@@ -26,7 +26,7 @@ const CHAT_LABEL = 'End-to-end encrypted, pad-hedged';
 const CHAT_CLAIM = 'The pad seeds the keys and ChaCha20-Poly1305 encrypts. The relay sees ciphertext and traffic shape only.';
 const DEFAULT_RELAY = 'http://127.0.0.1:8080';
 const POLL_WAIT_MS = 25000;
-const QR_PACKET = 600;   // payload bytes per animated frame
+const QR_PACKET = 300;   // payload bytes per animated frame: ~77 modules per side, readable by phone cameras
 const QR_FPS = 10;
 const TYPES = ['text', 'approve', 'vouch', 'control'];
 
@@ -134,7 +134,7 @@ function scanBox(onText) {
   const status = h('p', { class: 'muted' }, 'Starting camera…');
   const work = document.createElement('canvas');
   const ctx = work.getContext('2d', { willReadFrequently: true });
-  const MAX_SIDE = 480; // decode at a reduced size: ~11 ms per frame on a laptop, plenty for a 600-byte frame
+  const MAX_SIDE = 720; // decode size: ~25 ms per frame on a laptop; phones need the resolution more than the speed
   const btn = h('button', { onclick: async () => {
     btn.disabled = true;
     try {
@@ -142,7 +142,7 @@ function scanBox(onText) {
         video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
       });
       video.srcObject = stream; await video.play();
-      let last = '', busy = false, frames = 0, hits = 0;
+      let last = '', busy = false, frames = 0, hits = 0, tried = 0;
       const timer = setInterval(() => {
         if (busy || video.readyState < 2) return;
         busy = true;
@@ -155,8 +155,9 @@ function scanBox(onText) {
           const { data } = ctx.getImageData(0, 0, w, hgt);
           frames++;
           const text = qr_decode_rgba(w, hgt, data);
+          if (text) tried++;
           if (text && text !== last) { last = text; hits++; onText(text); }
-          if (frames % 20 === 0) status.textContent = hits ? `Reading… ${hits} frames so far.` : 'Point the camera at the other screen.';
+          if (frames % 10 === 0) status.textContent = hits ? `Reading… ${hits} frames read (${tried} decodes in ${frames} tries). Keep the code filling the view.` : `Point the camera at the other screen. Fill the view with the code. (${frames} tries)`;
         } catch (e) { /* frame not ready */ }
         busy = false;
       }, 1000 / QR_FPS / 2);
