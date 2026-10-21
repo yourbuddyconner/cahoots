@@ -96,27 +96,34 @@ def badge(s, x, y, label, w=58, h=78, words=None):
 
 # 1. Ceremony -----------------------------------------------------------------
 def ceremony():
-    s = Svg(960, 300, "The ceremony in five steps")
     steps = [
-        ("Set up", ["One person names the group", "and the member count.", "Every device shows it.", "Everyone confirms."]),
-        ("Draw", ["Each device makes its own", "random bytes and locks", "them in with a fingerprint", "before it sees anyone else's."]),
-        ("Touch", ["Devices connect in a ring.", "First the fingerprints go", "around, then the bytes.", "Nothing uses a radio."]),
-        ("Mix", ["Every device combines all", "the bytes into one secret.", "One honest member is", "enough to make it random."]),
-        ("Say the words", ["Six words appear on every", "screen. Read them aloud.", "If they match, the group", "is in cahoots."]),
+        ("Set up", "One person names the group and the member count. Every device shows it. Everyone confirms."),
+        ("Draw", "Each device makes its own random bytes and locks them in with a fingerprint, before it sees anyone else's."),
+        ("Touch", "Devices connect in a ring. First the fingerprints go around, then the bytes. Nothing uses a radio."),
+        ("Mix", "Every device combines all the bytes into one secret. One honest member is enough to make it random."),
+        ("Say the words", "Six words appear on every screen. Read them aloud. If they match, the group is in cahoots."),
     ]
-    n = len(steps)
-    gap = 18
-    w = (960 - 40 - gap * (n - 1)) / n
+    rowh = 92
+    top = 28
+    s = Svg(960, top + rowh * len(steps) + 44, "The ceremony in five steps")
+    x_num, x_name, x_body = 36, 84, 330
     for i, (name, body) in enumerate(steps):
-        x = 20 + i * (w + gap)
-        y = 24
-        s.rect(x, y, w, 228, fill=BG2, stroke=LINE, r=12)
-        s.text(x + 16, y + 30, f"{i + 1:02d}", size=12, fill=AMBER, mono=True)
-        s.text(x + 16, y + 60, name, size=17, fill=FG, weight=600)
-        s.lines(x + 16, y + 90, body, size=12.5, fill=FG2, lh=19)
-        if i < n - 1:
-            s.arrow(x + w + 3, y + 114, x + w + gap - 3, y + 114, color=FG3)
-    s.text(480, 282, "Steps 2 and 3 are what stop anyone from choosing their bytes after seeing everyone else's.", size=12, fill=FG3, anchor="middle")
+        y = top + i * rowh
+        s.rect(20, y, 920, rowh - 12, fill=BG2, stroke=LINE, r=12)
+        s.text(x_num, y + 48, f"{i + 1:02d}", size=13, fill=AMBER, mono=True)
+        s.text(x_name, y + 49, name, size=20, fill=FG, weight=600)
+        # wrap the body to two lines of about 70 characters
+        words, lines, cur = body.split(), [], ""
+        for w in words:
+            if len(cur) + len(w) + 1 > 72:
+                lines.append(cur); cur = w
+            else:
+                cur = (cur + " " + w).strip()
+        lines.append(cur)
+        s.lines(x_body, y + 36 if len(lines) > 1 else y + 47, lines, size=14.5, fill=FG2, lh=22)
+        if i < len(steps) - 1:
+            s.arrow(x_num + 8, y + rowh - 12, x_num + 8, y + rowh - 1, color=FG3)
+    s.text(480, top + rowh * len(steps) + 22, "Steps 2 and 3 are what stop anyone from choosing their bytes after seeing everyone else's.", size=12.5, fill=FG3, anchor="middle")
     s.save("ceremony.svg")
 
 
