@@ -1,0 +1,19 @@
+[package]
+name = "cahoots-hal"
+description = "Hardware abstraction traits for Cahoots badges plus the device ceremony logic written against them. no_std."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = []
+std = ["cahoots-core/std"]
+
+[dependencies]
+cahoots-core = { workspace = true }
+crc = { version = "3.3", default-features = false }
+zeroize = { version = "1.8", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+hex = "0.4"

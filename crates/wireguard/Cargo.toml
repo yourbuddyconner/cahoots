@@ -1,0 +1,22 @@
+[package]
+name = "cahoots-wireguard"
+description = "WireGuard PresharedKey helper over cahoots-provider: issue, accept, render, rotate."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "cahoots-wg"
+path = "src/main.rs"
+
+[dependencies]
+cahoots-provider = { workspace = true }
+cahoots-core = { workspace = true, features = ["std"] }
+base64 = "0.22"
+hex = "0.4"
+zeroize = "1.8"
+clap = { version = "4.5", features = ["derive", "env"] }
+
+[dev-dependencies]
+tempfile = "3"

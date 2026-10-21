@@ -1,0 +1,41 @@
+[package]
+name = "cahoots-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+cahoots-core = { path = "../core" }
+
+[[bin]]
+name = "message_parse"
+path = "fuzz_targets/message_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frame_decode"
+path = "fuzz_targets/frame_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "params_decode"
+path = "fuzz_targets/params_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ceremony_feed"
+path = "fuzz_targets/ceremony_feed.rs"
+test = false
+doc = false
+bench = false

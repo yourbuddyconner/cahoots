@@ -1,0 +1,18 @@
+[package]
+name = "cahoots-host"
+description = "Desktop simulator target for Cahoots badges: socket Link, file PadStore, PNG Display."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+cahoots-core = { workspace = true, features = ["std"] }
+cahoots-hal = { workspace = true, features = ["std"] }
+png = "0.17"
+base64 = "0.22"
+getrandom = "0.3"
+
+[dev-dependencies]
+tempfile = "3"

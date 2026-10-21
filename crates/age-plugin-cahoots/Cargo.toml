@@ -1,0 +1,25 @@
+[package]
+name = "age-plugin-cahoots"
+description = "age plugin: encrypt files to a Cahoots circle. Recipient age1cahoots..., identity AGE-PLUGIN-CAHOOTS-..."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "age-plugin-cahoots"
+path = "src/main.rs"
+
+[dependencies]
+cahoots-provider = { workspace = true }
+cahoots-core = { workspace = true, features = ["std"] }
+age-core = "0.12"
+age-plugin = "0.7"
+clap = { version = "4.5", features = ["derive", "env"] }
+hex = "0.4"
+zeroize = "1.8"
+base64 = "0.22"
+bech32 = "0.11"
+
+[dev-dependencies]
+tempfile = "3"

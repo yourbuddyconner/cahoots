@@ -1,21 +1,21 @@
 [workspace]
 resolver = "2"
 members = [
-    "core",
-    "vectors",
-    "provider",
-    "firmware/hal",
-    "firmware/host",
-    "yk",
-    "web/wasm",
-    "adapters/hpke",
-    "adapters/wireguard",
-    "adapters/age-plugin-cahoots",
+    "crates/core",
+    "crates/vectors",
+    "crates/provider",
+    "crates/hal",
+    "crates/host",
+    "crates/yk",
+    "crates/wasm",
+    "crates/hpke",
+    "crates/wireguard",
+    "crates/age-plugin-cahoots",
 ]
-exclude = ["fuzz"]
-# Not workspace members: firmware/esp32s3 (needs the xtensa/riscv esp toolchain),
-# firmware/dabao (built with `cargo xtask dabao` inside xous-core), web (wasm-pack),
-# tvc-app (built as an OCI image). Each has its own README.
+exclude = ["crates/fuzz"]
+# Not workspace members: crates/esp32s3 (needs the esp toolchain), crates/dabao (built with
+# `cargo xtask dabao` inside xous-core), crates/fuzz (cargo-fuzz, nightly), web/app (static PWA),
+# tvc-app (OCI image). Each has its own README.
 
 [workspace.package]
 version = "0.1.0"
@@ -25,9 +25,9 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/yourbuddyconner/cahoots"
 
 [workspace.dependencies]
-cahoots-core = { path = "core", default-features = false }
-cahoots-hal = { path = "firmware/hal" }
-cahoots-provider = { path = "provider" }
+cahoots-core = { path = "crates/core", default-features = false }
+cahoots-hal = { path = "crates/hal" }
+cahoots-provider = { path = "crates/provider" }
 sha2 = { version = "0.10", default-features = false }
 poly1305 = { version = "0.8", default-features = false }
 subtle = { version = "2.6", default-features = false }

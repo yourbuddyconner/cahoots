@@ -1,0 +1,23 @@
+[package]
+name = "cahoots-wasm"
+description = "cahoots-core bindings for the browser client."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cahoots-core = { workspace = true, features = ["std"] }
+wasm-bindgen = "0.2.100"
+raptorq = "2.0.0"
+qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
+base64 = "0.22.1"
+zeroize = "1.8"
+
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

@@ -6,3 +6,4 @@ Cargo.lock.bak
 .DS_Store
 /web/node_modules
 /web/dist
+/web/app/pkg

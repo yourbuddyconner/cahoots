@@ -20,19 +20,26 @@ A circle can also give a seat to an AI agent. The agent's copy of the pad lives 
 
 ## Repository layout
 
+Every Rust crate lives under `crates/`. The PWA lives under `web/app`.
+
 | Path | Crate | What it holds | Status |
 |---|---|---|---|
-| `core/` | `cahoots-core` | The protocol: parameters, commit-then-reveal ceremony, XOR combine, check words, circle ID, message codec with one-time Poly1305, spent-range ledger, spend ordering, touch-link framing. `no_std` + `alloc`. | **M1 done** |
-| `vectors/` | `cahoots-vectors` | JSON test vectors generated from core. Every client must reproduce them. | **M1 done** |
-| `provider/` | `cahoots-provider` | Pad provider API (`psk`, `spend`) over device, phone, file, and TVC backends. | trait only (S1) |
-| `firmware/hal/` | `cahoots-hal` | `Entropy`, `PadStore`, `Display`, `Link` traits. | traits only (M4a) |
-| `firmware/host/` | `cahoots-host` | Desktop simulator target. | placeholder (M4a) |
-| `firmware/esp32s3/` | | `esp-hal` + Embassy firmware, first hardware target. | placeholder (M4b) |
-| `firmware/dabao/` | | Xous app for the Baochip-1x Dabao. | placeholder (M4c, M5) |
-| `web/` | | Offline PWA phone client, core compiled to WASM. | placeholder (M2) |
+| `crates/core` | `cahoots-core` | The protocol: parameters, commit-then-reveal ceremony, XOR combine, check words, circle ID, message codec with one-time Poly1305, spent-range ledger, spend ordering, touch-link framing. `no_std` + `alloc`. | done (M1) |
+| `crates/vectors` | `cahoots-vectors` | JSON test vectors generated from core. Every client must reproduce them. | done (M1) |
+| `crates/provider` | `cahoots-provider` | Pad provider API (`psk`, `spend`) with memory and encrypted-file backends, plus the HKDF session-key derivation. | done (S1) |
+| `crates/hpke` | `cahoots-hpke` | HPKE `mode_psk` adapter (X25519 and X-Wing suites). | done (S1) |
+| `crates/age-plugin-cahoots` | `age-plugin-cahoots` | age plugin: recipient `cahoots:<circle>`. | done (S1), untested against the `age` CLI |
+| `crates/wireguard` | `cahoots-wireguard` | WireGuard `PresharedKey` helper and the `cahoots-wg` CLI. | done (S1), `wg` interop test pending |
+| `crates/yk` | `cahoots-yk` | YubiKey OpenPGP `GET CHALLENGE` entropy source and CLI. | done (M2), throughput not yet measured |
+| `crates/wasm` | `cahoots-wasm` | Browser bindings: ceremony, circle, fountain-coded animated QR, QR rendering. | done (M2) |
+| `web/app` | | Offline PWA phone and laptop client. | done (M2), camera scanning untested |
+| `crates/hal` | `cahoots-hal` | HAL traits, ring ceremony driver, SP 800-90B health tests, persistent ledger. `no_std`. | done (M4a) |
+| `crates/host` | `cahoots-host` | Desktop simulator: socket Link, file PadStore, PNG Display. Four processes run a ring ceremony. | done (M4a) |
+| `crates/esp32s3` | | `esp-hal` + Embassy firmware, first hardware target. | placeholder (M4b) |
+| `crates/dabao` | | Xous app for the Baochip-1x Dabao. | placeholder (M4c, M5) |
+| `crates/fuzz` | | `cargo-fuzz` targets for every parser. Not a workspace member. | done |
 | `tvc-app/` | | Cahoots TVC workload: agent seat, policy, square log, vouching. | placeholder (M3) |
-| `adapters/` | | HPKE, age, TLS-PSK, MLS, WireGuard adapters feeding provider output into standard PSK slots. | placeholder (S1, S4) |
-| `docs/` | | Protocol spec, threat model, ceremony guide. | |
+| `docs/` | | Protocol spec, threat model, use cases, plan, ceremony guide. | |
 
 ## Build and test
 
@@ -55,6 +62,10 @@ The pinned toolchain is in `rust-toolchain.toml`. CI runs the same commands.
 - Circles that seat an agent trust the enclave with their pad.
 
 See `docs/threat-model.md` for the full list.
+
+## What it is for
+
+`docs/use-cases.md` lists concrete uses, from group chat to bootstrapping WireGuard and physical mesh networks from a ceremony. `docs/plan.md` has the milestones, including the network-bootstrap track.
 
 ## Working rules
 

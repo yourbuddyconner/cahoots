@@ -1,0 +1,17 @@
+[package]
+name = "cahoots-hpke"
+description = "HPKE (RFC 9180) mode_psk adapter: mixes a 32-byte pad PSK into X25519 or X-Wing HPKE."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cahoots-provider = { workspace = true }
+hpke = { version = "0.14", default-features = false, features = ["alloc", "x25519", "mlkem", "chacha"] }
+rand_core = "0.10"
+zeroize = "1.8"
+
+[dev-dependencies]
+cahoots-core = { workspace = true, features = ["std"] }
+rand = "0.10"

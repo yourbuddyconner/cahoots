@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "circle_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "classical_secret": "",
+      "context": "hpke",
+      "handle_bytes": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0000000000",
+      "offset": 0,
+      "pq_secret": "",
+      "psk": "1111111111111111111111111111111111111111111111111111111111111111",
+      "session_key": "1116fa567832c19e988ae1a81ac5a9ab0ea5fd633e67e19e8d847d51720c3b94",
+      "slice": 0
+    },
+    {
+      "circle_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "classical_secret": "65636468652d736563726574",
+      "context": "tls13",
+      "handle_bytes": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0304030201",
+      "offset": 16909060,
+      "pq_secret": "6d6c6b656d2d736563726574",
+      "psk": "2222222222222222222222222222222222222222222222222222222222222222",
+      "session_key": "088c75b78e13f784112b9d013be62b949e30cd4da9ac03828dfb8b10b8849516",
+      "slice": 3
+    },
+    {
+      "circle_id": "cccccccccccccccccccccccccccccccc",
+      "classical_secret": "",
+      "context": "wireguard",
+      "handle_bytes": "cccccccccccccccccccccccccccccccc0120000000",
+      "offset": 32,
+      "pq_secret": "",
+      "psk": "3333333333333333333333333333333333333333333333333333333333333333",
+      "session_key": "3128149e5b36c0aa206fe5248b60968f17541b0aa262021a7f68165ca06128e9",
+      "slice": 1
+    }
+  ],
+  "description": "session_key = HKDF-SHA256(salt = \"cahoots/psk/v1\" || circle_id || slice || offset (u32 LE) || context, ikm = classical_secret || pq_secret || psk, info = \"cahoots/session-key/v1\", L = 32)."
+}

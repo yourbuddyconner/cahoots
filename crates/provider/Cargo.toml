@@ -1,0 +1,21 @@
+[package]
+name = "cahoots-provider"
+description = "Pad provider API: psk and spend over memory, file, device, and TVC backends. Owns the spent-range ledger. See handoff section 10."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cahoots-core = { workspace = true, features = ["std"] }
+zeroize = { version = "1.8", features = ["std", "derive"] }
+hkdf = "0.12"
+sha2 = "0.10"
+chacha20poly1305 = { version = "0.10", features = ["std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+getrandom = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
