@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cahoots</title>
-<meta name="description" content="In-person key agreement and rotation for the protocols you already run. Meet once, build a shared pad with open hardware badges, and spend it as keys.">
+<meta name="description" content="Cahoots badges make an encryption secret when you touch them together. Nothing crosses a network. Use it to protect your VPN, your files, and your group chat.">
 <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -21,10 +21,10 @@
   <div class="wrap">
     <a class="brand" href="./"><img src="assets/mark.svg" alt="" width="22" height="22"><span>Cahoots</span></a>
     <nav aria-label="Primary">
-      <a href="#what">Product</a>
-      <a href="#ceremony">Ceremony</a>
+      <a href="#what">Why</a>
+      <a href="#ceremony">How it works</a>
       <a href="#rings">Hardware</a>
-      <a href="#station">Numbers Station</a>
+      <a href="#station">The feed</a>
       <a href="docs/">Docs</a>
       <a class="nav-cta" href="app/">Open the app</a>
     </nav>
@@ -33,12 +33,12 @@
 
 <section class="hero">
   <div class="wrap hero-copy">
-    <p class="eyebrow">Open hardware · one-time pads · a Turnkey project</p>
-    <h1>Keys agreed in a room.<br>Rotated by pointer.</h1>
-    <p class="lede">Cahoots is in-person key agreement for the protocols you already run. A group meets once. Their badges touch and build a shared pad of random bytes. That pad is a key budget for WireGuard tunnels, encrypted files, group chat, and approvals.</p>
+    <p class="eyebrow">Open hardware · a Turnkey project</p>
+    <h1>Encryption keys you made in a room, with people you trust.</h1>
+    <p class="lede">Cahoots badges make a shared secret when you touch them together. Nothing crosses a network, so there is nothing to intercept. Use that secret to protect your VPN, your files, and your group chat, including against computers that don't exist yet.</p>
     <div class="cta">
-      <a class="btn primary" href="app/">Run a ceremony in your browser</a>
-      <a class="btn ghost" href="docs/#/protocol">Read the protocol <span aria-hidden="true">→</span></a>
+      <a class="btn primary" href="app/">Try it in your browser</a>
+      <a class="btn ghost" href="#ceremony">How it works <span aria-hidden="true">→</span></a>
     </div>
   </div>
 </section>
@@ -50,13 +50,13 @@
     <p class="nogl" id="nogl" hidden>Your browser can't draw the badge in 3D. The parts are listed below.</p>
     <div class="stepper-wrap">
       <ol class="parts" id="parts">
-        <li data-step="0"><span class="part-name">Polycarbonate shells</span><span class="part-why">Card-sized, with four screws and a lanyard slot. The shells are transparent because the chip's silicon is open to inspection, and the case should be too.</span></li>
-        <li data-step="1"><span class="part-name">1.54" e-paper</span><span class="part-why">Shows the six check words and keeps them on screen with no power. Members read them aloud. If every screen matches, every pad matches.</span></li>
-        <li data-step="2"><span class="part-name">Baochip-1x</span><span class="part-why">A hardware random number generator with health tests, a key store, and one-way counters. The pad lives in on-die RRAM and is erased byte by byte as it is spent.</span></li>
-        <li data-step="3"><span class="part-name">Touch link</span><span class="part-why">Four spring pins on one edge. Gold pads and magnets on the other. Badges snap into a ring and swap contributions over the wire. No radio.</span></li>
-        <li data-step="4"><span class="part-name">Battery and USB-C</span><span class="part-why">A 400 mAh cell runs the badge for a day at the table. USB-C charges it. Before a ceremony, USB-C can also load YubiKey bytes from a laptop. It is never connected during one.</span></li>
+        <li data-step="0"><span class="part-name">Polycarbonate shells</span><span class="part-why">The size of a credit card. The case is clear because the chip's design is public, and so is everything around it.</span></li>
+        <li data-step="1"><span class="part-name">1.54" e-paper</span><span class="part-why">After a ceremony, every badge shows the same six words. Read them out loud. If they match, you're in.</span></li>
+        <li data-step="2"><span class="part-name">Baochip-1x</span><span class="part-why">Makes real random numbers and keeps the secret on the chip. It destroys every piece after one use.</span></li>
+        <li data-step="3"><span class="part-name">Touch link</span><span class="part-why">Badges snap together with magnets and talk through the pins. No Wi-Fi, no Bluetooth. Nothing leaves the table.</span></li>
+        <li data-step="4"><span class="part-name">Battery and USB-C</span><span class="part-why">Runs all day. Charges over USB-C. Unplugged during a ceremony.</span></li>
       </ol>
-      <p class="scroll-hint" id="scroll-hint">Scroll to take it apart</p>
+      <p class="scroll-hint" id="scroll-hint">Scroll to see inside</p>
     </div>
   </div>
 </section>
@@ -65,40 +65,40 @@
 
 <main>
 <section class="band wrap" id="what">
-  <p class="eyebrow">What it does</p>
-  <h2>The pad is a key budget.</h2>
+  <p class="eyebrow">Why</p>
+  <h2>Most keys are made by math.<br>These are made by meeting.</h2>
   <div class="grid three">
     <article class="card">
-      <p class="card-k">Spend 32 bytes</p>
-      <p>Seed a session of any size in a protocol you already run. Each of these protocols has a slot for a secret that both sides already share. The slot is almost always empty, because sharing the secret was the hard part. The ceremony fills it.</p>
-      <p class="claim">An attacker must break the math <em>and</em> know the pad</p>
+      <p class="card-k">Nothing to intercept</p>
+      <p>The badges create the secret when they touch. It never crosses a network, so there is nothing for an attacker to capture today and nothing to decrypt later with a bigger computer.</p>
+      <p class="claim">Made in the room. Never sent anywhere.</p>
     </article>
     <article class="card">
-      <p class="card-k">Spend one byte per byte</p>
-      <p>Encrypt a short message as a true one-time pad with a one-time Poly1305 tag. Use it for approvals, key announcements, and the words you say at the start of a call. A 256 KiB pad holds about two thousand such messages.</p>
-      <p class="claim">Information-theoretic, as long as no byte is reused</p>
+      <p class="card-k">Works with what you already run</p>
+      <p>Plug the secret into WireGuard, your file encryption, or your group chat. They all have a slot for a shared secret. It usually sits empty, because sharing one safely was the hard part. Now it isn't.</p>
+      <p class="claim">An attacker has to beat the math <em>and</em> get into the room.</p>
     </article>
     <article class="card">
-      <p class="card-k">Rotate by pointer</p>
-      <p>A rotation is a public note that says which bytes come next. Both sides spend the same offset, derive the same key, and erase the bytes. There is no coordination server and no certificate authority.</p>
-      <p class="claim">Every spend is ledgered and erased before the key leaves</p>
+      <p class="card-k">Used once, then gone</p>
+      <p>The badge uses each piece of the secret once, then wipes it. Keys rotate on their own, with no server in the middle. If a badge is lost, what it already protected stays protected.</p>
+      <p class="claim">Short messages get true one-time-pad protection. No computer, now or later, can break them.</p>
     </article>
   </div>
-  <div class="slots" aria-label="Protocols with a pre-shared key slot">
+  <div class="slots" aria-label="Works with">
     <span>WireGuard</span><span>HPKE</span><span>age</span><span>TLS 1.3</span><span>MLS</span><span>Meshtastic</span><span>SSH</span>
   </div>
 </section>
 
 <section class="band wrap" id="ceremony">
-  <p class="eyebrow">The ceremony</p>
-  <h2>Five steps, in a room.</h2>
+  <p class="eyebrow">How it works</p>
+  <h2>Five minutes, in person.</h2>
   <div class="grid two">
     <ol class="steps">
-      <li><span><b>Agree.</b> One member sets the circle name, size, and pad length. Every screen shows them. Everyone confirms.</span></li>
-      <li><span><b>Commit.</b> Each badge draws random bytes from its hardware generator and shares a hash of them. After that, nobody can change their contribution.</span></li>
-      <li><span><b>Reveal.</b> Badges touch in a ring and pass contributions around until every badge holds all of them. Each badge checks every contribution against its hash.</span></li>
-      <li><span><b>Combine.</b> Every badge XORs every contribution into one pad. If at least one member was honest, the pad is random.</span></li>
-      <li><span><b>Say the words.</b> Six words from the pad appear on every screen. Members read them aloud. A mismatch means start over.</span></li>
+      <li><span><b>Start a circle.</b> One person names it and says how many people are in it. Every badge shows the details. Everyone confirms.</span></li>
+      <li><span><b>Draw.</b> Each badge makes its own random numbers and locks them in before seeing anyone else's. Nobody can cheat after the fact.</span></li>
+      <li><span><b>Touch.</b> Badges snap together in a ring and pass their numbers around until everyone has all of them.</span></li>
+      <li><span><b>Mix.</b> Every badge combines all the numbers into one shared secret. If even one person was honest, the secret is random.</span></li>
+      <li><span><b>Say the words.</b> Six words appear on every screen. Read them out loud. If they match, you're done. If not, start over.</span></li>
     </ol>
     <div class="card screen" aria-label="What the badge shows">
       <div class="screen-top"><span>sf-meetup</span><span>TRNG · T4</span></div>
@@ -110,24 +110,24 @@
 
 <section class="band wrap" id="rings">
   <p class="eyebrow">Hardware</p>
-  <h2>Concentric rings of security.</h2>
-  <p class="sub">Anyone can build a badge from what is on the bench. A circle is only as protected as its least protected member. The ceremony shows the circle's tier before anyone confirms.</p>
+  <h2>Build your own, or get ours.</h2>
+  <p class="sub">It runs on a phone with no hardware at all, on any dev board, or on the badge we make. A group is only as safe as its least safe device, and the badges tell you which one that is before you commit.</p>
   <div class="tiers">
-    <div class="tier"><span class="tier-k">T0</span><span class="tier-n">Phone</span><span class="tier-d">The protocol runs. Erasure is best effort.</span></div>
-    <div class="tier"><span class="tier-k">T1</span><span class="tier-n">Any microcontroller</span><span class="tier-d">Real erasure in a raw partition. A stolen device is a copy of the pad.</span></div>
-    <div class="tier"><span class="tier-k">T2</span><span class="tier-n">Sealed</span><span class="tier-d">Secure boot and flash encryption. A dumped flash is ciphertext.</span></div>
-    <div class="tier"><span class="tier-k">T3</span><span class="tier-n">Key store</span><span class="tier-d">The key that wraps the pad never leaves the chip. Each wrong PIN burns a one-way counter. At the limit, the badge erases the pad.</span></div>
-    <div class="tier on"><span class="tier-k">T4</span><span class="tier-n">Inspected</span><span class="tier-d">A member has compared the silicon with the published design under a microscope. This is the badge we make.</span></div>
+    <div class="tier"><span class="tier-k">T0</span><span class="tier-n">Phone</span><span class="tier-d">No hardware needed. The phone decides how well secrets are wiped.</span></div>
+    <div class="tier"><span class="tier-k">T1</span><span class="tier-n">Any microcontroller</span><span class="tier-d">Wipes secrets for real. A stolen board still gives up its secret.</span></div>
+    <div class="tier"><span class="tier-k">T2</span><span class="tier-n">Sealed</span><span class="tier-d">Locked firmware and encrypted storage. A copied chip is useless without the PIN.</span></div>
+    <div class="tier"><span class="tier-k">T3</span><span class="tier-n">Key store</span><span class="tier-d">The chip guards the secret itself. Too many wrong PINs and it wipes everything.</span></div>
+    <div class="tier on"><span class="tier-k">T4</span><span class="tier-n">Inspected</span><span class="tier-d">Someone has looked at the chip under a microscope and matched it to the public design. This is the badge we make.</span></div>
   </div>
 </section>
 
 <section class="band wrap" id="station">
-  <p class="eyebrow">Numbers Station</p>
-  <h2>A public feed only the circle can read.</h2>
+  <p class="eyebrow">The feed</p>
+  <h2>Post anywhere. Only your circle can read it.</h2>
   <div class="grid two">
     <div>
-      <p class="sub">During the Cold War, shortwave stations read out strings of numbers. Anyone could hear them. Only the agent who held the matching pad page could read them.</p>
-      <p class="sub">Cahoots keeps the idea. Ciphertext goes on an append-only feed. Anyone can read it. Only circle members can decrypt or forge an entry. That holds against the operator too. The feed orders messages and refuses any reuse of pad bytes it can see. Its head is anchored, so nobody can rewrite history.</p>
+      <p class="sub">During the Cold War, radio stations read out strings of numbers. Anyone could listen. Only the spy with the matching code sheet could understand.</p>
+      <p class="sub">Cahoots works the same way. Messages go on a public feed, scrambled. Anyone can see them. Only your circle can read them or post as you. Not even the people who run the feed can. The feed keeps everything in order and can't be quietly rewritten.</p>
     </div>
     <div class="card station-card" aria-label="Live feed example">
       <div class="station-head"><span>circle 6f8648f8</span><span>seq 41 · 25 B</span></div>
@@ -138,16 +138,16 @@
 
 <section class="band wrap" id="build">
   <p class="eyebrow">Build</p>
-  <h2>Four traits make a badge.</h2>
+  <h2>Four parts make a badge.</h2>
   <div class="grid three">
-    <article class="card"><p class="card-k">Entropy</p><p>A hardware random source with SP 800-90B health tests. If a test fails, the ceremony stops.</p></article>
-    <article class="card"><p class="card-k">PadStore</p><p>Raw non-volatile memory with an erase unit. Spent bytes are overwritten and read back.</p></article>
-    <article class="card"><p class="card-k">Display and Link</p><p>A screen that can show six words, and a wire to the next badge. The desktop simulator is the reference implementation and the test harness.</p></article>
+    <article class="card"><p class="card-k">Randomness</p><p>A real random number source that checks itself. If the check fails, the ceremony stops.</p></article>
+    <article class="card"><p class="card-k">Storage</p><p>Memory the badge controls directly, so a wipe is a real wipe. The badge reads every erase back to prove it.</p></article>
+    <article class="card"><p class="card-k">Screen and link</p><p>A screen that shows six words, and a wire to the next badge. The code is open, and a simulator on your laptop stands in for the hardware.</p></article>
   </div>
   <div class="cta">
     <a class="btn primary" href="https://github.com/yourbuddyconner/cahoots">Source on GitHub</a>
-    <a class="btn ghost" href="docs/#/tiers">Device tiers <span aria-hidden="true">→</span></a>
-    <a class="btn ghost" href="docs/#/use-cases">Use cases <span aria-hidden="true">→</span></a>
+    <a class="btn ghost" href="docs/#/protocol">Read the protocol <span aria-hidden="true">→</span></a>
+    <a class="btn ghost" href="docs/#/use-cases">What people use it for <span aria-hidden="true">→</span></a>
   </div>
 </section>
 </main>
@@ -156,7 +156,7 @@
   <div class="wrap foot">
     <div>
       <a class="brand" href="./"><img src="assets/mark.svg" alt="" width="22" height="22"><span>Cahoots</span></a>
-      <p class="fine">Open source under MIT or Apache-2.0. Turnkey provides custody, policy, and attestation over every spend.</p>
+      <p class="fine">Open source under MIT or Apache-2.0. Turnkey builds the hosted parts: secure custody for software members and a policy over every use.</p>
     </div>
     <div class="foot-links">
       <a href="docs/">Docs</a>
@@ -164,7 +164,7 @@
       <a href="https://github.com/yourbuddyconner/cahoots">GitHub</a>
     </div>
   </div>
-  <p class="wrap fine">Even Turnkey can't read your circle. That holds for circles without an agent seat. A circle that seats an agent trusts the enclave with its pad. The software says so before you confirm.</p>
+  <p class="wrap fine">Even Turnkey can't read your circle. The one exception is a circle that invites a software member hosted by Turnkey. That circle trusts Turnkey's secure hardware with its secret, and the app says so before you agree.</p>
 </footer>
 
 <script type="module" src="main.js"></script>
