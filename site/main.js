@@ -4,8 +4,8 @@
 // held by four screws, a 1.54" e-paper on a ribbon, the Baochip-1x on a black ENIG board,
 // a four-pin magnetic touch link on each short edge, a 400 mAh LiPo, USB-C, one button.
 import * as THREE from "three";
-import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { makeBadge } from "./badge.js";
+import { addLights, enableShadows, setupEnvironment } from "./rig.js";
 
 // ---------- Numbers Station ticker: real random five-digit groups ----------
 function groups(n) {
@@ -56,21 +56,10 @@ if (!canvas || !hasWebGL()) {
   renderer.setClearColor(0x000000, 0);
 
   const scene = new THREE.Scene();
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  const room = new RoomEnvironment();
-  scene.environment = pmrem.fromScene(room, 0.04).texture;
-  scene.environmentIntensity = 0.55;
-  room.dispose();
-  pmrem.dispose();
-
+  enableShadows(renderer);
+  setupEnvironment(renderer, scene, "assets/hdr/studio.hdr", 0.9);
   const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
-  const key = new THREE.DirectionalLight(0xfff4e6, 2.2);
-  key.position.set(4, 7, 5);
-  scene.add(key);
-  const rim = new THREE.DirectionalLight(0xc8783c, 1.2);
-  rim.position.set(-6, 3, -5);
-  scene.add(rim);
-  scene.add(new THREE.HemisphereLight(0xe8e4da, 0x1b2228, 0.5));
+  addLights(scene);
 
   const { group, stack } = makeBadge(renderer);
   scene.add(group);

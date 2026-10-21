@@ -50,7 +50,7 @@ export function makeBadge(renderer) {
     return m;
   }
 
-  function canvasTexture(draw, w = 512, h = 512) {
+  function canvasTexture(draw, w = 2048, h = 2048) {
     const c = document.createElement("canvas");
     c.width = w;
     c.height = h;
@@ -80,15 +80,22 @@ export function makeBadge(renderer) {
     });
     ctx.font = `400 ${w * 0.042}px "IBM Plex Mono", monospace`;
     ctx.fillText("read aloud · press to confirm", w * 0.07, h * 0.92);
+    // E-ink grain: a faint speckle of capsules, so the panel does not read as printed paper.
+    let s = 7;
+    const r = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+    for (let i = 0; i < w * h * 0.004; i++) {
+      ctx.fillStyle = r() < 0.5 ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.08)";
+      ctx.fillRect(r() * w, r() * h, 2, 2);
+    }
   });
 
   // Board: black solder mask, gold pads and traces, silkscreen.
   const pcbTex = canvasTexture(
     (ctx, w, h) => {
-      ctx.fillStyle = "#15171a";
+      ctx.fillStyle = "#121417";
       ctx.fillRect(0, 0, w, h);
       ctx.strokeStyle = "#c9a24a";
-      ctx.lineWidth = 2.2;
+      ctx.lineWidth = w / 480;
       ctx.lineCap = "round";
       for (let i = 0; i < 34; i++) {
         const y = h * 0.1 + i * h * 0.022;
@@ -103,7 +110,7 @@ export function makeBadge(renderer) {
       ctx.fillStyle = "#c9a24a";
       for (let i = 0; i < 48; i++) {
         ctx.beginPath();
-        ctx.arc(w * 0.12 + (i % 16) * w * 0.05, h * 0.9 + Math.floor(i / 16) * h * 0.03, 3, 0, Math.PI * 2);
+        ctx.arc(w * 0.12 + (i % 16) * w * 0.05, h * 0.9 + Math.floor(i / 16) * h * 0.03, w / 340, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.fillStyle = "#e8e4da";
@@ -112,8 +119,8 @@ export function makeBadge(renderer) {
       ctx.fillText("TOUCH LINK  GND TX RX DET", w * 0.56, h * 0.5);
       ctx.fillText("NO RADIO", w * 0.1, h * 0.84);
     },
-    1024,
-    1024,
+    2048,
+    2048,
   );
 
   const chipTex = canvasTexture((ctx, w, h) => {
@@ -140,28 +147,33 @@ export function makeBadge(renderer) {
     ctx.fillText("protected · 503040", w * 0.08, h * 0.6);
   });
 
+  // Clear polycarbonate: nearly all light passes, a faint warm tint builds with thickness, and the
+  // surface carries sharp reflections of the studio.
   const polycarbonate = new THREE.MeshPhysicalMaterial({
-    color: 0xf2efe8,
+    color: 0xffffff,
     metalness: 0,
-    roughness: 0.12,
-    transmission: 0.92,
+    roughness: 0.1,
+    transmission: 1,
     thickness: 0.25,
-    ior: 1.58,
-    clearcoat: 1,
+    attenuationColor: new THREE.Color(0xf3ead8),
+    attenuationDistance: 2.5,
+    ior: 1.585,
+    specularIntensity: 0.7,
+    clearcoat: 0.3,
     clearcoatRoughness: 0.08,
+    envMapIntensity: 0.7,
     transparent: true,
-    opacity: 1,
   });
   epaperTex.center.set(0.5, 0.5);
   epaperTex.rotation = -Math.PI / 2;
-  const paperMat = new THREE.MeshStandardMaterial({ map: epaperTex, roughness: 0.98, metalness: 0 });
-  const bezelMat = new THREE.MeshStandardMaterial({ color: 0x101214, roughness: 0.55 });
-  const pcbMat = new THREE.MeshStandardMaterial({ map: pcbTex, roughness: 0.62, metalness: 0.15 });
+  const paperMat = new THREE.MeshStandardMaterial({ map: epaperTex, roughness: 0.92, metalness: 0 });
+  const bezelMat = new THREE.MeshStandardMaterial({ color: 0x0c0d0f, roughness: 0.45 });
+  const pcbMat = new THREE.MeshStandardMaterial({ map: pcbTex, roughness: 0.5, metalness: 0.1 });
   const pcbEdgeMat = new THREE.MeshStandardMaterial({ color: 0x3a3f33, roughness: 0.9 });
   const chipMat = new THREE.MeshStandardMaterial({ map: chipTex, roughness: 0.3, metalness: 0.1 });
   const chipSideMat = new THREE.MeshStandardMaterial({ color: 0x0b0d0f, roughness: 0.4 });
-  const gold = new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.25, metalness: 1 });
-  const steel = new THREE.MeshStandardMaterial({ color: 0xaeb3b8, roughness: 0.35, metalness: 1 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xe2b347, roughness: 0.28, metalness: 1 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0xc2c6ca, roughness: 0.32, metalness: 1 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x24282c, roughness: 0.6, metalness: 0.4 });
   const cellMat = new THREE.MeshStandardMaterial({ map: cellTex, roughness: 0.45, metalness: 0.5 });
   const ribbonMat = new THREE.MeshStandardMaterial({ color: 0xb8742a, roughness: 0.5, metalness: 0.2 });
@@ -170,6 +182,11 @@ export function makeBadge(renderer) {
   const group = new THREE.Group();
   const stack = [];
   function add(mesh, rest, explodedOffset, step) {
+    mesh.traverse((m) => {
+      if (!m.isMesh) return;
+      m.receiveShadow = true;
+      m.castShadow = m.material !== polycarbonate;
+    });
     mesh.position.y = rest;
     stack.push({ mesh, rest, out: rest + explodedOffset });
     mesh.userData.step = step;
@@ -196,7 +213,7 @@ export function makeBadge(renderer) {
 
   // PCB with everything soldered to it. Step 2.
   const boardShape = rrect(W - 4 * MM, L - 4 * MM, CORNER - 1 * MM, [slot(0, -(L / 2 - 8 * MM), 12 * MM, 3 * MM)]);
-  const pcb = plate(boardShape, 1.0 * MM, [pcbMat, pcbEdgeMat]);
+  const pcb = plate(boardShape, 1.0 * MM, [pcbMat, pcbEdgeMat], 0.12 * MM);
   add(pcb, 1.0 * MM, 0, 2);
   // Chip: 7 × 7 mm.
   const chip = new THREE.Mesh(new THREE.BoxGeometry(7 * MM, 0.9 * MM, 7 * MM), [
@@ -249,7 +266,7 @@ export function makeBadge(renderer) {
 
   // E-paper: 1.54", 200 × 200, bezel 42 × 44 mm, active 37 × 37 mm, with its ribbon. Step 1.
   const display = new THREE.Group();
-  const bezel = plate(rrect(42 * MM, 44 * MM, 1 * MM), 1.0 * MM, bezelMat);
+  const bezel = plate(rrect(42 * MM, 44 * MM, 1 * MM), 1.0 * MM, bezelMat, 0.15 * MM);
   display.add(bezel);
   const panel = box(37 * MM, 0.3 * MM, 37 * MM, paperMat);
   panel.position.y = 1.0 * MM;

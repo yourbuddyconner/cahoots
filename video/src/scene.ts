@@ -1,8 +1,8 @@
 // The launch video as a pure function of the frame number. The driver (render.mjs) calls
 // window.renderFrame(f) and screenshots the page. Every number comes from motion.ts or timeline.ts.
 import * as THREE from "three";
-import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { makeBadge } from "../../site/badge.js";
+import { addGround, addLights, enableShadows, setupEnvironment } from "../../site/rig.js";
 import { DUR, EASE, FPS, SPRING, STAGGER, prog, springAt } from "./motion";
 import { BADGE, CH, CLOSE, EXPLODE, OPEN, PARTS, TEXTS, TOTAL, TOUCH, USES, USES_ITEMS, WORDS, cue, move } from "./timeline";
 
@@ -21,21 +21,11 @@ renderer.toneMappingExposure = EXPOSURE;
 renderer.setClearColor(0x000000, 0);
 
 const scene = new THREE.Scene();
-const pmrem = new THREE.PMREMGenerator(renderer);
-const room = new RoomEnvironment();
-scene.environment = pmrem.fromScene(room, 0.04).texture;
-scene.environmentIntensity = 0.55;
-room.dispose();
-pmrem.dispose();
-
+enableShadows(renderer);
+const envReady = setupEnvironment(renderer, scene, "../../site/assets/hdr/studio.hdr", 0.9);
 const camera = new THREE.PerspectiveCamera(30, W / H, 0.1, 100);
-const key = new THREE.DirectionalLight(0xfff4e6, 2.2);
-key.position.set(4, 7, 5);
-scene.add(key);
-const rim = new THREE.DirectionalLight(0xc8783c, 1.2);
-rim.position.set(-6, 3, -5);
-scene.add(rim);
-scene.add(new THREE.HemisphereLight(0xe8e4da, 0x1b2228, 0.5));
+addLights(scene);
+const ground = addGround(scene, 0, 0.5);
 
 // Two badges. B is the one that slides in and snaps on from the right (+x), pins to pads.
 const A = makeBadge(renderer);
@@ -297,10 +287,14 @@ async function renderFrame(f: number) {
   const fade = mv(f, "close.fade", EASE.exit);
   fadeEl.style.opacity = String(fade);
 
+  // The ground sits just under the lowest visible part, so shadows land where the badge rests.
+  stage.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(stage);
+  ground.position.y = box.min.y - 0.01;
   renderer.render(scene, camera);
   await new Promise((r) => requestAnimationFrame(() => r(null)));
 }
 
 window.renderFrame = renderFrame;
 window.TOTAL = TOTAL;
-document.fonts.ready.then(() => { window.ready = true; });
+Promise.all([document.fonts.ready, envReady]).then(() => { window.ready = true; });

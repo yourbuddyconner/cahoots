@@ -42,9 +42,9 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
 page.on("pageerror", (e) => { console.error("page error:", e.message); });
-page.on("console", (m) => { if (m.type() === "error") console.error("console:", m.text()); });
+page.on("console", (m) => { if (m.type() === "error" || m.type() === "warning") console.error("console:", m.text()); });
 await page.goto(`http://127.0.0.1:${port}/video/src/index.html`);
-await page.waitForFunction(() => window.ready === true, null, { timeout: 60000 });
+await page.waitForFunction(() => window.ready === true, null, { timeout: 180000 });
 const total = await page.evaluate(() => window.TOTAL);
 
 let frames;
