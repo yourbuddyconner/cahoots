@@ -18,7 +18,7 @@ The group is now a **cahoot** (a circle). The pad is a key budget. Spending 32 b
 
 Ciphertext travels over the **Numbers Station**, an append-only public feed. Anyone can read it. Only circle members can decrypt or forge an entry.
 
-A circle can also give a seat to an AI agent. The agent's copy of the pad lives inside a Turnkey Verifiable Cloud (TVC) enclave, and a pinned policy decides each read and send. Circles without an agent seat have a simple guarantee: even Turnkey can't read your circle.
+A circle can also give a seat to a hosted software member, such as an AI agent. That member's copy of the pad lives inside a Turnkey Verifiable Cloud (TVC) enclave, and a pinned policy decides each read and send. This integration is optional. Circles without a hosted seat have a simple guarantee: nobody who runs the feed can read the circle.
 
 ## Repository layout
 
