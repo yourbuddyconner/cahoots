@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Numbers Station</title>
+<style>
+  :root { --bg: #0b0d10; --fg: #d7dde4; --dim: #7c8794; --accent: #9ad1a4; --mono: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  @media (prefers-color-scheme: light) { :root { --bg: #f6f7f8; --fg: #1a1f24; --dim: #5b6670; --accent: #1f7a3a; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--mono); padding: 16px; }
+  h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 4px; letter-spacing: .08em; text-transform: uppercase; }
+  .sub { color: var(--dim); font-size: .85rem; margin-bottom: 16px; }
+  .head { color: var(--accent); word-break: break-all; }
+  table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid color-mix(in srgb, var(--fg) 12%, transparent); vertical-align: top; }
+  th { color: var(--dim); font-weight: 500; }
+  td.ct { word-break: break-all; color: var(--dim); }
+  td.cid { color: var(--accent); white-space: nowrap; }
+  .circles span { display: inline-block; margin: 0 12px 8px 0; color: var(--dim); }
+  .circles b { color: var(--fg); font-weight: 500; }
+</style>
+</head>
+<body>
+<h1>Numbers Station</h1>
+<div class="sub">Anyone can read this. Only pad holders can decrypt it. Head: <span class="head" id="head">…</span></div>
+<div class="circles" id="circles"></div>
+<table><thead><tr><th>seq</th><th>received</th><th>circle</th><th>ciphertext (base64url)</th></tr></thead><tbody id="rows"></tbody></table>
+<script>
+  const rows = document.getElementById('rows');
+  const MAX_ROWS = 60;
+  let after = null;
+  function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  async function refreshCircles() {
+    try {
+      const r = await fetch('/v1/circles'); const j = await r.json();
+      document.getElementById('circles').innerHTML = j.circles.map(c => `<span><b>${esc(c.circle_id.slice(0, 8))}…</b> ${c.count}</span>`).join('');
+      const h = await (await fetch('/v1/head')).json();
+      document.getElementById('head').textContent = (h.seq === null ? 'empty' : `#${h.seq} ${h.hash}`);
+    } catch (e) {}
+  }
+  async function poll() {
+    try {
+      const q = after === null ? '' : `?after=${after}`;
+      const r = await fetch('/v1/feed' + q); const j = await r.json();
+      for (const e of j.entries) {
+        const tr = document.createElement('tr');
+        const t = new Date(e.received_at).toISOString().replace('T', ' ').slice(0, 19);
+        tr.innerHTML = `<td>${e.seq}</td><td>${t}</td><td class="cid">${esc(e.circle_id.slice(0, 8))}…</td><td class="ct">${esc(e.message.slice(0, 160))}${e.message.length > 160 ? '…' : ''}</td>`;
+        rows.prepend(tr);
+        after = e.seq;
+      }
+      while (rows.children.length > MAX_ROWS) rows.removeChild(rows.lastChild);
+      if (j.entries.length) refreshCircles();
+    } catch (e) {}
+    setTimeout(poll, 1500);
+  }
+  refreshCircles(); poll();
+</script>
+</body>
+</html>
