@@ -7,3 +7,4 @@ Cargo.lock.bak
 /web/node_modules
 /web/dist
 /web/app/pkg
+/site/docs/md

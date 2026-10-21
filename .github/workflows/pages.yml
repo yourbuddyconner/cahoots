@@ -1,0 +1,63 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        run: curl -sSf https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+      - name: Build the browser app
+        run: |
+          cd crates/wasm
+          wasm-pack build --target web --release --out-dir ../../web/app/pkg --no-typescript
+      - name: Assemble the site
+        run: |
+          set -e
+          out=_site
+          rm -rf "$out"
+          cp -r site "$out"
+          mkdir -p "$out/docs/md" "$out/app"
+          cp README.md "$out/docs/md/readme.md"
+          cp docs/*.md "$out/docs/md/"
+          cp web/README.md "$out/docs/md/web.md"
+          cp crates/station/README.md "$out/docs/md/station.md"
+          cp crates/chat/README.md "$out/docs/md/chat-cli.md"
+          cp crates/host/README.md "$out/docs/md/host.md"
+          cp crates/yk/README.md "$out/docs/md/yk.md"
+          cp crates/ADAPTERS.md "$out/docs/md/adapters.md"
+          cp -r web/app/. "$out/app/"
+          rm -f "$out/app/pkg/.gitignore"
+          touch "$out/.nojekyll"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
