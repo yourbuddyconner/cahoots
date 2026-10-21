@@ -43,8 +43,8 @@ Every Rust crate lives under `crates/`. The PWA lives under `web/app`.
 | `web/app` | | Offline PWA phone and laptop client. | done (M2), camera scanning untested |
 | `crates/hal` | `cahoots-hal` | HAL traits, ring ceremony driver, SP 800-90B health tests, persistent ledger. `no_std`. | done (M4a) |
 | `crates/host` | `cahoots-host` | Desktop simulator: socket Link, file PadStore, PNG Display. Four processes run a ring ceremony. | done (M4a) |
-| `crates/esp32s3` | | `esp-hal` + Embassy firmware, an alternative hardware target. The first board is the DIY badge (`docs/diy-badge.md`): a Pico 2, a screen hat, and a secure element. | placeholder (M4b) |
-| `crates/dabao` | | Xous app for the Baochip-1x Dabao. | placeholder (M4c, M5) |
+| `crates/esp32s3` | | `esp-hal` + Embassy firmware, a third hardware family. The first two are the Pico (tinkering) and the Baochip Dabao (native); see `docs/diy-badge.md`. | placeholder |
+| `crates/dabao` | | Xous app for the Baochip-1x Dabao, the native badge family. | placeholder (M4c, M5) |
 | `crates/chat` | `cahoots-chat` | Pad-seeded end-to-end chat: epoch keys, sender ratchets, ChaCha20-Poly1305, plus the `cahoots-chat` CLI demo. | done (C1, C3) |
 | `crates/station` | `cahoots-station` | The Numbers Station relay: hash-chained log, reuse refusal, long-poll feed, display page, Dockerfile. | done (C2); TVC deploy pending |
 | `crates/fuzz` | | `cargo-fuzz` targets for every parser. Not a workspace member. | done |
@@ -74,7 +74,7 @@ See `docs/threat-model.md` for the full list.
 
 ## What it is for
 
-`docs/tiers.md` defines the device tiers, from a phone (T0) to inspected silicon (T4), and the rule that a circle is only as protected as its least protected member. `docs/use-cases.md` lists concrete uses, from group chat to bootstrapping WireGuard and physical mesh networks from a ceremony. `docs/diy-badge.md` is the badge you can build from three parts. `docs/plan.md` is the roadmap. `docs/glossary.md` defines the terms.
+`docs/tiers.md` defines the device tiers, from a phone (T0) to inspected silicon (T4), and the rule that a circle is only as protected as its least protected member. `docs/use-cases.md` lists concrete uses, from group chat to bootstrapping WireGuard and physical mesh networks from a ceremony. `docs/diy-badge.md` is how to build a badge, in either hardware family. `docs/plan.md` is the roadmap. `docs/glossary.md` defines the terms.
 
 ## Working rules
 

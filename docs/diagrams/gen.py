@@ -398,19 +398,19 @@ def wiring():
         "Trust the order of the wires in the plug, not their",
         "colours. Cables from different makers differ.",
         "",
-        "The screen hat uses SPI1 (GP8 to GP13) and the",
-        "buttons use GP2, GP3, GP15 to GP21. Nothing",
-        "collides with GP4 and GP5.",
+        "The e-paper hat uses SPI1 (GP8 to GP13). The two",
+        "Qwiic buttons chain from the breakout's second",
+        "port, on the same bus. Nothing collides.",
     ], size=12, fill=FG2, lh=19)
     s.save("diy-wiring.svg")
 
 
 def stack():
-    s = Svg(960, 300, "The stack: screen hat on top, secure element wedged between, Pico below")
+    s = Svg(960, 300, "The stack: e-paper on top, buttons and secure element between, the board below")
     cx = 330
-    layers = [("Screen hat (Waveshare Pico-LCD-1.3)", 60, "#2a2f3a", "faces out: 240 × 240 screen, joystick, four buttons"),
-              ("Trust M breakout + cable", 118, "#1f2a44", "lies flat between the boards, port toward the USB end"),
-              ("Pico 2 with headers", 176, "#1b4d3e", "pins up into the hat's header; USB at the end")]
+    layers = [("E-paper screen", 60, "#2a2f3a", "1.54\" 200 × 200 on the Baochip; a 2.13\" hat on the Pico"),
+              ("Two buttons · secure element (Pico only)", 118, "#1f2a44", "on the Pico they chain on one Qwiic cable; the Baochip needs no secure element"),
+              ("The board: Dabao or Pico 2", 176, "#1b4d3e", "USB-C to the phone; a wire to the next badge")]
     for name, y, fill, note in layers:
         s.rect(cx - 220, y, 440, 40, fill=fill, stroke=LINE, r=8)
         s.text(cx, y + 25, name, size=13, fill=FG, anchor="middle", weight=600)
@@ -419,7 +419,7 @@ def stack():
         s.line(x, 100, x, 176, color="#d4af37", sw=2)
     s.text(cx - 200, 148, "header", size=10, fill="#d4af37", anchor="end", mono=True)
     s.rect(cx - 240, 40, 480, 196, fill="none", stroke=LINE_SOFT, r=14, dash="6 6")
-    s.text(cx, 262, "A snap case holds the three together. Nothing is glued or soldered.", size=12, fill=FG3, anchor="middle")
+    s.text(cx, 262, "Same shape in both families. The Pico build snaps together; the Dabao build needs a header.", size=12, fill=FG3, anchor="middle")
     s.save("diy-stack.svg")
 
 

@@ -1,71 +1,66 @@
-# The DIY badge
+# Build a badge
 
-A Cahoots badge you can build from three parts you can buy anywhere, with no soldering, for about $20. The shape comes from the Wedgie pocket computer (wedgie.dev): a Pico, a screen hat with buttons, and a secure element wedged between them. Cahoots adopts the shape. The parts below are the recommended build; the matrix after it lists the alternatives and what each one costs you in dollars and in security.
+Cahoots runs on any board that can do four things: make random numbers, store the pad and erase parts of it for real, show six words, and talk to the next badge over a wire. Those four are the HAL (`crates/hal`). A board that implements them and passes the device test suite is a Cahoots badge, and its README says which [tier](tiers.md) it reaches and why.
 
-**Status: not yet built.** This page is the plan we are building to. The firmware image does not exist yet (roadmap M4b). We will build one ourselves first and replace this line with what we learned.
+Two hardware families come first. More can follow.
+
+| Family | Board | What it is for | Tier | When |
+|---|---|---|---|---|
+| **Baochip** (native, fully supported) | Dabao evaluation board, Baochip-1x | The badge we stand behind. RISC-V, a hardware key store, on-chip RRAM, silicon you can inspect. No radio. | T3; T4 for anyone who inspects the chip | Boards ship 15 December 2026 |
+| **Raspberry Pi Pico** (tinkering) | Pico 2 or Pico 2 W, RP2350 | Buy it today anywhere. Wi-Fi on the W for tinkering, a huge ecosystem, WebUSB to the phone. Needs a $5 secure element to be honest about its tier. | T2 | Now |
+
+Both run the same Rust core and the same ceremony. Both are USB devices, so the browser app can drive either one. The RP2350 can boot its RISC-V cores instead of its Arm cores, so the firmware can be RISC-V on both.
+
+**Status: neither is built yet.** This page is the plan we are building to. We will build both ourselves and replace this line with what we learned.
+
+## The shape both families share
 
 ![The stack](diagrams/diy-stack.svg)
 
-## The recommended build
+- **An e-paper screen.** The manufactured badge uses a 1.54" 200 × 200 e-paper panel, and the DIY builds use e-paper too. It holds the six words with no power, it is readable in sunlight, and it never needs to animate: a single code fits on it, and the reveal, which is too big for a single code, travels over the wire or the USB cable instead. A 200 × 200 panel shows a version 4 code at 6 pixels per module, which a phone reads at arm's length.
+- **Two buttons.** A is next, B is confirm. That is enough for every screen: cycle through a PIN digit with A and lock it with B, confirm the words with B or reject them with A, pick a seat with A and take it with B. No joystick.
+- **A wire to the next badge.** The touch link. On the Baochip it is a UART between two boards. On the Pico it is the same, or the spare port on the secure element's Qwiic breakout. No radio is used during a ceremony on either family.
+- **USB to a phone or laptop.** The browser app connects over WebUSB or WebSerial and becomes the badge's camera: it scans the other members' codes with the phone camera and passes them down the cable, and it can mirror the badge's screen. The secret never goes up the cable. Only commitments, reveals, sealed messages, and the ledger position do. This is roadmap item M4d, and it works the same for both families.
 
-| Part | Why this one | Price |
+## Family 1: Baochip
+
+The native badge. The Dabao is the Baochip-1x on a small two-layer board: a 350 MHz VexRiscv RV32-IMAC core with an MMU, four 700 MHz PicoRV I/O cores, 4 MiB of on-chip RRAM, 2 MiB of SRAM, USB-C as a high-speed USB device, and 20 pinned-out I/Os. $12 plus shipping, from Crowd Supply, shipping 15 December 2026. Most of the chip's RTL is published, and its package lets an owner compare the die with the design under an infrared microscope.
+
+The board has no screen, no buttons, no battery, and no radio. You add:
+
+| Part | Price | Notes |
 |---|---|---|
-| **Raspberry Pi Pico 2 with headers** (Pico 2 H) | RP2350: signed boot, 8 KB of one-time-programmable memory for keys, a hardware random number generator, glitch detectors. Two dollars more than a Pico 1 for a whole tier of security. | about $7 |
-| **Waveshare Pico-LCD-1.3** | 240 × 240 colour screen, a joystick, and four buttons on a hat that plugs straight onto the Pico. Big enough for the six words, a single code, and a PIN prompt. | $7.31 to $8.99 |
-| **Adafruit OPTIGA Trust M breakout** (product 4351) | The only secure element on a no-soldering Qwiic breakout. A second random source, an AES key that never leaves the chip, four counters a copied flash cannot roll back. | $4.95 |
-| **Qwiic / STEMMA QT cable with bare wire ends** | Four wires that push into the hat's header beside the Pico's pins. | about $1 |
-| **Total** | | **about $21** at single-unit retail, under $20 with the screen bought direct from Waveshare or any part bought in a pack |
+| Dabao | $12 | Plus $10 shipping in the US |
+| Waveshare 1.54" e-paper module, 200 × 200, SPI, 8-pin cable | $10 to $18 | The same panel as the manufactured badge, so the display driver is shared. The `epd-waveshare` Rust crate covers this panel class; the exact revision needs checking. |
+| Two tactile buttons | under $1 | Any 6 mm tactile switch |
+| A UART cable to the next badge | under $1 | Three wires: TX, RX, ground |
+| Optional: a 3.7 V LiPo and a charger board | $8 to $12 | For a badge that runs unplugged. The Dabao has no charger on board. |
+| **Total** | **about $25** | |
 
-Where to buy: the Pico 2 H from any Raspberry Pi reseller; the screen from [Waveshare](https://www.waveshare.com/product/pico-lcd-1.3.htm), [The Pi Hut](https://thepihut.com/collections/raspberry-pi-screens/products/1-3-ips-lcd-display-module-for-raspberry-pi-pico-240x240) or [RobotShop](https://robotshop.com/products/waveshare-13in-lcd-display-module-rpi-pico-65k-colors-240x240-spi); the Trust M breakout from [Adafruit](https://www.adafruit.com/product/4351), Mouser, DigiKey or The Pi Hut; the cable from Adafruit (STEMMA QT to bare wires) or SparkFun (Qwiic breadboard cable).
+No secure element is needed. The Baochip has its own true random number generator, a key store with one-way counters, and RRAM, which is why it is T3 on its own. The firmware runs on Xous, the Rust microkernel the chip ships with (`cargo xtask dabao`), and develops today in hosted mode on a laptop with the chip's emulator (roadmap M4c).
 
-## The matrix
+Wiring will be published when the boards arrive. The Dabao's pinout is interactive on its Crowd Supply page, and until a board is on the bench we will not guess which of the 20 I/Os carry SPI and UART. Expect to solder a header or use jumper wires; this family is not the no-soldering one.
 
-Pick one from each row. The tier column uses the definitions in [device tiers](tiers.md). A circle is as safe as its least safe member, so a group of these badges is the lowest tier among them.
+## Family 2: Raspberry Pi Pico
 
-### Board
+The tinkering badge. Available everywhere today, cheap, and surrounded by parts that plug together without soldering. It needs one extra part to be honest about security: a secure element, because an RP2350 on its own cannot stop a copied flash from being restored, and that is the attack that lets pad bytes be reused.
 
-| Option | Price | What you get | What you give up |
-|---|---|---|---|
-| **Pico 2 H** (recommended) | $7 | Signed boot, on-chip random source, glitch detectors, headers fitted | |
-| Pico 2 (no headers) | $5 | The same chip | You solder two header strips. Ten minutes, and it breaks the no-soldering promise |
-| Pico H / Pico (RP2040) | $4 to $5 | Runs the same firmware | No signed boot, so replaced firmware runs. One tier lower with the same secure element |
-| RP2040 clone boards | $2 to $3 in packs | Cheapest possible | Quality varies; the case may not fit; no signed boot |
-| Pico 2 W / Pico W | $7 to $8 | Wi-Fi and Bluetooth | A radio on the badge. The protocol requires the radio off during a ceremony, and a badge with no radio has nothing to prove. Not recommended |
-
-### Screen
-
-| Option | Price | What you get | What you give up |
-|---|---|---|---|
-| **Waveshare Pico-LCD-1.3** (recommended) | $7 to $9 | 240 × 240 colour, joystick, four buttons. Shows words, a scannable code, and a PIN pad | |
-| Waveshare Pico-OLED-1.3 | $8 to $9 | 128 × 64 monochrome, two buttons | Too small to show a code a phone can scan. Codes go through the phone over USB instead. PIN entry with two buttons is slow |
-| Bare 1.3" ST7789 module | $3 to $4 | The same panel as the hat | Seven wires to solder, no buttons, no case fit |
-| No screen | $0 | The phone is the screen over USB | The badge cannot show you the six words itself, so you are trusting the phone's display of them. Fine for a headless node (a router), wrong for a person's badge |
-
-### Secure element
-
-| Option | Price | What you get | What you give up |
-|---|---|---|---|
-| **Infineon OPTIGA Trust M V3**, Adafruit breakout (recommended) | $5 | TRNG, one AES-256 key that never leaves the chip, four counters (600,000 counts each), 10 kB storage, CC EAL6+, PSA Level 3, encrypted I2C session. A key can be linked to a counter so it stops working at a threshold, which is how the PIN lockout is built | The chip has no PIN of its own. The firmware decides when to burn an attempt |
-| NXP EdgeLock SE050 / SE051 | $7 chip, no hobbyist breakout | 50 kB storage, AES with policies, counters, and a PIN enforced by the chip: an authentication object with an attempt limit of 1 to 255, counted down before each try, reset only on success. Reaches T3 | You solder it, or we design a breakout. NXP's own board is a $60 Arduino shield |
-| Microchip ATECC608B | $1 chip, several Qwiic breakouts | RNG, AES-128, two counters, 16 small slots | No PIN, fewer counters, less storage. Enough for the counter and the wrapping key, nothing more |
-| None | $0 | | T1 at best: a stolen board is a copy of the secret and a restored flash copy is not detected |
-
-### What each combination reaches
-
-| Build | Tier | Why |
+| Part | Price | Notes |
 |---|---|---|
-| Pico 1 + screen, no secure element | T1 | Real erase, but a stolen board is a copy of the pad and the flash can be restored. |
-| Pico 1 + Trust M | T2 | The pad at rest is ciphertext without the chip. The ledger cannot be rolled back. A PIN with a counter-backed lockout. Firmware can still be replaced. |
-| **Pico 2 + Trust M** (recommended) | T2 with signed firmware | Only firmware the group pinned runs. Flash is still readable, but the pad on it is ciphertext. |
-| Pico 2 + SE050 | T3 | The wrapping key never leaves the chip, the chip enforces the PIN attempts, and after the limit the key is gone and the pad with it. |
+| **Pico 2 W with headers** (tinkering) or **Pico 2 H** (no radio) | $7 to $8 | RP2350: signed boot, 8 KB of one-time-programmable memory, a hardware random source, glitch detectors, and RISC-V cores if you want them. The W adds Wi-Fi and Bluetooth, which the firmware turns off for the ceremony. |
+| Waveshare Pico-ePaper-2.13 | $13.99 | 250 × 122 black and white e-paper on a hat the Pico plugs into. Partial refresh 0.3 s, full refresh 2 s. Uses SPI1 on GP8 to GP13. No buttons. |
+| Adafruit OPTIGA Trust M breakout | $4.95 | The secure element, on a Qwiic breakout. A second random source, an AES key that never leaves the chip, four counters a copied flash cannot roll back. |
+| Two SparkFun Qwiic Buttons | $3.95 each | The two buttons, chained on the same Qwiic bus as the Trust M. Each has a settable I2C address. |
+| Qwiic cables: one with bare wire ends, two short ones | about $3 | The bare-ended one pushes into the hat's header beside the Pico's pins; the others chain the buttons. |
+| **Total** | **about $37** | About $33 with one button and the Pico's own BOOTSEL as the second. About $21 if you take the Waveshare LCD hat with built-in buttons instead of e-paper, which works but is not the badge's screen. |
 
-None of these is T4. That needs a published chip design and someone willing to inspect it, which is the badge we manufacture.
+Alternative screen: the same Waveshare 1.54" 200 × 200 module as the Baochip family, on its 8-pin cable to the Pico's SPI pins. It matches the manufactured badge exactly and costs about the same as the hat, but it does not plug onto the Pico, so it is jumper wires or soldering.
 
-## Wiring
+### Wiring the Pico family
 
 ![Wiring](diagrams/diy-wiring.svg)
 
-The cable's plug carries four wires in a fixed order: ground, 3.3 V, SDA, SCL. Trust that order, not the colours, because cables from different makers use different colours. With the Pico's USB connector at the top and counting pins from that end:
+The Qwiic cable's plug carries four wires in a fixed order: ground, 3.3 V, SDA, SCL. Trust that order, not the colours. With the Pico's USB connector at the top and counting pins from that end:
 
 | Wire | Goes to | Pico pin | Signal |
 |---|---|---|---|
@@ -74,43 +69,42 @@ The cable's plug carries four wires in a fixed order: ground, 3.3 V, SDA, SCL. T
 | SDA | left side, 6th pin | 6 | GP4, I2C0 SDA |
 | SCL | left side, 7th pin | 7 | GP5, I2C0 SCL |
 
-The screen hat uses SPI1 on GP8 to GP13 and the buttons and joystick on GP2, GP3 and GP15 to GP21, so nothing collides with GP4 and GP5. The Trust M answers at I2C address 0x30.
+The e-paper hat uses SPI1 on GP8 to GP13, so nothing collides with GP4 and GP5. The Trust M answers at I2C address 0x30. The two Qwiic buttons chain from the Trust M breakout's second port and sit on the same bus.
 
-## Assembly
+### Assembly
 
-1. Push the four bare wire ends into the hat's female header, in the slots beside the four Pico pins above. The wire shares the slot with the pin. Push until the insulation meets the header.
+1. Push the four bare wire ends into the hat's female header, in the slots beside the four Pico pins above. The wire shares the slot with the pin.
 2. Plug the Pico into the hat, USB end matching the hat's marked end.
-3. Plug the cable's other end into the Trust M breakout's Qwiic port and lay the breakout flat between the two boards, port toward the USB end.
-4. Snap the case on, if you have one. Wedgie's case is made for the pink NULLLAB Pico; a case for the official Pico 2 H will be published with the firmware.
+3. Plug the cable's other end into the Trust M breakout, and chain the two buttons from its second port.
+4. Put it in a case if you have one. Nothing is glued or soldered.
 5. Plug the USB cable into a computer.
+
+### About the radio
+
+A Pico 2 W has Wi-Fi and Bluetooth on board. For tinkering that is useful: flash over the air, serve a status page, talk to a relay without a phone. For a ceremony the firmware turns the radio off before it makes its contribution and keeps it off until the words are confirmed. That is a firmware promise, not a hardware one, so a W badge's tier label says "radio present, off by firmware", and a group that wants the stronger claim uses the non-W Pico 2 or the Baochip, which has no radio to promise about.
 
 ## Firmware and first boot
 
-Not published yet. When it is, the steps will be: hold BOOTSEL while plugging in, drag the `.uf2` file onto the drive that appears, and the badge reboots into Cahoots. The first screen will show the firmware hash so the group can compare it, then ask for a PIN.
+Not published for either family yet. When it is: for the Pico, hold BOOTSEL while plugging in and drag the `.uf2` file onto the drive that appears. For the Dabao, `cargo xtask dabao` produces the images and the board's bootloader takes them over USB. The first screen on either shows the firmware hash so the group can compare it, then asks for a PIN.
 
-What the firmware will check on first boot, and show on the screen: the secure element answers on I2C and its random source passes the health tests; the screen and all buttons work; the flash region for the pad erases and reads back clean.
+What the firmware checks on first boot, and shows on the screen: the random sources pass the health tests; the screen and both buttons work; the pad region erases and reads back clean; on the Pico, the secure element answers on I2C.
 
-## What the secure element does
+## What the Pico's secure element does
 
-Every member holds the whole pad, and the pad is too big for any secure element (64 KiB to 256 KiB against 10 kB to 50 kB of secure storage). So the pad lives in the microcontroller's flash, and the secure element does four smaller jobs that a bare microcontroller cannot do honestly.
+Every member holds the whole pad, and the pad is too big for any secure element. So the pad lives in the Pico's flash, and the Trust M does four smaller jobs the Pico cannot do honestly on its own. The Baochip does all four in its own silicon.
 
-1. **A second source of randomness.** The chip's random number generator is read over I2C and mixed into the device's contribution, under the same rule as a YubiKey: never the only source, because the chip is closed. With a Pico 2 that makes three sources: the RP2350's generator, the secure element's, and the health tests over both.
-2. **A wrapping key that never leaves the chip.** The pad is stored in flash encrypted under an AES key held in the secure element. Spending bytes means asking the chip to decrypt that range over an encrypted I2C session. Reading the flash chip alone yields ciphertext.
-3. **Counters that cannot be rolled back.** The ledger's head is bound to a monotonic counter in the chip. Copying the flash, spending, and restoring the copy leaves the counter ahead of the ledger, and the device refuses to continue. Pad reuse by flash restore is the biggest hole in a bare microcontroller, and one counter closes it.
-4. **A PIN with a lockout.** On the Trust M, the wrapping key is linked to a counter with a threshold; each wrong PIN burns a count and at the threshold the key stops working, which makes the pad unrecoverable. On the SE050 the chip itself counts the attempts.
+1. **A second source of randomness**, mixed into the device's contribution under the same rule as a YubiKey: never the only source.
+2. **A wrapping key that never leaves the chip.** The pad is stored encrypted under an AES key in the Trust M. Reading the flash alone yields ciphertext.
+3. **Counters that cannot be rolled back.** The ledger's head is bound to a monotonic counter. Copying the flash, spending, and restoring the copy leaves the counter ahead, and the device refuses to continue.
+4. **A PIN with a lockout.** The wrapping key is linked to a counter with a threshold; each wrong PIN burns a count, and at the threshold the key stops working and the pad is unrecoverable.
 
-## How it talks to the phone
+## Adding a family
 
-The DIY badge has a screen and buttons but no camera and no radio. The ceremony needs each member's codes to reach every other member. Two links do that:
-
-- **USB to the phone or laptop.** The browser app connects to the badge over WebUSB or WebSerial. The app then acts as the badge's camera: it scans the other members' codes with the phone camera and passes them down the cable, and it can mirror the badge's codes on the phone screen. The secret never goes up the cable. Only commitments, reveals, sealed messages, and the ledger position do. This is roadmap item M4d.
-- **Badge to badge over a Qwiic cable.** Adafruit's breakout has two Qwiic ports, and an RP2040 or RP2350 can act as an I2C peripheral, so two badges can be chained with one cable for the ceremony. This is the touch link of this shape: a cable instead of magnets and pins, and no radio.
-
-The protocol does not change. The badge speaks the same frames to the app that it would speak over pins.
+Implement the four HAL traits (`Entropy`, `PadStore`, `Display`, `Link`) in a crate for the board. Run the device suite against the host simulator: a board passes by completing a ring ceremony with simulated peers and producing the right six words. Write the crate's README with the tier the board earns and why, judged by what its storage and boot chain can actually do, not by what the crate claims. The ESP32-S3 target that was planned first is one such family and stays in the tree.
 
 ## Open questions
 
-1. Whether to make the Pico 2 the only supported board and treat the RP2040 as unsupported, to keep one firmware image.
-2. How a badge is first provisioned: who writes the wrapping key into the secure element, and whether a factory-fresh Trust M's existing keys are trusted or replaced.
-3. Whether the screen hat's four buttons and joystick are enough for a PIN, or whether the phone enters the PIN over USB, which weakens the point of a PIN.
-4. A breakout for the SE050, either found or designed, so the T3 build is also solder-free.
+1. Which Dabao I/Os carry SPI and UART, and whether a header can be fitted without soldering.
+2. Whether the Pico family's PIN is entered on the badge's two buttons or on the phone over USB. On the badge is the point of a PIN.
+3. How a Pico badge is first provisioned: who writes the wrapping key into a fresh Trust M.
+4. Whether to offer the Waveshare 1.54" module as the standard Pico screen, so both families share one panel and one driver, at the cost of the no-soldering build.

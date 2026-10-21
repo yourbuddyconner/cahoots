@@ -154,7 +154,7 @@
 <text x="560" y="306" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">Trust the order of the wires in the plug, not their</text>
 <text x="560" y="325" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">colours. Cables from different makers differ.</text>
 <text x="560" y="344" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start"></text>
-<text x="560" y="363" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">The screen hat uses SPI1 (GP8 to GP13) and the</text>
-<text x="560" y="382" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">buttons use GP2, GP3, GP15 to GP21. Nothing</text>
-<text x="560" y="401" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">collides with GP4 and GP5.</text>
+<text x="560" y="363" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">The e-paper hat uses SPI1 (GP8 to GP13). The two</text>
+<text x="560" y="382" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">Qwiic buttons chain from the breakout's second</text>
+<text x="560" y="401" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">port, on the same bus. Nothing collides.</text>
 </svg>
