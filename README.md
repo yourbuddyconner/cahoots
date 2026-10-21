@@ -68,7 +68,7 @@ See `docs/threat-model.md` for the full list.
 
 ## What it is for
 
-`docs/use-cases.md` lists concrete uses, from group chat to bootstrapping WireGuard and physical mesh networks from a ceremony. `docs/plan.md` has the milestones, including the network-bootstrap track.
+`docs/tiers.md` defines the device tiers, from a phone (T0) to inspected silicon (T4), and the rule that a circle is only as protected as its least protected member. `docs/use-cases.md` lists concrete uses, from group chat to bootstrapping WireGuard and physical mesh networks from a ceremony. `docs/plan.md` has the milestones, including the network-bootstrap track.
 
 ## Working rules
 

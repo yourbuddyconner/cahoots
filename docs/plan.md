@@ -81,4 +81,5 @@ Carried from the handoff section 7, with additions.
 10. **New.** Whether the first network demo is WireGuard between laptops (N1, no hardware) or a Meshtastic circle (N4, needs radios). WireGuard is faster to ship. Meshtastic is closer to the community angle.
 11. **New.** Whether the federation profile (N5) is worth its ceremony cost before there is a multi-party deployment that needs it.
 12. **New.** Whether circle apps (A2, A3) come before or after the TVC app (M3). They share the control-subtype work in N2.
-13. **New.** Whether the genesis manifest (regions, holders, purposes, spend rules) replaces slices now, before C4 lands, or after. It touches core, vectors, provider, wasm, and host. Decided in conversation on 2026-10-20 to adopt the manifest and drop delegation; timing open.
+13. **New.** Whether the genesis manifest (regions, holders, purposes, spend rules) replaces slices now, before C4 lands, or after. It touches core, vectors, provider, wasm, and host. Decided in conversation on 2026-10-20 to adopt the manifest and drop delegation; timing open. The manifest should also carry each principal's device tier.
+14. **New.** Device tiers (`docs/tiers.md`) are declared, not proven, below T3. Whether a T0 phone in a circle of T3 badges should be allowed at all, or only with a loud warning, is a product call.
