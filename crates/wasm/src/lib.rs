@@ -67,6 +67,38 @@ pub fn qr_svg(data: &[u8]) -> Result<String, String> {
         .build())
 }
 
+/// Decode the first QR code found in a grayscale frame (`width * height` bytes, row-major).
+/// Returns `None` when nothing decodes. This is the camera path on every browser, including
+/// iOS, where WebKit has no `BarcodeDetector`.
+#[wasm_bindgen]
+pub fn qr_decode_gray(width: u32, height: u32, gray: &[u8]) -> Option<String> {
+    let (w, h) = (width as usize, height as usize);
+    if w == 0 || h == 0 || gray.len() != w * h {
+        return None;
+    }
+    let mut img = rqrr::PreparedImage::prepare_from_greyscale(w, h, |x, y| gray[y * w + x]);
+    for grid in img.detect_grids() {
+        if let Ok((_, text)) = grid.decode() {
+            return Some(text);
+        }
+    }
+    None
+}
+
+/// Decode from RGBA pixels as `canvas.getImageData` returns them.
+#[wasm_bindgen]
+pub fn qr_decode_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<String> {
+    let n = width as usize * height as usize;
+    if rgba.len() != n * 4 {
+        return None;
+    }
+    let gray: Vec<u8> = rgba
+        .chunks_exact(4)
+        .map(|p| ((p[0] as u32 * 77 + p[1] as u32 * 150 + p[2] as u32 * 29) >> 8) as u8)
+        .collect();
+    qr_decode_gray(width, height, &gray)
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }

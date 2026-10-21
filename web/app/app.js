@@ -3,7 +3,7 @@
 // All crypto is in cahoots-core and cahoots-chat (WASM).
 import init, {
   Ceremony, Circle, FountainEncoder, FountainDecoder,
-  b64_encode, b64_decode, bucket_pad, bucket_unpad, chat_bucket_pad, chat_bucket_unpad, qr_svg,
+  b64_encode, b64_decode, bucket_pad, bucket_unpad, chat_bucket_pad, chat_bucket_unpad, qr_svg, qr_decode_rgba,
 } from './pkg/cahoots_wasm.js';
 
 const CLAIM = {
@@ -121,27 +121,44 @@ function stopScanner() {
   scanner.stream.getTracks().forEach((t) => t.stop());
   scanner = null;
 }
-/** Shows a camera preview and calls onText(rawValue) for every code seen. */
+/** Shows a camera preview and calls onText(text) for every code seen.
+ *  Frames are decoded in our own wasm (rqrr), so this works on every browser,
+ *  including iOS where WebKit has no BarcodeDetector. */
 function scanBox(onText) {
   const wrap = h('div');
-  if (!('BarcodeDetector' in window)) {
-    wrap.append(h('p', { class: 'muted' }, 'Camera scanning needs the BarcodeDetector API (Chrome on Android or desktop). Use paste or a file instead.'));
+  if (!navigator.mediaDevices?.getUserMedia) {
+    wrap.append(h('p', { class: 'muted' }, 'This browser cannot open the camera. Use paste or a file instead.'));
     return wrap;
   }
-  const video = h('video', { playsinline: '', muted: '' });
+  const video = h('video', { playsinline: '', muted: '', autoplay: '' });
   const status = h('p', { class: 'muted' }, 'Starting camera…');
+  const work = document.createElement('canvas');
+  const ctx = work.getContext('2d', { willReadFrequently: true });
+  const MAX_SIDE = 480; // decode at a reduced size: ~11 ms per frame on a laptop, plenty for a 600-byte frame
   const btn = h('button', { onclick: async () => {
     btn.disabled = true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
       video.srcObject = stream; await video.play();
-      const det = new BarcodeDetector({ formats: ['qr_code'] });
-      let last = '';
-      const timer = setInterval(async () => {
+      let last = '', busy = false, frames = 0, hits = 0;
+      const timer = setInterval(() => {
+        if (busy || video.readyState < 2) return;
+        busy = true;
         try {
-          const codes = await det.detect(video);
-          for (const c of codes) { if (c.rawValue !== last) { last = c.rawValue; onText(c.rawValue); } }
+          const scale = Math.min(1, MAX_SIDE / Math.max(video.videoWidth, video.videoHeight));
+          const w = Math.max(1, Math.round(video.videoWidth * scale));
+          const hgt = Math.max(1, Math.round(video.videoHeight * scale));
+          if (work.width !== w || work.height !== hgt) { work.width = w; work.height = hgt; }
+          ctx.drawImage(video, 0, 0, w, hgt);
+          const { data } = ctx.getImageData(0, 0, w, hgt);
+          frames++;
+          const text = qr_decode_rgba(w, hgt, data);
+          if (text && text !== last) { last = text; hits++; onText(text); }
+          if (frames % 20 === 0) status.textContent = hits ? `Reading… ${hits} frames so far.` : 'Point the camera at the other screen.';
         } catch (e) { /* frame not ready */ }
+        busy = false;
       }, 1000 / QR_FPS / 2);
       scanner = { stream, timer };
       status.textContent = 'Point the camera at the other screen.';

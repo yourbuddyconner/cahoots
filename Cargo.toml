@@ -47,3 +47,11 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 panic = "abort"
+
+# The wasm client decodes camera frames in software; speed matters more than size there.
+[profile.release.package.cahoots-wasm]
+opt-level = 3
+[profile.release.package.rqrr]
+opt-level = 3
+[profile.release.package.raptorq]
+opt-level = 3

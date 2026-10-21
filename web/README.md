@@ -78,7 +78,7 @@ Chat, verified the same day with two tabs on two origins behind a proxy that for
 - Member 1 reloaded the page. It came back on epoch `0:32` with the full history, "Last seq 3", no re-decrypted or duplicated entries, and received the next message from member 0.
 - No console errors in either tab.
 
-Camera scanning uses the `BarcodeDetector` API and was not tested here; there is no camera in the automation session. Chrome on Android and desktop Chrome support it. Safari does not, so iPhone users use paste or file import until a vendored JS decoder is added.
+Camera scanning opens the camera with `getUserMedia`, draws each frame to a canvas at up to 480 px, and decodes it in our own wasm with the `rqrr` crate (`qr_decode_rgba`). No browser barcode API is used, so it works on iOS Safari and Chrome alike. The decoder is covered by Rust tests on rendered frames, including a 600-byte fountain frame. A real camera was not available in the automation session, so the end-to-end scan still needs a check on a phone.
 
 ## Limits
 

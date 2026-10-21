@@ -16,6 +16,7 @@ cahoots-chat = { path = "../chat", default-features = false }
 wasm-bindgen = "0.2.100"
 raptorq = "2.0.0"
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
+rqrr = "0.11"
 base64 = "0.22.1"
 zeroize = "1.8"
 
