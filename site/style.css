@@ -36,7 +36,7 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--amber); outline
 .wrap { max-width: var(--max); margin: 0 auto; padding-left: var(--gutter); padding-right: var(--gutter); }
 
 h1, h2 { font-family: var(--display); font-weight: 600; letter-spacing: -0.035em; line-height: 1.02; margin: 0 0 20px; text-wrap: balance; }
-h1 { font-size: clamp(38px, 6vw, 72px); }
+h1 { font-size: clamp(44px, 7.5vw, 92px); }
 h2 { font-size: clamp(30px, 4vw, 48px); letter-spacing: -0.03em; }
 p { margin: 0 0 1em; }
 code { font-family: var(--mono); font-size: 0.9em; }
