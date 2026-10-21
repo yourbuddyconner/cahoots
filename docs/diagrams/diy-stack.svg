@@ -11,7 +11,7 @@
 <text x="580" y="85" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">1.54" 200 × 200 on the Baochip; a 2.13" hat on the Pico</text>
 <rect x="110" y="118" width="440" height="40" rx="8" fill="#1f2a44" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
 <text x="330" y="143" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f4f4f5" text-anchor="middle">Two buttons · secure element (Pico only)</text>
-<text x="580" y="143" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">on the Pico they chain on one Qwiic cable; the Baochip needs no secure element</text>
+<text x="580" y="143" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">Pico: one Qwiic chain. Baochip: buttons only</text>
 <rect x="110" y="176" width="440" height="40" rx="8" fill="#1b4d3e" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
 <text x="330" y="201" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f4f4f5" text-anchor="middle">The board: Dabao or Pico 2</text>
 <text x="580" y="201" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">USB-C to the phone; a wire to the next badge</text>

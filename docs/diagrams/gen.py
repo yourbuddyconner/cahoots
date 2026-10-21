@@ -409,7 +409,7 @@ def stack():
     s = Svg(960, 300, "The stack: e-paper on top, buttons and secure element between, the board below")
     cx = 330
     layers = [("E-paper screen", 60, "#2a2f3a", "1.54\" 200 × 200 on the Baochip; a 2.13\" hat on the Pico"),
-              ("Two buttons · secure element (Pico only)", 118, "#1f2a44", "on the Pico they chain on one Qwiic cable; the Baochip needs no secure element"),
+              ("Two buttons · secure element (Pico only)", 118, "#1f2a44", "Pico: one Qwiic chain. Baochip: buttons only"),
               ("The board: Dabao or Pico 2", 176, "#1b4d3e", "USB-C to the phone; a wire to the next badge")]
     for name, y, fill, note in layers:
         s.rect(cx - 220, y, 440, 40, fill=fill, stroke=LINE, r=8)
