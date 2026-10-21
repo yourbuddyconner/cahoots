@@ -69,11 +69,10 @@ function median(a: number[]) { const b = [...a].sort((x, y) => x - y); return b[
 const chStart = (sec: number) => (sec === 0 ? 0 : hit(sec) + 1);
 export const CH: Record<string, readonly [number, number]> = {
   open: [0, chStart(6.6)],
-  badge: [chStart(6.6), chStart(13.0)],
-  explode: [chStart(13.0), chStart(22.5)],
-  touch: [chStart(22.5), chStart(30.0)],
-  words: [chStart(30.0), chStart(36.0)],
-  uses: [chStart(36.0), chStart(41.5)],
+  badge: [chStart(6.6), chStart(14.5)],
+  explode: [chStart(14.5), chStart(20.2)],
+  touch: [chStart(20.2), chStart(27.1)],
+  network: [chStart(27.1), chStart(41.5)],
   close: [chStart(41.5), TOTAL],
 };
 
@@ -88,61 +87,63 @@ export const OPEN = (() => {
   return { mark, word, ticker, out };
 })();
 
-// BADGE: the assembled badge drops in and turns.
+// BADGE: the problem, then the badge that answers it.
 export const BADGE = (() => {
   const drop = hero("badge.drop", hit(6.6), DUR.panelIn);
   mark_(drop, "slam", "badge lands");
-  const head = text("badge.head", "This badge makes an encryption secret.", hit(7.4), hit(12.2), "head");
+  const head = text("badge.head", "Every key you trust came from someone else's random numbers.", hit(7.4), hit(13.8), "head");
   const turn = hero("badge.turn", hit(10.2), DUR.lift);
-  mark_(turn, "swap", "badge turns over");
+  mark_(turn, "swap", "badge tilts to camera");
   return { drop, head, turn };
 })();
 
-// EXPLODE: the parts separate over two bars; a label per part on every other beat.
+// EXPLODE: the parts separate over two bars; a label per part on every beat.
 export const PARTS = ["Clear case", "E-paper screen", "Baochip-1x", "Touch pins", "Battery and USB-C"];
 export const EXPLODE = (() => {
-  const apart = hero("explode.apart", hit(13.0), DUR.explode);
+  const apart = hero("explode.apart", hit(14.5), DUR.explode);
   mark_(apart, "whoosh", "parts separate");
-  const head = text("explode.head", "Open hardware. Every part is public.", hit(13.8), hit(21.4), "head");
-  const labels = nextBeats(hit(14.6) - 1, PARTS.length, 2);
-  labels.forEach((f, i) => { text(`explode.label${i}`, PARTS[i], f, hit(21.4), `label${i}`); mark_(f, "tick", PARTS[i]); });
-  const together = hero("explode.together", hit(21.0), DUR.panelIn);
+  const head = text("explode.head", "This one rolls its own. Open hardware, nothing hidden.", hit(15.0), hit(19.8), "head");
+  const labels = nextBeats(hit(15.4) - 1, PARTS.length, 1);
+  labels.forEach((f, i) => { text(`explode.label${i}`, PARTS[i], f, hit(19.8), `label${i}`); mark_(f, "tick", PARTS[i]); });
+  const together = hero("explode.together", hit(19.4), DUR.panelIn);
   mark_(together, "swap", "parts assemble");
   return { apart, head, labels, together };
 })();
 
-// TOUCH: a second badge slides in and snaps on; a pulse crosses the pins.
+// TOUCH: a second badge snaps on, a pulse crosses the pins, both screens flip to the same six words.
 export const TOUCH = (() => {
-  const land = hit(23.9);
+  const land = hit(21.4);
   const snap = hero("touch.snap", land - DUR.snap, DUR.snap);
   mark_(land, "slam", "badges snap together");
-  const head = text("touch.head", "Touch two together. They make one secret.", hit(24.3), hit(29.5), "head");
-  const pulse = hero("touch.pulse", hit(25.1), DUR.connector);
+  const head = text("touch.head", "Touch two. They share a secret nobody else has.", hit(21.8), hit(26.7), "head");
+  const pulse = hero("touch.pulse", hit(22.6), DUR.connector);
   mark_(pulse, "fly", "pulse over the pins");
-  const pulse2 = hero("touch.pulse2", hit(26.7), DUR.connector);
+  const pulse2 = hero("touch.pulse2", hit(23.4), DUR.connector);
   mark_(pulse2, "fly", "pulse back");
-  return { snap, land, head, pulse, pulse2 };
+  const push = hero("touch.push", hit(24.2), DUR.push);
+  const flip = hero("touch.flip", hit(25.4), DUR.flip);
+  mark_(flip, "check", "both screens show the words");
+  return { snap, land, head, pulse, pulse2, push, flip };
 })();
 
-// WORDS: push in to the screens; both refresh to the same six words.
-export const WORDS = (() => {
-  const push = hero("words.push", hit(30.0), DUR.push);
-  mark_(push, "swap", "camera push");
-  const flip = hero("words.flip", hit(31.2), DUR.flip);
-  mark_(flip, "check", "screens show the words");
-  const head = text("words.head", "Both screens show the same six words.", hit(31.6), hit(35.6), "head");
-  return { push, flip, head };
-})();
-
-// USES: the badges pull back; three uses, one per bar.
-export const USES_ITEMS = ["WireGuard tunnels", "Encrypted files", "Group chat"];
-export const USES = (() => {
-  const recede = hero("uses.recede", hit(36.0), DUR.panelIn);
-  mark_(recede, "whoosh", "badges recede");
-  const head = text("uses.head", "Protect your VPN, your files, and your chat.", hit(36.4), hit(40.7), "head");
-  const items = nextBeats(hit(37.2) - 1, USES_ITEMS.length, 2);
-  items.forEach((f, i) => { text(`uses.item${i}`, USES_ITEMS[i], f, hit(40.7), `item${i}`); mark_(f, "tick", USES_ITEMS[i]); });
-  return { recede, head, items };
+// NETWORK: the payoff. Links grow from the pair to six devices, one per beat; then keys rotate down every link.
+export const NODES = ["WireGuard peer", "Mesh radio", "Laptop", "Phone", "Server", "Second site"];
+export const NETWORK = (() => {
+  const recede = hero("net.recede", hit(27.1), DUR.panelIn);
+  mark_(recede, "whoosh", "pair pulls back");
+  const links = nextBeats(hit(28.6) - 1, NODES.length, 1);
+  links.forEach((f, i) => {
+    hero(`net.link${i}`, f, DUR.connector);
+    mark_(f, "tick", `link to ${NODES[i]}`);
+    text(`net.node${i}`, NODES[i], f + DUR.connector, hit(40.3), `node${i}`);
+  });
+  const head2 = text("net.head2", "One meeting gives the whole network its keys.", hit(27.9), hit(33.4), "head");
+  const rotate = hero("net.rotate", hit(35.4), DUR.explode / 2);
+  mark_(rotate, "fly", "keys rotate down the links");
+  const head3 = text("net.head3", "No server. No CA. Nothing crosses a network.", hit(34.2), hit(40.3), "head");
+  const rotate2 = hero("net.rotate2", hit(38.6), DUR.explode / 2);
+  mark_(rotate2, "fly", "keys rotate again");
+  return { recede, links, head2, rotate, head3, rotate2 };
 })();
 
 // CLOSE: the line, the address, a settle, then black.

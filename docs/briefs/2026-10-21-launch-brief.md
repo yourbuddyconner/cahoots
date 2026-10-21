@@ -1,10 +1,12 @@
-# Cahoots launch video: directed brief (rev A)
+# Cahoots launch video: directed brief (rev B)
 
-GOAL: A viewer on X knows that Cahoots badges make a shared encryption secret when you touch them together, and opens cahoots.network.
+GOAL: A viewer on X comes away with "I want one": a badge that makes its own random numbers, and one meeting with it gives a whole network its keys with no server and no CA. Then they open cahoots.network.
+
+Rev B (2026-10-21): the six check words were taking a full chapter for a verification step. Cut to a beat inside the touch chapter. The payoff is now a 14 s network chapter.
 
 OUTPUT: three.js scene in `video/src/scene.ts` rendered frame by frame through Playwright and Chrome, 1920 x 1080, H.264 High, yuv420p, CRF 16, AAC 192k, faststart. Output `video/out/cahoots-launch.mp4`.
 
-TIME: 52.28 s x 30 fps = 1568 frames. Loop: no. Music "sunsides - chill trap promo" (152 BPM, steady; 147.7 in the intro), spliced in `video/splice.py`: 0 to 41.46 s (intro and first main section) then 135.02 s to the end (outro tail, faded over the last 2 s). Beat grid: detected beats (`video/src/beats.json`), snapped per beat. Chapters start on section changes and bars: 0, 6.6, 13.0, 22.5, 30.0, 36.0, 41.5.
+TIME: 52.28 s x 30 fps = 1568 frames. Loop: no. Music "sunsides - chill trap promo" (152 BPM, steady; 147.7 in the intro), spliced in `video/splice.py`: 0 to 41.46 s (intro and first main section) then 135.02 s to the end (outro tail, faded over the last 2 s). Beat grid: detected beats (`video/src/beats.json`), snapped per beat. Chapters start on section changes and bars: 0, 6.6, 14.5, 20.2, 27.1, 41.5.
 
 LOOK: base #0a0a0b, text #f4f4f5, dim text #a1a1aa, accent amber #e5a33a, e-paper #e6e2d8 with ink #17191b. Headlines Inter Tight 600, 84 px, tracking -0.035em, left-aligned on a 12-column grid at x = 160 px. Part labels and use items JetBrains Mono 500, 36 px, uppercase, tracking 0.08em, amber. Address JetBrains Mono 400, 44 px. The badge is the site's procedural model (`site/badge.js`) under the site's room environment and the same amber rim light. The ticker of five-digit groups from the site runs along the bottom edge during the open and the close. Identity on screen: the badge's e-paper reads "sf-meetup", "TRNG · T4", and the six words sunset valve present raven curtain pudding (demo values from the site).
 
@@ -18,13 +20,12 @@ MOTION (tokens in `video/src/motion.ts`; no inline numbers in scenes):
 - Visual hits 1 frame before the beat; sound on the beat.
 
 SHOTS (one hero each; frames from `timeline.ts`, the audit prints them):
-- 00 open (0 to 6.6): the mark lands on the first beat (ζ 0.7), the wordmark reveals word-wise beside it, the ticker starts at the section change (3.4). Hands off by the wordmark exiting as the badge drops.
-- 01 badge (6.6 to 13.0): the assembled badge drops from above and lands on the beat (ζ 0.8), then turns 180° at 10.2 to show the back. Headline "This badge makes an encryption secret." Hands off by the explode starting on the bar.
-- 02 explode (13.0 to 22.5): the parts separate over two bars (ease-in-out-quart), one part label per two beats as its part clears the stack. Headline "Open hardware. Every part is public." Hands off by the parts assembling at 21.0 as the labels leave.
-- 03 touch (22.5 to 30.0): a second badge slides in from the right and snaps onto the first (ζ 0.6), landing on the beat; an amber pulse crosses the pins, then returns. Headline "Touch two together. They make one secret." Hands off by the camera push.
-- 04 words (30.0 to 36.0): the camera pushes to the two screens; both e-paper panels refresh (flip) from "ceremony · 2 of 2" to the same six words on the beat. Headline "Both screens show the same six words." Hands off by the badges receding.
-- 05 uses (36.0 to 41.5): the pair pulls back and dims to a third; three uses enter one per bar beside the headline "Protect your VPN, your files, and your chat." Hands off by the headline leaving before the close enters.
-- 06 close (41.5 to 52.28): "Get in cahoots." then the address; the pair settles to face the camera at 46.3; the scene dims at 49.4; fade to black over the last 20 frames.
+- 00 open (0 to 6.6): the logo is on screen from frame 0 (the thumbnail), the ticker starts at the section change (3.4), the logo leaves as the badge drops.
+- 01 badge (6.6 to 14.5): the assembled badge drops and lands on the beat (ζ 0.8), tilts to camera at 10.2. Headline "Every key you trust came from someone else's random numbers." Hands off by the explode starting on the bar.
+- 02 explode (14.5 to 20.2): parts separate over two bars, one label per beat. Headline "This one rolls its own. Open hardware, nothing hidden." Hands off by the parts assembling at 19.4.
+- 03 touch (20.2 to 27.1): a second badge snaps on (ζ 0.6) on the beat; a pulse crosses the pins and returns; the camera pushes in and both screens refresh to the same six words on the beat. Headline "Touch two. They share a secret nobody else has." Hands off by the pair pulling back.
+- 04 network (27.1 to 41.5): the payoff. The pair pulls back; an amber link grows from it to one of six devices on every beat (WireGuard peer, mesh radio, laptop, phone, server, second site), each device's ring lighting as its link lands; then keys run down every link at 35.4 and again at 38.6. Headlines "One meeting gives the whole network its keys." then "No server. No CA. Nothing crosses a network." Hands off by the last headline leaving before the close.
+- 05 close (41.5 to 52.28): "Get in cahoots." then the address; the pair settles to camera at 46.3; the scene dims at 49.4; fade to black over the last 20 frames.
 
 BANNED: the skill's starting list, plus: lens flare or bloom on the polycarbonate; particles; any text over the e-paper; a scale bump of the whole frame on beats; the badge spinning while a headline is read; fade-and-slide-up on every line; headlines that are slogans (every headline above is a statement someone would say); the amber used for anything but the accent, the labels, and the pulse.
 

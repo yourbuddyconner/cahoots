@@ -4,7 +4,7 @@ import * as THREE from "three";
 import { makeBadge } from "../../site/badge.js";
 import { addGround, addLights, enableShadows, setupEnvironment } from "../../site/rig.js";
 import { DUR, EASE, FPS, SPRING, STAGGER, prog, springAt } from "./motion";
-import { BADGE, CH, CLOSE, EXPLODE, OPEN, PARTS, TEXTS, TOTAL, TOUCH, USES, USES_ITEMS, WORDS, cue, move } from "./timeline";
+import { BADGE, CH, EXPLODE, NETWORK, NODES, OPEN, PARTS, TOTAL, TOUCH, cue, move } from "./timeline";
 
 declare global {
   interface Window { renderFrame: (f: number) => Promise<void>; ready: boolean; TOTAL: number }
@@ -80,6 +80,56 @@ const pulse = new THREE.Mesh(
 );
 stage.add(pulse);
 
+// The network: six devices on an arc behind the pair, a link to each, and key pulses that run down the links.
+const NET_CENTER = new THREE.Vector3(1.4, 0.3, 0);
+const NET_ANCHOR = new THREE.Vector3(1.4, 0.95, -0.3);
+const NET_R = 6.5;
+const amberMat = new THREE.MeshBasicMaterial({ color: 0xe5a33a, transparent: true, opacity: 0.9 });
+const puckMat = new THREE.MeshStandardMaterial({ color: 0x1a1b1e, roughness: 0.5, metalness: 0.3 });
+const net = new THREE.Group();
+scene.add(net);
+const nodes = NODES.map((_, i) => {
+  const a = THREE.MathUtils.degToRad(-72 + (144 * i) / (NODES.length - 1));
+  const pos = new THREE.Vector3(NET_CENTER.x + NET_R * Math.sin(a), NET_CENTER.y, NET_CENTER.z - NET_R * Math.cos(a));
+  const puck = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.14, 40), puckMat);
+  puck.position.copy(pos);
+  puck.castShadow = puck.receiveShadow = true;
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.03, 12, 48), amberMat.clone());
+  ring.rotation.x = Math.PI / 2;
+  ring.position.copy(pos).add(new THREE.Vector3(0, 0.08, 0));
+  const dir = pos.clone().sub(NET_ANCHOR);
+  const len = dir.length();
+  const link = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 1, 8), amberMat.clone());
+  link.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+  const key = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 10), amberMat.clone());
+  net.add(puck, ring, link, key);
+  return { pos, puck, ring, link, key, dir: dir.normalize(), len };
+});
+/** Draw link i grown to `p` of its length and its device lit by `lit`. */
+function setLink(i: number, p: number, lit: number) {
+  const n = nodes[i];
+  n.link.visible = p > 0;
+  n.link.scale.y = Math.max(0.001, n.len * p);
+  n.link.position.copy(NET_ANCHOR).addScaledVector(n.dir, (n.len * p) / 2);
+  (n.ring.material as THREE.MeshBasicMaterial).opacity = 0.15 + 0.85 * lit;
+  n.ring.visible = true;
+  n.puck.visible = true;
+}
+/** A key travelling down link i: `p` 0 at the pair, 1 at the device. Hidden outside 0..1. */
+function setKey(i: number, p: number) {
+  const n = nodes[i];
+  n.key.visible = p > 0 && p < 1;
+  n.key.position.copy(NET_ANCHOR).addScaledVector(n.dir, n.len * p);
+}
+const ndc = new THREE.Vector3();
+function placeLabel(id: string, pos: THREE.Vector3) {
+  const e = els.get(id);
+  if (!e || e.style.display === "none") return;
+  ndc.copy(pos).project(camera);
+  e.style.left = `${((ndc.x + 1) / 2) * W}px`;
+  e.style.top = `${((1 - ndc.y) / 2) * H - 64}px`;
+}
+
 // ───────────── DOM overlay ─────────────
 const overlay = document.getElementById("overlay")!;
 const els = new Map<string, HTMLElement>();
@@ -143,14 +193,16 @@ const mv = (f: number, id: string, ease = EASE.move) => {
 };
 
 // Camera rigs, as (position, lookAt) pairs the chapters blend between.
-const RIG = {
-  hero: { p: new THREE.Vector3(0, 5.2, 9.6), l: new THREE.Vector3(-1.6, 0.2, 0) },
+const RIG: Record<string, { p: THREE.Vector3; l: THREE.Vector3 }> = {
+  hero: { p: new THREE.Vector3(0, 5.2, 9.6), l: new THREE.Vector3(-2.0, 0.1, 0) },
   explode: { p: new THREE.Vector3(0, 4.2, 16.5), l: new THREE.Vector3(-1.7, 0.9, 0) },
   pair: { p: new THREE.Vector3(1.4, 5.6, 10.4), l: new THREE.Vector3(1.4, -0.6, 0) },
   screens: { p: new THREE.Vector3(1.4, 7.4, 6.2), l: new THREE.Vector3(1.4, -1.3, 0.5) },
-  far: { p: new THREE.Vector3(5.2, 5.0, 13.0), l: new THREE.Vector3(1.4, 0.4, 0) },
+  net: { p: new THREE.Vector3(1.0, 8.6, 12.8), l: new THREE.Vector3(0.9, 0.0, -2.4) },
   close: { p: new THREE.Vector3(1.4, 7.0, 9.0), l: new THREE.Vector3(1.4, -0.7, 0) },
 };
+// Where the touch chapter leaves the camera: part way from the pair rig to the screens rig.
+RIG.touchEnd = { p: new THREE.Vector3().lerpVectors(RIG.pair.p, RIG.screens.p, 0.7), l: new THREE.Vector3().lerpVectors(RIG.pair.l, RIG.screens.l, 0.7) };
 function setCam(a: { p: THREE.Vector3; l: THREE.Vector3 }, b: { p: THREE.Vector3; l: THREE.Vector3 }, t: number) {
   camera.position.lerpVectors(a.p, b.p, t);
   camera.lookAt(new THREE.Vector3().lerpVectors(a.l, b.l, t));
@@ -171,6 +223,7 @@ async function renderFrame(f: number) {
   paperA.map = wordsTex;
   paperB.map = wordsTex;
   pulse.material.opacity = 0;
+  net.visible = false;
   stage.visible = true;
   markEl.style.opacity = "0";
   ticker.parentElement!.style.opacity = "0";
@@ -217,7 +270,7 @@ async function renderFrame(f: number) {
   }
 
   // TOUCH
-  if (between(f, CH.touch[0], CH.words[0])) {
+  if (between(f, CH.touch[0], CH.network[0])) {
     B.group.visible = true;
     const t0 = TOUCH.snap;
     const slide = EASE.move(prog(f, t0, t0 + DUR.snap * 0.6));
@@ -227,7 +280,9 @@ async function renderFrame(f: number) {
     A.group.rotation.y = 0;
     B.group.rotation.y = 0;
     const camT = EASE.move(prog(f, CH.touch[0], CH.touch[0] + DUR.panelIn));
-    setCam(RIG.explode, RIG.pair, camT);
+    const push = mv(f, "touch.push");
+    if (push > 0) setCam(RIG.pair, RIG.touchEnd, push);
+    else setCam(RIG.explode, RIG.pair, camT);
     for (const id of ["touch.pulse", "touch.pulse2"]) {
       const m = move(id);
       const p = EASE.move(prog(f, m.from, m.from + m.dur));
@@ -237,32 +292,39 @@ async function renderFrame(f: number) {
         pulse.material.opacity = Math.sin(Math.PI * Math.min(1, p)) * 0.95;
       }
     }
-    textState(f, "touch.head", "head");
-  }
-
-  // WORDS
-  if (between(f, CH.words[0], CH.uses[0])) {
-    B.group.visible = true;
-    A.group.rotation.y = 0;
-    B.group.rotation.y = 0;
-    const push = mv(f, "words.push");
-    setCam(RIG.pair, RIG.screens, push);
-    const flip = prog(f, WORDS.flip, WORDS.flip + DUR.flip);
+    // Both screens wait, then refresh to the same six words on the beat.
+    const flip = prog(f, TOUCH.flip, TOUCH.flip + DUR.flip);
     const tex = flip <= 0 ? waitingTex : flip < 0.5 ? blankTex : wordsTex;
     paperA.map = tex;
     paperB.map = tex;
-    textState(f, "words.head", "head");
+    textState(f, "touch.head", "head");
   }
 
-  // USES
-  if (between(f, CH.uses[0], CH.close[0])) {
+  // NETWORK: the pair pulls back, links grow to six devices one per beat, then keys run down every link.
+  if (between(f, CH.network[0], CH.close[0])) {
     B.group.visible = true;
     A.group.rotation.y = 0;
     B.group.rotation.y = 0;
-    const r = mv(f, "uses.recede");
-    setCam(RIG.screens, RIG.far, r);
-    textState(f, "uses.head", "head");
-    USES_ITEMS.forEach((_, i) => textState(f, `uses.item${i}`, `item i${i}`));
+    net.visible = true;
+    const r = mv(f, "net.recede");
+    setCam(RIG.touchEnd, RIG.net, r);
+    NODES.forEach((_, i) => {
+      const grow = EASE.enter(prog(f, NETWORK.links[i], NETWORK.links[i] + DUR.connector));
+      // The ring lights when the link lands, with one soft settle.
+      const lit = Math.min(1, springAt(f, NETWORK.links[i] + DUR.connector, SPRING.chip));
+      setLink(i, grow, Math.max(0, lit));
+      let keyP = -1;
+      for (const id of ["net.rotate", "net.rotate2"]) {
+        const m = move(id);
+        const from = m.from + i * STAGGER.item;
+        if (f >= from && f < from + m.dur) keyP = EASE.move(prog(f, from, from + m.dur));
+      }
+      setKey(i, keyP);
+      textState(f, `net.node${i}`, "node");
+      placeLabel(`net.node${i}`, nodes[i].pos);
+    });
+    textState(f, "net.head2", "head");
+    textState(f, "net.head3", "head");
   }
 
   // CLOSE
@@ -270,7 +332,7 @@ async function renderFrame(f: number) {
     B.group.visible = true;
     const title = mv(f, "close.title");
     const settle = mv(f, "close.settle");
-    setCam(RIG.far, RIG.close, Math.max(title, settle));
+    setCam(RIG.net, RIG.close, Math.max(title, settle));
     const spin = ambient * (sec - CH.close[0] / FPS);
     A.group.rotation.y = spin * (1 - settle);
     B.group.rotation.y = spin * (1 - settle);
