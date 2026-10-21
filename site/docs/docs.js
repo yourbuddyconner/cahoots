@@ -7,6 +7,7 @@ const DOCS = [
   { id: "use-cases", title: "What it is for", file: "use-cases.md", lede: "Concrete uses, from group chat to bootstrapping a network." },
   { id: "ceremony-guide", title: "Ceremony guide", file: "ceremony-guide.md", lede: "How to run a ceremony with a group." },
   { id: "tiers", title: "Device tiers", file: "tiers.md", lede: "What each kind of device protects, from a phone to inspected silicon." },
+  { id: "diy-badge", title: "DIY badge", file: "diy-badge.md", lede: "A badge from three parts and no soldering: a Pico, a screen hat, a secure element." },
   { id: "glossary", title: "Glossary", file: "glossary.md", lede: "The words these pages use, in plain terms." },
   { group: "Specification" },
   { id: "protocol", title: "Protocol v1", file: "protocol.md", lede: "The normative description of the ceremony, messages, and storage.", spec: true },

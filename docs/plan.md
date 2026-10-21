@@ -35,10 +35,11 @@ Goal: a badge you can hold, that makes the secret in a room and never puts it on
 | M1 Core | The protocol as a plain library: the ceremony, the message format, the ledger of used bytes | The library passes its tests and the published test vectors, and builds for tiny chips with no operating system | **done** |
 | M2 Phone app | The browser app: runs a ceremony with no network by showing and scanning animated codes; sends and reads messages; optional YubiKey randomness | Three phones complete a ceremony with no network. The YubiKey path is labelled and its speed measured | **done** (camera scanning on a real iPhone and the YubiKey speed measurement are still unchecked) |
 | M4a Simulator | A desktop program that behaves like a badge, so the badge firmware can be written and tested before any hardware exists | Four simulated badges complete a ceremony and show the expected six words | **done** |
-| M4b First board | The first real hardware: an off-the-shelf ESP32-S3 board with a screen, a wired touch link, and real random numbers | Four boards complete a ceremony over wires in under 30 seconds | up next (boards to order) |
+| M4b DIY badge | The first real hardware, in the shape of the Wedgie pocket computer: a Pico 2, a screen hat with buttons, and a secure element on a Qwiic cable, no soldering. The secure element adds a second random source, a wrapping key that never leaves the chip, and rollback-proof counters. Design in [the DIY badge](diy-badge.md) | Four kits complete a ceremony over cables in under 30 seconds. The pad on flash reads as ciphertext without the chip. A restored flash copy is refused | up next (kits to order; the ESP32-S3 board becomes an alternative target) |
+| M4d Badge over USB | The browser app talks to a badge over WebUSB or WebSerial: the phone scans codes for the badge and shows the badge's codes, and the secret never crosses the cable | A phone and a DIY badge complete a ceremony with a second phone and badge | after M4b |
 | M3 Hosted seat | A group member that runs as a program inside a Turnkey Verifiable Cloud enclave, under a policy the group pinned | The acceptance scenario from the handoff passes | later |
 | M4c Badge OS, hosted | The badge software running on the Baochip operating system (Xous), in an emulator | Passes the same device tests as the simulator | later |
-| M5 Our badge | The badge we manufacture, built on the Baochip-1x with its hardware key store | Four of our badges complete a ceremony, and so does a mixed group with ESP32-S3 boards | December 2026 |
+| M5 Our badge | The badge we manufacture, built on the Baochip-1x with its hardware key store | Four of our badges complete a ceremony, and so does a mixed group with DIY badges | December 2026 |
 | M6 Approvals from a badge | A badge approves what the hosted seat is allowed to send | A message approved on a badge posts and decrypts everywhere | after M3 and M5 |
 | M7 Meetup kit | Everything needed to run a ceremony with strangers: a host guide, a big shared display, spare batteries, cases, and the magnetic connectors | A real meetup runs a ceremony with badges and phones in one group | after M4b |
 
@@ -102,9 +103,10 @@ Goal: small programs, such as a vote, that every member runs over the same order
 6. Which toolkit milestone to pitch to the first customer: approvals (S2) or recovery (S3).
 7. Who reviews the approvals, recovery, and hosted-keys work before it ships.
 8. Whether to buy an open-design USB random number generator as a second source that others can audit.
-9. Whether to permanently enable secure boot and storage encryption on the spare ESP32-S3. Needs Conner's approval, because it cannot be undone.
+9. Whether to permanently enable secure boot and storage encryption on the spare ESP32-S3. Needs Conner's approval, because it cannot be undone. Less pressing now that the DIY badge is the first board.
 10. Whether the first network demo is WireGuard between laptops (N1, no hardware) or a Meshtastic group (N4, needs radios). WireGuard ships faster. Meshtastic fits the community story better.
 11. Whether pairwise secrets (N5) are worth the longer ceremony before a deployment with several parties needs them.
 12. Whether apps (A2, A3) come before or after the hosted seat (M3). They share the control-message work in N2.
 13. When to replace the fixed "one part of the pad per member" layout with a manifest written at the ceremony that names who may spend which bytes, for what. Decided on 2026-10-20 to adopt the manifest and drop delegation. The timing is open. The manifest should also record each member's device tier.
 14. Device tiers below T3 are declared, not proven. Whether a phone (T0) may join a group of T3 badges at all, or only with a loud warning, is a product decision.
+15. **New, 2026-10-21.** Which secure element the DIY badge standardises on. Decided: the Infineon Trust M first, because it has a no-soldering breakout; the NXP SE050 as the PIN-in-silicon tier once a breakout exists. Open: whether to support the RP2040 or require the Pico 2.
