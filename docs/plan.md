@@ -1,85 +1,110 @@
-# Project plan
+# Roadmap
 
-Milestones from the handoff of 2026-10-20, plus a network-bootstrap track added on 2026-10-20 after the WireGuard and mesh discussion (`docs/use-cases.md`). Status reflects the `main` branch.
+Status reflects the `main` branch as of 2026-10-21.
 
-## Hardware track
+![Roadmap by track](diagrams/roadmap.svg)
 
-| Milestone | Scope | Done when | Status |
+## How to read this page
+
+The work runs on five tracks. Each milestone has a short code, such as `M2`, that commit messages and issues refer to.
+
+| Track | What it is about |
+|---|---|
+| Hardware | The badge, from a software-only simulator to the device we manufacture |
+| Toolkit | Libraries that plug the shared secret into tools people already run |
+| Networks | Using a group's secret to set up VPNs and mesh networks |
+| Chat | Encrypted group chat and the public feed it runs over |
+| Apps | Small programs that run on top of a group's message stream |
+
+Status words mean exactly this:
+
+- **done**: the code is merged and its tests pass in CI.
+- **partly done**: some of the scope is merged. The row says what is missing.
+- **up next**: the next thing to start on that track.
+- **later**: waits on another milestone, named in the row.
+
+A few terms repeat below. The [glossary](glossary.md) defines all of them. The ones you need most: a **cahoot** (or circle) is a group that shares one secret. The **pad** is that secret, a file of random bytes. The **feed** is the public bulletin board that carries encrypted messages. A **hosted seat** is a group member that is a program running in a secure cloud enclave instead of a person with a device.
+
+## Hardware
+
+Goal: a badge you can hold, that makes the secret in a room and never puts it on a network.
+
+| Milestone | What it delivers | Done when | Status |
 |---|---|---|---|
-| M0 Repo | Workspace, CI (fmt, clippy, test, no_std, wasm, vectors) | CI green on the layout | **done** |
-| M1 cahoots-core | Sections 3.1 to 3.6 as pure logic | Unit, property, and vector tests pass; builds no_std | **done** |
-| M2 Phone and laptop client + YubiKey | WASM core, offline PWA, animated-QR ceremony, compose/read, TRNG/CSPRNG label, `cahoots-yk` | Three clients run a ceremony with no network; YubiKey contributions get the TRNG label; throughput measured | code done; camera scan and YubiKey throughput unverified |
-| M3 TVC app | Agent seat, policy, square log, vouching on TVC2 simulation | Acceptance scenario (handoff section 6) passes | not started |
-| M4a Host simulator | `cahoots-hal` driver plus socket Link, file PadStore, PNG Display | Four simulated devices complete a ring ceremony; words match the vectors | **done** |
-| M4b ESP32-S3 bring-up | TRNG with entropy source and health tests, NOR pad partition, e-paper, UART touch link, USB CDC for YubiKey bytes | Four boards complete a ceremony over wires in under 30 s at 256 KiB | not started, boards to order |
-| M4c Xous hosted | `dabao` target in `bao1x-emu` | Passes the device suite against the host simulator | not started |
-| M5 Dabao port | Driver swap, RRAM erase verification | Four Dabaos, and a mixed ring with ESP32-S3s, complete a ceremony | December 2026 |
-| M6 Agent seat on hardware | A device sponsors the agent seat and approves from a device | A device-approved agent message posts and decrypts everywhere | after M3, M5 |
-| M7 Meetup kit | Ceremony guide, square display, batteries, enclosures, pogo connectors | Conner runs a meetup with devices and phones in one circle | after M4b |
+| M0 Repo | The repository, the build, and the automated checks | Every check passes on a fresh clone | **done** |
+| M1 Core | The protocol as a plain library: the ceremony, the message format, the ledger of used bytes | The library passes its tests and the published test vectors, and builds for tiny chips with no operating system | **done** |
+| M2 Phone app | The browser app: runs a ceremony with no network by showing and scanning animated codes; sends and reads messages; optional YubiKey randomness | Three phones complete a ceremony with no network. The YubiKey path is labelled and its speed measured | **done** (camera scanning on a real iPhone and the YubiKey speed measurement are still unchecked) |
+| M4a Simulator | A desktop program that behaves like a badge, so the badge firmware can be written and tested before any hardware exists | Four simulated badges complete a ceremony and show the expected six words | **done** |
+| M4b First board | The first real hardware: an off-the-shelf ESP32-S3 board with a screen, a wired touch link, and real random numbers | Four boards complete a ceremony over wires in under 30 seconds | up next (boards to order) |
+| M3 Hosted seat | A group member that runs as a program inside a Turnkey Verifiable Cloud enclave, under a policy the group pinned | The acceptance scenario from the handoff passes | later |
+| M4c Badge OS, hosted | The badge software running on the Baochip operating system (Xous), in an emulator | Passes the same device tests as the simulator | later |
+| M5 Our badge | The badge we manufacture, built on the Baochip-1x with its hardware key store | Four of our badges complete a ceremony, and so does a mixed group with ESP32-S3 boards | December 2026 |
+| M6 Approvals from a badge | A badge approves what the hosted seat is allowed to send | A message approved on a badge posts and decrypts everywhere | after M3 and M5 |
+| M7 Meetup kit | Everything needed to run a ceremony with strangers: a host guide, a big shared display, spare batteries, cases, and the magnetic connectors | A real meetup runs a ceremony with badges and phones in one group | after M4b |
 
-## SDK track
+## Toolkit
 
-| Milestone | Scope | Done when | Status |
+Goal: a developer who already runs WireGuard, encrypts files, or signs approvals can use a group's secret without learning the protocol.
+
+| Milestone | What it delivers | Done when | Status |
 |---|---|---|---|
-| S1 Provider, HPKE, age | `cahoots-provider` with memory and file backends, HPKE `mode_psk`, `age-plugin-cahoots` | Two laptops encrypt a 1 GB file with `age -r cahoots:<circle>`; replayed offset refused; PSK vectors published | code done; the `age` CLI end-to-end run is pending |
-| S2 Circle-MAC approval demo | TVC-hosted verifier a Turnkey policy can require | Forged or replayed approval refused | after M3 |
-| S3 Recovery circles | Shamir split at a device ceremony | 3-of-5 recovers; two shares reveal nothing | after M5 |
-| S4 Transport adapters | TLS 1.3 PSK importer, MLS external PSK, WireGuard helper | Interop tests against rustls or OpenSSL, OpenMLS, `wg` | WireGuard helper done under S1; `wg` interop test pending |
-| S5 TVC pad custody | TVC backend for the provider | Workload gets a PSK only under the pinned policy; every spend logged | after M3 |
+| S1 File and tunnel keys | A library that hands out keys from the pad and records what was used, plus adapters for HPKE, `age` file encryption, and WireGuard | Two laptops encrypt a 1 GB file to a group. A reused key is refused. The key-derivation test vectors are published | **done** (the end-to-end run with the real `age` command is still pending) |
+| S4 More tunnels | Adapters for TLS 1.3, MLS group messaging, and a finished WireGuard helper | Each adapter has a test against the real implementation | partly done: the WireGuard helper exists; its test against the real `wg` tool is pending |
+| S2 Approvals | A verifier that a Turnkey policy can require: "a member of this group approved this action" | A forged or replayed approval is refused | after M3 |
+| S3 Recovery | A recovery secret split among the group at the ceremony, so that any 3 of 5 members can restore it | Three shares recover the secret. Two shares reveal nothing | after M5 |
+| S5 Hosted keys | A copy of the pad held in a cloud enclave, so a server can take part under a pinned policy | The server gets a key only when the policy allows it, and every use is logged | after M3 |
 
-## Network-bootstrap track (new)
+## Networks
 
-The design is in `docs/use-cases.md` sections 3 to 5. These milestones turn a circle into a trust root for a network.
+Goal: a group that met once can set up a VPN or a mesh network with no coordination server and no certificate authority. The design is in [What it is for](use-cases.md), sections 3 to 5.
 
-| Milestone | Scope | Done when | Depends on |
+| Milestone | What it delivers | Done when | Status |
 |---|---|---|---|
-| N1 WireGuard fleet bootstrap | `cahoots-wg` CLI: `peer` announcements, `psk` issue and accept, `[Peer]` rendering, `wg set` command, rotation schedule | Two Linux boxes bring up a WireGuard tunnel whose public keys and PSK came only from a circle. Rotation over the tunnel works. A replayed PSK handle is refused on both ends. `wg show` reports the preshared key present. | S1 |
-| N2 Control message subtypes | `peer`, `psk`, `rotate`, `slice-transfer` encodings in `cahoots-core`, with vectors | Vectors published; the PWA shows peer announcements in a circle | M1 |
-| N3 Headless node provisioning | Badge-to-node slice transfer over USB or the touch link, with erase verification on the badge | A simulated host node receives a pad from a simulated badge; the badge's copy reads back erased | M4a, then M4b |
-| N4 Mesh adapters | Meshtastic channel key, 802.11s SAE password, Reticulum link PSK helpers | Each helper has an interop test against the real stack where one is installable; otherwise a documented manual test | N1 |
-| N5 Federation profile | Pairwise pads from pair touches at the ceremony; sender-authentic messages; per-pair tunnel PSKs | Three devices complete group plus pairwise ceremonies; a member cannot forge another's announcement | M4b |
-| N6 Numbers Station over LoRa | A badge with a LoRa radio broadcasts pure-pad messages with fountain framing; the radio is provably off during contribution | A message sent over LoRa decrypts on a phone client; a capture shows ciphertext only | M4b, M7 |
+| N1 WireGuard | A command that sets up and rotates WireGuard tunnels between group members from the pad alone | Two Linux machines bring up a tunnel whose keys came only from the group. Rotation works over the tunnel. A replayed key is refused on both ends | up next (needs S1, which is done) |
+| N2 Control messages | Standard message types for "here is my public key", "here is a key for our tunnel", and "rotate now" | Test vectors are published and the app shows peer announcements | up next |
+| N3 Headless nodes | A way to hand a node with no screen, such as a router on a roof, its share of the pad from a badge, with the badge wiping its copy | A simulated node receives its share from a simulated badge, and the badge's copy reads back empty | after M4a, then M4b |
+| N4 Mesh radios | Adapters for Meshtastic, Wi-Fi mesh (802.11s), and Reticulum | Each adapter has a test against the real stack, or a written manual test where that is impossible | after N1 |
+| N5 Federation | Pairwise secrets between each two members, so a member cannot forge another member's messages | Three devices complete the group and pairwise ceremonies. A member cannot post as another | after M4b |
+| N6 LoRa feed | A badge with a LoRa radio that broadcasts encrypted messages, with the radio provably off during the ceremony | A message sent over LoRa decrypts on a phone, and a radio capture shows only noise | after M4b and M7 |
 
-Suggested order: N1 and N2 alongside M2, because they need no hardware and give the first "I bootstrapped a real network from a ceremony" story. N3 follows M4a. N5 and N6 follow the ESP32-S3 bring-up.
+Suggested order: N1 and N2 first, because they need no hardware and give the first "I set up a real network from a ceremony" story.
 
-## Circle-apps track (new)
+## Chat
 
-Design in `docs/use-cases.md` section 8.
+Goal: a group chat where the keys come from the pad and the messages travel over a public feed. The design is in [Chat](chat.md).
 
-| Milestone | Scope | Done when | Depends on |
+| Milestone | What it delivers | Done when | Status |
 |---|---|---|---|
-| A1 Property demos | `words` (spoken challenge), fair draw, SSH bootstrap helper, and the transcript-forging tool for the deniability claim | Each has a test and a one-paragraph doc with its security claim and limits | M2, N2 |
-| A2 App distribution | `app` control subtype carrying a module hash; clients refuse unposted modules | A posted hash enables a module in every member's client; an unposted one is refused | N2 |
-| A3 Reducer runtime | WASM reducer host in `cahoots-wasm` and the PWA, with send quotas, mandatory bucket padding, and a visibly separate app frame | The vote app runs in three clients and agrees on the tally from the square's order | A2 |
-| A4 Protocol v2 items | Anonymous region with a retry rule for collisions; hidden circle ID in the header | Vectors published; v1 and v2 messages coexist by version byte | A3 |
+| C1 Chat crate | The chat encryption: keys derived from the pad, forward secrecy per sender, standard authenticated encryption | Three sessions exchange messages with key rotation, out-of-order delivery, and rejection of tampered or replayed messages | **done** |
+| C2 The feed | The public relay (the Numbers Station): an append-only log where each entry is chained to the last, and which refuses any message that reuses pad bytes | Posting and reading work over HTTP. A tampered log refuses to start | **done** |
+| C3 CLI demo | A terminal chat client for trying the protocol without hardware | Three terminals chat through one relay, rotate keys, and reject a tampered entry | **done** |
+| C4 Chat in the app | A chat screen in the browser app, with a relay address setting | Two browser tabs chat through the relay | **done** |
+| C5 Hosted feed | The relay running inside a Turnkey Verifiable Cloud enclave, with the head of its log anchored so it cannot be rewritten | The deployment pins the exact image, and the log head is anchored | after C2, needs access to the TVC test environment |
 
-## Chat track (new, 2026-10-20)
+## Apps
 
-Design in `docs/chat.md`: epoch keys from 32-byte pad spends, per-sender symmetric ratchets, ChaCha20-Poly1305, relayed over the Numbers Station.
+Goal: small programs, such as a vote, that every member runs over the same ordered messages and that can never touch the pad. The design is in [What it is for](use-cases.md), section 8.
 
-| Milestone | Scope | Done when | Depends on |
+| Milestone | What it delivers | Done when | Status |
 |---|---|---|---|
-| C1 Chat crate | `cahoots-chat`: epoch derivation, chains, message format, session state, vectors | Three sessions round-trip with rotation, out-of-order delivery, tamper and replay rejection; builds for wasm32 and thumbv7em | **done** |
-| C2 Numbers Station | `cahoots-station`: hash-chained append-only log, pure-pad reuse refusal, long-poll feed, display page, Dockerfile | Integration test posts and reads through HTTP; a broken chain refuses to start | **done** |
-| C3 CLI demo | `cahoots-chat` binary: local dev ceremony, REPL client against the relay | Three terminals chat through one relay; an epoch rotates; a tampered entry is rejected | **done** |
-| C4 PWA chat | Chat screen in `web/app` over the wasm bindings, relay URL setting, session persisted in IndexedDB | Two browser tabs chat through the relay; the UI says "end-to-end encrypted, pad-hedged" | **done** (verified in Chrome) |
-| C5 TVC deploy | The station as a TVC2 workload with its head anchored | The deploy record pins the image and the log head is anchored | C2, access to `tkhq/test-tvc-2` |
+| A1 Property demos | Four small demonstrations: spoken challenge words for calls, a fair random draw, SSH key setup from a group, and a tool that forges a plausible transcript to show that erased messages cannot be proven | Each has a test and a one-paragraph description of what it does and does not guarantee | after M2 and N2 |
+| A2 App distribution | A group agrees on an app the same way it agrees on the pad: by posting the app's hash. Clients refuse apps the group has not posted | A posted hash enables an app on every member's client. An unposted one is refused | after N2 |
+| A3 Runtime | A sandbox in the browser app that runs these programs with a daily send budget, fixed message sizes, and a visibly separate frame | A vote app runs in three clients and agrees on the tally | after A2 |
+| A4 Protocol v2 | Two protocol changes apps need: messages that hide who sent them, and messages that hide which group they belong to | Test vectors published. Version 1 and version 2 messages coexist | after A3 |
 
 ## Open decisions
 
-Carried from the handoff section 7, with additions.
-
-1. ~~Repo location.~~ Decided: `github.com/yourbuddyconner/cahoots`.
-2. Agent runtime: a Valet agent calling the app, or a model inside TVC.
-3. Square exposure at meetups: public internet or local network only.
-4. Screen: e-ink or OLED, decided after comparing both in M5.
-5. When marketing gets involved.
-6. SDK priority: S2 or S3 as the first customer pitch.
-7. Who reviews S2, S3, and S5.
-8. Whether to buy an open-design USB TRNG as an auditable second source.
-9. Whether to fuse secure boot and flash encryption on the spare ESP32-S3. Needs Conner's approval.
-10. **New.** Whether the first network demo is WireGuard between laptops (N1, no hardware) or a Meshtastic circle (N4, needs radios). WireGuard is faster to ship. Meshtastic is closer to the community angle.
-11. **New.** Whether the federation profile (N5) is worth its ceremony cost before there is a multi-party deployment that needs it.
-12. **New.** Whether circle apps (A2, A3) come before or after the TVC app (M3). They share the control-subtype work in N2.
-13. **New.** Whether the genesis manifest (regions, holders, purposes, spend rules) replaces slices now, before C4 lands, or after. It touches core, vectors, provider, wasm, and host. Decided in conversation on 2026-10-20 to adopt the manifest and drop delegation; timing open. The manifest should also carry each principal's device tier.
-14. **New.** Device tiers (`docs/tiers.md`) are declared, not proven, below T3. Whether a T0 phone in a circle of T3 badges should be allowed at all, or only with a loud warning, is a product call.
+1. ~~Where the repository lives.~~ Decided: `github.com/yourbuddyconner/cahoots`.
+2. What the hosted seat runs: an agent that calls the app, or a model inside the enclave.
+3. Whether the feed at a meetup is on the public internet or only the local network.
+4. The badge screen: e-paper or OLED. Decided after comparing both on the Baochip board (M5).
+5. When to involve marketing.
+6. Which toolkit milestone to pitch to the first customer: approvals (S2) or recovery (S3).
+7. Who reviews the approvals, recovery, and hosted-keys work before it ships.
+8. Whether to buy an open-design USB random number generator as a second source that others can audit.
+9. Whether to permanently enable secure boot and storage encryption on the spare ESP32-S3. Needs Conner's approval, because it cannot be undone.
+10. Whether the first network demo is WireGuard between laptops (N1, no hardware) or a Meshtastic group (N4, needs radios). WireGuard ships faster. Meshtastic fits the community story better.
+11. Whether pairwise secrets (N5) are worth the longer ceremony before a deployment with several parties needs them.
+12. Whether apps (A2, A3) come before or after the hosted seat (M3). They share the control-message work in N2.
+13. When to replace the fixed "one part of the pad per member" layout with a manifest written at the ceremony that names who may spend which bytes, for what. Decided on 2026-10-20 to adopt the manifest and drop delegation. The timing is open. The manifest should also record each member's device tier.
+14. Device tiers below T3 are declared, not proven. Whether a phone (T0) may join a group of T3 badges at all, or only with a loud warning, is a product decision.

@@ -4,6 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cahoots docs</title>
+<meta name="description" content="How Cahoots works: the ceremony, the protocol, the threat model, device tiers, and the roadmap.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Cahoots">
+<meta property="og:title" content="Cahoots docs">
+<meta property="og:description" content="How Cahoots works: the ceremony, the protocol, the threat model, device tiers, and the roadmap.">
+<meta property="og:url" content="https://cahoots.network/docs/">
+<meta property="og:image" content="https://cahoots.network/assets/og-docs.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Cahoots docs">
+<meta name="twitter:description" content="How Cahoots works: the ceremony, the protocol, the threat model, device tiers, and the roadmap.">
+<meta name="twitter:image" content="https://cahoots.network/assets/og-docs.png">
 <link rel="icon" href="../assets/mark.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +27,7 @@
 <body class="docs-body">
 <header class="top">
   <div class="wrap">
-    <a class="brand" href="../"><img src="../assets/mark.svg" alt="" width="22" height="22"><span>Cahoots</span></a>
+    <a class="brand" href="../"><img src="../assets/mark.svg" alt="" width="22" height="22"><span>Cahoots</span><span class="brand-sub">Docs</span></a>
     <nav aria-label="Primary">
       <a href="../">Home</a>
       <a href="https://github.com/yourbuddyconner/cahoots">GitHub</a>
@@ -22,9 +35,13 @@
     </nav>
   </div>
 </header>
+<details class="drawer" id="drawer">
+  <summary><span class="drawer-k">Contents</span><span id="drawer-label"></span></summary>
+</details>
 <div class="docs-layout">
   <nav class="docs-nav" aria-label="Documents" id="nav"></nav>
   <main class="docs-main" id="content"><p class="loading">Loading…</p></main>
+  <aside class="docs-toc" id="toc" hidden></aside>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/marked@14.1.2/marked.min.js"></script>
 <script type="module" src="docs.js"></script>

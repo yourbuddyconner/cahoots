@@ -1,11 +1,11 @@
 {
   "name": "Cahoots",
   "short_name": "Cahoots",
-  "description": "Private group messaging with one-time pads. Works offline.",
+  "description": "Make a shared secret with people in the room, then send messages nothing can break. Works offline.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#1a1a1a",
-  "theme_color": "#1a1a1a",
+  "background_color": "#0a0a0b",
+  "theme_color": "#0a0a0b",
   "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
 }

@@ -10,6 +10,8 @@ The ceremony produces one thing: a pile of random bytes that a small group share
 
 The two modes share a pad, a ledger, and a circle ID. A circle can use both.
 
+![Two ways to spend the pad](diagrams/modes.svg)
+
 ## 2. Concrete uses
 
 ### 2.1 Group chat that cannot be broken later

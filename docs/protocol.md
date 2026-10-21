@@ -34,6 +34,8 @@ Implementation: `core/src/params.rs`.
 
 Commit-then-reveal. Without it, the last member to reveal could choose a contribution after seeing everyone else's and bias the pad.
 
+![The ceremony in five steps](diagrams/ceremony.svg)
+
 1. **Setup.** The leader chooses the parameters. They are sent to every device and shown for confirmation.
 2. **Commit.** Each device generates `R_i` and computes `C_i = SHA-256("cahoots/commit/v1" || params || i || R_i)`. Every device sends `C_i` to every other device. A device MUST NOT send `R_i` until it holds all `n` commitments.
 3. **Reveal.** Each device sends `R_i`. Each received `R_j` is checked against `C_j` in constant time. A mismatch aborts the ceremony on that device.

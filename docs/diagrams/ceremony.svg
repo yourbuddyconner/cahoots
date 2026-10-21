@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" width="960" height="300" role="img" aria-labelledby="t">
+<title id="t">The ceremony in five steps</title>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#a1a1aa"/></marker>
+<marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#e5a33a"/></marker>
+<pattern id="hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#6b6b74" stroke-width="1.5"/></pattern>
+</defs>
+<rect width="960" height="300" rx="16" fill="#0e0e10"/>
+<rect x="20.0" y="24" width="169.6" height="228" rx="12" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<text x="36.0" y="54" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="400" fill="#e5a33a" text-anchor="start">01</text>
+<text x="36.0" y="84" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#f4f4f5" text-anchor="start">Set up</text>
+<text x="36.0" y="114" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">One person names the group</text>
+<text x="36.0" y="133" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">and the member count.</text>
+<text x="36.0" y="152" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">Every device shows it.</text>
+<text x="36.0" y="171" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">Everyone confirms.</text>
+<line x1="192.6" y1="138" x2="204.6" y2="138" stroke="#6b6b74" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="207.6" y="24" width="169.6" height="228" rx="12" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<text x="223.6" y="54" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="400" fill="#e5a33a" text-anchor="start">02</text>
+<text x="223.6" y="84" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#f4f4f5" text-anchor="start">Draw</text>
+<text x="223.6" y="114" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">Each device makes its own</text>
+<text x="223.6" y="133" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">random bytes and locks</text>
+<text x="223.6" y="152" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">them in with a fingerprint</text>
+<text x="223.6" y="171" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">before it sees anyone else's.</text>
+<line x1="380.2" y1="138" x2="392.2" y2="138" stroke="#6b6b74" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="395.2" y="24" width="169.6" height="228" rx="12" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<text x="411.2" y="54" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="400" fill="#e5a33a" text-anchor="start">03</text>
+<text x="411.2" y="84" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#f4f4f5" text-anchor="start">Touch</text>
+<text x="411.2" y="114" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">Devices connect in a ring.</text>
+<text x="411.2" y="133" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">First the fingerprints go</text>
+<text x="411.2" y="152" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">around, then the bytes.</text>
+<text x="411.2" y="171" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">Nothing uses a radio.</text>
+<line x1="567.8" y1="138" x2="579.8" y2="138" stroke="#6b6b74" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="582.8" y="24" width="169.6" height="228" rx="12" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<text x="598.8" y="54" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="400" fill="#e5a33a" text-anchor="start">04</text>
+<text x="598.8" y="84" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#f4f4f5" text-anchor="start">Mix</text>
+<text x="598.8" y="114" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">Every device combines all</text>
+<text x="598.8" y="133" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">the bytes into one secret.</text>
+<text x="598.8" y="152" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">One honest member is</text>
+<text x="598.8" y="171" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">enough to make it random.</text>
+<line x1="755.4" y1="138" x2="767.4" y2="138" stroke="#6b6b74" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="770.4" y="24" width="169.6" height="228" rx="12" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<text x="786.4" y="54" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="400" fill="#e5a33a" text-anchor="start">05</text>
+<text x="786.4" y="84" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#f4f4f5" text-anchor="start">Say the words</text>
+<text x="786.4" y="114" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">Six words appear on every</text>
+<text x="786.4" y="133" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">screen. Read them aloud.</text>
+<text x="786.4" y="152" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">If they match, the group</text>
+<text x="786.4" y="171" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">is in cahoots.</text>
+<text x="480" y="282" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#6b6b74" text-anchor="middle">Steps 2 and 3 are what stop anyone from choosing their bytes after seeing everyone else's.</text>
+</svg>

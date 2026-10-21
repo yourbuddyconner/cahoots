@@ -2,6 +2,8 @@
 
 A draft for meetup hosts. It will be finished in M7, after the first ceremonies on real hardware.
 
+![The ceremony in five steps](diagrams/ceremony.svg)
+
 ## Before
 
 1. Every member charges their badge or phone.

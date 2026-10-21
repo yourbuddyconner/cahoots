@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 440" width="960" height="440" role="img" aria-labelledby="t">
+<title id="t">Device tiers: a group is as protected as its least protected device</title>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#a1a1aa"/></marker>
+<marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#e5a33a"/></marker>
+<pattern id="hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#6b6b74" stroke-width="1.5"/></pattern>
+</defs>
+<rect width="960" height="440" rx="16" fill="#0e0e10"/>
+<circle cx="230" cy="200" r="170" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<circle cx="230" cy="200" r="138" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<circle cx="230" cy="200" r="106" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<circle cx="230" cy="200" r="74" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<circle cx="230" cy="200" r="42" fill="none" stroke="#e5a33a" stroke-width="1.5"/>
+<circle cx="230" cy="200" r="42" fill="rgba(229,163,58,0.10)" stroke="none" stroke-width="1"/>
+<text x="230" y="46" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="400" fill="#6b6b74" text-anchor="middle">T0</text>
+<text x="230" y="78" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="400" fill="#6b6b74" text-anchor="middle">T1</text>
+<text x="230" y="110" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="400" fill="#6b6b74" text-anchor="middle">T2</text>
+<text x="230" y="142" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="400" fill="#6b6b74" text-anchor="middle">T3</text>
+<text x="230" y="174" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="400" fill="#e5a33a" text-anchor="middle">T4</text>
+<text x="230" y="204" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" font-weight="500" fill="#e5a33a" text-anchor="middle">T4</text>
+<text x="450" y="60" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="400" fill="#6b6b74" text-anchor="start">T0</text>
+<text x="490" y="60" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="500" fill="#f4f4f5" text-anchor="start">Phone or laptop</text>
+<text x="490" y="80" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">Runs the protocol correctly. The operating</text>
+<text x="490" y="97" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">system decides how well secrets are wiped.</text>
+<line x1="450" y1="110" x2="940" y2="110" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+<text x="450" y="126" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="400" fill="#6b6b74" text-anchor="start">T1</text>
+<text x="490" y="126" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="500" fill="#f4f4f5" text-anchor="start">Any microcontroller</text>
+<text x="490" y="146" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">Wipes used bytes for real.</text>
+<text x="490" y="163" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">A stolen board still gives up its secret.</text>
+<line x1="450" y1="176" x2="940" y2="176" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+<text x="450" y="192" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="400" fill="#6b6b74" text-anchor="start">T2</text>
+<text x="490" y="192" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="500" fill="#f4f4f5" text-anchor="start">Sealed board</text>
+<text x="490" y="212" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">Locked firmware, encrypted storage, a PIN.</text>
+<text x="490" y="229" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">A copied chip is useless without the PIN.</text>
+<line x1="450" y1="242" x2="940" y2="242" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+<text x="450" y="258" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="400" fill="#6b6b74" text-anchor="start">T3</text>
+<text x="490" y="258" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="500" fill="#f4f4f5" text-anchor="start">Hardware key store</text>
+<text x="490" y="278" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">The chip guards the secret itself.</text>
+<text x="490" y="295" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">Too many wrong PINs and it wipes everything.</text>
+<line x1="450" y1="308" x2="940" y2="308" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+<text x="450" y="324" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="400" fill="#e5a33a" text-anchor="start">T4</text>
+<text x="490" y="324" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="500" fill="#f4f4f5" text-anchor="start">Inspected</text>
+<text x="490" y="344" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">Someone checked the chip under a microscope</text>
+<text x="490" y="361" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="start">against the public design.</text>
+<line x1="450" y1="374" x2="940" y2="374" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+<text x="450" y="392" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#6b6b74" text-anchor="start">Four T3 badges and one phone make a T0 group.</text>
+<text x="450" y="409" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#6b6b74" text-anchor="start">The ceremony shows this before anyone confirms.</text>
+</svg>

@@ -10,6 +10,8 @@ The randomness label (`TRNG` or `CSPRNG`, handoff 3.3) is a separate axis and is
 
 ## The tiers
 
+![Device tiers](diagrams/tiers.svg)
+
 | Tier | Device | What it protects | What it does not |
 |---|---|---|---|
 | **T0 Software** | A phone or laptop browser running the PWA | The protocol: correct spends, erase before send, constant-time tags, reuse detection | Anything about the platform. Erasure is best effort. A compromised OS reads the pad. |

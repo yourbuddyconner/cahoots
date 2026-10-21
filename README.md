@@ -14,9 +14,15 @@ The hard part is getting the same random file to every member without anyone els
 4. Every device XORs all contributions into one shared pad.
 5. The members read six check words aloud to confirm every device holds the same pad.
 
+![The ceremony in five steps](docs/diagrams/ceremony.svg)
+
 The group is now a **cahoot** (a circle). The pad is a key budget. Spending 32 bytes seeds a session of any size in WireGuard, HPKE, age, or the pad-seeded chat, hedged so an attacker must break both the math and the pad. Spending one byte per byte encrypts a short message that nothing can break. Every spend is recorded in a ledger and the bytes are erased, so no key is ever used twice.
 
+![The pad: everyone holds all of it, each member sends from their own part](docs/diagrams/pad.svg)
+
 Ciphertext travels over the **Numbers Station**, an append-only public feed. Anyone can read it. Only circle members can decrypt or forge an entry.
+
+![Anyone can read the feed. Only the group can read the messages.](docs/diagrams/station.svg)
 
 A circle can also give a seat to a hosted software member, such as an AI agent. That member's copy of the pad lives inside a Turnkey Verifiable Cloud (TVC) enclave, and a pinned policy decides each read and send. This integration is optional. Circles without a hosted seat have a simple guarantee: nobody who runs the feed can read the circle.
 
@@ -68,7 +74,7 @@ See `docs/threat-model.md` for the full list.
 
 ## What it is for
 
-`docs/tiers.md` defines the device tiers, from a phone (T0) to inspected silicon (T4), and the rule that a circle is only as protected as its least protected member. `docs/use-cases.md` lists concrete uses, from group chat to bootstrapping WireGuard and physical mesh networks from a ceremony. `docs/plan.md` has the milestones, including the network-bootstrap track.
+`docs/tiers.md` defines the device tiers, from a phone (T0) to inspected silicon (T4), and the rule that a circle is only as protected as its least protected member. `docs/use-cases.md` lists concrete uses, from group chat to bootstrapping WireGuard and physical mesh networks from a ceremony. `docs/plan.md` is the roadmap. `docs/glossary.md` defines the terms.
 
 ## Working rules
 

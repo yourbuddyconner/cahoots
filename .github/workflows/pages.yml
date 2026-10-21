@@ -39,6 +39,8 @@ jobs:
           mkdir -p "$out/docs/md" "$out/app"
           cp README.md "$out/docs/md/readme.md"
           cp docs/*.md "$out/docs/md/"
+          mkdir -p "$out/docs/diagrams"
+          cp docs/diagrams/*.svg "$out/docs/diagrams/"
           cp web/README.md "$out/docs/md/web.md"
           cp crates/station/README.md "$out/docs/md/station.md"
           cp crates/chat/README.md "$out/docs/md/chat-cli.md"

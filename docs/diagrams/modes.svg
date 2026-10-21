@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 360" width="960" height="360" role="img" aria-labelledby="t">
+<title id="t">Two ways to spend the pad</title>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#a1a1aa"/></marker>
+<marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#e5a33a"/></marker>
+<pattern id="hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#6b6b74" stroke-width="1.5"/></pattern>
+</defs>
+<rect width="960" height="360" rx="16" fill="#0e0e10"/>
+<rect x="20" y="24" width="450" height="300" rx="12" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<text x="40" y="56" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="600" fill="#f4f4f5" text-anchor="start">Short messages</text>
+<text x="40" y="78" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#a1a1aa" text-anchor="start">One pad byte per message byte</text>
+<rect x="309" y="42" width="141" height="22" rx="11" fill="none" stroke="#e5a33a" stroke-width="1"/>
+<text x="379.5" y="57" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="400" fill="#e5a33a" text-anchor="middle">unbreakable</text>
+<rect x="40" y="104" width="18" height="18" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="40" y="138" width="18" height="18" rx="3" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<rect x="62" y="104" width="18" height="18" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="62" y="138" width="18" height="18" rx="3" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<rect x="84" y="104" width="18" height="18" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="84" y="138" width="18" height="18" rx="3" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<rect x="106" y="104" width="18" height="18" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="106" y="138" width="18" height="18" rx="3" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<rect x="128" y="104" width="18" height="18" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="128" y="138" width="18" height="18" rx="3" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<rect x="150" y="104" width="18" height="18" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="150" y="138" width="18" height="18" rx="3" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<rect x="172" y="104" width="18" height="18" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="172" y="138" width="18" height="18" rx="3" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<rect x="194" y="104" width="18" height="18" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="194" y="138" width="18" height="18" rx="3" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<rect x="216" y="104" width="18" height="18" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="216" y="138" width="18" height="18" rx="3" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<rect x="238" y="104" width="18" height="18" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="238" y="138" width="18" height="18" rx="3" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<rect x="260" y="104" width="18" height="18" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="260" y="138" width="18" height="18" rx="3" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<rect x="282" y="104" width="18" height="18" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="282" y="138" width="18" height="18" rx="3" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<text x="314" y="117" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="400" fill="#6b6b74" text-anchor="start">pad bytes</text>
+<text x="314" y="151" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="400" fill="#6b6b74" text-anchor="start">message</text>
+<text x="40" y="188" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#6b6b74" text-anchor="start">one for one, then both are gone</text>
+<text x="40" y="224" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">A message of 60 bytes uses 60 pad bytes plus 32 for the seal.</text>
+<text x="40" y="246" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">No computer, now or later, can read it without the pad.</text>
+<text x="40" y="268" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">Budget: about 2,000 messages from a 256 KiB pad.</text>
+<rect x="490" y="24" width="450" height="300" rx="12" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<text x="510" y="56" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="600" fill="#f4f4f5" text-anchor="start">Everything else</text>
+<text x="510" y="78" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#a1a1aa" text-anchor="start">32 pad bytes become one session key</text>
+<rect x="834" y="42" width="86" height="22" rx="11" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<text x="877.0" y="57" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="400" fill="#a1a1aa" text-anchor="middle">hedged</text>
+<rect x="510" y="104" width="18" height="18" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="532" y="104" width="18" height="18" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="554" y="104" width="18" height="18" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<text x="586" y="117" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="400" fill="#6b6b74" text-anchor="start">32 bytes</text>
+<line x1="640" y1="113" x2="690" y2="113" stroke="#6b6b74" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="696" y="100" width="92" height="26" rx="13" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<text x="742" y="117" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="400" fill="#a1a1aa" text-anchor="middle">key exchange</text>
+<line x1="794" y1="113" x2="840" y2="113" stroke="#6b6b74" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="846" y="102" width="18" height="18" rx="3" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<rect x="868" y="102" width="18" height="18" rx="3" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<rect x="846" y="124" width="18" height="18" rx="3" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<rect x="868" y="124" width="18" height="18" rx="3" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<text x="846" y="162" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="400" fill="#6b6b74" text-anchor="start">any amount</text>
+<text x="510" y="188" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#6b6b74" text-anchor="start">the bytes seed a key, then they are gone</text>
+<text x="510" y="224" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">The 32 bytes seed a normal key exchange: WireGuard, files, chat.</text>
+<text x="510" y="246" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">An attacker has to break the math and have the pad.</text>
+<text x="510" y="268" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#a1a1aa" text-anchor="start">Budget: about 8,000 sessions of any size from the same pad.</text>
+<text x="480" y="346" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#6b6b74" text-anchor="middle">Both modes share one pad and one ledger. A group can use both.</text>
+</svg>
