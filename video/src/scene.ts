@@ -112,16 +112,19 @@ function el(id: string, cls: string, textContent: string) {
 }
 
 /** Word-wise reveal: 0 before `in`, 1 once shown, back to 0 after `out`. Text never moves while read. */
-function textState(f: number, id: string, cls: string) {
+function textState(f: number, id: string, cls: string, preShown = false) {
   const c = cue(id);
+  // A pre-shown text finished its reveal before frame 0, so frame 0 is a finished frame (the thumbnail).
+  const shift = preShown ? DUR.textIn + STAGGER.word * c.text.split(/\s+/).length : 0;
+  f += shift;
   const e = el(id, cls, c.text);
   const words = e.querySelectorAll<HTMLElement>(".w");
-  const visible = f >= c.in && f < c.out + DUR.textOut + STAGGER.word * words.length;
+  const visible = f >= c.in && f - shift < c.out + DUR.textOut + STAGGER.word * words.length;
   e.style.display = visible ? "" : "none";
   if (!visible) return;
   words.forEach((w, i) => {
     const pin = EASE.enter(prog(f, c.in + i * STAGGER.word, c.in + i * STAGGER.word + DUR.textIn));
-    const pout = EASE.exit(prog(f, c.out + i * 2, c.out + i * 2 + DUR.textOut));
+    const pout = EASE.exit(prog(f - shift, c.out + i * 2, c.out + i * 2 + DUR.textOut));
     const o = Math.min(pin, 1 - pout);
     w.style.opacity = String(o);
     w.style.transform = `translateY(${(1 - pin) * 0.35}em)`;
@@ -188,11 +191,12 @@ async function renderFrame(f: number) {
   // OPEN
   if (between(f, CH.open[0], CH.badge[0] + DUR.panelOut)) {
     stage.visible = false;
-    const m = springAt(f, OPEN.mark, SPRING.mark);
-    const out = mv(f, "open.out", EASE.exit);
-    markEl.style.opacity = String(Math.min(1, m * 1.2) * (1 - out));
-    markEl.style.transform = `translate(-50%, -50%) scale(${lerp(0.6, 1, Math.min(1, m))})`;
-    textState(f, "open.word", "wordmark");
+    // The mark leaves with the wordmark, not later with the chapter.
+    const wordOut = cue("open.word").out;
+    const out = EASE.exit(prog(f, wordOut, wordOut + DUR.textOut));
+    markEl.style.opacity = String(1 - out);
+    markEl.style.transform = "translate(-50%, -50%)";
+    textState(f, "open.word", "wordmark", true);
     const tk = mv(f, "open.ticker", EASE.enter);
     ticker.parentElement!.style.opacity = String(tk * (1 - out));
   }

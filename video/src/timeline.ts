@@ -77,12 +77,11 @@ export const CH: Record<string, readonly [number, number]> = {
   close: [chStart(41.5), TOTAL],
 };
 
-// OPEN: black. The mark lands, then the wordmark.
+// OPEN: the logo is fully on screen from frame 0 (it is the thumbnail), holds, then leaves as the badge drops.
+// The scene treats these two as pre-shown: their reveals ran before frame 0.
 export const OPEN = (() => {
-  const mark = hero("open.mark", hit(1.0), DUR.panelIn);
-  mark_(mark, "tick", "mark lands");
-  const word = text("open.word", "Cahoots", hit(1.8), hit(5.6), "head");
-  mark_(word, "enter", "wordmark");
+  const mark = hero("open.mark", 0, DUR.panelIn);
+  const word = text("open.word", "Cahoots", 0, hit(5.6), "head");
   const ticker = hero("open.ticker", hit(3.4), DUR.rowIn);
   mark_(ticker, "tick", "number groups start");
   const out = exitBefore("open", hit(6.6), DUR.panelOut);
