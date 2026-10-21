@@ -8,3 +8,7 @@ Cargo.lock.bak
 /web/dist
 /web/app/pkg
 /site/docs/md
+
+# video
+node_modules/
+out/

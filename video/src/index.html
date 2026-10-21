@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cahoots launch video</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/" } }
+</script>
+<style>
+  :root { --bg: #0a0a0b; --fg: #f4f4f5; --fg-2: #a1a1aa; --amber: #e5a33a; }
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); }
+  body { font-family: "Inter", system-ui, sans-serif; color: var(--fg); -webkit-font-smoothing: antialiased; }
+  #gl { position: absolute; inset: 0; width: 1920px; height: 1080px; }
+  #glow { position: absolute; left: 50%; top: 45%; width: 1100px; height: 640px; transform: translate(-50%, -50%); background: radial-gradient(ellipse at center, rgba(229,163,58,0.12), rgba(229,163,58,0.03) 45%, transparent 70%); filter: blur(24px); }
+  #overlay { position: absolute; inset: 0; }
+  #overlay > div { position: absolute; }
+  .w { display: inline-block; white-space: pre; }
+  .w + .w { margin-left: 0.26em; }
+  .head { left: 160px; bottom: 150px; width: 1000px; font-family: "Inter Tight", sans-serif; font-weight: 600; font-size: 84px; line-height: 1.02; letter-spacing: -0.035em; }
+  .wordmark { left: 50%; top: 50%; transform: translate(-50%, -50%); margin-left: 56px; font-family: "Inter Tight", sans-serif; font-weight: 600; font-size: 132px; letter-spacing: -0.03em; }
+  #mark { position: absolute; left: 50%; top: 50%; width: 84px; height: 84px; transform: translate(-50%, -50%); margin-left: -268px; opacity: 0; }
+  .label { font-family: "JetBrains Mono", monospace; font-weight: 500; font-size: 36px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--amber); left: 1400px; }
+  .label::before { content: ""; display: inline-block; width: 28px; height: 2px; background: var(--amber); margin: 0 18px 12px 0; vertical-align: middle; }
+  .l0 { top: 190px; } .l1 { top: 290px; } .l2 { top: 390px; } .l3 { top: 490px; } .l4 { top: 590px; }
+  .item { font-family: "JetBrains Mono", monospace; font-weight: 500; font-size: 36px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--amber); left: 160px; }
+  .i0 { top: 300px; } .i1 { top: 380px; } .i2 { top: 460px; }
+  .url { left: 160px; bottom: 100px; font-family: "JetBrains Mono", monospace; font-weight: 400; font-size: 44px; color: var(--fg-2); letter-spacing: 0.02em; }
+  #tickerwrap { position: absolute; left: 0; right: 0; bottom: 0; border-top: 1px solid rgba(255,255,255,0.08); padding: 18px 0; font-family: "JetBrains Mono", monospace; font-size: 20px; letter-spacing: 0.14em; color: #6b6b74; white-space: nowrap; overflow: hidden; opacity: 0; }
+  #ticker { display: inline-block; }
+  #fade { position: absolute; inset: 0; background: #000; opacity: 0; }
+</style>
+</head>
+<body>
+<div id="glow"></div>
+<canvas id="gl" width="1920" height="1080"></canvas>
+<div id="overlay"></div>
+<img id="mark" src="../../site/assets/mark.svg" alt="">
+<div id="tickerwrap"><span id="ticker"></span></div>
+<div id="fade"></div>
+<script type="module" src="../out/scene.js"></script>
+</body>
+</html>
