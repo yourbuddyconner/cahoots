@@ -147,3 +147,41 @@ A node provisioned this way holds the whole pad, as any member does. The federat
 Every network today bottoms out in a trust root someone downloaded: a CA bundle, a coordination server's key, a vendor's signing key. Cahoots offers a trust root you built with people you could see. In the Pessiland story, pad couriers are the new certificate authorities. For a mesh network on a hillside, that is not a thought experiment. It is the only option that works with no uplink.
 
 Turnkey's piece is unchanged: a node that lives in the cloud, a gateway or exit node, holds its slice in TVC under a pinned policy, and every PSK it issues or accepts is in the anchored log.
+
+## 7. Other properties worth building on
+
+These follow from having a shared random tape with a ledger. Each is cheap because the pad does the work.
+
+1. **Spoken challenge words.** Spend 4 bytes, map them to two BIP-39 words, and both sides say them at the start of a call. No voice clone can produce them. One `words` command in the client.
+2. **Sender-anonymous messages.** The tag proves some member wrote a message, not which. Reserve a shared anonymous region where members spend at random offsets and treat a collision there as a retry, and the circle has anonymous votes with information-theoretic strength. This is a protocol version 2 change, because it alters the reuse rule for one region.
+3. **Perfect deniability after erasure.** For any ciphertext and tag there is a pad that decrypts it to any plaintext of the same length, including a Poly1305 key that reproduces the tag. Once the real bytes are erased, no transcript proves what was said. This holds only for human-only circles. The threat model should say so, and a "forge a transcript" tool makes it believable.
+4. **Liveness beacons and a dead man's switch.** A daily pad-authenticated counter is an honest warrant canary. With Shamir shares held in TVC and a policy that releases them when beacons stop, it becomes continuity planning with an attested release.
+5. **SSH bootstrap.** Peer announcements carry host and user keys. A helper writes `known_hosts` and `authorized_keys`. Trust-from-the-room replaces trust-on-first-use.
+6. **Fair draws.** Pad bytes spent in order are a shared random tape nobody chose. Lotteries and leader election with no server.
+7. **Ciphertext that looks like noise.** Pure-pad ciphertext is uniform. Hiding the circle ID behind a salted hash makes the whole message indistinguishable from random bytes, so it can be posted anywhere. Also a version 2 format change.
+
+## 8. Circle apps: programmable logic without touching the pad
+
+A circle is an authenticated broadcast channel, and the Numbers Station gives it a total order. That is the input a replicated state machine wants. A **circle app** is a WASM module with a pure `reduce(state, message) -> state` and a `render(state)`. Every member runs it over the same ordered plaintexts and reaches the same state. The pad is never an input, so apps cannot weaken it.
+
+Invariants that apps must not cross:
+
+- Only the provider reads pad bytes, and it erases before it returns anything.
+- Tag checks are constant time and happen before anything is spent.
+- No radio runs during contribution.
+- The screen that shows check words and send confirmations belongs to the core, not to an app.
+
+Design rules:
+
+1. **The circle agrees on the app the way it agrees on the pad.** The module hash is posted as a control message. Clients refuse to run a module the circle has not posted.
+2. **Apps spend, so apps get budgets.** Each action costs `32 + len` pad bytes. Apps get a daily send quota, bucket padding is mandatory, and any send the user did not initiate needs an on-screen confirmation. Bulk state travels in PSK mode.
+3. **Sender identity is a convention.** Apps that count per member must declare that they need the federation profile.
+
+| Host | Verdict |
+|---|---|
+| Phone and laptop clients, WASM reducers | Build first. Above the provider boundary, deterministic, hash-pinned. |
+| TVC, as a seat with a pinned policy | The agent seat generalized. The module hash belongs in the deploy record. |
+| The badge, as a Xous detached app | Later. Needs the pad service to own the pad and the display. Not on the ESP32 build. |
+| JavaScript plugins with pad access, or anything active during a ceremony | Never. |
+
+The first app should be a vote. It exercises ordering, budgets, and the identity caveat at once.
