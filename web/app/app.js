@@ -194,7 +194,7 @@ function fileBtn(label, onText) {
 }
 const aboutSheet = () => sheet(
   h('h2', {}, 'What this is'),
-  h('p', { class: 'muted' }, 'Cahoots makes a shared secret with the people in the room. Phones show and scan codes; nothing crosses a network. The secret is a one-time pad: short messages encrypted with it cannot be broken by any computer, and it also seeds keys for chat.'),
+  h('p', { class: 'muted' }, 'Cahoots makes a shared secret with the people in the room. Phones show and scan codes; no server is involved. The secret is a one-time pad: short messages encrypted with it cannot be broken by any computer, and it also seeds keys for chat.'),
   h('p', { class: 'muted' }, 'You need at least two devices in the same place. Everything stays on this device.'),
   h('a', { class: 'btn', href: SITE, target: '_blank', rel: 'noopener' }, 'Read more at cahoots.network'));
 
