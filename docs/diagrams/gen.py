@@ -301,7 +301,7 @@ def tiers():
 # 6. Roadmap ------------------------------------------------------------------
 def roadmap():
     tracks = [
-        ("Hardware", [("M0", "Repo", "done"), ("M1", "Core", "done"), ("M2", "Phone app", "done"), ("M4a", "Simulator", "done"), ("M4b", "First board", "next"), ("M3", "Hosted seat", "later"), ("M5", "Our badge", "later"), ("M7", "Meetup kit", "later")]),
+        ("Hardware", [("M0", "Repo", "done"), ("M1", "Core", "done"), ("M2", "Phone app", "done"), ("M4a", "Simulator", "done"), ("M4b", "DIY badge", "next"), ("M4d", "Badge over USB", "later"), ("M3", "Hosted seat", "later"), ("M5", "Our badge", "later"), ("M7", "Meetup kit", "later")]),
         ("Toolkit", [("S1", "File and tunnel keys", "done"), ("S4", "More tunnels", "part"), ("S2", "Approvals", "later"), ("S3", "Recovery", "later"), ("S5", "Hosted keys", "later")]),
         ("Networks", [("N1", "WireGuard", "next"), ("N2", "Control messages", "next"), ("N3", "Headless nodes", "later"), ("N4", "Mesh radios", "later"), ("N5", "Federation", "later"), ("N6", "LoRa feed", "later")]),
         ("Chat", [("C1", "Chat crate", "done"), ("C2", "The feed", "done"), ("C3", "CLI demo", "done"), ("C4", "Chat in the app", "done"), ("C5", "Hosted feed", "later")]),
