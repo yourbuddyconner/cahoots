@@ -140,10 +140,15 @@ export const NETWORK = (() => {
   const head2 = text("net.head2", "One meeting gives the whole network its keys.", hit(27.9), hit(33.4), "head");
   const rotate = hero("net.rotate", hit(35.4), DUR.explode / 2);
   mark_(rotate, "fly", "keys rotate down the links");
-  const head3 = text("net.head3", "No server. No CA. Nothing crosses a network.", hit(34.2), hit(40.3), "head");
+  // The second line is a cube: "No server, no CA." rolls over to its generalization on the bar between the two key rotations.
+  const head3 = text("net.head3", "Keys rotate from the badge for years.", hit(34.2), hit(40.3), "head");
+  const cubeA = text("net.cubeA", "No server, no CA.", hit(34.2), hit(37.0), "cubeA");
+  const flip = hero("net.flip", hit(37.0), DUR.flip);
+  mark_(flip, "swap", "cube rolls to the generalization");
+  const cubeB = text("net.cubeB", "No man in the middle.", hit(37.0), hit(40.3), "cubeB");
   const rotate2 = hero("net.rotate2", hit(38.6), DUR.explode / 2);
   mark_(rotate2, "fly", "keys rotate again");
-  return { recede, links, head2, rotate, head3, rotate2 };
+  return { recede, links, head2, rotate, head3, cubeA, flip, cubeB, rotate2 };
 })();
 
 // CLOSE: the line, the address, a settle, then black.

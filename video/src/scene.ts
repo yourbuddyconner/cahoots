@@ -171,6 +171,50 @@ function textState(f: number, id: string, cls: string, preShown = false) {
   });
 }
 
+/** The network's second headline: a fixed first line and a second line that rolls like a cube between two faces. */
+function cubeHead(f: number) {
+  const line = cue("net.head3"), a = cue("net.cubeA"), b = cue("net.cubeB");
+  let e = els.get("net.cube");
+  if (!e) {
+    e = document.createElement("div");
+    e.className = "head cubehead";
+    const l1 = document.createElement("div");
+    l1.className = "line";
+    for (const w of line.text.split(/\s+/)) { const s = document.createElement("span"); s.className = "w"; s.textContent = w; l1.appendChild(s); }
+    const cube = document.createElement("div");
+    cube.className = "cube";
+    for (const [cls, txt] of [["a", a.text], ["b", b.text]] as const) {
+      const face = document.createElement("div");
+      face.className = `face ${cls}`;
+      for (const w of txt.split(/\s+/)) { const s = document.createElement("span"); s.className = "w"; s.textContent = w; face.appendChild(s); }
+      cube.appendChild(face);
+    }
+    const wrap = document.createElement("div");
+    wrap.className = "cubewrap";
+    wrap.appendChild(cube);
+    e.append(l1, wrap);
+    overlay.appendChild(e);
+    els.set("net.cube", e);
+  }
+  const visible = f >= line.in && f < line.out + DUR.textOut + STAGGER.word * 8;
+  e.style.display = visible ? "" : "none";
+  if (!visible) return;
+  const reveal = (el: HTMLElement, inF: number) => {
+    el.querySelectorAll<HTMLElement>(".w").forEach((w, i) => {
+      const pin = EASE.enter(prog(f, inF + i * STAGGER.word, inF + i * STAGGER.word + DUR.textIn));
+      const pout = EASE.exit(prog(f, line.out + i * 2, line.out + i * 2 + DUR.textOut));
+      w.style.opacity = String(Math.min(pin, 1 - pout));
+      w.style.transform = `translateY(${(1 - pin) * 0.35}em)`;
+    });
+  };
+  reveal(e.querySelector(".line")!, line.in);
+  reveal(e.querySelector(".face.a")!, a.in);
+  // Face b is revealed by the roll itself, so its words are fully opaque once the roll starts.
+  reveal(e.querySelector(".face.b")!, b.in - DUR.textIn - STAGGER.word * 5);
+  const roll = mv(f, "net.flip");
+  (e.querySelector(".cube") as HTMLElement).style.transform = `rotateX(${-90 * roll}deg)`;
+}
+
 const ticker = document.getElementById("ticker")!;
 const tickerText = (() => {
   let s = 1;
@@ -324,7 +368,7 @@ async function renderFrame(f: number) {
       placeLabel(`net.node${i}`, nodes[i].pos);
     });
     textState(f, "net.head2", "head");
-    textState(f, "net.head3", "head");
+    cubeHead(f);
   }
 
   // CLOSE
