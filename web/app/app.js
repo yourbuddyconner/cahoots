@@ -274,17 +274,19 @@ function animatedQr(bytes, capLeft) {
   obs.observe(document.body, { childList: true, subtree: true });
   return h('div', { class: 'panel' }, h('div', { class: 'cap' }, h('span', {}, capLeft), cap), box);
 }
-/** Camera plus progress; calls onDone(bytes) when the transfer completes. */
-function fountainReceiver(onDone, hint) {
+/** Camera plus progress; calls onDone(bytes) when an animated transfer completes. Single codes
+ * (cahoots-… text) go to onTagged instead, so one camera reads both kinds. */
+function fountainReceiver(onDone, hint, onTagged = null) {
   let dec = new FountainDecoder();
   const bar = h('progress', { value: 0, max: 1 });
   const st = status();
-  st.textContent = 'Hold steady on the animation. The bar fills as frames arrive.';
+  st.textContent = onTagged ? '' : 'Hold steady on the animation. The bar fills as frames arrive.';
   const feed = (text) => {
+    if (onTagged && text.startsWith('cahoots-')) { onTagged(text); return; }
     try {
       const done = dec.add(b64_decode(text));
       bar.value = dec.progress();
-      st.textContent = `${Math.round(dec.progress() * 100)}% of ${kib(dec.transfer_length())}`;
+      st.textContent = `Reading an animation · ${Math.round(dec.progress() * 100)}% of ${kib(dec.transfer_length())}. Hold steady.`;
       if (done) { const out = dec.result(); dec = new FountainDecoder(); bar.value = 0; st.textContent = 'Got it.'; onDone(out); }
     } catch (e) { if (e !== 'magic') st.textContent = friendly(e); }
   };
@@ -465,8 +467,8 @@ function screenRun(params) {
     const left = [...missing].filter((i) => i !== me);
     if (!left.length) { waiting.textContent = 'All in. Moving on.'; return; }
     waiting.textContent = phase === 'commit'
-      ? `Show your code to ${left.map(seatName).join(' and ')}, and scan theirs. Any order.`
-      : `Scan the animation of ${left.map(seatName).join(' and ')}, and let them scan yours.`;
+      ? `Show this code to ${left.map(seatName).join(' and ')}, and scan whatever they show you: a code or an animation. Any order.`
+      : `Let ${left.map(seatName).join(' and ')} scan this animation. When they show you theirs, scan it.`;
   };
   const got = (i, what) => { buzz(); toast(`Got seat ${i + 1}'s ${what}`, 'ok'); refresh(); };
   const feedText = (text) => {
@@ -490,7 +492,9 @@ function screenRun(params) {
   };
 
   let show, text, fileName;
-  const scanStage = () => (phase === 'commit' ? camera(feedText, 'Fill the frame with their code') : fountainReceiver(feedBytes, 'Fill the frame with their animation').el);
+  // One camera for both steps: a single code (commitment) and an animation (reveal) are both accepted,
+  // because a member who is ahead shows an animation while this one is still collecting commitments.
+  const scanStage = () => fountainReceiver(feedBytes, phase === 'commit' ? 'Fill the frame with their code or animation' : 'Fill the frame with their animation', feedText).el;
   if (phase === 'commit') {
     text = enc.commit(me, c.commitment(), c.params_bytes());
     fileName = `commit-${me + 1}.txt`;
