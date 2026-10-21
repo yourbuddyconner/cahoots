@@ -35,7 +35,7 @@
   <div class="wrap hero-copy">
     <p class="eyebrow">Open hardware · one-time pads · a Turnkey project</p>
     <h1>Keys agreed in a room.<br>Rotated by pointer.</h1>
-    <p class="lede">Cahoots is in-person key agreement for the protocols you already run. A group meets once, their badges touch, and a shared pad of random bytes becomes a key budget for WireGuard, encrypted files, group chat, and approvals.</p>
+    <p class="lede">Cahoots is in-person key agreement for the protocols you already run. A group meets once. Their badges touch and build a shared pad of random bytes. That pad is a key budget for WireGuard tunnels, encrypted files, group chat, and approvals.</p>
     <div class="cta">
       <a class="btn primary" href="app/">Run a ceremony in your browser</a>
       <a class="btn ghost" href="docs/#/protocol">Read the protocol <span aria-hidden="true">→</span></a>
@@ -50,11 +50,11 @@
     <p class="nogl" id="nogl" hidden>Your browser can't draw the badge in 3D. The parts are listed below.</p>
     <div class="stepper-wrap">
       <ol class="parts" id="parts">
-        <li data-step="0"><span class="part-name">Polycarbonate shells</span><span class="part-why">Card-sized, four screws, a lanyard slot. Transparent on purpose: the chip's silicon is open and inspectable, so the case is too.</span></li>
-        <li data-step="1"><span class="part-name">1.54" e-paper</span><span class="part-why">Shows the six check words and holds them with no power. Members read them aloud. If every screen matches, every pad matches.</span></li>
-        <li data-step="2"><span class="part-name">Baochip-1x</span><span class="part-why">Hardware random numbers with health tests, a key store, one-way counters, and the pad in on-die RRAM, erased byte by byte as it is spent.</span></li>
-        <li data-step="3"><span class="part-name">Touch link</span><span class="part-why">Four spring pins on one edge, gold pads and magnets on the other. Badges snap into a ring and swap contributions by wire. No radio.</span></li>
-        <li data-step="4"><span class="part-name">Battery and USB-C</span><span class="part-why">A day at the table on a 400 mAh cell. USB-C charges it and carries YubiKey bytes from a laptop before the ceremony, never during.</span></li>
+        <li data-step="0"><span class="part-name">Polycarbonate shells</span><span class="part-why">Card-sized, with four screws and a lanyard slot. The shells are transparent because the chip's silicon is open to inspection, and the case should be too.</span></li>
+        <li data-step="1"><span class="part-name">1.54" e-paper</span><span class="part-why">Shows the six check words and keeps them on screen with no power. Members read them aloud. If every screen matches, every pad matches.</span></li>
+        <li data-step="2"><span class="part-name">Baochip-1x</span><span class="part-why">A hardware random number generator with health tests, a key store, and one-way counters. The pad lives in on-die RRAM and is erased byte by byte as it is spent.</span></li>
+        <li data-step="3"><span class="part-name">Touch link</span><span class="part-why">Four spring pins on one edge. Gold pads and magnets on the other. Badges snap into a ring and swap contributions over the wire. No radio.</span></li>
+        <li data-step="4"><span class="part-name">Battery and USB-C</span><span class="part-why">A 400 mAh cell runs the badge for a day at the table. USB-C charges it. Before a ceremony, USB-C can also load YubiKey bytes from a laptop. It is never connected during one.</span></li>
       </ol>
       <p class="scroll-hint" id="scroll-hint">Scroll to take it apart</p>
     </div>
@@ -66,21 +66,21 @@
 <main>
 <section class="band wrap" id="what">
   <p class="eyebrow">What it does</p>
-  <h2>The pad is a key budget,<br>not a message store.</h2>
+  <h2>The pad is a key budget.</h2>
   <div class="grid three">
     <article class="card">
       <p class="card-k">Spend 32 bytes</p>
-      <p>Seed a session of any size in a protocol you already run. Every one of them has a slot for a secret both sides already share. The slot is almost always empty, because sharing the secret was the hard part. The ceremony fills it.</p>
-      <p class="claim">Attacker must break the math <em>and</em> know the pad</p>
+      <p>Seed a session of any size in a protocol you already run. Each of these protocols has a slot for a secret that both sides already share. The slot is almost always empty, because sharing the secret was the hard part. The ceremony fills it.</p>
+      <p class="claim">An attacker must break the math <em>and</em> know the pad</p>
     </article>
     <article class="card">
       <p class="card-k">Spend one byte per byte</p>
-      <p>Encrypt a short message as a true one-time pad with a one-time Poly1305 tag. Approvals, key announcements, the words you say at the start of a call. A 256 KiB pad holds about two thousand of these.</p>
+      <p>Encrypt a short message as a true one-time pad with a one-time Poly1305 tag. Use it for approvals, key announcements, and the words you say at the start of a call. A 256 KiB pad holds about two thousand such messages.</p>
       <p class="claim">Information-theoretic, as long as no byte is reused</p>
     </article>
     <article class="card">
       <p class="card-k">Rotate by pointer</p>
-      <p>A rotation is a public note that says which bytes come next. Both sides spend the same offset, derive the same key, and erase. No coordination server, no certificate authority, nothing to download.</p>
+      <p>A rotation is a public note that says which bytes come next. Both sides spend the same offset, derive the same key, and erase the bytes. There is no coordination server and no certificate authority.</p>
       <p class="claim">Every spend is ledgered and erased before the key leaves</p>
     </article>
   </div>
@@ -95,9 +95,9 @@
   <div class="grid two">
     <ol class="steps">
       <li><span><b>Agree.</b> One member sets the circle name, size, and pad length. Every screen shows them. Everyone confirms.</span></li>
-      <li><span><b>Commit.</b> Each badge draws random bytes from its hardware generator and shares a hash of them. Nobody can change a contribution after seeing anyone else's.</span></li>
-      <li><span><b>Reveal.</b> Badges touch in a ring and pass contributions around until everyone holds all of them. Each one is checked against its hash.</span></li>
-      <li><span><b>Combine.</b> Every badge XORs every contribution into one pad. If even one member was honest, the pad is random.</span></li>
+      <li><span><b>Commit.</b> Each badge draws random bytes from its hardware generator and shares a hash of them. After that, nobody can change their contribution.</span></li>
+      <li><span><b>Reveal.</b> Badges touch in a ring and pass contributions around until every badge holds all of them. Each badge checks every contribution against its hash.</span></li>
+      <li><span><b>Combine.</b> Every badge XORs every contribution into one pad. If at least one member was honest, the pad is random.</span></li>
       <li><span><b>Say the words.</b> Six words from the pad appear on every screen. Members read them aloud. A mismatch means start over.</span></li>
     </ol>
     <div class="card screen" aria-label="What the badge shows">
@@ -111,13 +111,13 @@
 <section class="band wrap" id="rings">
   <p class="eyebrow">Hardware</p>
   <h2>Concentric rings of security.</h2>
-  <p class="sub">Anyone can build a badge from what's on the bench. A circle is as protected as its least protected member, and the ceremony says so before anyone confirms.</p>
+  <p class="sub">Anyone can build a badge from what is on the bench. A circle is only as protected as its least protected member. The ceremony shows the circle's tier before anyone confirms.</p>
   <div class="tiers">
     <div class="tier"><span class="tier-k">T0</span><span class="tier-n">Phone</span><span class="tier-d">The protocol runs. Erasure is best effort.</span></div>
     <div class="tier"><span class="tier-k">T1</span><span class="tier-n">Any microcontroller</span><span class="tier-d">Real erasure in a raw partition. A stolen device is a copy of the pad.</span></div>
     <div class="tier"><span class="tier-k">T2</span><span class="tier-n">Sealed</span><span class="tier-d">Secure boot and flash encryption. A dumped flash is ciphertext.</span></div>
-    <div class="tier"><span class="tier-k">T3</span><span class="tier-n">Key store</span><span class="tier-d">The wrapping key never leaves the chip. Bad PINs burn a counter, then the pad.</span></div>
-    <div class="tier on"><span class="tier-k">T4</span><span class="tier-n">Inspected</span><span class="tier-d">Silicon compared with the published design under a microscope. The badge we make.</span></div>
+    <div class="tier"><span class="tier-k">T3</span><span class="tier-n">Key store</span><span class="tier-d">The key that wraps the pad never leaves the chip. Each wrong PIN burns a one-way counter. At the limit, the badge erases the pad.</span></div>
+    <div class="tier on"><span class="tier-k">T4</span><span class="tier-n">Inspected</span><span class="tier-d">A member has compared the silicon with the published design under a microscope. This is the badge we make.</span></div>
   </div>
 </section>
 
@@ -126,8 +126,8 @@
   <h2>A public feed only the circle can read.</h2>
   <div class="grid two">
     <div>
-      <p class="sub">During the Cold War, shortwave stations read out strings of numbers. Anyone could hear them. Only the agent holding the matching pad page could read them.</p>
-      <p class="sub">Cahoots keeps the idea. Ciphertext goes on an append-only feed. Anyone can read it. Only circle members can decrypt or forge an entry, and that holds against the operator too. The feed orders messages, refuses reuse of pad bytes it can see, and anchors its head so nobody rewrites history.</p>
+      <p class="sub">During the Cold War, shortwave stations read out strings of numbers. Anyone could hear them. Only the agent who held the matching pad page could read them.</p>
+      <p class="sub">Cahoots keeps the idea. Ciphertext goes on an append-only feed. Anyone can read it. Only circle members can decrypt or forge an entry. That holds against the operator too. The feed orders messages and refuses any reuse of pad bytes it can see. Its head is anchored, so nobody can rewrite history.</p>
     </div>
     <div class="card station-card" aria-label="Live feed example">
       <div class="station-head"><span>circle 6f8648f8</span><span>seq 41 · 25 B</span></div>
@@ -140,9 +140,9 @@
   <p class="eyebrow">Build</p>
   <h2>Four traits make a badge.</h2>
   <div class="grid three">
-    <article class="card"><p class="card-k">Entropy</p><p>A hardware random source with SP 800-90B health tests. The ceremony aborts when a test fails.</p></article>
+    <article class="card"><p class="card-k">Entropy</p><p>A hardware random source with SP 800-90B health tests. If a test fails, the ceremony stops.</p></article>
     <article class="card"><p class="card-k">PadStore</p><p>Raw non-volatile memory with an erase unit. Spent bytes are overwritten and read back.</p></article>
-    <article class="card"><p class="card-k">Display and Link</p><p>Something to show six words on, and a wire to the next badge. The desktop simulator is the reference and the test harness.</p></article>
+    <article class="card"><p class="card-k">Display and Link</p><p>A screen that can show six words, and a wire to the next badge. The desktop simulator is the reference implementation and the test harness.</p></article>
   </div>
   <div class="cta">
     <a class="btn primary" href="https://github.com/yourbuddyconner/cahoots">Source on GitHub</a>
@@ -156,7 +156,7 @@
   <div class="wrap foot">
     <div>
       <a class="brand" href="/"><img src="assets/mark.svg" alt="" width="22" height="22"><span>Cahoots</span></a>
-      <p class="fine">Open source. MIT or Apache-2.0. Turnkey's part is custody, policy, and attestation over every spend.</p>
+      <p class="fine">Open source under MIT or Apache-2.0. Turnkey provides custody, policy, and attestation over every spend.</p>
     </div>
     <div class="foot-links">
       <a href="docs/">Docs</a>
@@ -164,7 +164,7 @@
       <a href="https://github.com/yourbuddyconner/cahoots">GitHub</a>
     </div>
   </div>
-  <p class="wrap fine">Even Turnkey can't read your circle. That holds for circles without an agent seat. Circles that seat an agent trust the enclave with their pad, and the software says so before you confirm.</p>
+  <p class="wrap fine">Even Turnkey can't read your circle. That holds for circles without an agent seat. A circle that seats an agent trusts the enclave with its pad. The software says so before you confirm.</p>
 </footer>
 
 <script type="module" src="main.js"></script>
