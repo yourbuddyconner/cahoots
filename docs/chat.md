@@ -1,6 +1,6 @@
 # Pad-seeded chat, version 1
 
-End-to-end encrypted group chat for circle members, where the pad seeds the keys and a standard AEAD encrypts the messages. This is PSK mode (handoff section 10) applied to chat. The security claim is computational, hedged by the pad. The UI MUST label it "end-to-end encrypted, pad-hedged", never "unbreakable". Pure-pad text (`docs/protocol.md` section 4) stays available for the lines that deserve the strongest claim.
+End-to-end encrypted group chat for circle members, where the pad seeds the keys and a standard AEAD encrypts the messages. This is PSK mode (32 pad bytes become one session key) applied to chat. The security claim is computational, hedged by the pad. The UI MUST label it "end-to-end encrypted, pad-hedged", never "unbreakable". Pure-pad text (`docs/protocol.md` section 4) stays available for the lines that deserve the strongest claim.
 
 All integers are little-endian. HKDF is HKDF-SHA256 (RFC 5869). AEAD is ChaCha20-Poly1305 (RFC 8439).
 

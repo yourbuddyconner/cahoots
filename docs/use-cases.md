@@ -1,12 +1,12 @@
-# What Cahoots is concretely for
+# What Cahoots is for
 
-The ceremony produces one thing: a pile of random bytes that a small group shares and that nobody else has seen. This document lists what that pile is good for, in order from the obvious to the ambitious. The second half is a draft design for using a circle to bootstrap a network: WireGuard first, then physical mesh networks.
+The ceremony produces one thing: a pile of random bytes that a small group shares and that nobody else has seen. This document lists what that pile is good for, from the obvious to the ambitious. The second half is a draft design for the most ambitious one: setting up a network, WireGuard first and then physical mesh networks, with no server and no certificate authority involved.
 
 ## 1. The two modes, restated
 
-**Pure-pad mode** (`docs/protocol.md` section 4). One pad byte per message byte, plus 32 bytes for the one-time tag. Confidentiality and integrity do not depend on any math. Fit for short, high-value messages: a few hundred bytes at a time. A 256 KiB pad holds roughly 2,000 bucket-padded text messages across the circle.
+**Pure-pad mode** ([protocol](protocol.md), section 4). One pad byte per message byte, plus 32 bytes for the seal. Nothing about its security depends on math being hard. Fit for short, high-value messages: a few hundred bytes at a time. A 256 KiB pad holds roughly 2,000 padded text messages across the circle.
 
-**PSK mode** (handoff section 10). 32 pad bytes per session, mixed into an ordinary key exchange with HKDF. The session stays confidential if the math holds **or** the pad stays secret. A 256 KiB pad holds about 8,000 sessions of any size. This is the mode for files, tunnels, and anything bigger than a text message.
+**PSK mode.** 32 pad bytes become one session key, mixed into an ordinary key exchange with HKDF. PSK stands for pre-shared key. The session stays confidential if the math holds **or** the pad stays secret, so an attacker has to beat both. A 256 KiB pad holds about 8,000 sessions of any size. This is the mode for files, tunnels, and anything bigger than a text message.
 
 The two modes share a pad, a ledger, and a circle ID. A circle can use both.
 
@@ -16,15 +16,15 @@ The two modes share a pad, a ledger, and a circle ID. A circle can use both.
 
 ### 2.1 Group chat that cannot be broken later
 
-The meetup demo. Members post ciphertext to the Numbers Station. Harvested ciphertext stays useless forever, including against quantum computers. This is the only use that is information-theoretically secure end to end.
+The meetup demo. Members post encrypted messages to the public feed (the Numbers Station). Anyone who records the feed today and waits for a bigger computer, even a quantum one, still gets nothing. This is the only use where that guarantee holds end to end.
 
 ### 2.2 Approvals that do not depend on public-key crypto
 
-An `approve` message carries the SHA-256 of an action. A verifier that holds the pad checks the one-time tag. A Turnkey policy can require one of these alongside a passkey (handoff 10.4). In a world where signatures break, the approval still stands.
+An `approve` message carries the hash of an action, such as a transaction. A verifier that holds the pad checks the seal. A policy engine can require one of these next to a passkey or a signature. If signatures are ever broken, the approval still stands, because it never relied on one.
 
 ### 2.3 Encrypting files to a circle
 
-`age -r cahoots:<circle>` wraps the file key with a 32-byte pad PSK. Two laptops that share a circle can exchange gigabytes with one ceremony. Each file spends a fresh offset, so a leaked file key reveals nothing about other files.
+`age -r cahoots:<circle>` wraps the file key with 32 pad bytes. Two laptops that share a circle can exchange gigabytes after one ceremony. Each file spends fresh bytes, so a leaked file key reveals nothing about other files.
 
 ### 2.4 Hedging ordinary tunnels: WireGuard, TLS, MLS
 
@@ -34,11 +34,11 @@ WireGuard's `PresharedKey` is the clearest case. The WireGuard paper describes i
 
 ### 2.5 Recovery circles
 
-A dealer device Shamir-splits a recovery secret at the ceremony and hands each member a share over the touch link (handoff 10.5). Recovery means k people meet again, or send their shares as pure-pad messages. Social recovery backed by in-person trust.
+At the ceremony, one device splits a recovery secret into shares (Shamir's scheme) and hands each member one over the touch link. To recover, enough of those people meet again, or send their shares as pure-pad messages. It is social recovery, where the people are the ones you met in person.
 
 ### 2.6 Bootstrapping networks
 
-This is the use the rest of this document is about. The claim is simple: **a circle is a trust root for a network**, built in a room instead of downloaded from a certificate authority.
+This is the use the rest of this document is about. Every network has to start from something its members trust: a certificate authority's root, a coordination server's key, a vendor's signing key. Call that the network's starting trust. Today it is always downloaded from somewhere. **A circle can be that starting trust instead**, and it was made in a room by the people who run the network.
 
 ## 3. Bootstrapping a WireGuard network
 
@@ -46,7 +46,7 @@ This is the use the rest of this document is about. The claim is simple: **a cir
 
 To set up a WireGuard tunnel between two machines, you need three things: each side's public key, each side's endpoint and allowed IPs, and, optionally, a pre-shared key. All three travel over some channel before the tunnel exists. In practice that channel is a chat message, a wiki page, or a coordination server. Each of those is a place where a key can be swapped or read.
 
-A circle removes the channel. Members touch devices once. From then on they have an authenticated, confidential path to each other that does not depend on any network or any public key.
+A circle removes the channel. Members touch devices once. From then on each of them can send the others a message that is private and provably from inside the group, with no network and no public key involved.
 
 ### 3.2 How it works
 
@@ -83,7 +83,7 @@ Both are fine when one operator runs every node. Call this the **fleet profile**
 
 Mesh networks have the bootstrap problem in its purest form. There is no internet to fetch a certificate from. Nodes join and leave. Links are slow, lossy, and sometimes one-way. Deployments happen in the field, by people with a bag of hardware. And the communities that build them, off-grid radio, disaster response, neighbourhood networks, already meet in person.
 
-The deployment story writes itself. The install crew runs the ceremony at the trailhead or in the van. Each node's badge, or the node itself, holds a slice. Nodes then come up on the roof with every key they need and no network trust at all.
+So the install goes like this. The crew runs the ceremony at the trailhead or in the van. Each node's badge, or the node itself, holds a part of the pad. The nodes then come up on the roof with every key they need, having trusted nothing from the network.
 
 ### 4.2 Where the pad bytes go
 
@@ -103,9 +103,9 @@ Each mesh stack has a slot that a circle can fill. The slot decides the mode.
 
 Three things make mesh bootstrap harder than WireGuard between two servers.
 
-1. **Nodes have no screen and no operator at join time.** A node mounted on a roof cannot read check words. The badge does the ceremony; the node receives its slice afterwards over USB or the touch link. That transfer is a pad-to-node provisioning step that the protocol needs to name. Draft: the node's slice is written to the node's pad partition and the badge erases its copy, the same move as a recovery share (handoff 10.5).
+1. **Nodes have no screen and no operator at join time.** A node mounted on a roof cannot read check words. The badge does the ceremony; the node receives its slice afterwards over USB or the touch link. That transfer is a pad-to-node provisioning step that the protocol needs to name. Draft: the node's part of the pad is written to the node's storage and the badge erases its copy, the same move as handing over a recovery share.
 2. **Links are lossy.** Circle messages over LoRa need the fountain-coded framing the phone client uses for QR. The `raptorq` packets are already sized for that.
-3. **Nodes join after the ceremony.** Adding a member without a new ceremony is out of scope for v1 (handoff section 5). The practical answer today is to run the ceremony with a spare slice held by the operator's badge and hand that slice to the new node. The spare is a planned member, not an extension of the pad.
+3. **Nodes join after the ceremony.** Adding a member without a new ceremony is out of scope for v1. The practical answer today is to run the ceremony with a spare slice held by the operator's badge and hand that slice to the new node. The spare is a planned member, not an extension of the pad.
 
 ### 4.4 The Numbers Station over LoRa
 
@@ -126,12 +126,12 @@ A `control` message's plaintext begins with one subtype byte.
 | `2` | `rotate` | `purpose (u8) | peer_a (u8) | peer_b (u8) | not_after (u64 unix seconds)` |
 | `3` | `slice-transfer` | `member (u8)`. Announces that the member's slice now lives on a node, not a badge. Informational. |
 
-The `context` bound into the PSK HKDF salt (handoff 10.3) is the `purpose` byte followed by the two peer indices, so a PSK issued for WireGuard between A and B cannot be reused for TLS or for another pair.
+The `context` bound into the PSK HKDF salt is the `purpose` byte followed by the two peer indices, so a PSK issued for WireGuard between A and B cannot be reused for TLS or for another pair.
 
 ### 5.2 The fleet profile and the federation profile
 
 - **Fleet profile** (v1): one group pad, as specified. One operator, or a group that trusts every member with every tunnel. All of sections 3 and 4 work in this profile.
-- **Federation profile** (later): at the ceremony, every pair of devices also touches directly and runs a two-member sub-ceremony. Each pair holds a **pairwise pad** that nobody else has. Pairwise pads give sender authenticity (handoff 3.8 lists this as out of scope for v1) and keep each tunnel's PSK private to its two ends. The cost is `n(n-1)/2` touches, which is 28 for eight members. The group pad stays for circle-wide messages.
+- **Federation profile** (later): at the ceremony, every pair of devices also touches directly and runs a two-member sub-ceremony. Each pair holds a **pairwise pad** that nobody else has. Pairwise pads prove which member sent a message (out of scope for v1 otherwise) and keep each tunnel's key private to its two ends. The cost is `n(n-1)/2` touches, which is 28 for eight members. The group pad stays for circle-wide messages.
 
 The federation profile is the version that scales from "my boxes" to "our neighbourhood network".
 
@@ -144,22 +144,24 @@ The federation profile is the version that scales from "my boxes" to "our neighb
 
 A node provisioned this way holds the whole pad, as any member does. The federation profile changes this to the node's pairwise pads only.
 
-## 6. The thesis, restated for networks
+## 6. The point, for networks
 
-Every network today bottoms out in a trust root someone downloaded: a CA bundle, a coordination server's key, a vendor's signing key. Cahoots offers a trust root you built with people you could see. In the Pessiland story, pad couriers are the new certificate authorities. For a mesh network on a hillside, that is not a thought experiment. It is the only option that works with no uplink.
+Every network today starts from a secret that someone downloaded and chose to trust: a certificate authority's root, a coordination server's key, a vendor's signing key. If that secret is bad, as the eMudhra keys were, everything built on it is bad, and nobody in the network can tell.
 
-Turnkey's piece is unchanged: a node that lives in the cloud, a gateway or exit node, holds its slice in TVC under a pinned policy, and every PSK it issues or accepts is in the anchored log.
+Cahoots replaces that downloaded secret with one the members made together, in the same room, on devices they can inspect. Nobody outside the room has seen it, so there is nothing for a third party to get wrong. For a mesh network on a hillside with no uplink, this is not a philosophical preference. It is the only way the network can start at all.
+
+A node that lives in the cloud, such as a gateway, can still take part: it holds its part of the pad inside a secure enclave under a policy the group pinned, and every key it issues or accepts is written to a log that cannot be rewritten.
 
 ## 7. Other properties worth building on
 
-These follow from having a shared random tape with a ledger. Each is cheap because the pad does the work.
+These follow from having shared random bytes and a record of which ones were used. Each is cheap because the pad does the work.
 
 1. **Spoken challenge words.** Spend 4 bytes, map them to two BIP-39 words, and both sides say them at the start of a call. No voice clone can produce them. One `words` command in the client.
 2. **Sender-anonymous messages.** The tag proves some member wrote a message, not which. Reserve a shared anonymous region where members spend at random offsets and treat a collision there as a retry, and the circle has anonymous votes with information-theoretic strength. This is a protocol version 2 change, because it alters the reuse rule for one region.
 3. **Perfect deniability after erasure.** For any ciphertext and tag there is a pad that decrypts it to any plaintext of the same length, including a Poly1305 key that reproduces the tag. Once the real bytes are erased, no transcript proves what was said. This holds only for human-only circles. The threat model should say so, and a "forge a transcript" tool makes it believable.
-4. **Liveness beacons and a dead man's switch.** A daily pad-authenticated counter is an honest warrant canary. With Shamir shares held in TVC and a policy that releases them when beacons stop, it becomes continuity planning with an attested release.
-5. **SSH bootstrap.** Peer announcements carry host and user keys. A helper writes `known_hosts` and `authorized_keys`. Trust-from-the-room replaces trust-on-first-use.
-6. **Fair draws.** Pad bytes spent in order are a shared random tape nobody chose. Lotteries and leader election with no server.
+4. **Proof of life and a dead man's switch.** A daily counter sealed with the pad proves the sender is still there and still free. Hold recovery shares in an enclave with a policy that releases them when the daily messages stop, and it becomes a continuity plan with a verifiable trigger.
+5. **SSH setup.** Peer announcements carry host and user keys. A helper writes `known_hosts` and `authorized_keys`. Today SSH trusts a host's key the first time it sees it and hopes nobody was in the way. With a circle, the key was vouched for by someone in the room.
+6. **Fair draws.** Pad bytes used in order are random numbers that everyone holds and nobody chose. That gives lotteries and leader election with no server to trust.
 7. **Ciphertext that looks like noise.** Pure-pad ciphertext is uniform. Hiding the circle ID behind a salted hash makes the whole message indistinguishable from random bytes, so it can be posted anywhere. Also a version 2 format change.
 
 ## 8. Circle apps: programmable logic without touching the pad

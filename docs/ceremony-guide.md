@@ -7,7 +7,7 @@ A draft for meetup hosts. It will be finished in M7, after the first ceremonies 
 ## Before
 
 1. Every member charges their badge or phone.
-2. The leader picks a circle name, the member count, and whether the circle seats an agent. If it does, the software says so before anyone confirms: that circle trusts the enclave with its pad.
+2. The leader picks a name, the member count, and whether the circle gives a seat to a hosted software member. If it does, the software says so before anyone confirms: that circle trusts the enclave with its secret.
 3. Members who want YubiKey entropy run `cahoots-yk` on a laptop and load the bytes onto their device first.
 
 ## During

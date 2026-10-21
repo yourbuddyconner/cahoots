@@ -1,12 +1,12 @@
 # Device tiers: concentric rings of security
 
-Cahoots is open hardware and open protocol. Anyone can build a badge from whatever is on their bench, and a phone works with no hardware at all. The badge Turnkey makes is the fully verified one. These tiers say what each kind of device protects, so that members know what they are getting and the software never claims more than the weakest device in the room can deliver.
+Cahoots is open hardware and open protocol. Anyone can build a badge from whatever is on their bench, and a phone works with no hardware at all. The badge we make is the fully verified one. These tiers say what each kind of device protects, so that members know what they are getting and the software never claims more than the weakest device in the room can deliver.
 
 ## The rule that makes tiers matter
 
 Every member holds the whole pad. A circle's protection against device theft or tampering is therefore the protection of its **least protected member**. The circle tier is the minimum of its members' device tiers, and the ceremony shows it before anyone confirms.
 
-The randomness label (`TRNG` or `CSPRNG`, handoff 3.3) is a separate axis and is also a minimum over members. A circle carries both.
+The randomness label (`TRNG` when every device used hardware randomness, `CSPRNG` otherwise) is a separate question, and it is also decided by the weakest member. A circle carries both labels.
 
 ## The tiers
 
@@ -20,7 +20,7 @@ The randomness label (`TRNG` or `CSPRNG`, handoff 3.3) is a separate axis and is
 | **T3 Key store** | A chip with a hardware key store, one-way counters, and a crypto engine that never exposes keys: the Baochip-1x | The pad-wrapping key never leaves the engine. Failed PINs burn a one-way counter. After N failures the slot is erased and the pad with it. Boot stages lock the slot before the application runs | Physical attacks on the die. Flaws in the key-store controller, which must be verified against the RTL (see `docs/plan.md`, M5). |
 | **T4 Inspected** | A T3 device whose silicon a member has compared with the published design under an infrared microscope, running firmware whose hash the circle pinned | The chip is what the RTL says it is. The firmware is what the circle agreed to | Supply-chain attacks between inspection and use. The inspection itself is a skill. |
 
-The Turnkey badge targets T3 at launch and T4 for anyone willing to look.
+Our badge targets T3 at launch and T4 for anyone willing to look.
 
 ## What each tier changes in the software
 

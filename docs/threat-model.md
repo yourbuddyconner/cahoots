@@ -3,8 +3,8 @@
 ## Covered
 
 - **A network attacker** sees ciphertext and lengths. They can't read messages or change them undetected. Confidentiality comes from the pad. Integrity comes from the one-time Poly1305 tag.
-- **The Numbers Station operator and the TVC host** can drop or delay messages. They can't read or forge messages in human-only circles. Log anchoring prevents rollback and forked views.
-- **A compromised Cahoots enclave** exposes only circles that seat an agent.
+- **Whoever runs the feed, and whoever hosts the enclave,** can drop or delay messages. They can't read or forge messages in a circle made only of people. Because the head of the log is anchored, they also can't quietly remove entries or show different members different histories.
+- **A compromised enclave** exposes only the circles that gave a hosted software member a seat.
 - **A malicious member** can't bias the pad during the ceremony, because of commit-then-reveal.
 - **A replayed message** is detected by the spent-range ledger and flagged as possible reuse.
 
@@ -20,7 +20,7 @@
 
 - **Confidentiality.** For a `TRNG` circle: secure against unlimited computing power, as long as pad bytes are never reused. For a `CSPRNG` circle: computationally secure.
 - **Integrity inside the circle.** Information-theoretic, through the one-time Poly1305 key.
-- **The agent policy and the square log** rely on TVC attestation and signatures. That is ordinary modern cryptography. The pad is the layer that does not depend on math. TVC is the layer that governs the agent.
+- **The hosted member's policy and the feed's log** rely on enclave attestation and signatures. That is ordinary modern cryptography. The pad is the layer that does not depend on math. The enclave is the layer that governs the hosted member.
 
 ## Randomness
 

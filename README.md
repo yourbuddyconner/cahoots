@@ -1,6 +1,6 @@
 # Cahoots
 
-Cahoots is in-person key agreement and rotation for the protocols you already run. A group meets once, builds a shared pad of random bytes with hardware badges or phones, and then spends those bytes as keys: for WireGuard tunnels, encrypted files, group chat, approvals, and for short messages that no amount of computing power can read.
+Cahoots makes encryption keys in person. A group meets once, builds a shared pad of random bytes with hardware badges or phones, and then spends those bytes as keys for the tools it already runs: WireGuard tunnels, encrypted files, group chat, approvals, and short messages that no amount of computing power can read. Keys rotate from the pad for years with no server in between.
 
 ## The mental model
 
