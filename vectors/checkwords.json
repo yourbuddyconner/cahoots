@@ -1,0 +1,54 @@
+{
+  "cases": [
+    {
+      "check_words": [
+        "attend",
+        "index",
+        "system",
+        "icon",
+        "lawn",
+        "visual"
+      ],
+      "circle_id": "44ae3e564527b55fd0e9f7175b17bfcd",
+      "pad": "bc049454e0a02f53ed5b4e350b51acd94c8ca7e6ef33ca3aa3befe697a703037702d8bfc55d419f05a260666b01aa309d90a19374b3a226a470205f38a2f9d7470a05dbab0526007b7de819edd059dbbaf27224569c060c090c9c2e0112d7634"
+    },
+    {
+      "check_words": [
+        "chief",
+        "reduce",
+        "slam",
+        "super",
+        "future",
+        "estate"
+      ],
+      "circle_id": "89867a6d8a37fe6fb3546cbcf0993557",
+      "pad": "9bc70093f67878f5fe23b773c8d468b158305cd52bf1e6773eff62168a563eec9b8098b156582f21ebc76d3ded05a468291ffa4705c960602e114976ad1e97676ca66e5d39f802c5cb2f953a2366d8fbf79e9265c6ec792118f3639ebe9c7f5b"
+    },
+    {
+      "check_words": [
+        "risk",
+        "kidney",
+        "gasp",
+        "current",
+        "shop",
+        "lens"
+      ],
+      "circle_id": "ed18091cf9477ca505ebf662c7eb92c8",
+      "pad": "a515f351f4b3d4ea25a9089ae86cadc2669a349a7fbd2cdf31f44557daa34003237adebb00083f1f4ffbf57a4f4d29c1e924c9fdb572f185cf4bb3bb8b88b1768732fd83f72a9ed1e6ec4e8097a58c7379029d0cd6f0ec186d2295e13781b0cd"
+    },
+    {
+      "check_words": [
+        "upper",
+        "little",
+        "poverty",
+        "winter",
+        "stove",
+        "fetch"
+      ],
+      "circle_id": "1e873e429a9b9c3a7a3296a4b49cf85f",
+      "pad": "c90a34116e009a2e88d3901023bb65e31b2851c16da24e35353ea99dbdfd57374b9f6318a6963dba4e8a4010afb1a278627a053f51554dd8b2c8d5e0c8e1a0ae8d0347ad1e02db06c6d91af63ec84c169a5cb3b1b6961b09c826af5d36bcd82e"
+    }
+  ],
+  "description": "check = SHA-256(\"cahoots/check/v1\" || params || pad); first 66 bits as six 11-bit big-endian BIP-39 English indices. circle_id = SHA-256(\"cahoots/circle-id/v1\" || pad)[..16].",
+  "params_encoded": "0102600000000105776f726473"
+}

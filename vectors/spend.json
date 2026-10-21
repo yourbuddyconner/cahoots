@@ -1,0 +1,45 @@
+{
+  "circle_id": "2e6d951568cbdff2859a57f23920e3bd",
+  "description": "Spend ordering. Sender: read range, mark spent (durable), erase, then seal. Receiver: reject overlap with ledger, verify tag, decrypt, mark spent, erase.",
+  "pad": "783b1416caaf82a6d7a90cd80c10c892ca9816591a2effb38b542adf2666225bd70fb3d4316dc1c0958a8fb48e31a200261bb09109843b88772bc6f725ddd9de633eed2f7063c2b10c528cb8bded8436568f1dfcf8da45a0b11a7b3f39f9575ebf69e345837d3499b633afc138e3ab73b9f058e1146fb6b8627ce82f03f4815513491e6aebbb2e0b8dc96c4cc75973a33a72e8426222ed12baf46c0967fc7db85c5ad597eab00e353b8fcae390119da4f66a268f900998fe80c015a8e98c777d27b4a23528f8cb9b4718d5aa3fb1341011d5f0fa20be8685a114d401877d6c972261c5b9e53e81223eb2ed2758b8c773c94e7e364b3238b05d441b88fddb6564",
+  "params_encoded": "01020001000000057370656e64",
+  "receiver_ledger_slice_0_after": [
+    [
+      0,
+      37
+    ],
+    [
+      37,
+      75
+    ]
+  ],
+  "receiver_replay_of_first": "reject: reuse (checked before the tag)",
+  "sender_state_after": {
+    "ledger_slice_0": [
+      [
+        0,
+        37
+      ],
+      [
+        37,
+        75
+      ]
+    ],
+    "slice_0_bytes_0_to_75": "all zero"
+  },
+  "sends_from_slice_0": [
+    {
+      "message": "012e6d951568cbdff2859a57f23920e3bd0000000000050000b166c1a7452e3168348830a3af45c4e09ca6472af3",
+      "offset": 0,
+      "plaintext": "6669727374",
+      "spend_len": 37
+    },
+    {
+      "message": "012e6d951568cbdff2859a57f23920e3bd002500000006000010a7d2633ce8f382180264371062b6c97fbdb9077fae",
+      "offset": 37,
+      "plaintext": "7365636f6e64",
+      "spend_len": 38
+    }
+  ],
+  "slice_len": 128
+}

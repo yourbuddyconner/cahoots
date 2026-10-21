@@ -1,0 +1,25 @@
+[package]
+name = "cahoots-core"
+description = "Cahoots protocol core: ceremony, pad combine, message codec, spent ledger. no_std + alloc."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["std"]
+std = ["sha2/std", "zeroize/std", "serde?/std"]
+serde = ["dep:serde"]
+
+[dependencies]
+sha2 = { workspace = true }
+poly1305 = { workspace = true }
+subtle = { workspace = true }
+zeroize = { workspace = true, features = ["alloc", "derive"] }
+crc = { workspace = true }
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+hex = { workspace = true }
+proptest = { workspace = true }

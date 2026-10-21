@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "frame": "010000000000000000ed0072f1",
+      "payload": "",
+      "seq": 0,
+      "type": 1
+    },
+    {
+      "frame": "0207000000280000002884c6e9b1cfe2126891b75846841957b4ce7cf869190c8e23d6c23e42e31c9eebb6154519702f40a7cb2528",
+      "payload": "2884c6e9b1cfe2126891b75846841957b4ce7cf869190c8e23d6c23e42e31c9eebb6154519702f40",
+      "seq": 7,
+      "type": 2
+    }
+  ],
+  "description": "Touch-link frame: type (u8) | seq (u32 LE) | len (u32 LE) | payload | CRC-32 (IEEE 802.3, LE) over everything before it."
+}

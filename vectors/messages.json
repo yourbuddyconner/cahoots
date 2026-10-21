@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "message": "018724ece462921962020862d047b94ffa00000000000c00008f8eeba3daec06c54f73a179ec4a9d5ac0a559ae2ac5fb06cc31a24b",
+      "msg_type": 0,
+      "offset": 0,
+      "pad_range": "1a38f7bc7d4a857bdec093054fd6bcd219f72b6ddc245e2bf82d6da2f6e5efb2e7eb87cfb5cc65ac3d10cd1c",
+      "plaintext": "68656c6c6f20636972636c65",
+      "slice": 0
+    },
+    {
+      "message": "018724ece462921962020862d047b94ffa01e80300002000012eb531c7a8b521fd892897baa81f0457451a829194df22547e16056c45c87485cce7460506944d6b16fbebcc10a09b4c",
+      "msg_type": 1,
+      "offset": 1000,
+      "pad_range": "bfa4addef553a7a3589b7d1836f8ee7487bbd61929f413654eb18dd69f29b1c89b70f8f88fb6153b5ac37453e192be1b1cf9cb1be8a6dc1aa1d3c376770de2fd",
+      "plaintext": "b5c5c93f270334c6d3ebe3e9498dba4c59e3498a7c79fe4edfc5c61a32c59678",
+      "slice": 1
+    },
+    {
+      "message": "018724ece462921962020862d047b94ffa02d0070000000002cd133866737f00508e399a2bf9a7940e",
+      "msg_type": 2,
+      "offset": 2000,
+      "pad_range": "5c795cacb00ff4941d9781bfabec331cb894f0f73d420174edaae5ea8094b7fb",
+      "plaintext": "",
+      "slice": 2
+    },
+    {
+      "message": "018724ece462921962020862d047b94ffa03b80b00002000033f0cb17210b5f92efdcd9ceaf22bcc5299ba7bfb55f3c2cb05435335d61155311d8ed3a286f80e46b6811eeac06191ce",
+      "msg_type": 3,
+      "offset": 3000,
+      "pad_range": "2dd509f2aeb6f793cd2f63470f23c009f169c22901cafaa4d018eb8eb02a74684f6dd51675d1f92efdcd9ceaf22bcc5299ba7bfb55f3c2cb05435335d6115537",
+      "plaintext": "7061646465640000000000000000000000000000000000000000000000000006",
+      "slice": 3
+    }
+  ],
+  "circle_id": "8724ece462921962020862d047b94ffa",
+  "description": "message = header(25) || ct || Poly1305(key, header || ct). key = range[0..32], stream = range[32..]. All integers little-endian.",
+  "tag_failure": {
+    "expected": "reject: tag mismatch; nothing is marked spent",
+    "message": "018724ece462921962020862d047b94ffa0007000000090000e92b47727e6f327c2695d90a9de385d9bffb81aa3c70f93a37",
+    "pad_range": "c7764a4649d10794b31c11748bc68f4943ad4b968f6db636b389f9e06a01df9280453317191d5b085f",
+    "tampered": "018724ece462921962020862d047b94ffa0007000000090000692b47727e6f327c2695d90a9de385d9bffb81aa3c70f93a37"
+  }
+}

@@ -1,0 +1,8 @@
+/target
+**/target
+Cargo.lock.bak
+*.bin
+*.pad
+.DS_Store
+/web/node_modules
+/web/dist

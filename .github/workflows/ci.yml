@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  check:
+    name: fmt, clippy, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown, thumbv7em-none-eabi
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - name: core builds no_std (thumbv7em)
+        run: cargo build -p cahoots-core --no-default-features --target thumbv7em-none-eabi
+      - name: core builds for wasm32
+        run: cargo build -p cahoots-core --target wasm32-unknown-unknown
+      - name: vectors are up to date
+        run: |
+          cargo run -p cahoots-vectors -- --check
