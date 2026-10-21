@@ -11,6 +11,8 @@ members = [
     "crates/hpke",
     "crates/wireguard",
     "crates/age-plugin-cahoots",
+    "crates/chat",
+    "crates/station",
 ]
 exclude = ["crates/fuzz"]
 # Not workspace members: crates/esp32s3 (needs the esp toolchain), crates/dabao (built with
@@ -28,6 +30,8 @@ repository = "https://github.com/yourbuddyconner/cahoots"
 cahoots-core = { path = "crates/core", default-features = false }
 cahoots-hal = { path = "crates/hal" }
 cahoots-provider = { path = "crates/provider" }
+cahoots-chat = { path = "crates/chat", default-features = false }
+cahoots-station = { path = "crates/station" }
 sha2 = { version = "0.10", default-features = false }
 poly1305 = { version = "0.8", default-features = false }
 subtle = { version = "2.6", default-features = false }

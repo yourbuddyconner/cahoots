@@ -1,0 +1,10 @@
+[package]
+name = "cahoots-station"
+description = "The Numbers Station: an append-only, hash-chained public relay for circle ciphertext. Built as a TVC workload."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cahoots-core = { workspace = true, features = ["std"] }
