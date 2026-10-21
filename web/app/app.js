@@ -34,6 +34,9 @@ const friendly = (e) => {
   if (m && m[1] === 'conflicting-commit') return `Two different people are using seat ${Number(m[2]) + 1}. One of them needs to leave and rejoin with another seat.`;
   if (m && m[1] === 'commit-mismatch') return `Seat ${Number(m[2]) + 1}'s reveal does not match their commitment.`;
   if (m && m[1] === 'bad-index') return 'That code is for a different group size.';
+  const m2 = s.match(/^(corrupted|bad-key):(\d+)$/);
+  if (m2 && m2[1] === 'corrupted') return 'That scan came through garbled. Scan it again.';
+  if (m2 && m2[1] === 'bad-key') return `Seat ${Number(m2[2]) + 1}'s code is not valid. Ask them to show it again.`;
   return s;
 };
 const CHAT_LABEL = 'End-to-end encrypted, pad-hedged';
@@ -294,12 +297,31 @@ function fountainReceiver(onDone, hint, onTagged = null) {
 }
 
 // ---------------------------------------------------------------- text/file codecs
+// Text forms, for paste and files. A commitment is 32 bytes of hash plus the member's 1216-byte
+// KEM public key; it carries the circle parameters too, so scanning any member is enough to join.
+// A reveal is a sealed blob, encrypted to every other member (crates/core/src/reveal.rs).
 const enc = {
   params: (bytes) => `cahoots-params:${b64_encode(bytes)}`,
-  // A commitment carries the circle parameters too, so scanning any member's commitment is enough to join.
   commit: (i, bytes, params) => `cahoots-commit:${i}:${b64_encode(bytes)}${params ? ':' + b64_encode(params) : ''}`,
   reveal: (i, bytes) => `cahoots-reveal:${i}:${b64_encode(bytes)}`,
 };
+// Binary forms, for the animated code: a type byte, then the same content.
+const PACK = { commit: 1, reveal: 2 };
+function packCommit(i, params, bytes) {
+  const out = new Uint8Array(3 + params.length + bytes.length);
+  out[0] = PACK.commit; out[1] = i; out[2] = params.length;
+  out.set(params, 3); out.set(bytes, 3 + params.length);
+  return out;
+}
+function packReveal(bytes) { const out = new Uint8Array(bytes.length + 1); out[0] = PACK.reveal; out.set(bytes, 1); return out; }
+/** Decode an animated transfer into the same shape parseTagged gives. */
+function parsePacked(bytes) {
+  if (bytes[0] === PACK.commit) { const plen = bytes[2]; return { kind: 'commit', index: bytes[1], params: bytes.subarray(3, 3 + plen), bytes: bytes.subarray(3 + plen) }; }
+  if (bytes[0] === PACK.reveal) { return { kind: 'reveal', index: bytes[2], params: null, bytes: bytes.subarray(1) }; }
+  return null;
+}
+/** Our sealed reveal. Built once by the core; the randomness is only drawn the first time. */
+const revealOf = (c) => c.reveal(crypto.getRandomValues(new Uint8Array(c.reveal_randomness_len())));
 function parseTagged(text) {
   const m = text.trim().match(/^cahoots-(params|commit|reveal):(?:(\d+):)?([A-Za-z0-9_-]+)(?::([A-Za-z0-9_-]+))?$/);
   if (!m) return null;
@@ -309,10 +331,8 @@ function paramsFromBytes(b) {
   if (b[0] !== 1) throw 'unknown version';
   return { n: b[1], pad_len: new DataView(b.buffer, b.byteOffset).getUint32(2, true), agent_seat: b[6] === 1, name: utf8d.decode(b.subarray(8, 8 + b[7])) };
 }
-const packReveal = (i, bytes) => { const out = new Uint8Array(bytes.length + 1); out[0] = i; out.set(bytes, 1); return out; };
 const paramsHash = (params) => b64_encode(utf8.encode(JSON.stringify(params)));
 let pendingCommits = [];   // commitments scanned before this device's ceremony object exists
-let pendingReveals = new Map(); // reveals that arrived before every commitment was in
 let ceremony = null;       // in-memory only: { c, params, label, mode }
 
 // ================================================================ screens
@@ -365,22 +385,22 @@ function screenNew() {
 
 function screenJoin() {
   const err = status();
-  const take = (text) => {
+  const accept = (t) => {
     try {
-      const t = parseTagged(text);
       if (!t) throw 'That is not a Cahoots code.';
-      if (t.kind === 'reveal') throw 'That is a reveal code. You need a commitment code: ask them to go back to step 1.';
-      if (t.kind === 'commit' && !t.params) throw 'That code has no setup in it. Scan the leader instead.';
+      if (t.kind === 'reveal') throw 'That is a step-2 animation. Join from someone still on step 1, or from the host.';
+      if (t.kind === 'commit' && !t.params) throw 'That code has no setup in it. Scan the host instead.';
       const params = paramsFromBytes(t.kind === 'params' ? t.bytes : t.params);
-      if (t.kind === 'commit') pendingCommits = [{ index: t.index, bytes: t.bytes }];
+      if (t.kind === 'commit') pendingCommits = [{ index: t.index, bytes: new Uint8Array(t.bytes) }];
       buzz();
       go(`#/ceremony/${paramsHash(params)}/pick`);
     } catch (e) { err.textContent = friendly(e); }
   };
+  const take = (text) => accept(parseTagged(text));
   screen({
     title: 'Join a ceremony', back: '#/',
     menu: () => sheet(h('h2', {}, 'No camera?'), btn('Paste a code', () => pasteSheet('cahoots-commit:…', take)), fileBtn('Load a file', take)),
-    body: [next('Point the camera at the screen of someone who has already joined.'), camera(take, 'Fill the frame with their code'), err],
+    body: [next('Point the camera at the screen of someone who has already joined. Hold still: their code is a short animation.'), fountainReceiver((bytes) => accept(parsePacked(bytes)), 'Fill the frame with their animation', take).el, err],
     actions: [link('No camera? Paste a code', () => pasteSheet('cahoots-commit:…', take))],
   });
 }
@@ -423,7 +443,7 @@ function screenPick(params) {
         if (extra && extra.length !== params.pad_len) throw `The hardware file must be exactly ${params.pad_len} bytes, got ${extra.length}.`;
         const contribution = new Uint8Array(params.pad_len);
         for (let o = 0; o < contribution.length; o += 65536) crypto.getRandomValues(contribution.subarray(o, Math.min(o + 65536, contribution.length)));
-        const c = new Ceremony(params.n, params.pad_len, params.name, params.agent_seat, idx, contribution, extra ?? undefined);
+        const c = new Ceremony(params.n, params.pad_len, params.name, params.agent_seat, idx, contribution, extra ?? undefined, crypto.getRandomValues(new Uint8Array(32)));
         ceremony = { c, params, label: extra ? 'TRNG' : 'CSPRNG', mode: 'show' };
         go(`#/ceremony/${paramsHash(params)}/run`);
       } catch (e) { err.textContent = friendly(e); }
@@ -441,10 +461,6 @@ function screenRun(params) {
   const me = c.index();
   for (const p of pendingCommits) { if (p.index !== me) { try { c.add_commitment(p.index, p.bytes); } catch (e) { /* shown as waiting */ } } }
   pendingCommits = [];
-  if (c.phase() === 'reveal') {
-    for (const [i, bytes] of pendingReveals) { try { c.add_reveal(i, bytes); } catch (e) { /* re-shown as waiting */ } }
-    pendingReveals = new Map();
-  }
   const phase = c.phase();
   if (phase === 'aborted') {
     ceremony = null;
@@ -467,43 +483,35 @@ function screenRun(params) {
     const left = [...missing].filter((i) => i !== me);
     if (!left.length) { waiting.textContent = 'All in. Moving on.'; return; }
     waiting.textContent = phase === 'commit'
-      ? `Show this code to ${left.map(seatName).join(' and ')}, and scan whatever they show you: a code or an animation. Any order.`
+      ? `Show this to ${left.map(seatName).join(' and ')}, and scan theirs. Any order. Hold still: each one takes a moment.`
       : `Let ${left.map(seatName).join(' and ')} scan this animation. When they show you theirs, scan it.`;
   };
   const got = (i, what) => { buzz(); toast(`Got seat ${i + 1}'s ${what}`, 'ok'); refresh(); };
-  const feedText = (text) => {
+  // A sealed reveal that arrives before its commitment stands in for it; the core handles that.
+  const accept = (t) => {
     try {
-      const t = parseTagged(text);
       if (!t || t.kind === 'params') return;
-      if (t.index === me) { st.textContent = `That code is for seat ${me + 1}, which is yours. If someone else chose seat ${me + 1} too, one of you must leave and rejoin with another seat.`; return; }
+      if (t.index === me) { st.textContent = `That is seat ${me + 1}'s, which is yours. If someone else chose seat ${me + 1} too, one of you must leave and rejoin with another seat.`; return; }
       if (t.kind === 'commit') { c.add_commitment(t.index, t.bytes); got(t.index, 'commitment'); }
-      else if (t.kind === 'reveal') { acceptReveal(t.index, t.bytes); got(t.index, 'reveal'); }
+      else if (t.kind === 'reveal') { c.add_reveal(t.index, t.bytes); got(t.index, 'reveal'); }
     } catch (e) { st.textContent = friendly(e); if (c.phase() === 'aborted') rerender(); }
   };
-  // A reveal fixes its commitment, so a member that has not revealed yet may take a late
-  // reveal as both. The reveal itself is applied once every commitment is in.
-  const acceptReveal = (i, bytes) => {
-    if (c.phase() === 'commit') { c.add_commitment(i, c.commitment_for(i, bytes)); pendingReveals.set(i, bytes); }
-    else c.add_reveal(i, bytes);
-  };
-  const feedBytes = (bytes) => {
-    try { if (bytes[0] === me) { st.textContent = 'That is your own seat\'s animation.'; return; } acceptReveal(bytes[0], bytes.subarray(1)); got(bytes[0], 'reveal'); }
-    catch (e) { st.textContent = friendly(e); if (c.phase() === 'aborted') rerender(); }
-  };
+  const feedText = (text) => accept(parseTagged(text));
+  const feedBytes = (bytes) => accept(parsePacked(bytes));
 
   let show, text, fileName;
-  // One camera for both steps: a single code (commitment) and an animation (reveal) are both accepted,
-  // because a member who is ahead shows an animation while this one is still collecting commitments.
-  const scanStage = () => fountainReceiver(feedBytes, phase === 'commit' ? 'Fill the frame with their code or animation' : 'Fill the frame with their animation', feedText).el;
+  // One camera for both steps: commitments and reveals are both animations now, and a member
+  // who is ahead shows a reveal while this one is still collecting commitments.
+  const scanStage = () => fountainReceiver(feedBytes, 'Fill the frame with their animation', feedText).el;
   if (phase === 'commit') {
     text = enc.commit(me, c.commitment(), c.params_bytes());
     fileName = `commit-${me + 1}.txt`;
-    show = panelQr(text, `seat ${me + 1} · step 1`, 'others scan this');
+    show = animatedQr(packCommit(me, c.params_bytes(), c.commitment()), `seat ${me + 1} · step 1`);
   } else {
-    const reveal = c.reveal();
+    const reveal = revealOf(c);
     text = enc.reveal(me, reveal);
     fileName = `reveal-${me + 1}.txt`;
-    show = animatedQr(packReveal(me, reveal), `seat ${me + 1} · step 2`);
+    show = animatedQr(packReveal(reveal), `seat ${me + 1} · step 2`);
   }
   const desktop = matchMedia('(min-width: 960px)').matches;
   const showWrap = h('div', { class: 'half', style: desktop || ceremony.mode === 'show' ? '' : 'display:none' }, h('p', { class: 'eyebrow' }, 'Show'), show);
@@ -534,7 +542,7 @@ function screenRun(params) {
 function screenRevealDone(params) {
   const { c } = ceremony;
   const me = c.index();
-  const reveal = c.reveal();
+  const reveal = revealOf(c);
   const text = enc.reveal(me, reveal);
   const others = Array.from({ length: params.n }, (_, i) => i).filter((i) => i !== me).map((i) => `seat ${i + 1}`).join(' and ');
   screen({
@@ -543,7 +551,7 @@ function screenRevealDone(params) {
     menu: () => sheet(h('h2', {}, 'Share your reveal another way'), copyBtn(text), downloadBtn(`reveal-${me + 1}.txt`, text)),
     body: [
       next(`Your screen has everything. ${others.charAt(0).toUpperCase() + others.slice(1)} still ${params.n > 2 ? 'need' : 'needs'} to scan this animation. Hold still until their bar fills.`),
-      animatedQr(packReveal(me, reveal), `seat ${me + 1} · step 2`),
+      animatedQr(packReveal(reveal), `seat ${me + 1} · step 2`),
     ],
     actions: [btn(params.n > 2 ? 'Everyone has scanned it' : 'They have scanned it', () => screenWords(), 'primary')],
   });
@@ -552,13 +560,13 @@ function screenRevealDone(params) {
 function screenWords() {
   const { c, label, params } = ceremony;
   const me = c.index();
-  const reveal = c.reveal(); // kept so members still collecting can scan it from here
+  const reveal = revealOf(c); // kept so members still collecting can scan it from here
   const out = c.finish(label);
   ceremony = null;
   const words = out.words().split(' ');
   const id = out.circle_id_hex();
   const revealText = enc.reveal(me, reveal);
-  const showReveal = () => sheet(h('h2', {}, 'Someone still collecting? Show them this.'), animatedQr(packReveal(me, reveal), `seat ${me + 1} · step 2`), copyBtn(revealText), downloadBtn(`reveal-${me + 1}.txt`, revealText));
+  const showReveal = () => sheet(h('h2', {}, 'Someone still collecting? Show them this.'), animatedQr(packReveal(reveal), `seat ${me + 1} · step 2`), copyBtn(revealText), downloadBtn(`reveal-${me + 1}.txt`, revealText));
   screen({
     title: 'Step 3 of 3 · Check', sub: params.name,
     menu: showReveal,

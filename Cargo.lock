@@ -380,13 +380,17 @@ dependencies = [
 name = "cahoots-core"
 version = "0.1.0"
 dependencies = [
+ "chacha20poly1305 0.10.1",
  "crc",
  "hex",
+ "hkdf 0.12.4",
+ "hybrid-array",
  "poly1305 0.8.0",
  "proptest",
  "serde",
  "sha2 0.10.9",
  "subtle",
+ "x-wing",
  "zeroize",
 ]
 

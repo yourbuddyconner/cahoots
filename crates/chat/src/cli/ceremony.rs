@@ -30,21 +30,29 @@ pub fn local_ceremony(
     for i in 0..members {
         let mut r = Zeroizing::new(std::vec![0u8; pad_len as usize]);
         getrandom::getrandom(&mut r).map_err(|e| StoreError::Io(e.to_string()))?;
+        let mut seed = Zeroizing::new([0u8; 32]);
+        getrandom::getrandom(seed.as_mut()).map_err(|e| StoreError::Io(e.to_string()))?;
         devs.push(
-            Ceremony::new(params.clone(), i, r.to_vec())
+            Ceremony::new(params.clone(), i, r.to_vec(), *seed)
                 .map_err(|e| StoreError::Format(std::format!("ceremony: {e:?}")))?,
         );
     }
-    let commits: Vec<_> = devs.iter().map(|d| d.my_commitment()).collect();
+    let commits: Vec<_> = devs
+        .iter()
+        .map(|d| (d.my_commitment(), *d.my_public_key()))
+        .collect();
     for d in devs.iter_mut() {
-        for (j, c) in commits.iter().enumerate() {
-            d.add_commitment(j as u8, *c)
+        for (j, (c, pk)) in commits.iter().enumerate() {
+            d.add_commitment(j as u8, *c, pk)
                 .map_err(|e| StoreError::Format(std::format!("commit: {e:?}")))?;
         }
     }
+    let mut fill = |buf: &mut [u8]| {
+        getrandom::getrandom(buf).expect("os randomness");
+    };
     let reveals: Vec<Vec<u8>> = devs
-        .iter()
-        .map(|d| d.my_reveal().expect("reveal phase").to_vec())
+        .iter_mut()
+        .map(|d| d.my_reveal(&mut fill).expect("reveal phase").to_vec())
         .collect();
     for d in devs.iter_mut() {
         for (j, r) in reveals.iter().enumerate() {

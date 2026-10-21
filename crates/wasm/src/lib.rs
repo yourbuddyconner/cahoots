@@ -12,6 +12,7 @@ use cahoots_core::ledger::{MemLedger, SpentLedger};
 use cahoots_core::message::{MessageError, MessageType};
 use cahoots_core::pad::{self, MemPadStorage, Pad, PadError, PadStorage};
 use cahoots_core::params::CircleParams;
+use cahoots_core::reveal::PUBLIC_KEY_LEN;
 use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
 use wasm_bindgen::prelude::*;
 use zeroize::Zeroizing;
@@ -113,6 +114,8 @@ fn ceremony_err(e: CeremonyError) -> String {
         CeremonyError::ContributionLength => "contribution-length".into(),
         CeremonyError::WrongPhase => "wrong-phase".into(),
         CeremonyError::ConflictingCommit(i) => format!("conflicting-commit:{i}"),
+        CeremonyError::BadKey(i) => format!("bad-key:{i}"),
+        CeremonyError::Corrupted(i) => format!("corrupted:{i}"),
         CeremonyError::CommitMismatch(i) => format!("commit-mismatch:{i}"),
         CeremonyError::Aborted => "aborted".into(),
     }
@@ -132,7 +135,9 @@ pub struct WasmCeremony {
 impl WasmCeremony {
     /// `contribution` is `L` bytes from `crypto.getRandomValues`. `extra` (optional) is a
     /// hardware contribution of the same length, for example from `cahoots-yk`; it is XORed in.
+    /// `kem_seed` is 32 more random bytes; it derives the key other members seal reveals to.
     #[wasm_bindgen(constructor)]
+    #[allow(clippy::too_many_arguments)] // a JavaScript-facing constructor; the arguments are the ceremony's inputs
     pub fn new(
         n: u8,
         pad_len: u32,
@@ -141,11 +146,15 @@ impl WasmCeremony {
         index: u8,
         contribution: &[u8],
         extra: Option<Vec<u8>>,
+        kem_seed: &[u8],
     ) -> Result<WasmCeremony, String> {
         let params = CircleParams::new(n, pad_len, name, agent_seat).map_err(params_err)?;
+        let seed: [u8; 32] = kem_seed
+            .try_into()
+            .map_err(|_| "kem-seed-length".to_string())?;
         let inner = match extra {
-            Some(x) => Ceremony::with_extra_source(params, index, contribution.to_vec(), &x),
-            None => Ceremony::new(params, index, contribution.to_vec()),
+            Some(x) => Ceremony::with_extra_source(params, index, contribution.to_vec(), &x, seed),
+            None => Ceremony::new(params, index, contribution.to_vec(), seed),
         }
         .map_err(ceremony_err)?;
         Ok(WasmCeremony { inner })
@@ -170,40 +179,52 @@ impl WasmCeremony {
         .into()
     }
 
+    /// Our commitment followed by our KEM public key: 32 + 1216 bytes. Public.
     pub fn commitment(&self) -> Vec<u8> {
-        self.inner.my_commitment().to_vec()
+        let mut out = self.inner.my_commitment().to_vec();
+        out.extend_from_slice(self.inner.my_public_key());
+        out
     }
 
-    /// The commitment that `contribution` from member `index` would have produced.
-    /// A member that has not revealed yet may accept a late reveal as both commitment
-    /// and reveal: that member's own contribution was still secret when the other
-    /// side committed, so commit-then-reveal still holds for it.
-    pub fn commitment_for(&self, index: u8, contribution: &[u8]) -> Vec<u8> {
-        cahoots_core::commit::commit(self.inner.params(), index, contribution).to_vec()
-    }
-
+    /// `commitment` is the 32 + 1216 bytes another member's `commitment()` returned.
     pub fn add_commitment(&mut self, from: u8, commitment: &[u8]) -> Result<(), String> {
-        let c: [u8; 32] = commitment
-            .try_into()
-            .map_err(|_| "commitment-length".to_string())?;
-        self.inner.add_commitment(from, c).map_err(ceremony_err)?;
-        // The core counts every member's reveal, including our own. Fold ours in as soon as
-        // the reveal phase opens so the UI only has to exchange the peers' reveals.
-        if self.inner.phase() == Phase::Reveal {
-            let index = self.inner.index();
-            let mine = self.inner.my_reveal().map(<[u8]>::to_vec);
-            if let Some(mine) = mine {
-                self.inner.add_reveal(index, &mine).map_err(ceremony_err)?;
-            }
+        if commitment.len() != 32 + PUBLIC_KEY_LEN {
+            return Err("commitment-length".to_string());
         }
-        Ok(())
+        let c: [u8; 32] = commitment[..32].try_into().expect("32 bytes");
+        self.inner
+            .add_commitment(from, c, &commitment[32..])
+            .map_err(ceremony_err)
     }
 
-    /// Our contribution. `None` until every commitment is held.
-    pub fn reveal(&self) -> Option<Vec<u8>> {
-        self.inner.my_reveal().map(<[u8]>::to_vec)
+    /// Random bytes `reveal` needs the first time it is called.
+    pub fn reveal_randomness_len(&self) -> usize {
+        self.inner.reveal_randomness_len()
     }
 
+    /// Our contribution sealed to every other member. `None` until every commitment is held.
+    /// Built once; pass `reveal_randomness_len()` bytes from `crypto.getRandomValues`.
+    pub fn reveal(&mut self, randomness: &[u8]) -> Result<Option<Vec<u8>>, String> {
+        let mut pos = 0usize;
+        let mut short = false;
+        let mut fill = |buf: &mut [u8]| {
+            if pos + buf.len() > randomness.len() {
+                short = true;
+                buf.fill(0);
+            } else {
+                buf.copy_from_slice(&randomness[pos..pos + buf.len()]);
+                pos += buf.len();
+            }
+        };
+        let out = self.inner.my_reveal(&mut fill).map(<[u8]>::to_vec);
+        if short {
+            return Err("randomness-length".to_string());
+        }
+        Ok(out)
+    }
+
+    /// A sealed reveal from member `from`. Before every commitment is held it also stands in
+    /// for that member's commitment.
     pub fn add_reveal(&mut self, from: u8, reveal: &[u8]) -> Result<(), String> {
         self.inner.add_reveal(from, reveal).map_err(ceremony_err)
     }

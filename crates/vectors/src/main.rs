@@ -11,6 +11,7 @@ use cahoots_core::ledger::{MemLedger, SpentLedger};
 use cahoots_core::message::{self, MessageType};
 use cahoots_core::pad::{bucket_pad, MemPadStorage, Pad, PadError, PadStorage};
 use cahoots_core::params::CircleParams;
+use cahoots_core::reveal::{self, randomness_len};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -30,17 +31,39 @@ fn fill(seed: u64, len: usize) -> Vec<u8> {
 fn ceremony_vectors() -> Value {
     let params = CircleParams::new(3, 192, "vectors", false).unwrap();
     let contributions: Vec<Vec<u8>> = (0..3).map(|i| fill(100 + i, 192)).collect();
+    let seeds: Vec<[u8; 32]> = (0..3)
+        .map(|i| fill(300 + i, 32).try_into().unwrap())
+        .collect();
     let mut devs: Vec<Ceremony> = contributions
         .iter()
         .enumerate()
-        .map(|(i, c)| Ceremony::new(params.clone(), i as u8, c.clone()).unwrap())
+        .map(|(i, c)| Ceremony::new(params.clone(), i as u8, c.clone(), seeds[i]).unwrap())
         .collect();
-    let commits: Vec<[u8; 32]> = devs.iter().map(|d| d.my_commitment()).collect();
+    let commits: Vec<([u8; 32], [u8; 1216])> = devs
+        .iter()
+        .map(|d| (d.my_commitment(), *d.my_public_key()))
+        .collect();
     for d in devs.iter_mut() {
-        for (j, c) in commits.iter().enumerate() {
-            d.add_commitment(j as u8, *c).unwrap();
+        for (j, (c, pk)) in commits.iter().enumerate() {
+            d.add_commitment(j as u8, *c, pk).unwrap();
         }
-        for (j, r) in contributions.iter().enumerate() {
+    }
+    // Sealing randomness: a deterministic stream per member, drawn in the order seal() asks.
+    let rand: Vec<Vec<u8>> = (0..3).map(|i| fill(400 + i, randomness_len(3))).collect();
+    let reveals: Vec<Vec<u8>> = devs
+        .iter_mut()
+        .enumerate()
+        .map(|(i, d)| {
+            let mut pos = 0usize;
+            let mut f = |buf: &mut [u8]| {
+                buf.copy_from_slice(&rand[i][pos..pos + buf.len()]);
+                pos += buf.len();
+            };
+            d.my_reveal(&mut f).unwrap().to_vec()
+        })
+        .collect();
+    for d in devs.iter_mut() {
+        for (j, r) in reveals.iter().enumerate() {
             d.add_reveal(j as u8, r).unwrap();
         }
         assert_eq!(d.phase(), Phase::Complete);
@@ -54,39 +77,71 @@ fn ceremony_vectors() -> Value {
     }
     assert_eq!(result.pad.as_slice(), expected.as_slice());
 
-    // Mismatch abort: member 1 reveals bytes that differ from its commitment.
-    let mut victim = Ceremony::new(params.clone(), 0, contributions[0].clone()).unwrap();
-    for (j, c) in commits.iter().enumerate() {
-        victim.add_commitment(j as u8, *c).unwrap();
+    // Mismatch abort: member 1 seals bytes that differ from its commitment, with its real keys.
+    let mut victim = Ceremony::new(params.clone(), 0, contributions[0].clone(), seeds[0]).unwrap();
+    for (j, (c, pk)) in commits.iter().enumerate() {
+        victim.add_commitment(j as u8, *c, pk).unwrap();
     }
     let mut bad = contributions[1].clone();
     bad[0] ^= 0x01;
-    let err = victim.add_reveal(1, &bad).unwrap_err();
+    let recipients: Vec<(u8, &[u8])> = vec![(0, &commits[0].1), (2, &commits[2].1)];
+    let mut pos = 0usize;
+    let mut f = |buf: &mut [u8]| {
+        buf.copy_from_slice(&rand[1][pos..pos + buf.len()]);
+        pos += buf.len();
+    };
+    let bad_reveal = reveal::seal(&params, 1, &commits[1].1, &recipients, &bad, &mut f).unwrap();
+    let err = victim.add_reveal(1, &bad_reveal).unwrap_err();
     assert_eq!(err, CeremonyError::CommitMismatch(1));
     assert_eq!(victim.phase(), Phase::Aborted);
 
+    // Garbled in transit: one flipped byte opens as nothing and changes nothing.
+    let mut victim = Ceremony::new(params.clone(), 0, contributions[0].clone(), seeds[0]).unwrap();
+    for (j, (c, pk)) in commits.iter().enumerate() {
+        victim.add_commitment(j as u8, *c, pk).unwrap();
+    }
+    let mut garbled = reveals[1].clone();
+    let last = garbled.len() - 1;
+    garbled[last] ^= 0x01;
+    assert_eq!(
+        victim.add_reveal(1, &garbled).unwrap_err(),
+        CeremonyError::Corrupted(1)
+    );
+    assert_eq!(victim.phase(), Phase::Reveal);
+
     json!({
-        "description": "Commit-then-reveal ceremony for n=3, L=192. commit_i = SHA-256(\"cahoots/commit/v1\" || params || i || R_i). pad = XOR of all R_i.",
+        "description": "Commit-then-reveal ceremony for n=3, L=192. commit_i = SHA-256(\"cahoots/commit/v1\" || params || i || pk_i || R_i), where pk_i is the X-Wing encapsulation key derived from kem_seed_i. Reveals are sealed to every other member (crates/core/src/reveal.rs): content key K_i, per recipient X-Wing encapsulation with the 64 bytes of randomness given, wrap = ChaCha20-Poly1305(HKDF-SHA256(salt \"cahoots/reveal-wrap/v1\", ikm shared, info params||from||to), nonce 0, aad from||to, K_i), content = ChaCha20-Poly1305(K_i, nonce 0, aad \"cahoots/reveal/v1\"||params||from||pk_from, R_i). pad = XOR of all R_i.",
         "params": {
             "n": params.n, "pad_len": params.pad_len, "name": params.name, "agent_seat": params.agent_seat,
             "encoded": hex::encode(params.encode()),
         },
         "contributions": contributions.iter().map(hex::encode).collect::<Vec<_>>(),
-        "commitments": commits.iter().map(hex::encode).collect::<Vec<_>>(),
+        "kem_seeds": seeds.iter().map(hex::encode).collect::<Vec<_>>(),
+        "public_keys": commits.iter().map(|(_, pk)| hex::encode(pk)).collect::<Vec<_>>(),
+        "commitments": commits.iter().map(|(c, _)| hex::encode(c)).collect::<Vec<_>>(),
+        "seal_randomness": rand.iter().map(hex::encode).collect::<Vec<_>>(),
+        "sealed_reveals": reveals.iter().map(hex::encode).collect::<Vec<_>>(),
         "pad": hex::encode(&*result.pad),
         "check_words": result.check_words,
         "circle_id": hex::encode(result.circle_id),
         "mismatch_abort": {
-            "description": "A device holding all commitments receives this reveal for member 1. It MUST abort.",
+            "description": "Member 0, holding all commitments, receives this reveal for member 1. It opens, but the contribution does not match the commitment. It MUST abort.",
             "member": 1,
-            "bad_reveal": hex::encode(&bad),
+            "bad_contribution": hex::encode(&bad),
+            "sealed_reveal": hex::encode(&bad_reveal),
             "expected": "abort: commit mismatch for member 1",
         },
+        "garbled": {
+            "description": "Member 1's real sealed reveal with its last byte flipped. Member 0 MUST refuse it as corrupted and change nothing.",
+            "sealed_reveal": hex::encode(&garbled),
+            "expected": "corrupted; phase stays reveal",
+        },
         "single_commit": {
-            "description": "Standalone commitment check: commit(params, index, contribution).",
+            "description": "Standalone commitment check: commit(params, index, public_key, contribution).",
             "index": 0,
+            "public_key": hex::encode(commits[0].1),
             "contribution": hex::encode(&contributions[0]),
-            "commitment": hex::encode(commit(&params, 0, &contributions[0])),
+            "commitment": hex::encode(commit(&params, 0, &commits[0].1, &contributions[0])),
         }
     })
 }

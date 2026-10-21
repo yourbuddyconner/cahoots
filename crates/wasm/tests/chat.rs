@@ -10,14 +10,38 @@ fn contribution(i: u8, len: usize) -> Vec<u8> {
 
 fn pair() -> (Circle, Circle) {
     let l = 4096;
-    let mut a =
-        WasmCeremony::new(2, l, "chat", false, 0, &contribution(0, l as usize), None).unwrap();
-    let mut b =
-        WasmCeremony::new(2, l, "chat", false, 1, &contribution(1, l as usize), None).unwrap();
+    let mut a = WasmCeremony::new(
+        2,
+        l,
+        "chat",
+        false,
+        0,
+        &contribution(0, l as usize),
+        None,
+        &[7u8; 32],
+    )
+    .unwrap();
+    let mut b = WasmCeremony::new(
+        2,
+        l,
+        "chat",
+        false,
+        1,
+        &contribution(1, l as usize),
+        None,
+        &[9u8; 32],
+    )
+    .unwrap();
     let (ca, cb) = (a.commitment(), b.commitment());
     a.add_commitment(1, &cb).unwrap();
     b.add_commitment(0, &ca).unwrap();
-    let (ra, rb) = (a.reveal().unwrap(), b.reveal().unwrap());
+    let rand = |i: u8, n: usize| contribution(50 + i, n);
+    let na = a.reveal_randomness_len();
+    let nb = b.reveal_randomness_len();
+    let (ra, rb) = (
+        a.reveal(&rand(0, na)).unwrap().unwrap(),
+        b.reveal(&rand(1, nb)).unwrap().unwrap(),
+    );
     a.add_reveal(1, &rb).unwrap();
     b.add_reveal(0, &ra).unwrap();
     (

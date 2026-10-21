@@ -12,8 +12,10 @@
 //! | kind | payload |
 //! |---|---|
 //! | `Params` | `index u8 \| CircleParams::encode()` |
-//! | `Commit` | `index u8 \| commitment (32 B)` |
-//! | `Reveal` | `index u8 \| R_index (L bytes)` |
+//! | `Commit` | `index u8 \| commitment (32 B) \| KEM public key (1216 B)` |
+//! | `Reveal` | `index u8 \| sealed reveal (see `cahoots_core::reveal`)` |
+//!
+//! Reveals are sealed to every member, so the wire never carries a contribution in the clear.
 //! | `Abort`  | `index u8 \| reason u8` |
 
 use crate::{Display, Entropy, HealthError, Link};
@@ -22,6 +24,7 @@ use alloc::vec::Vec;
 use cahoots_core::ceremony::{Ceremony, CeremonyError, CeremonyResult, Phase};
 use cahoots_core::frame::{self, FrameError};
 use cahoots_core::params::CircleParams;
+use cahoots_core::reveal::{randomness_len, KEM_SEED_LEN, PUBLIC_KEY_LEN};
 use zeroize::Zeroizing;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +74,8 @@ pub struct RingCeremony<L: Link> {
     seen_commit: [bool; MAX_MEMBERS],
     seen_reveal: [bool; MAX_MEMBERS],
     pending_reveals: Vec<(u8, Zeroizing<Vec<u8>>)>,
+    /// Randomness for sealing our reveal, drawn up front so no entropy source is held.
+    reveal_rand: Zeroizing<Vec<u8>>,
     revealed_self: bool,
     aborted: Option<RingError>,
 }
@@ -86,9 +91,18 @@ impl<L: Link> RingCeremony<L> {
     ) -> Result<Self, RingError> {
         let mut contribution = Zeroizing::new(vec![0u8; params.pad_len as usize]);
         entropy.fill(&mut contribution).map_err(RingError::Health)?;
+        let mut kem_seed = Zeroizing::new([0u8; KEM_SEED_LEN]);
+        entropy.fill(kem_seed.as_mut()).map_err(RingError::Health)?;
+        let mut reveal_rand = Zeroizing::new(vec![0u8; randomness_len(params.n)]);
+        entropy.fill(&mut reveal_rand).map_err(RingError::Health)?;
         let n = params.n;
         let params_bytes = params.encode();
-        let ceremony = Ceremony::new(params, index, core::mem::take(&mut *contribution))?;
+        let ceremony = Ceremony::new(
+            params,
+            index,
+            core::mem::take(&mut *contribution),
+            *kem_seed,
+        )?;
         Ok(RingCeremony {
             link,
             ceremony,
@@ -101,6 +115,7 @@ impl<L: Link> RingCeremony<L> {
             seen_commit: [false; MAX_MEMBERS],
             seen_reveal: [false; MAX_MEMBERS],
             pending_reveals: Vec::new(),
+            reveal_rand,
             revealed_self: false,
             aborted: None,
         })
@@ -140,8 +155,10 @@ impl<L: Link> RingCeremony<L> {
         self.seen_commit[me] = true;
         let pb = self.params_bytes.clone();
         self.send(Frame::Params, self.index, &pb);
-        let c = self.ceremony.my_commitment();
-        self.send(Frame::Commit, self.index, &c);
+        let mut body = Vec::with_capacity(32 + PUBLIC_KEY_LEN);
+        body.extend_from_slice(&self.ceremony.my_commitment());
+        body.extend_from_slice(self.ceremony.my_public_key());
+        self.send(Frame::Commit, self.index, &body);
     }
 
     fn abort(&mut self, e: RingError) -> RingError {
@@ -211,11 +228,11 @@ impl<L: Link> RingCeremony<L> {
                 }
             }
             k if k == Frame::Commit as u8 => {
-                let c: [u8; 32] = body
-                    .as_slice()
-                    .try_into()
-                    .map_err(|_| RingError::Protocol)?;
-                if let Err(e) = self.ceremony.add_commitment(index, c) {
+                if body.len() != 32 + PUBLIC_KEY_LEN {
+                    return Err(self.abort(RingError::Protocol));
+                }
+                let c: [u8; 32] = body[..32].try_into().expect("32 bytes");
+                if let Err(e) = self.ceremony.add_commitment(index, c, &body[32..]) {
                     return Err(self.abort(RingError::Ceremony(e)));
                 }
                 if !self.seen_commit[i] {
@@ -246,14 +263,27 @@ impl<L: Link> RingCeremony<L> {
         if !self.revealed_self {
             self.revealed_self = true;
             self.seen_reveal[usize::from(self.index)] = true;
-            let r = self.ceremony.my_reveal().expect("in Reveal phase").to_vec();
+            let rand = core::mem::take(&mut self.reveal_rand);
+            let mut pos = 0usize;
+            let mut fill = |buf: &mut [u8]| {
+                buf.copy_from_slice(&rand[pos..pos + buf.len()]);
+                pos += buf.len();
+            };
+            let r = self
+                .ceremony
+                .my_reveal(&mut fill)
+                .expect("in Reveal phase")
+                .to_vec();
             self.send(Frame::Reveal, self.index, &r);
-            self.ceremony.add_reveal(self.index, &r)?;
         }
         let pending = core::mem::take(&mut self.pending_reveals);
         for (idx, r) in pending {
-            if let Err(e) = self.ceremony.add_reveal(idx, &r) {
-                return Err(self.abort(RingError::Ceremony(e)));
+            match self.ceremony.add_reveal(idx, &r) {
+                Ok(()) => {}
+                // A garbled frame on a wire is a CRC failure before it gets here; a sealed
+                // reveal that still fails to open is not addressed to us. Drop it and keep going.
+                Err(CeremonyError::Corrupted(_)) => {}
+                Err(e) => return Err(self.abort(RingError::Ceremony(e))),
             }
         }
         Ok(())

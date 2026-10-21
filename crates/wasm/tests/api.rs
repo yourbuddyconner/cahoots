@@ -9,23 +9,61 @@ fn contribution(i: u8, len: usize) -> Vec<u8> {
         .collect()
 }
 
+fn seed(i: u8) -> Vec<u8> {
+    vec![0x40 + i; 32]
+}
+
+/// Randomness for sealing: enough bytes for the ceremony, deterministic per member.
+fn rand(c: &WasmCeremony, i: u8) -> Vec<u8> {
+    contribution(100 + i, c.reveal_randomness_len())
+}
+
 #[test]
 fn two_member_ceremony_through_bindings_agrees() {
     let l = 1024;
-    let mut a =
-        WasmCeremony::new(2, l as u32, "pair", false, 0, &contribution(0, l), None).unwrap();
-    let mut b =
-        WasmCeremony::new(2, l as u32, "pair", false, 1, &contribution(1, l), None).unwrap();
+    let mut a = WasmCeremony::new(
+        2,
+        l as u32,
+        "pair",
+        false,
+        0,
+        &contribution(0, l),
+        None,
+        &seed(0),
+    )
+    .unwrap();
+    let mut b = WasmCeremony::new(
+        2,
+        l as u32,
+        "pair",
+        false,
+        1,
+        &contribution(1, l),
+        None,
+        &seed(1),
+    )
+    .unwrap();
     assert_eq!(a.phase(), "commit");
-    assert!(a.reveal().is_none());
+    assert!(a.reveal(&[]).unwrap().is_none());
     let ca = a.commitment();
     let cb = b.commitment();
-    assert_eq!(ca.len(), 32);
+    assert_eq!(ca.len(), 32 + 1216);
     a.add_commitment(1, &cb).unwrap();
     b.add_commitment(0, &ca).unwrap();
     assert_eq!(a.phase(), "reveal");
-    let ra = a.reveal().unwrap();
-    let rb = b.reveal().unwrap();
+    assert_eq!(a.reveal(&[1, 2, 3]).unwrap_err(), "randomness-length");
+    let ra = a.reveal(&rand(&a, 0)).unwrap().unwrap();
+    let rb = b.reveal(&rand(&b, 1)).unwrap().unwrap();
+    assert!(
+        !ra.windows(32).any(|w| w == &contribution(0, l)[..32]),
+        "contribution in the clear"
+    );
+    // A garbled copy is refused without changing anything.
+    let mut garbled = rb.clone();
+    let last = garbled.len() - 1;
+    garbled[last] ^= 1;
+    assert_eq!(a.add_reveal(1, &garbled).unwrap_err(), "corrupted:1");
+    assert_eq!(a.phase(), "reveal");
     a.add_reveal(1, &rb).unwrap();
     b.add_reveal(0, &ra).unwrap();
     assert_eq!(a.phase(), "complete");
@@ -54,7 +92,7 @@ fn two_member_ceremony_through_bindings_agrees() {
 #[test]
 fn extra_source_changes_commitment() {
     let l = 256;
-    let a = WasmCeremony::new(2, l, "x", false, 0, &contribution(0, 256), None).unwrap();
+    let a = WasmCeremony::new(2, l, "x", false, 0, &contribution(0, 256), None, &seed(0)).unwrap();
     let b = WasmCeremony::new(
         2,
         l,
@@ -63,9 +101,15 @@ fn extra_source_changes_commitment() {
         0,
         &contribution(0, 256),
         Some(contribution(5, 256)),
+        &seed(0),
     )
     .unwrap();
-    assert_ne!(a.commitment(), b.commitment());
+    assert_ne!(a.commitment()[..32], b.commitment()[..32]);
+    assert_eq!(
+        a.commitment()[32..],
+        b.commitment()[32..],
+        "same seed, same key"
+    );
     assert!(WasmCeremony::new(
         2,
         l,
@@ -73,20 +117,32 @@ fn extra_source_changes_commitment() {
         false,
         0,
         &contribution(0, 256),
-        Some(contribution(5, 10))
+        Some(contribution(5, 10)),
+        &seed(0),
     )
     .is_err());
+    assert_eq!(
+        WasmCeremony::new(2, l, "x", false, 0, &contribution(0, 256), None, &[1, 2])
+            .err()
+            .unwrap(),
+        "kem-seed-length"
+    );
 }
 
 #[test]
 fn circle_state_roundtrips_with_ledger() {
     let l = 512;
-    let mut a = WasmCeremony::new(2, l, "s", true, 0, &contribution(0, 512), None).unwrap();
-    let mut b = WasmCeremony::new(2, l, "s", true, 1, &contribution(1, 512), None).unwrap();
+    let mut a =
+        WasmCeremony::new(2, l, "s", true, 0, &contribution(0, 512), None, &seed(0)).unwrap();
+    let mut b =
+        WasmCeremony::new(2, l, "s", true, 1, &contribution(1, 512), None, &seed(1)).unwrap();
     let (ca, cb) = (a.commitment(), b.commitment());
     a.add_commitment(1, &cb).unwrap();
     b.add_commitment(0, &ca).unwrap();
-    let (ra, rb) = (a.reveal().unwrap(), b.reveal().unwrap());
+    let (ra, rb) = (
+        a.reveal(&rand(&a, 0)).unwrap().unwrap(),
+        b.reveal(&rand(&b, 1)).unwrap().unwrap(),
+    );
     a.add_reveal(1, &rb).unwrap();
     b.add_reveal(0, &ra).unwrap();
     let mut ca = a.finish("TRNG").unwrap().into_circle();
@@ -166,13 +222,21 @@ fn late_reveal_can_stand_in_for_its_commitment() {
             .map(|k| (k.wrapping_mul(7 + i as u32)) as u8)
             .collect()
     };
-    let mut a = WasmCeremony::new(2, 1024, "late", false, 0, &contrib(0), None).unwrap();
-    let b = WasmCeremony::new(2, 1024, "late", false, 1, &contrib(1), None).unwrap();
-    // A never saw B's commitment code. It derives it from B's reveal, then applies the reveal.
-    let derived = a.commitment_for(1, &contrib(1));
-    assert_eq!(derived, b.commitment());
-    a.add_commitment(1, &derived).unwrap();
-    assert_eq!(a.phase(), "reveal");
-    a.add_reveal(1, &contrib(1)).unwrap();
+    let mut a = WasmCeremony::new(2, 1024, "late", false, 0, &contrib(0), None, &seed(0)).unwrap();
+    let mut b = WasmCeremony::new(2, 1024, "late", false, 1, &contrib(1), None, &seed(1)).unwrap();
+    // B scanned A's commitment and is already sealing. A never saw B's commitment code:
+    // B's sealed reveal stands in for it, and A completes in one step.
+    b.add_commitment(0, &a.commitment()).unwrap();
+    let rb = b.reveal(&rand(&b, 1)).unwrap().unwrap();
+    assert_eq!(a.phase(), "commit");
+    a.add_reveal(1, &rb).unwrap();
     assert_eq!(a.phase(), "complete");
+    // A's own reveal still goes to B, sealed to B's key, which A learned from the late reveal.
+    let ra = a.reveal(&rand(&a, 0)).unwrap().unwrap();
+    b.add_reveal(0, &ra).unwrap();
+    assert_eq!(b.phase(), "complete");
+    assert_eq!(
+        a.finish("CSPRNG").unwrap().words(),
+        b.finish("CSPRNG").unwrap().words()
+    );
 }

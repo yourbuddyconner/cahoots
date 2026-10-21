@@ -7,6 +7,7 @@
 - **A compromised enclave** exposes only the circles that gave a hosted software member a seat.
 - **A malicious member** can't bias the pad during the ceremony, because of commit-then-reveal.
 - **A replayed message** is detected by the spent-range ledger and flagged as possible reuse.
+- **Someone within antenna or camera range during the ceremony** sees commitments and public keys, which are public, and sealed reveals, which they would have to break X-Wing (X25519 and ML-KEM-768) to open, once per member. They do not get the pad. Someone spliced into the cable who substitutes keys is caught by the commitment check and the ceremony aborts.
 
 ## Not covered
 
@@ -15,10 +16,12 @@
 - A stolen or compromised device exposes that device's pad. A device PIN and a lockout are future work.
 - Erasure on phone storage is best effort.
 - Coercion of members.
+- Emanations after the ceremony: a device spending pad bytes, or drawing a decrypted message on its screen, can be read up close by the same kind of attacker. E-paper and on-die storage reduce the exposure; nothing removes it.
+- Phone screens show the six check words. They are derived from the pad by a hash and reveal nothing useful about it.
 
 ## Claims the UI may make
 
-- **Confidentiality.** For a `TRNG` circle: secure against unlimited computing power, as long as pad bytes are never reused. For a `CSPRNG` circle: computationally secure.
+- **Confidentiality.** For a `TRNG` circle: secure against unlimited computing power, as long as pad bytes are never reused, against anyone who did not record the ceremony from inside the room. Against someone who did, as strong as X-Wing. For a `CSPRNG` circle: computationally secure.
 - **Integrity inside the circle.** Information-theoretic, through the one-time Poly1305 key.
 - **The hosted member's policy and the feed's log** rely on enclave attestation and signatures. That is ordinary modern cryptography. The pad is the layer that does not depend on math. The enclave is the layer that governs the hosted member.
 

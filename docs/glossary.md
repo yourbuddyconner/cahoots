@@ -12,6 +12,10 @@ The words these documents use, in plain terms. Where a term has a precise defini
 
 **Commitment.** A fingerprint of a device's contribution, shared before the contribution itself. It stops anyone from choosing their bytes after seeing everyone else's.
 
+**Sealed reveal.** A member's contribution encrypted to every other member before it leaves the device, with X-Wing (X25519 plus ML-KEM-768). The wire, the cable, or the phone screen never carries a contribution in the clear, so someone recording the ceremony from nearby learns nothing. The pad itself does not depend on this encryption.
+
+**KEM.** Key encapsulation mechanism: a way for one party to send another a fresh secret key using only the other party's public key. Cahoots uses X-Wing, which combines a classical scheme and a post-quantum one, so both would have to fall.
+
 **Check words.** Six English words that every device shows after the ceremony. They are derived from the pad. If everyone sees the same six words, everyone holds the same pad.
 
 **Circle ID.** A short public label for a group, derived from the pad. It identifies a group on the feed without revealing anything about the pad.

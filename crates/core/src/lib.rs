@@ -14,5 +14,6 @@ pub mod ledger;
 pub mod message;
 pub mod pad;
 pub mod params;
+pub mod reveal;
 
 pub use circle_id::CircleId;

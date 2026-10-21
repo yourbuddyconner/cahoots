@@ -10,7 +10,7 @@ The hard part is getting the same random file to every member without anyone els
 
 1. A group meets in a room. Each person holds a Cahoots badge or a phone.
 2. Each device generates random bytes from its hardware random number generator.
-3. The devices swap those bytes over a wired touch link. The devices physically touch.
+3. The devices swap those bytes over a wired touch link, or by showing each other animated codes. Each contribution is encrypted to the other members before it leaves the device, so a camera or an antenna in the room learns nothing.
 4. Every device XORs all contributions into one shared pad.
 5. The members read six check words aloud to confirm every device holds the same pad.
 

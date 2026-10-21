@@ -9,6 +9,7 @@ This is the normative description of what `cahoots-core` implements. The words M
 - **Circle:** the set of members that hold one pad.
 - **Slice:** a fixed, non-overlapping part of the pad assigned to one sender.
 - **Spent:** pad bytes that were used to encrypt or decrypt a message. They MUST be erased and never used again.
+- **Sealed reveal:** a contribution encrypted to every other member of the ceremony (section 3.2). The link never carries a contribution in the clear.
 
 ## 2. Parameters
 
@@ -37,14 +38,14 @@ Commit-then-reveal. Without it, the last member to reveal could choose a contrib
 ![The ceremony in five steps](diagrams/ceremony.svg)
 
 1. **Setup.** The leader chooses the parameters. They are sent to every device and shown for confirmation.
-2. **Commit.** Each device generates `R_i` and computes `C_i = SHA-256("cahoots/commit/v1" || params || i || R_i)`. Every device sends `C_i` to every other device. A device MUST NOT send `R_i` until it holds all `n` commitments.
-3. **Reveal.** Each device sends `R_i`. Each received `R_j` is checked against `C_j` in constant time. A mismatch aborts the ceremony on that device.
+2. **Commit.** Each device generates `R_i` and a KEM keypair `(dk_i, pk_i)` from 32 more random bytes, and computes `C_i = SHA-256("cahoots/commit/v1" || params || i || pk_i || R_i)`. Every device sends `(C_i, pk_i)` to every other device. Both are public. A device MUST NOT reveal until it holds all `n` commitments.
+3. **Reveal.** Each device sends its sealed reveal (section 3.2): `R_i` encrypted to every other member. Each received reveal is opened and the contribution checked against `C_j`, using the `pk_j` held with the commitment, in constant time. A reveal that fails to open is refused and nothing changes. A reveal that opens but does not match aborts the ceremony on that device. A device that holds no commitment for `j` yet MAY take a sealed reveal from `j` as both: the commitment is derived from the opened contribution and the key in the blob. That is safe because the device's own contribution was fixed before it sent anything.
 4. **Combine.** `PAD = XOR of all R_j`. A device MAY XOR a second independent source into its own `R_i` before committing. That source MUST NOT replace the device's own TRNG output.
 5. **Check words.** `check = SHA-256("cahoots/check/v1" || params || PAD)`. The first 66 bits are read as six 11-bit big-endian indices into the BIP-39 English wordlist. Every device shows the six words. Members read them aloud. A mismatch means the ceremony restarts.
 6. **Erase.** Each device erases every `R_j` and keeps only `PAD`.
 7. **Circle ID.** `circle_id = SHA-256("cahoots/circle-id/v1" || PAD)[0..16]`.
 
-Implementation: `crates/core/src/ceremony.rs`, `commit.rs`, `combine.rs`, `checkwords.rs`, `circle_id.rs`.
+Implementation: `crates/core/src/ceremony.rs`, `commit.rs`, `reveal.rs`, `combine.rs`, `checkwords.rs`, `circle_id.rs`.
 
 ### 3.1 Touch-link framing
 
@@ -55,6 +56,31 @@ frame = type (u8) | seq (u32) | len (u32) | payload | CRC-32
 The CRC is IEEE 802.3 (the same polynomial as zlib) over every byte before it. It catches transmission errors only. Commitments and check words provide integrity. Devices form a ring and forward every commitment and reveal they receive until all devices hold all `n` of each. The touch link MUST NOT use any radio.
 
 Implementation: `crates/core/src/frame.rs`.
+
+### 3.2 Sealed reveals
+
+The ceremony link radiates: a wire, a USB cable, or a phone screen can be read by an antenna or a camera nearby. Without this section, an attacker in range during the ceremony records every contribution and holds the pad. With it, that attacker has to break X-Wing (X25519 and ML-KEM-768, both) for every member. Nobody else is affected: the pad is still the XOR of the contributions and never depends on the key exchange, so the claim against an attacker who was not in the room is unchanged.
+
+The KEM is X-Wing (draft 06). `pk_i` is the 1216-byte encapsulation key derived from a 32-byte seed. Binding `pk_i` into `C_i` is what stops someone spliced into the cable from substituting keys: a reveal sealed with the real key then fails the commitment check and the ceremony aborts.
+
+A sealed reveal from member `i` to the other members is:
+
+```
+version (u8 = 1) | i (u8) | pk_i (1216) | k (u8)
+k × [ j (u8) | ct_j (1120) | wrap_j (48) ]
+body = ChaCha20-Poly1305(K_i, nonce 0, aad = "cahoots/reveal/v1" || params || i || pk_i, R_i)
+```
+
+- `K_i` is a fresh 32-byte content key.
+- For each other member `j`, in ascending order: `(ct_j, ss_j) = XWing.Encaps(pk_j)` with 64 bytes of randomness, `wrap_key_j = HKDF-SHA256(salt = "cahoots/reveal-wrap/v1", ikm = ss_j, info = params || i || j)`, and `wrap_j = ChaCha20-Poly1305(wrap_key_j, nonce 0, aad = i || j, K_i)`.
+- Every key is used once, so every nonce is zero.
+- Randomness is drawn in this order: `K_i`, then 64 bytes per recipient. `randomness_len(n) = 32 + 64 (n - 1)`.
+
+Member `j` opens it by finding its entry, decapsulating `ct_j` with `dk_j`, unwrapping `K_i`, and decrypting the body. A failure anywhere is `corrupted`: nothing is learned and nothing changes. The opened `R_i` is then checked against `C_i`.
+
+On the ring, sealed reveals are forwarded unchanged: every hop is a member and can open its own copy, so no per-hop session is needed. On phones, one animation carries the reveal to every scanner, since each scanner unwraps its own entry.
+
+Implementation: `crates/core/src/reveal.rs`.
 
 ## 4. Messages
 
@@ -106,4 +132,4 @@ Implementation: `crates/core/src/pad.rs`, `crates/core/src/ledger.rs`.
 
 ## 6. Test vectors
 
-`crates/vectors/*.json` are generated from `cahoots-core` by `cargo run -p cahoots-vectors`. They cover the ceremony (including a mismatch abort), check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. Every client MUST reproduce them.
+`crates/vectors/*.json` are generated from `cahoots-core` by `cargo run -p cahoots-vectors`. They cover the ceremony (KEM seeds, public keys, sealing randomness, sealed reveals, a mismatch abort, and a garbled reveal), check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. Every client MUST reproduce them.

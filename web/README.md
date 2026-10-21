@@ -36,8 +36,8 @@ The service worker fetches from the network first and falls back to its cache, s
 
 1. The host opens **Start a ceremony** and picks a name, the number of people, and a secret size (Small 16 KiB, Medium 64 KiB, Large 256 KiB). The hosted software member option is under **Advanced**; when it is on, every member's seat screen says so.
 2. The host keeps seat 1 and taps **Make my contribution**. Everyone else opens **Join one**, scans any member's code (it carries the parameters), and picks a free seat. Seats already seen are crossed out. Randomness is this device's `crypto.getRandomValues`; **Add hardware randomness** mixes in a `cahoots-yk` contribution from a file or an animated QR. The label is `TRNG` only when a full-length hardware contribution was mixed in.
-3. **Step 1, Commit.** Each member shows a single QR of their commitment. Others scan it. A line on the screen names whose codes are still needed; chips and the line update in place without restarting the camera. Nobody can reveal until all commitments are in; the app withholds the reveal until then.
-4. **Step 2, Reveal.** Each member shows an animated QR (RaptorQ fountain packets at about 10 frames per second). Receivers scan until the progress bar fills. Every reveal is verified against its commitment; a mismatch aborts with nothing kept.
+3. **Step 1, Commit.** Each member shows a short animation of their commitment and 1216-byte X-Wing public key. Others scan it. A line on the screen names whose codes are still needed; chips and the line update in place without restarting the camera. Nobody can reveal until all commitments are in; the app withholds the reveal until then.
+4. **Step 2, Reveal.** Each member shows an animated QR of their sealed reveal: the contribution encrypted to every other member, so a camera pointed at the screen learns nothing. Receivers scan until the progress bar fills. A garbled scan is refused and can be retried; a reveal that opens but does not match its commitment aborts with nothing kept.
 5. **Step 3, Check.** Six BIP-39 words. If every screen agrees, members tap **They match** and the circle is saved. A member who scans a code for their own seat is told that two people picked the same seat and how to fix it.
 
 Messages are base64url text shown as a QR and as copyable text. Reads take a scan or a paste. Reuse and tag failures show distinct refusals.
@@ -59,9 +59,10 @@ Messages are base64url text shown as a QR and as copyable text. Reads take a sca
 | Data | Form |
 |---|---|
 | Parameters | `cahoots-params:<base64url params bytes>` |
-| Commitment | `cahoots-commit:<index>:<base64url 32 bytes>:<base64url params bytes>`. The parameters ride along so a joiner can scan any member. |
-| Reveal (text/file) | `cahoots-reveal:<index>:<base64url contribution>` |
-| Reveal (animated QR) | Fountain packets of `[index] ‖ contribution`. Each QR frame is base64url of `"CHQ1" ‖ RaptorQ OTI (12 bytes) ‖ encoding packet`. |
+| Commitment | `cahoots-commit:<index>:<base64url 32-byte hash + 1216-byte X-Wing public key>:<base64url params bytes>`. The parameters ride along so a joiner can scan any member. |
+| Reveal (text/file) | `cahoots-reveal:<index>:<base64url sealed reveal>`, the blob from `docs/protocol.md` section 3.2, encrypted to every other member |
+| Commitment (animated QR) | Fountain packets of `0x01 ‖ index ‖ params_len ‖ params ‖ hash ‖ public key`. Each QR frame is base64url of `"CHQ1" ‖ RaptorQ OTI (12 bytes) ‖ encoding packet`. |
+| Reveal (animated QR) | Fountain packets of `0x02 ‖ sealed reveal` |
 | Message | base64url of the wire message from the protocol spec |
 
 ## What was verified
