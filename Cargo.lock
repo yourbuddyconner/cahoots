@@ -344,14 +344,23 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 name = "cahoots-chat"
 version = "0.1.0"
 dependencies = [
+ "axum",
+ "base64 0.22.1",
  "cahoots-core",
+ "cahoots-provider",
+ "cahoots-station",
  "chacha20poly1305 0.10.1",
+ "clap",
+ "getrandom 0.2.17",
  "hex",
  "hkdf 0.12.4",
  "proptest",
  "serde_json",
  "sha2 0.10.9",
  "subtle",
+ "tempfile",
+ "tokio",
+ "ureq",
  "zeroize",
 ]
 
@@ -428,6 +437,7 @@ dependencies = [
  "cahoots-core",
  "clap",
  "hex",
+ "http",
  "reqwest",
  "serde",
  "serde_json",
@@ -435,6 +445,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tower-http",
 ]
 
 [[package]]
@@ -452,6 +463,7 @@ name = "cahoots-wasm"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "cahoots-chat",
  "cahoots-core",
  "qrcode",
  "raptorq",
@@ -2326,6 +2338,20 @@ checksum = "f4987bdc12753382e0bec4a65c50738ffaabc998b9cdd1f952fb5f39b0048a96"
 dependencies = [
  "crypto-common 0.2.2",
  "ctutils",
+]
+
+[[package]]
+name = "ureq"
+version = "2.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
+dependencies = [
+ "base64 0.22.1",
+ "log",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "url",
 ]
 
 [[package]]

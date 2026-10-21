@@ -39,8 +39,9 @@ Every Rust crate lives under `crates/`. The PWA lives under `web/app`.
 | `crates/host` | `cahoots-host` | Desktop simulator: socket Link, file PadStore, PNG Display. Four processes run a ring ceremony. | done (M4a) |
 | `crates/esp32s3` | | `esp-hal` + Embassy firmware, first hardware target. | placeholder (M4b) |
 | `crates/dabao` | | Xous app for the Baochip-1x Dabao. | placeholder (M4c, M5) |
+| `crates/chat` | `cahoots-chat` | Pad-seeded end-to-end chat: epoch keys, sender ratchets, ChaCha20-Poly1305, plus the `cahoots-chat` CLI demo. | done (C1, C3) |
+| `crates/station` | `cahoots-station` | The Numbers Station relay: hash-chained log, reuse refusal, long-poll feed, display page, Dockerfile. | done (C2); TVC deploy pending |
 | `crates/fuzz` | | `cargo-fuzz` targets for every parser. Not a workspace member. | done |
-| `tvc-app/` | | Cahoots TVC workload: agent seat, policy, square log, vouching. | placeholder (M3) |
 | `docs/` | | Protocol spec, threat model, use cases, plan, ceremony guide. | |
 
 ## Build and test

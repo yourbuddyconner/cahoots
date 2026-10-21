@@ -1,12 +1,12 @@
-# Cahoots phone and laptop client (M2)
+# Cahoots phone and laptop client (M2, C4)
 
-An offline PWA. `cahoots-core` runs as WebAssembly. There are no network calls, no CDN scripts, and no bundler. Members exchange ceremony data by pointing phones at each other's screens, or by paste and file when a camera is not available.
+A PWA. `cahoots-core` and `cahoots-chat` run as WebAssembly. There are no CDN scripts and no bundler. The ceremony and pure-pad messaging make no network calls: members exchange ceremony data by pointing phones at each other's screens, or by paste and file when a camera is not available. The chat screen is the one place the app talks to a server, a Numbers Station relay, and it sends and receives ciphertext only.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `wasm/` | `cahoots-wasm`: wasm-bindgen API over the core. Ceremony, `Circle` (pad + ledger + label) with send/receive and export/import for IndexedDB, RaptorQ fountain coding for animated QR, QR rendering to SVG, bucket padding, base64url. Also compiles natively, so `cargo test -p cahoots-wasm` exercises the whole API. |
+| `crates/wasm/` | `cahoots-wasm`: wasm-bindgen API over the core. Ceremony, `Circle` (pad + ledger + label + chat session + relay cursor) with pure-pad send/receive, chat send/receive, epoch rotation, and export/import for IndexedDB; RaptorQ fountain coding for animated QR; QR rendering to SVG; bucket padding; base64url. Also compiles natively, so `cargo test -p cahoots-wasm` exercises the whole API. |
 | `app/` | The static PWA: `index.html`, `app.js` (ES module), `styles.css`, `sw.js` (cache-first service worker), `manifest.json`. |
 | `app/pkg/` | Build output of `wasm-pack`. Not committed. |
 
@@ -37,6 +37,18 @@ The service worker caches every asset on first load. After that the app works wi
 
 Messages are base64url text shown as a QR and as copyable text. Reads take a scan or a paste. Reuse and tag failures show distinct refusals.
 
+## Chat (pad-seeded, over a relay)
+
+**Open chat** on a circle screen opens the chat for that circle. The header reads "End-to-end encrypted, pad-hedged": the pad seeds the keys and ChaCha20-Poly1305 encrypts, per `docs/chat.md`. The relay sees ciphertext and traffic shape only.
+
+- **Relay.** The chat needs a running Numbers Station (`cargo run -p cahoots-station -- --listen 127.0.0.1:8080 --log station.jsonl`). The URL is set per circle under the **Relay** disclosure and stored in IndexedDB; the default is `http://127.0.0.1:8080`, and blank means the page's own origin. The screen long-polls `GET /v1/circles/{id}/messages?after=<seq>&wait=25000` while open and posts sealed messages as raw bytes.
+- **Epochs.** The first send spends 32 pad bytes to start an epoch. **Rotate epoch** spends 32 more. Peers switch to the newest epoch they see; the chip next to the circle name shows the current one. Rotation also happens on its own after 1000 of your own messages in an epoch.
+- **Padding.** Plaintext is padded to 64, 256, 1024, or 4096 bytes before encryption.
+- **Rejections** show inline and muted: `rejected: replay`, `rejected: tag`, `rejected: reuse`, and so on. Your own messages coming back from the relay are skipped by sender index.
+- **Persistence.** Chat keys, the epoch state, and the last relay sequence number are exported with the circle, so a reload resumes where it left off without re-reading the feed. Plaintext history is stored on the device.
+- **CORS.** The station sends no CORS headers, so the app must be served from the same origin as the relay (reverse proxy `/v1/` to it) or the station needs CORS added before a phone on another origin can use it. The verification below used a small same-origin proxy.
+- The service worker never caches `/v1/` responses.
+
 ## Exchange formats (also used by the paste and file fallbacks)
 
 | Data | Form |
@@ -57,6 +69,14 @@ Driven in Chrome with two tabs on two origins (`127.0.0.1` and `localhost`, so e
 - Replaying a message was refused with "Possible pad reuse".
 - The circle survived a page reload: the ledger was restored and the next send used offset 64.
 - The fountain path ran in the browser: a 16 KiB transfer decoded with one in four packets dropped, in about 50 ms.
+
+Chat, verified the same day with two tabs on two origins behind a proxy that forwarded `/v1/` to one `cahoots-station` process:
+
+- After a 2-member ceremony, member 0 opened chat, sent a message, and it appeared on member 1 under "member 0 · epoch 0:0". Member 1 replied in the same epoch, and member 0 received it.
+- Member 0 pressed **Rotate epoch** (spent 32 bytes, chip changed to `0:32`) and sent again. Member 1 decrypted it and its own chip switched to `0:32`.
+- A copy of that message with one ciphertext byte flipped was posted straight to the relay as a new entry. Member 1 showed `rejected: replay`, because the copy reused an already-consumed counter, which is checked before the tag. The tag-failure path is covered by the Rust tests.
+- Member 1 reloaded the page. It came back on epoch `0:32` with the full history, "Last seq 3", no re-decrypted or duplicated entries, and received the next message from member 0.
+- No console errors in either tab.
 
 Camera scanning uses the `BarcodeDetector` API and was not tested here; there is no camera in the automation session. Chrome on Android and desktop Chrome support it. Safari does not, so iPhone users use paste or file import until a vendored JS decoder is added.
 

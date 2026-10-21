@@ -59,10 +59,10 @@ Design in `docs/chat.md`: epoch keys from 32-byte pad spends, per-sender symmetr
 
 | Milestone | Scope | Done when | Depends on |
 |---|---|---|---|
-| C1 Chat crate | `cahoots-chat`: epoch derivation, chains, message format, session state, vectors | Three sessions round-trip with rotation, out-of-order delivery, tamper and replay rejection; builds for wasm32 and thumbv7em | M1 |
-| C2 Numbers Station | `cahoots-station`: hash-chained append-only log, pure-pad reuse refusal, long-poll feed, display page, Dockerfile | Integration test posts and reads through HTTP; a broken chain refuses to start | M1 |
-| C3 CLI demo | `cahoots-chat` binary: local dev ceremony, REPL client against the relay | Three terminals chat through one relay; an epoch rotates; a tampered entry is rejected | C1, C2 |
-| C4 PWA chat | Chat screen in `web/app` over the wasm bindings, relay URL setting, session persisted in IndexedDB | Two browser tabs chat through the relay; the UI says "end-to-end encrypted, pad-hedged" | C1, C2, M2 |
+| C1 Chat crate | `cahoots-chat`: epoch derivation, chains, message format, session state, vectors | Three sessions round-trip with rotation, out-of-order delivery, tamper and replay rejection; builds for wasm32 and thumbv7em | **done** |
+| C2 Numbers Station | `cahoots-station`: hash-chained append-only log, pure-pad reuse refusal, long-poll feed, display page, Dockerfile | Integration test posts and reads through HTTP; a broken chain refuses to start | **done** |
+| C3 CLI demo | `cahoots-chat` binary: local dev ceremony, REPL client against the relay | Three terminals chat through one relay; an epoch rotates; a tampered entry is rejected | **done** |
+| C4 PWA chat | Chat screen in `web/app` over the wasm bindings, relay URL setting, session persisted in IndexedDB | Two browser tabs chat through the relay; the UI says "end-to-end encrypted, pad-hedged" | **done** (verified in Chrome) |
 | C5 TVC deploy | The station as a TVC2 workload with its head anchored | The deploy record pins the image and the log head is anchored | C2, access to `tkhq/test-tvc-2` |
 
 ## Open decisions

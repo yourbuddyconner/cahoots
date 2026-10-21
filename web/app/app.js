@@ -1,7 +1,9 @@
-// Cahoots phone/laptop client. No network calls. All crypto is in cahoots-core (WASM).
+// Cahoots phone/laptop client. The ceremony and pure-pad messaging make no network calls.
+// The chat screen talks to a Numbers Station relay over HTTP; it sends and receives ciphertext only.
+// All crypto is in cahoots-core and cahoots-chat (WASM).
 import init, {
   Ceremony, Circle, FountainEncoder, FountainDecoder,
-  b64_encode, b64_decode, bucket_pad, bucket_unpad, qr_svg,
+  b64_encode, b64_decode, bucket_pad, bucket_unpad, chat_bucket_pad, chat_bucket_unpad, qr_svg,
 } from './pkg/cahoots_wasm.js';
 
 const CLAIM = {
@@ -15,18 +17,32 @@ const ERRORS = {
   'out-of-range': 'The message points outside the pad.',
   exhausted: 'Your slice of the pad is used up. Hold a new ceremony.',
   base64url: 'That is not a Cahoots message.',
+  replay: 'Already received: this message counter was consumed before.',
+  'too-far-ahead': 'Too many messages were skipped before this one.',
+  version: 'Not a chat message.',
+  length: 'Malformed message.',
 };
+const CHAT_LABEL = 'End-to-end encrypted, pad-hedged';
+const CHAT_CLAIM = 'The pad seeds the keys and ChaCha20-Poly1305 encrypts. The relay sees ciphertext and traffic shape only.';
+const DEFAULT_RELAY = 'http://127.0.0.1:8080';
+const POLL_WAIT_MS = 25000;
 const QR_PACKET = 600;   // payload bytes per animated frame
 const QR_FPS = 10;
 const TYPES = ['text', 'approve', 'vouch', 'control'];
 
 // ---------------------------------------------------------------- storage (IndexedDB)
 const db = await new Promise((resolve, reject) => {
-  const req = indexedDB.open('cahoots', 1);
-  req.onupgradeneeded = () => {
+  const req = indexedDB.open('cahoots', 2);
+  req.onupgradeneeded = (ev) => {
     const d = req.result;
-    d.createObjectStore('circles', { keyPath: 'id' });
-    d.createObjectStore('messages', { keyPath: 'key', autoIncrement: true }).createIndex('circle', 'circle');
+    if (ev.oldVersion < 1) {
+      d.createObjectStore('circles', { keyPath: 'id' });
+      d.createObjectStore('messages', { keyPath: 'key', autoIncrement: true }).createIndex('circle', 'circle');
+    }
+    if (ev.oldVersion < 2) {
+      d.createObjectStore('chat', { keyPath: 'key', autoIncrement: true }).createIndex('circle', 'circle');
+      d.createObjectStore('settings', { keyPath: 'id' });
+    }
   };
   req.onsuccess = () => resolve(req.result);
   req.onerror = () => reject(req.error);
@@ -44,6 +60,10 @@ const loadCircles = () => tx('circles', 'readonly', (s) => s.getAll());
 const deleteCircle = (id) => tx('circles', 'readwrite', (s) => s.delete(id));
 const saveMessage = (m) => tx('messages', 'readwrite', (s) => s.add(m));
 const loadMessages = (id) => tx('messages', 'readonly', (s) => s.index('circle').getAll(id));
+const saveChat = (m) => tx('chat', 'readwrite', (s) => s.add(m));
+const loadChat = (id) => tx('chat', 'readonly', (s) => s.index('circle').getAll(id));
+const loadSettings = async (id) => (await tx('settings', 'readonly', (s) => s.get(id))) || { id, relay: DEFAULT_RELAY };
+const saveSettings = (row) => tx('settings', 'readwrite', (s) => s.put(row));
 
 const live = new Map(); // circle id -> Circle (WASM object)
 let flash = null;   // one-shot banner for the next circle render
@@ -72,6 +92,7 @@ const h = (tag, attrs = {}, ...kids) => {
   return el;
 };
 const render = (...nodes) => { stopScanner(); view.replaceChildren(...nodes.filter((n) => n != null)); };
+window.addEventListener('hashchange', () => { chatRun++; });
 const notice = (text, kind = '') => h('div', { class: `notice ${kind}` }, text);
 const kib = (n) => n >= 1024 ? `${Math.round(n / 1024)} KiB` : `${n} B`;
 const hexToBytes = (s) => Uint8Array.from(s.match(/../g).map((x) => parseInt(x, 16)));
@@ -400,6 +421,7 @@ async function screenCircle(id) {
     h('p', { class: 'muted' }, `Integrity inside the circle is information-theoretic (one-time Poly1305). The tag proves a member wrote it, not which one. You are member ${circle.my_slice()} of ${circle.members()}${circle.agent_seat() ? ', plus an agent seat' : ''}. ${kib(circle.remaining())} of ${kib(circle.slice_len())} left in your slice.`),
     circle.remaining() < circle.slice_len() / 10 ? notice('Less than 10% of your slice remains. Plan a new ceremony.') : null,
     banner,
+    h('div', { class: 'row' }, h('a', { class: 'btn primary', href: `#/chat/${id}` }, 'Open chat'), h('span', { class: 'muted' }, 'Pad-seeded chat over a relay. Below: pure-pad messages, one byte of pad per byte.')),
     h('h2', {}, 'Compose'),
     type, text,
     h('div', { class: 'check' }, padOn, h('span', {}, 'Pad to 32/64/128/256 bytes to hide the length')),
@@ -416,6 +438,117 @@ async function screenCircle(id) {
   );
 }
 
+// ---------------------------------------------------------------- chat (pad-seeded, over the Numbers Station)
+let chatRun = 0; // bumps on every render; a stale poll loop sees a different value and stops
+async function screenChat(id) {
+  const circle = await openCircle(id);
+  if (!circle) { render(h('p', {}, 'Unknown circle.'), h('a', { class: 'btn', href: '#/' }, 'Back')); return; }
+  const me = circle.my_slice();
+  const settings = await loadSettings(id);
+  const run = ++chatRun;
+  const persist = () => saveCircle(circle);
+
+  const relayIn = h('input', { type: 'text', value: settings.relay, placeholder: DEFAULT_RELAY });
+  const relayBase = () => (relayIn.value.trim() || location.origin).replace(/\/$/, '');
+  const status = h('p', { class: 'muted' }, '');
+  const epochChip = h('span', { class: 'pill' }, '');
+  const list = h('div', { class: 'chatlist' });
+  const input = h('input', { type: 'text', placeholder: 'Message (up to 4094 bytes, padded to 64/256/1024/4096)', maxlength: '4000' });
+  const sendBtn = h('button', { class: 'primary' }, 'Send');
+  const rotateBtn = h('button', {}, 'Rotate epoch');
+
+  const setEpoch = () => { const e = circle.current_epoch(); epochChip.textContent = e ? `epoch ${e}` : 'no epoch yet'; };
+  const line = (m) => h('div', { class: `chatmsg ${m.dir}` },
+    h('div', { class: 'meta' }, m.dir === 'rejected' ? `rejected: ${m.reason} · seq ${m.seq}` : `${m.dir === 'out' ? 'you' : `member ${m.sender}`} · `, m.dir === 'rejected' ? null : h('span', { class: 'pill' }, `epoch ${m.epoch}`), m.dir === 'rejected' ? null : ` · ${new Date(m.ts).toLocaleTimeString()}`),
+    m.dir === 'rejected' ? null : h('div', {}, m.text));
+  const append = (m) => { list.append(line(m)); list.scrollTop = list.scrollHeight; };
+  for (const m of await loadChat(id)) append(m);
+  setEpoch();
+
+  const post = async (bytes) => {
+    const res = await fetch(`${relayBase()}/v1/circles/${id}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes });
+    if (!res.ok) throw `relay ${res.status}: ${await res.text()}`;
+    return res.json();
+  };
+  const doSend = async () => {
+    const text = input.value;
+    if (!text) return;
+    sendBtn.disabled = true;
+    try {
+      const pt = chat_bucket_pad(utf8.encode(text));
+      if (!pt) throw 'Message too long.';
+      const wire = circle.chat_send(pt);
+      await persist(); // keys and any epoch spend are recorded before the ciphertext leaves
+      await post(b64_decode(wire));
+      const m = { circle: id, dir: 'out', sender: me, epoch: circle.current_epoch(), text, ts: Date.now() };
+      await saveChat(m); append(m); setEpoch();
+      input.value = '';
+    } catch (e) { status.textContent = `Send failed: ${ERRORS[e] || e}`; }
+    sendBtn.disabled = false;
+  };
+  const doRotate = async () => {
+    try { const e = circle.rotate_epoch(); await persist(); setEpoch(); status.textContent = `Started epoch ${e}: spent 32 pad bytes. Peers switch when your next message arrives.`; }
+    catch (e) { status.textContent = `Rotate failed: ${ERRORS[e] || e}`; }
+  };
+  sendBtn.onclick = doSend;
+  input.onkeydown = (e) => { if (e.key === 'Enter') doSend(); };
+  rotateBtn.onclick = doRotate;
+
+  // Long-poll loop. Stops when the screen is replaced.
+  const poll = async () => {
+    while (run === chatRun) {
+      const after = circle.relay_seq();
+      const url = `${relayBase()}/v1/circles/${id}/messages?wait=${POLL_WAIT_MS}${after == null ? '' : `&after=${after}`}`;
+      let data;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw `${res.status}`;
+        data = await res.json();
+        status.textContent = `Connected to relay. Last seq ${circle.relay_seq() ?? 'none'}.`;
+      } catch (e) {
+        status.textContent = `Relay unreachable (${e}). Retrying…`;
+        await new Promise((r) => setTimeout(r, 3000));
+        continue;
+      }
+      if (run !== chatRun) break;
+      let changed = false;
+      for (const entry of data.entries || []) {
+        const bytes = b64_decode(entry.message);
+        if (bytes[0] === 2) {
+          const sender = bytes[22];
+          if (sender !== me) {
+            try {
+              const r = circle.chat_receive(entry.message);
+              const un = chat_bucket_unpad(r.text());
+              const m = { circle: id, dir: 'in', sender: r.sender(), epoch: r.epoch(), text: utf8d.decode(un ?? r.text()), ts: entry.received_at, seq: entry.seq };
+              await saveChat(m); append(m);
+            } catch (e) {
+              const m = { circle: id, dir: 'rejected', reason: e, seq: entry.seq, ts: entry.received_at };
+              await saveChat(m); append(m);
+            }
+          }
+        }
+        circle.set_relay_seq(BigInt(entry.seq));
+        changed = true;
+      }
+      if (changed) { await persist(); setEpoch(); }
+    }
+  };
+
+  render(
+    h('div', { class: 'row' }, h('h1', {}, circle.name()), epochChip),
+    h('p', {}, h('strong', {}, CHAT_LABEL), '. ', CHAT_CLAIM),
+    h('p', { class: 'muted' }, `You are member ${me}. One epoch costs 32 pad bytes for the whole circle. ${kib(circle.remaining())} left in your slice. The sender shown is a chain label, not a proof of who typed.`),
+    h('details', {}, h('summary', {}, 'Relay'), h('label', {}, 'Numbers Station URL (blank = this origin)'), relayIn, h('p', {}), h('button', { onclick: async () => { await saveSettings({ id, relay: relayIn.value.trim() }); chatRun++; screenChat(id); } }, 'Save and reconnect')),
+    status,
+    list,
+    h('div', { class: 'row' }, input, sendBtn, rotateBtn),
+    h('p', { class: 'muted' }, 'Plaintext history is stored on this device. Erasure on phone storage is best effort.'),
+    h('a', { class: 'btn', href: `#/c/${id}` }, 'Back to circle'),
+  );
+  poll();
+}
+
 // ---------------------------------------------------------------- router
 async function route() {
   const parts = location.hash.replace(/^#\/?/, '').split('/');
@@ -426,6 +559,7 @@ async function route() {
       const params = JSON.parse(utf8d.decode(b64_decode(parts[1])));
       if (parts[2] === 'run') screenRun(params); else screenPick(params);
     } else if (parts[0] === 'c') await screenCircle(parts[1]);
+    else if (parts[0] === 'chat') await screenChat(parts[1]);
     else await screenHome();
   } catch (e) { render(h('p', {}, `Error: ${e}`), h('a', { class: 'btn', href: '#/' }, 'Home')); }
 }

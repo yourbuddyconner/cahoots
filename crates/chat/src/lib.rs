@@ -17,7 +17,11 @@
 #![forbid(unsafe_code)]
 
 extern crate alloc;
+#[cfg(feature = "cli")]
+extern crate std;
 
+#[cfg(feature = "cli")]
+pub mod cli;
 mod primitives;
 mod session;
 

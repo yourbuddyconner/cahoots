@@ -76,3 +76,7 @@ The deploy record must pin:
 - the policy hash. The station has no policy today, so this is a placeholder for the agent-seat policy that will share the workload (handoff 3.7, gap 7, `appManifestDigest`).
 
 What anchoring adds once deployed: the station periodically commits its head hash to the TVC log. A reader who verifies the anchored head against the chain knows the history is the one everyone else sees.
+
+## CORS
+
+The API allows any origin for `GET`, `POST`, and `OPTIONS` with a `Content-Type` header. The feed is public ciphertext by design, so there is nothing to protect with an origin check.

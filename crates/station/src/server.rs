@@ -48,6 +48,13 @@ pub fn app(state: State) -> Router {
         .route("/v1/feed", get(feed))
         .with_state(state)
         .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY + 1))
+        // The feed is public by design: ciphertext only. Any origin may read and post.
+        .layer(
+            tower_http::cors::CorsLayer::new()
+                .allow_origin(tower_http::cors::Any)
+                .allow_methods([http::Method::GET, http::Method::POST, http::Method::OPTIONS])
+                .allow_headers([http::header::CONTENT_TYPE]),
+        )
 }
 
 fn now_ms() -> u64 {

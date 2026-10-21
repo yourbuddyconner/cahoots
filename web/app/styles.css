@@ -42,3 +42,8 @@ video { width: 100%; max-width: 360px; border-radius: 8px; background: #000; dis
 .member { border-top: 1px solid var(--line); padding: 8px 0; }
 .member .ok { color: var(--ok); font-weight: 600; }
 .big { font-size: 20px; }
+.chatlist { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin: 10px 0; max-height: 50vh; overflow-y: auto; }
+.chatmsg { padding: 6px 0; border-bottom: 1px solid var(--line); } .chatmsg:last-child { border-bottom: 0; }
+.chatmsg .meta { font-size: 12px; color: var(--muted); } .chatmsg.out .meta { color: var(--accent); }
+.chatmsg.rejected .meta { font-style: italic; }
+.row input[type=text] { flex: 1; min-width: 160px; }

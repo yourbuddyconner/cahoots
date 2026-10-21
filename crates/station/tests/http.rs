@@ -161,3 +161,37 @@ async fn long_poll_returns_when_entry_arrives() {
     let v: Value = r.json().await.unwrap();
     assert_eq!(v["entries"].as_array().unwrap().len(), 0);
 }
+
+#[tokio::test]
+async fn cors_allows_any_origin_for_reads_and_posts() {
+    let (base, _dir) = start().await;
+    let client = reqwest::Client::new();
+    let cid_hex = hex::encode([0xCD; 16]);
+    let r = client
+        .request(
+            reqwest::Method::OPTIONS,
+            format!("{base}/v1/circles/{cid_hex}/messages"),
+        )
+        .header("Origin", "http://localhost:8766")
+        .header("Access-Control-Request-Method", "POST")
+        .header("Access-Control-Request-Headers", "content-type")
+        .send()
+        .await
+        .unwrap();
+    assert!(r.status().is_success(), "preflight status {}", r.status());
+    assert_eq!(r.headers()["access-control-allow-origin"], "*");
+    let methods = r.headers()["access-control-allow-methods"]
+        .to_str()
+        .unwrap();
+    assert!(
+        methods.contains("POST") && methods.contains("GET"),
+        "{methods}"
+    );
+    let r = client
+        .get(format!("{base}/v1/head"))
+        .header("Origin", "http://localhost:8766")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.headers()["access-control-allow-origin"], "*");
+}

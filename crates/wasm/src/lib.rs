@@ -6,6 +6,7 @@
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use cahoots_chat::{self as chat, ChatError, ChatSession, EpochId};
 use cahoots_core::ceremony::{Ceremony, CeremonyError, Phase};
 use cahoots_core::ledger::{MemLedger, SpentLedger};
 use cahoots_core::message::{MessageError, MessageType};
@@ -40,6 +41,17 @@ pub fn bucket_pad(plaintext: &[u8]) -> Option<Vec<u8>> {
 #[wasm_bindgen]
 pub fn bucket_unpad(padded: &[u8]) -> Option<Vec<u8>> {
     pad::bucket_unpad(padded).map(<[u8]>::to_vec)
+}
+
+/// Chat plaintext buckets (64/256/1024/4096) with a u16 length trailer.
+#[wasm_bindgen]
+pub fn chat_bucket_pad(plaintext: &[u8]) -> Option<Vec<u8>> {
+    chat::bucket_pad(plaintext)
+}
+
+#[wasm_bindgen]
+pub fn chat_bucket_unpad(padded: &[u8]) -> Option<Vec<u8>> {
+    chat::bucket_unpad(padded).map(<[u8]>::to_vec)
 }
 
 /// Render `data` as a QR code SVG (byte mode, low error correction for density).
@@ -182,7 +194,7 @@ impl WasmCeremony {
         .map_err(pad_err)?;
         Ok(CeremonyOutput {
             words,
-            circle: Some(Circle { pad, label }),
+            circle: Some(Circle::from_pad(pad, label)),
         })
     }
 }
@@ -250,12 +262,82 @@ fn pad_err(e: PadError) -> String {
     }
 }
 
-const STATE_VERSION: u8 = 1;
+/// State format: v1 is pad + ledger + label; v2 appends chat session state and the relay seq.
+const STATE_VERSION: u8 = 2;
 
+fn chat_err(e: ChatError) -> String {
+    match e {
+        ChatError::Version => "version".into(),
+        ChatError::Type => "type".into(),
+        ChatError::Length => "length".into(),
+        ChatError::Tag => "tag".into(),
+        ChatError::WrongCircle => "wrong-circle".into(),
+        ChatError::BadSender => "bad-sender".into(),
+        ChatError::Reuse => "reuse".into(),
+        ChatError::Replay => "replay".into(),
+        ChatError::TooFarAhead => "too-far-ahead".into(),
+        ChatError::UnknownEpoch => "unknown-epoch".into(),
+        ChatError::State => "state".into(),
+        ChatError::Pad(p) => pad_err(p),
+    }
+}
+
+fn epoch_str(id: EpochId) -> String {
+    format!("{}:{}", id.slice, id.offset)
+}
+
+/// A circle on this device: the pad and ledger, the pad-seeded chat session over them,
+/// the randomness label, and the last relay sequence number this device has consumed.
 #[wasm_bindgen]
 pub struct Circle {
-    pad: Pad<MemPadStorage, MemLedger>,
+    chat: ChatSession<MemPadStorage, MemLedger>,
     label: Label,
+    relay_seq: Option<u64>,
+}
+
+/// A decrypted chat message.
+#[wasm_bindgen]
+#[derive(Debug)]
+pub struct ChatReceived {
+    text: Vec<u8>,
+    sender: u8,
+    counter: u32,
+    epoch: String,
+}
+
+#[wasm_bindgen]
+impl ChatReceived {
+    /// Plaintext bytes, still bucket-padded if the sender padded them.
+    pub fn text(&self) -> Vec<u8> {
+        self.text.clone()
+    }
+    pub fn sender(&self) -> u8 {
+        self.sender
+    }
+    pub fn counter(&self) -> u32 {
+        self.counter
+    }
+    /// `"<slice>:<offset>"` of the 32 pad bytes that key this epoch.
+    pub fn epoch(&self) -> String {
+        self.epoch.clone()
+    }
+}
+
+impl Circle {
+    fn from_pad(pad: Pad<MemPadStorage, MemLedger>, label: Label) -> Circle {
+        let me = pad.my_slice();
+        Circle {
+            chat: ChatSession::new(pad, me),
+            label,
+            relay_seq: None,
+        }
+    }
+    fn pad(&self) -> &Pad<MemPadStorage, MemLedger> {
+        self.chat.pad()
+    }
+    fn pad_mut(&mut self) -> &mut Pad<MemPadStorage, MemLedger> {
+        self.chat.pad_mut()
+    }
 }
 
 /// A decrypted message.
@@ -287,45 +369,89 @@ impl Received {
 #[wasm_bindgen]
 impl Circle {
     pub fn circle_id_hex(&self) -> String {
-        hex(&self.pad.circle_id())
+        hex(&self.pad().circle_id())
     }
     pub fn name(&self) -> String {
-        self.pad.params().name.clone()
+        self.pad().params().name.clone()
     }
     pub fn label(&self) -> String {
         self.label.as_str().into()
     }
     pub fn my_slice(&self) -> u8 {
-        self.pad.my_slice()
+        self.pad().my_slice()
     }
     pub fn members(&self) -> u8 {
-        self.pad.params().n
+        self.pad().params().n
     }
     pub fn agent_seat(&self) -> bool {
-        self.pad.params().agent_seat
+        self.pad().params().agent_seat
     }
     pub fn pad_len(&self) -> u32 {
-        self.pad.params().pad_len
+        self.pad().params().pad_len
     }
     pub fn slice_len(&self) -> u32 {
-        self.pad.params().slice_len()
+        self.pad().params().slice_len()
     }
     /// Unspent bytes left in this member's slice.
     pub fn remaining(&self) -> u32 {
-        self.pad.remaining()
+        self.pad().remaining()
+    }
+
+    // ---- pad-seeded chat (docs/chat.md) ----
+
+    /// `"<slice>:<offset>"` of the epoch this device sends in, if any.
+    pub fn current_epoch(&self) -> Option<String> {
+        self.chat.current_epoch().map(epoch_str)
+    }
+
+    /// Spend 32 bytes from this member's slice and switch to a fresh epoch.
+    pub fn rotate_epoch(&mut self) -> Result<String, String> {
+        self.chat.start_epoch().map(epoch_str).map_err(chat_err)
+    }
+
+    /// Encrypt a chat message (starting an epoch if needed) and return base64url wire bytes.
+    pub fn chat_send(&mut self, plaintext: &[u8]) -> Result<String, String> {
+        let wire = self.chat.send(plaintext).map_err(chat_err)?;
+        Ok(b64_encode(&wire))
+    }
+
+    /// Verify and decrypt a chat message. Errors: `reuse`, `tag`, `replay`, `too-far-ahead`,
+    /// `wrong-circle`, `version`, `length`, `base64url`.
+    pub fn chat_receive(&mut self, wire_b64: &str) -> Result<ChatReceived, String> {
+        let wire = b64_decode(wire_b64)?;
+        let (hdr, text) = self.chat.receive(&wire).map_err(chat_err)?;
+        Ok(ChatReceived {
+            text,
+            sender: hdr.sender,
+            counter: hdr.counter,
+            epoch: epoch_str(hdr.epoch),
+        })
+    }
+
+    /// Last relay sequence number consumed, persisted with the circle.
+    pub fn relay_seq(&self) -> Option<u64> {
+        self.relay_seq
+    }
+    pub fn set_relay_seq(&mut self, seq: Option<u64>) {
+        self.relay_seq = seq;
+    }
+
+    /// True while the pure-pad path still has a usable key range. Used by tests.
+    pub fn pure_pad_still_works(&self) -> bool {
+        self.pad().remaining() >= 32
     }
 
     /// Encrypt and return base64url wire bytes. The pad range is spent and erased first.
     pub fn send(&mut self, msg_type: u8, plaintext: &[u8]) -> Result<String, String> {
         let ty = MessageType::try_from(msg_type).map_err(|_| "type".to_string())?;
-        let wire = self.pad.send(ty, plaintext).map_err(pad_err)?;
+        let wire = self.pad_mut().send(ty, plaintext).map_err(pad_err)?;
         Ok(b64_encode(&wire))
     }
 
     /// Verify and decrypt base64url wire bytes. Errors: `reuse`, `tag`, `wrong-circle`, ...
     pub fn receive(&mut self, wire_b64: &str) -> Result<Received, String> {
         let wire = b64_decode(wire_b64)?;
-        let (hdr, pt) = self.pad.receive(&wire).map_err(pad_err)?;
+        let (hdr, pt) = self.pad_mut().receive(&wire).map_err(pad_err)?;
         Ok(Received {
             plaintext: pt,
             msg_type: hdr.msg_type as u8,
@@ -334,21 +460,22 @@ impl Circle {
         })
     }
 
-    /// Serialize pad, ledger, params, and label. Store the result in IndexedDB.
+    /// Serialize pad, ledger, params, label, chat state, and relay seq. Store it in IndexedDB.
     pub fn export(&self) -> Vec<u8> {
-        let params = self.pad.params().encode();
-        let slices = self.pad.params().slices();
-        let pad_len = self.pad.params().pad_len;
+        let pad = self.pad();
+        let params = pad.params().encode();
+        let slices = pad.params().slices();
+        let pad_len = pad.params().pad_len;
         let mut out = Vec::with_capacity(64 + params.len() + pad_len as usize);
         out.push(STATE_VERSION);
         out.push(self.label as u8);
-        out.push(self.pad.my_slice());
-        out.extend_from_slice(&self.pad.circle_id());
+        out.push(pad.my_slice());
+        out.extend_from_slice(&pad.circle_id());
         out.extend_from_slice(&(params.len() as u16).to_le_bytes());
         out.extend_from_slice(&params);
         out.push(slices);
         for s in 0..slices {
-            let ranges = self.pad.ledger().ranges(s);
+            let ranges = pad.ledger().ranges(s);
             out.extend_from_slice(&(ranges.len() as u32).to_le_bytes());
             for &(a, b) in ranges {
                 out.extend_from_slice(&a.to_le_bytes());
@@ -357,15 +484,27 @@ impl Circle {
         }
         out.extend_from_slice(&pad_len.to_le_bytes());
         let mut bytes = Zeroizing::new(vec![0u8; pad_len as usize]);
-        self.pad.storage().read(0, &mut bytes);
+        pad.storage().read(0, &mut bytes);
         out.extend_from_slice(&bytes);
+        // v2 trailer: chat state and relay seq.
+        let chat_state = self.chat.export_state();
+        out.extend_from_slice(&(chat_state.len() as u32).to_le_bytes());
+        out.extend_from_slice(&chat_state);
+        match self.relay_seq {
+            Some(seq) => {
+                out.push(1);
+                out.extend_from_slice(&seq.to_le_bytes());
+            }
+            None => out.extend_from_slice(&[0; 9]),
+        }
         out
     }
 
     pub fn import(state: &[u8]) -> Result<Circle, String> {
         let mut r = Reader(state);
         let err = |_: ()| "state".to_string();
-        if r.u8().map_err(err)? != STATE_VERSION {
+        let version = r.u8().map_err(err)?;
+        if version != 1 && version != STATE_VERSION {
             return Err("state-version".into());
         }
         let label = match r.u8().map_err(err)? {
@@ -395,9 +534,6 @@ impl Circle {
         }
         let pad_len = r.u32().map_err(err)? as usize;
         let bytes = r.take(pad_len).map_err(err)?.to_vec();
-        if !r.0.is_empty() {
-            return Err("state".into());
-        }
         let pad = Pad::with_circle_id(
             params,
             my_slice,
@@ -406,7 +542,31 @@ impl Circle {
             ledger,
         )
         .map_err(pad_err)?;
-        Ok(Circle { pad, label })
+        if version == 1 {
+            if !r.0.is_empty() {
+                return Err("state".into());
+            }
+            return Ok(Circle::from_pad(pad, label));
+        }
+        let chat_len = r.u32().map_err(err)? as usize;
+        let chat_state = r.take(chat_len).map_err(err)?;
+        let relay_seq = match r.u8().map_err(err)? {
+            0 => {
+                r.take(8).map_err(err)?;
+                None
+            }
+            1 => Some(r.u64().map_err(err)?),
+            _ => return Err("state".into()),
+        };
+        if !r.0.is_empty() {
+            return Err("state".into());
+        }
+        let chat = ChatSession::import_state(pad, my_slice, chat_state).map_err(chat_err)?;
+        Ok(Circle {
+            chat,
+            label,
+            relay_seq,
+        })
     }
 }
 
@@ -431,6 +591,10 @@ impl<'a> Reader<'a> {
     fn u32(&mut self) -> Result<u32, ()> {
         let b = self.take(4)?;
         Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    }
+    fn u64(&mut self) -> Result<u64, ()> {
+        let b = self.take(8)?;
+        Ok(u64::from_le_bytes(b.try_into().map_err(|_| ())?))
     }
 }
 
