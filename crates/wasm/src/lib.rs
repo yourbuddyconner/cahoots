@@ -174,6 +174,14 @@ impl WasmCeremony {
         self.inner.my_commitment().to_vec()
     }
 
+    /// The commitment that `contribution` from member `index` would have produced.
+    /// A member that has not revealed yet may accept a late reveal as both commitment
+    /// and reveal: that member's own contribution was still secret when the other
+    /// side committed, so commit-then-reveal still holds for it.
+    pub fn commitment_for(&self, index: u8, contribution: &[u8]) -> Vec<u8> {
+        cahoots_core::commit::commit(self.inner.params(), index, contribution).to_vec()
+    }
+
     pub fn add_commitment(&mut self, from: u8, commitment: &[u8]) -> Result<(), String> {
         let c: [u8; 32] = commitment
             .try_into()

@@ -2,6 +2,12 @@
 
 A PWA. `cahoots-core` and `cahoots-chat` run as WebAssembly. There are no CDN scripts and no bundler. The ceremony and pure-pad messaging make no network calls: members exchange ceremony data by pointing phones at each other's screens, or by paste and file when a camera is not available. The chat screen is the one place the app talks to a server, a Numbers Station relay, and it sends and receives ciphertext only.
 
+## Screens
+
+One job per screen: a top bar (back, title, a menu for secondary options), one stage element, and one primary action pinned at the bottom. On phones the ceremony's commit and reveal steps have a Show / Scan toggle; on screens wider than 960 px both panels sit side by side. Secondary paths (paste, copy, download, load a file, leave) live in the menu sheet so the main screen never needs scrolling.
+
+A commitment code carries the circle parameters, so a joiner scans any member who has already committed. A member that has not yet revealed accepts a late reveal as both commitment and reveal (`Ceremony.commitment_for`), which lets a member who joined late catch up without the others going back a step. The check-words screen keeps your own reveal available from its menu for anyone still collecting.
+
 ## Layout
 
 | Path | What |

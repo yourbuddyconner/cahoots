@@ -158,3 +158,21 @@ fn qr_svg_and_bucket_and_base64url() {
     assert_eq!(b64_decode(&e).unwrap(), vec![0xfb, 0xff]);
     assert!(b64_decode("***").is_err());
 }
+
+#[test]
+fn late_reveal_can_stand_in_for_its_commitment() {
+    let contrib = |i: u8| -> Vec<u8> {
+        (0..1024u32)
+            .map(|k| (k.wrapping_mul(7 + i as u32)) as u8)
+            .collect()
+    };
+    let mut a = WasmCeremony::new(2, 1024, "late", false, 0, &contrib(0), None).unwrap();
+    let b = WasmCeremony::new(2, 1024, "late", false, 1, &contrib(1), None).unwrap();
+    // A never saw B's commitment code. It derives it from B's reveal, then applies the reveal.
+    let derived = a.commitment_for(1, &contrib(1));
+    assert_eq!(derived, b.commitment());
+    a.add_commitment(1, &derived).unwrap();
+    assert_eq!(a.phase(), "reveal");
+    a.add_reveal(1, &contrib(1)).unwrap();
+    assert_eq!(a.phase(), "complete");
+}
