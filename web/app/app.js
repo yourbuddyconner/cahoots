@@ -451,7 +451,7 @@ function screenRun(params) {
     screen({ title: 'Ceremony stopped', body: [h('div', {}, h('h1', {}, 'A reveal did not match its commitment.'), h('p', { class: 'lead' }, 'Nothing was kept. Either someone\'s contribution changed after they committed, or a code was corrupted. Start again from the beginning.'))], actions: [btn('Back to start', () => go('#/'), 'primary')] });
     return;
   }
-  if (phase === 'complete') { screenWords(); return; }
+  if (phase === 'complete') { screenRevealDone(params); return; }
   const rerender = () => screenRun(params);
   const st = status();
   const seatName = (i) => (i === me ? 'you' : `seat ${i + 1}`);
@@ -528,6 +528,25 @@ function screenRun(params) {
     body: [chips, waiting, modeSeg, h('div', { class: 'pair' }, showWrap, scanWrap), st],
   });
   refresh();
+}
+
+/** Everything is in on this screen, but the others may still need this member's reveal. Show it until they say so. */
+function screenRevealDone(params) {
+  const { c } = ceremony;
+  const me = c.index();
+  const reveal = c.reveal();
+  const text = enc.reveal(me, reveal);
+  const others = Array.from({ length: params.n }, (_, i) => i).filter((i) => i !== me).map((i) => `seat ${i + 1}`).join(' and ');
+  screen({
+    title: 'Step 2 of 3 · Reveal', sub: params.name,
+    back: () => { if (confirm('Leave the ceremony? Nothing is kept.')) { ceremony = null; go('#/'); } },
+    menu: () => sheet(h('h2', {}, 'Share your reveal another way'), copyBtn(text), downloadBtn(`reveal-${me + 1}.txt`, text)),
+    body: [
+      next(`Your screen has everything. ${others.charAt(0).toUpperCase() + others.slice(1)} still ${params.n > 2 ? 'need' : 'needs'} to scan this animation. Hold still until their bar fills.`),
+      animatedQr(packReveal(me, reveal), `seat ${me + 1} · step 2`),
+    ],
+    actions: [btn(params.n > 2 ? 'Everyone has scanned it' : 'They have scanned it', () => screenWords(), 'primary')],
+  });
 }
 
 function screenWords() {

@@ -90,19 +90,22 @@ if (!revealJ?.startsWith("cahoots-reveal:1:")) throw new Error(`joiner reveal te
 // Leader takes the joiner's reveal as commitment plus reveal. With two people that completes the
 // leader's ceremony at once, so the leader lands on the check words and shares its reveal from there.
 await L.menu(); await L.page.click("text=Paste a code"); await L.paste(revealJ);
-await L.page.waitForSelector("text=Step 3 of 3");
+await L.page.waitForSelector('button:text-is("They have scanned it")');
 await L.closeSheet();
-await L.snap("words");
-await L.page.click("text=Someone still needs my reveal");
-await L.page.waitForSelector(".sheet-bg.on");
-await L.page.click(".sheet >> text=Copy as text"); const revealL = await L.clip(); await L.closeSheet();
+await L.snap("reveal-done");
+await L.menu(); await L.page.click(".sheet >> text=Copy as text"); const revealL = await L.clip(); await L.closeSheet();
 if (!revealL?.startsWith("cahoots-reveal:0:")) throw new Error(`leader reveal text: ${revealL}`);
 
-// Joiner takes the leader's reveal and completes.
+// Joiner takes the leader's reveal and completes; both confirm the others have scanned.
 await J.menu(); await J.page.click("text=Paste a code"); await J.paste(revealL);
-await J.page.waitForSelector("text=Step 3 of 3");
+await J.page.waitForSelector('button:text-is("They have scanned it")');
 await J.closeSheet();
+await J.page.click('button:text-is("They have scanned it")');
+await J.page.waitForSelector("text=Step 3 of 3");
 await J.snap("words");
+await L.page.click('button:text-is("They have scanned it")');
+await L.page.waitForSelector("text=Step 3 of 3");
+await L.snap("words");
 const wordsOf = (p) => p.$$eval(".words div", (els) => els.map((e) => e.textContent.replace(/^\d+/, "").trim()).join(" "));
 const wL = await wordsOf(L.page), wJ = await wordsOf(J.page);
 if (wL !== wJ) throw new Error(`check words differ: ${wL} / ${wJ}`);
