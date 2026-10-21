@@ -70,4 +70,4 @@ Chat messages travel over the Numbers Station: an append-only, hash-chained publ
 
 ## 7. Vectors
 
-`vectors/chat.json` covers epoch key derivation, chain and message keys for two senders, three encrypted messages including one out of order, and a tampered message that MUST fail.
+`crates/vectors/chat.json` covers epoch key derivation, chain and message keys for two senders, three encrypted messages including one out of order, and a tampered message that MUST fail.

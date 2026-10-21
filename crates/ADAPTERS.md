@@ -1,6 +1,6 @@
 # Adapters
 
-Thin crates that feed `cahoots-provider` output into standard PSK slots (handoff 10.2). Adapters never read the pad. They call `psk` / `psk_for` and derive a protocol-specific key with the `wireguard`, `hpke`, or `age` context, so a PSK released for one protocol can't be reused in another.
+Thin crates that feed `cahoots-provider` output into standard pre-shared-key slots. Adapters never read the pad. They call `psk` / `psk_for` and derive a protocol-specific key with the `wireguard`, `hpke`, or `age` context, so a PSK released for one protocol can't be reused in another.
 
 | Crate | Slot | Status |
 |---|---|---|

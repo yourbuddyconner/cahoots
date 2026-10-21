@@ -13,15 +13,14 @@ A commitment code carries the circle parameters, so a joiner scans any member wh
 | Path | What |
 |---|---|
 | `crates/wasm/` | `cahoots-wasm`: wasm-bindgen API over the core. Ceremony, `Circle` (pad + ledger + label + chat session + relay cursor) with pure-pad send/receive, chat send/receive, epoch rotation, and export/import for IndexedDB; RaptorQ fountain coding for animated QR; QR rendering to SVG; bucket padding; base64url. Also compiles natively, so `cargo test -p cahoots-wasm` exercises the whole API. |
-| `app/` | The static PWA: `index.html`, `app.js` (ES module), `styles.css`, `sw.js` (cache-first service worker), `manifest.json`. |
+| `app/` | The static PWA: `index.html`, `app.js` (ES module), `styles.css`, `sw.js` (network-first service worker with a cache fallback; bump `VERSION` on every release), `manifest.json`, icons. |
+| `e2e.mjs` | End-to-end check: two isolated browser contexts run a full ceremony through the paste fallbacks and exchange a message. `node web/e2e.mjs`. |
 | `app/pkg/` | Build output of `wasm-pack`. Not committed. |
 
 ## Build and run
 
 ```sh
-# once: wasm-pack. The repo pins Rust 1.88, which is too old to build wasm-pack itself,
-# so install it with a newer toolchain. Do this outside the repo directory.
-cargo +stable install wasm-pack --locked
+cargo install wasm-pack --locked   # once
 
 cd crates/wasm
 wasm-pack build --target web --release --out-dir ../../web/app/pkg --no-typescript
@@ -31,28 +30,28 @@ python3 -m http.server 8765 --bind 127.0.0.1
 # open http://127.0.0.1:8765/
 ```
 
-The service worker caches every asset on first load. After that the app works with the network off. For installs on a phone, serve over HTTPS (any static host) and use "Add to Home Screen". `wasm-opt` is disabled in `crates/wasm/Cargo.toml` so the build needs no binaryen download; enable it later for a smaller binary (currently about 435 KB).
+The service worker fetches from the network first and falls back to its cache, so a load with a connection always gets the current app and the app still opens with no connection. For installs on a phone, serve over HTTPS (any static host) and use "Add to Home Screen". The deployed app lives at https://cahoots.network/app/. The wasm binary is about 690 KB; the QR decoder and fountain coder are built at `opt-level = 3` for speed.
 
 ## How a ceremony flows
 
-1. The leader opens **Start a ceremony**, picks name, member count, pad length, and the agent seat. If the agent seat is on, the screen says the circle trusts the enclave with its pad.
-2. Every member confirms the parameters, picks their member number, and picks a randomness source: this device's `crypto.getRandomValues`, or that XORed with a `cahoots-yk` contribution (file import or animated-QR import from a laptop). The label is `TRNG` only when a full-length hardware contribution was imported.
-3. **Commit.** Each member shows a single QR of their commitment. Others scan it. Nobody can reveal until all commitments are in; the app withholds the reveal until then.
-4. **Reveal.** Each member shows an animated QR (RaptorQ fountain packets at about 10 frames per second). Receivers scan until the progress bar fills. Every reveal is verified against its commitment; a mismatch aborts with nothing kept.
-5. **Check words.** Six BIP-39 words. If every screen agrees, members tap **They match** and the circle is saved.
+1. The host opens **Start a ceremony** and picks a name, the number of people, and a secret size (Small 16 KiB, Medium 64 KiB, Large 256 KiB). The hosted software member option is under **Advanced**; when it is on, every member's seat screen says so.
+2. The host keeps seat 1 and taps **Make my contribution**. Everyone else opens **Join one**, scans any member's code (it carries the parameters), and picks a free seat. Seats already seen are crossed out. Randomness is this device's `crypto.getRandomValues`; **Add hardware randomness** mixes in a `cahoots-yk` contribution from a file or an animated QR. The label is `TRNG` only when a full-length hardware contribution was mixed in.
+3. **Step 1, Commit.** Each member shows a single QR of their commitment. Others scan it. A line on the screen names whose codes are still needed; chips and the line update in place without restarting the camera. Nobody can reveal until all commitments are in; the app withholds the reveal until then.
+4. **Step 2, Reveal.** Each member shows an animated QR (RaptorQ fountain packets at about 10 frames per second). Receivers scan until the progress bar fills. Every reveal is verified against its commitment; a mismatch aborts with nothing kept.
+5. **Step 3, Check.** Six BIP-39 words. If every screen agrees, members tap **They match** and the circle is saved. A member who scans a code for their own seat is told that two people picked the same seat and how to fix it.
 
 Messages are base64url text shown as a QR and as copyable text. Reads take a scan or a paste. Reuse and tag failures show distinct refusals.
 
 ## Chat (pad-seeded, over a relay)
 
-**Open chat** on a circle screen opens the chat for that circle. The header reads "End-to-end encrypted, pad-hedged": the pad seeds the keys and ChaCha20-Poly1305 encrypts, per `docs/chat.md`. The relay sees ciphertext and traffic shape only.
+**Chat** on a cahoot's screen opens the chat for that circle. The header reads "End-to-end encrypted, pad-hedged": the pad seeds the keys and ChaCha20-Poly1305 encrypts, per `docs/chat.md`. The relay sees ciphertext and traffic shape only.
 
-- **Relay.** The chat needs a running Numbers Station (`cargo run -p cahoots-station -- --listen 127.0.0.1:8080 --log station.jsonl`). The URL is set per circle under the **Relay** disclosure and stored in IndexedDB; the default is `http://127.0.0.1:8080`, and blank means the page's own origin. The screen long-polls `GET /v1/circles/{id}/messages?after=<seq>&wait=25000` while open and posts sealed messages as raw bytes.
-- **Epochs.** The first send spends 32 pad bytes to start an epoch. **Rotate epoch** spends 32 more. Peers switch to the newest epoch they see; the chip next to the circle name shows the current one. Rotation also happens on its own after 1000 of your own messages in an epoch.
+- **Relay.** The chat needs a running Numbers Station (`cargo run -p cahoots-station -- --listen 127.0.0.1:8080 --log station.jsonl`). There is no default: until a relay address is set for the circle (the empty state's button, or **Relay address** in the menu), the chat screen explains what a relay is and shows nothing else. The address is stored per circle in IndexedDB. The screen long-polls `GET /v1/circles/{id}/messages?after=<seq>&wait=25000` while open and posts sealed messages as raw bytes.
+- **Epochs.** The first send spends 32 pad bytes to start an epoch. **Start a new epoch** in the menu spends 32 more. Peers switch to the newest epoch they see; the subtitle under the circle name shows the current one. Rotation also happens on its own after 1000 of your own messages in an epoch.
 - **Padding.** Plaintext is padded to 64, 256, 1024, or 4096 bytes before encryption.
 - **Rejections** show inline and muted: `rejected: replay`, `rejected: tag`, `rejected: reuse`, and so on. Your own messages coming back from the relay are skipped by sender index.
 - **Persistence.** Chat keys, the epoch state, and the last relay sequence number are exported with the circle, so a reload resumes where it left off without re-reading the feed. Plaintext history is stored on the device.
-- **CORS.** The station sends no CORS headers, so the app must be served from the same origin as the relay (reverse proxy `/v1/` to it) or the station needs CORS added before a phone on another origin can use it. The verification below used a small same-origin proxy.
+- **CORS.** The station allows any origin, so the app on cahoots.network can talk to a relay on any host.
 - The service worker never caches `/v1/` responses.
 
 ## Exchange formats (also used by the paste and file fallbacks)
@@ -60,12 +59,16 @@ Messages are base64url text shown as a QR and as copyable text. Reads take a sca
 | Data | Form |
 |---|---|
 | Parameters | `cahoots-params:<base64url params bytes>` |
-| Commitment | `cahoots-commit:<index>:<base64url 32 bytes>` |
+| Commitment | `cahoots-commit:<index>:<base64url 32 bytes>:<base64url params bytes>`. The parameters ride along so a joiner can scan any member. |
 | Reveal (text/file) | `cahoots-reveal:<index>:<base64url contribution>` |
 | Reveal (animated QR) | Fountain packets of `[index] ‖ contribution`. Each QR frame is base64url of `"CHQ1" ‖ RaptorQ OTI (12 bytes) ‖ encoding packet`. |
 | Message | base64url of the wire message from the protocol spec |
 
-## What was verified (2026-10-20)
+## What was verified
+
+2026-10-21, `web/e2e.mjs` in headless Chrome, a phone-sized context and a desktop one: a two-member ceremony through the paste fallbacks, including the late-joiner path where the host takes the joiner's reveal as commitment and reveal; identical check words; a one-time-pad message decrypted on the other member; the same message refused as reuse on a second read; no console errors. The script runs in about ten seconds and is the check to run before a release.
+
+2026-10-20, by hand
 
 Driven in Chrome with two tabs on two origins (`127.0.0.1` and `localhost`, so each tab had its own IndexedDB like two phones would), using the paste fallback:
 
@@ -84,12 +87,12 @@ Chat, verified the same day with two tabs on two origins behind a proxy that for
 - Member 1 reloaded the page. It came back on epoch `0:32` with the full history, "Last seq 3", no re-decrypted or duplicated entries, and received the next message from member 0.
 - No console errors in either tab.
 
-Camera scanning opens the camera with `getUserMedia`, draws each frame to a canvas at up to 480 px, and decodes it in our own wasm with the `rqrr` crate (`qr_decode_rgba`). No browser barcode API is used, so it works on iOS Safari and Chrome alike. The decoder is covered by Rust tests on rendered frames, including a 600-byte fountain frame. A real camera was not available in the automation session, so the end-to-end scan still needs a check on a phone.
+Camera scanning opens the camera with `getUserMedia`, draws each frame to a canvas at up to 720 px, and decodes it in our own wasm with the `rqrr` crate (`qr_decode_rgba`). No browser barcode API is used, so it works on iOS Safari and Chrome alike. The decoder is covered by Rust tests on rendered frames, including a 600-byte fountain frame. A real camera was not available in the automation session, so the end-to-end scan still needs a check on a phone.
 
 ## Limits
 
 - Erasure on phone storage is best effort. IndexedDB may keep old pages on disk.
 - Plaintext history is stored on the device so messages can be reread. Deleting the circle removes it.
-- Message compose is limited to 255 bytes with padding on, and 65535 bytes with it off.
+- A message is at most 255 characters. With length hiding off (in the menu) longer messages are possible, but the compose box keeps the limit.
 - No animated-QR *sending* of a `cahoots-yk` contribution exists yet on the laptop side; the import screen is ready for it.
 - `bucket_pad` plaintext length is hidden only within the chosen bucket.

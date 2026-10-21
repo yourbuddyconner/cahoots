@@ -1,6 +1,6 @@
 # cahoots-yk
 
-Reads random bytes from a YubiKey and delivers them to a Cahoots client as a second entropy source. It is the primary extra hardware source for now, because Conner already owns several YubiKeys.
+Reads random bytes from a YubiKey and delivers them to a Cahoots client as a second entropy source. It is the first extra hardware source because YubiKeys are common and need no custom hardware.
 
 ## What it does
 
@@ -43,7 +43,7 @@ cahoots-yk bench --bytes 262144                    # throughput and a byte-histo
 
 ## Throughput
 
-Not yet measured. No YubiKey was attached when this crate was written. Run `cahoots-yk bench` per model and record the results here. If a full 256 KiB contribution takes too long, the handoff allows a fixed hardware prefix with the rest from the platform CSPRNG, but v1 should require the full `L` bytes from hardware for the `TRNG` label.
+Not yet measured. No YubiKey was attached when this crate was written. Run `cahoots-yk bench` per model and record the results here. If a full 256 KiB contribution takes too long, a later version may allow a fixed hardware prefix with the rest from the platform CSPRNG. Version 1 requires the full pad length from hardware for the `TRNG` label.
 
 | Model | Max challenge | Time for 256 KiB | KiB/s |
 |---|---|---|---|

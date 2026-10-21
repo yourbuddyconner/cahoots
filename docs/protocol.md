@@ -28,7 +28,7 @@ The parameters are encoded once and bound into every commitment and the check wo
 params = version (u8 = 1) | n (u8) | L (u32) | agent_seat (u8: 0 or 1) | name_len (u8) | name (UTF-8)
 ```
 
-Implementation: `core/src/params.rs`.
+Implementation: `crates/core/src/params.rs`.
 
 ## 3. Ceremony
 
@@ -44,7 +44,7 @@ Commit-then-reveal. Without it, the last member to reveal could choose a contrib
 6. **Erase.** Each device erases every `R_j` and keeps only `PAD`.
 7. **Circle ID.** `circle_id = SHA-256("cahoots/circle-id/v1" || PAD)[0..16]`.
 
-Implementation: `core/src/ceremony.rs`, `commit.rs`, `combine.rs`, `checkwords.rs`, `circle_id.rs`.
+Implementation: `crates/core/src/ceremony.rs`, `commit.rs`, `combine.rs`, `checkwords.rs`, `circle_id.rs`.
 
 ### 3.1 Touch-link framing
 
@@ -54,7 +54,7 @@ frame = type (u8) | seq (u32) | len (u32) | payload | CRC-32
 
 The CRC is IEEE 802.3 (the same polynomial as zlib) over every byte before it. It catches transmission errors only. Commitments and check words provide integrity. Devices form a ring and forward every commitment and reveal they receive until all devices hold all `n` of each. The touch link MUST NOT use any radio.
 
-Implementation: `core/src/frame.rs`.
+Implementation: `crates/core/src/frame.rs`.
 
 ## 4. Messages
 
@@ -75,7 +75,7 @@ Poly1305 with a one-time key is a Wegman-Carter authenticator. It is information
 
 For posting, a message is encoded as base64url text, or as a QR code for single messages.
 
-Implementation: `core/src/message.rs`, `core/src/pad.rs` (`bucket_pad`).
+Implementation: `crates/core/src/message.rs`, `crates/core/src/pad.rs` (`bucket_pad`).
 
 ### 4.1 Sending
 
@@ -95,7 +95,7 @@ A crash between steps 3 and 5 loses a message. It never leaves a range reusable.
 4. Verify the tag in constant time. On failure, reject and mark nothing spent.
 5. Decrypt, mark the range spent, and erase those bytes.
 
-Implementation: `core/src/pad.rs`, `core/src/ledger.rs`.
+Implementation: `crates/core/src/pad.rs`, `crates/core/src/ledger.rs`.
 
 ## 5. Storage and erasure
 
@@ -106,4 +106,4 @@ Implementation: `core/src/pad.rs`, `core/src/ledger.rs`.
 
 ## 6. Test vectors
 
-`vectors/*.json` are generated from `cahoots-core` by `cargo run -p cahoots-vectors`. They cover the ceremony (including a mismatch abort), check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. Every client MUST reproduce them.
+`crates/vectors/*.json` are generated from `cahoots-core` by `cargo run -p cahoots-vectors`. They cover the ceremony (including a mismatch abort), check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. Every client MUST reproduce them.

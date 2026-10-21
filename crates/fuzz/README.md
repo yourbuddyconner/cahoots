@@ -1,6 +1,6 @@
 # Fuzz targets
 
-`cargo-fuzz` targets for the parsers in `cahoots-core`. The handoff's working rules require the message decoder to be fuzzed; property tests in `crates/core/tests/proptests.rs` cover the same surface in CI, and these targets run longer campaigns locally.
+`cargo-fuzz` targets for the parsers in `cahoots-core`. The project's working rules require the message decoder to be fuzzed; property tests in `crates/core/tests/proptests.rs` cover the same surface in CI, and these targets run longer campaigns locally.
 
 ```sh
 cargo install cargo-fuzz

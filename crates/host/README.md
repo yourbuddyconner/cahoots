@@ -39,7 +39,7 @@ $H status --state /tmp/cahoots-dev0                   # spent ranges and remaini
 xxd /tmp/cahoots-dev0/pad.bin | head -4               # the spent range reads as zeros
 ```
 
-The base64url message can be pasted into the phone client or posted to the Numbers Station once those exist. Any other device that holds the same pad decrypts it.
+The base64url message can be pasted into the browser app (Read a message) or posted to the Numbers Station. Any other device that holds the same pad decrypts it.
 
 ## What the integration test covers
 

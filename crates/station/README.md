@@ -1,6 +1,6 @@
 # cahoots-station: the Numbers Station
 
-An append-only, hash-chained public relay for circle ciphertext. Anyone can read it. Only pad holders can decrypt what is on it. It is the "public square" of the handoff (section 3.7) and the relay for pad-seeded chat (`docs/chat.md`).
+An append-only, hash-chained public relay for circle ciphertext. Anyone can read it. Only pad holders can decrypt what is on it. It is the public feed every circle posts to and the relay for pad-seeded chat (`docs/chat.md`).
 
 ## What it does
 
@@ -67,13 +67,13 @@ Clients that keep the last head they saw can detect a rollback: a later head who
 
 ## Deploying as a TVC workload
 
-The station is built as an OCI image so it can run inside Turnkey Verifiable Cloud, where the log head is anchored and the operator cannot roll the log back or show different readers different histories. **The TVC2 deploy itself was not done.** It needs access to `tkhq/test-tvc-2` (private), its simulation mode, and the app-record leaf in `tvc-log` from the TVC2 gap list (handoff 3.7, gap 8). Until then this binary runs anywhere, and anchoring is a promise the operator makes, not one the enclave enforces.
+The station is built as an OCI image so it can run inside Turnkey Verifiable Cloud, where the log head is anchored and the operator cannot roll the log back or show different readers different histories. **The TVC2 deploy itself was not done.** It needs access to `tkhq/test-tvc-2` (private), its simulation mode, and the app-record leaf in `tvc-log`. Until then this binary runs anywhere, and anchoring is a promise the operator makes, not one the enclave enforces.
 
 The deploy record must pin:
 
 - the image digest of `cahoots-station`;
 - the log file location inside the sealed volume (`/data/station.jsonl`);
-- the policy hash. The station has no policy today, so this is a placeholder for the agent-seat policy that will share the workload (handoff 3.7, gap 7, `appManifestDigest`).
+- the policy hash. The station has no policy today, so this is a placeholder for the hosted-member policy that will share the workload (`appManifestDigest`).
 
 What anchoring adds once deployed: the station periodically commits its head hash to the TVC log. A reader who verifies the anchored head against the chain knows the history is the one everyone else sees.
 
