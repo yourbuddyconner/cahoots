@@ -1,5 +1,5 @@
 // Cache-first service worker. Bump VERSION when any asset changes.
-const VERSION = 'cahoots-v2';
+const VERSION = 'cahoots-v3';
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './manifest.json', './icon.svg',
   './pkg/cahoots_wasm.js', './pkg/cahoots_wasm_bg.wasm',

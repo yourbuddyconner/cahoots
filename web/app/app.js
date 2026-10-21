@@ -206,14 +206,21 @@ function fountainReceiver(onDone) {
 // Commitments, params, and messages fit in one QR. Reveals use the fountain or these text forms.
 const enc = {
   params: (bytes) => `cahoots-params:${b64_encode(bytes)}`,
-  commit: (i, bytes) => `cahoots-commit:${i}:${b64_encode(bytes)}`,
+  // A commitment carries the circle parameters too, so scanning any member's commitment is enough to join.
+  commit: (i, bytes, params) => `cahoots-commit:${i}:${b64_encode(bytes)}${params ? ':' + b64_encode(params) : ''}`,
   reveal: (i, bytes) => `cahoots-reveal:${i}:${b64_encode(bytes)}`,
 };
 function parseTagged(text) {
-  const m = text.trim().match(/^cahoots-(params|commit|reveal):(?:(\d+):)?([A-Za-z0-9_-]+)$/);
+  const m = text.trim().match(/^cahoots-(params|commit|reveal):(?:(\d+):)?([A-Za-z0-9_-]+)(?::([A-Za-z0-9_-]+))?$/);
   if (!m) return null;
-  return { kind: m[1], index: m[2] == null ? null : Number(m[2]), bytes: b64_decode(m[3]) };
+  return { kind: m[1], index: m[2] == null ? null : Number(m[2]), bytes: b64_decode(m[3]), params: m[4] ? b64_decode(m[4]) : null };
 }
+function paramsFromBytes(b) {
+  if (b[0] !== 1) throw 'unknown version';
+  return { n: b[1], pad_len: new DataView(b.buffer, b.byteOffset).getUint32(2, true), agent_seat: b[6] === 1, name: utf8d.decode(b.subarray(8, 8 + b[7])) };
+}
+// Commitments scanned before this device's ceremony object exists. Fed in on the run screen.
+let pendingCommits = [];
 // Reveal bytes carried over the fountain: [index] || contribution.
 const packReveal = (i, bytes) => { const out = new Uint8Array(bytes.length + 1); out[0] = i; out.set(bytes, 1); return out; };
 
@@ -255,22 +262,22 @@ function screenNew() {
 }
 
 function screenJoin() {
-  const ta = h('textarea', { placeholder: 'cahoots-params:…' });
+  const ta = h('textarea', { placeholder: 'cahoots-commit:… or cahoots-params:…' });
   const err = h('p', { class: 'muted' });
   const go = (text) => {
     try {
       const t = parseTagged(text);
-      if (!t || t.kind !== 'params') throw 'not parameters';
-      // Decode params bytes through a throwaway ceremony is overkill; parse the canonical layout here.
-      const b = t.bytes;
-      if (b[0] !== 1) throw 'unknown version';
-      const params = { n: b[1], pad_len: new DataView(b.buffer, b.byteOffset).getUint32(2, true), agent_seat: b[6] === 1, name: utf8d.decode(b.subarray(8, 8 + b[7])) };
+      if (!t) throw 'that is not a Cahoots code';
+      if (t.kind === 'reveal') throw 'that is a reveal code. Ask for a commitment code or the parameters code';
+      if (t.kind === 'commit' && !t.params) throw 'that commitment code has no parameters in it. Ask the leader to show the parameters code';
+      const params = paramsFromBytes(t.kind === 'params' ? t.bytes : t.params);
+      if (t.kind === 'commit') pendingCommits = [{ index: t.index, bytes: t.bytes }];
       location.hash = `#/ceremony/${b64_encode(utf8.encode(JSON.stringify(params)))}/pick`;
-    } catch (e) { err.textContent = `Could not read parameters: ${e}`; }
+    } catch (e) { err.textContent = `Could not join: ${e}`; }
   };
   render(
     h('h1', {}, 'Join a ceremony'),
-    h('p', {}, 'Scan the leader\'s parameter code, or paste it.'),
+    h('p', {}, 'Scan any member\'s commitment code, or the leader\'s parameters code. Or paste one.'),
     scanBox(go), ta, h('p', {}), h('button', { class: 'primary', onclick: () => go(ta.value) }, 'Continue'), err,
   );
 }
@@ -318,6 +325,10 @@ function screenRun(params) {
   if (!ceremony) { location.hash = `#/ceremony/${b64_encode(utf8.encode(JSON.stringify(params)))}/pick`; return; }
   const { c } = ceremony;
   const me = c.index();
+  if (pendingCommits.length) {
+    for (const p of pendingCommits) { if (p.index !== me) { try { c.add_commitment(p.index, p.bytes); } catch (e) { /* shown as waiting */ } } }
+    pendingCommits = [];
+  }
   const phase = c.phase();
   if (phase === 'aborted') { render(h('h1', {}, 'Ceremony aborted'), notice('A reveal did not match its commitment. Nothing was kept. Start again.', 'bad'), h('a', { class: 'btn', href: '#/' }, 'Back')); ceremony = null; return; }
   if (phase === 'complete') { screenWords(); return; }
@@ -345,12 +356,10 @@ function screenRun(params) {
     h('h1', {}, params.name),
     h('div', { class: 'phase' }, h('span', { class: phase === 'commit' ? 'on' : '' }, '1 Commit'), h('span', { class: phase === 'reveal' ? 'on' : '' }, '2 Reveal'), h('span', {}, '3 Check words')),
   ];
-  if (me === 0 && phase === 'commit') {
-    nodes.push(h('details', { class: 'card' }, h('summary', {}, 'Parameters for joiners'), qrBox(paramsText), h('p', { class: 'mono' }, paramsText), h('div', { class: 'row' }, copyButton(paramsText))));
-  }
   if (phase === 'commit') {
-    const mine = enc.commit(me, c.commitment());
-    nodes.push(h('div', { class: 'card' }, h('h2', {}, `Your commitment (member ${me})`), h('p', { class: 'muted' }, 'Show this to every other member. Nobody reveals until everyone has committed.'), qrBox(mine), h('p', { class: 'mono' }, mine), h('div', { class: 'row' }, copyButton(mine))));
+    const mine = enc.commit(me, c.commitment(), c.params_bytes());
+    nodes.push(h('div', { class: 'card' }, h('h2', {}, `Your commitment (member ${me})`), h('p', { class: 'muted' }, 'Show this to every other member. Anyone who has not joined yet can scan it to join. Nobody reveals until everyone has committed.'), qrBox(mine), h('p', { class: 'mono' }, mine), h('div', { class: 'row' }, copyButton(mine))));
+    if (me === 0) nodes.push(h('details', { class: 'card' }, h('summary', {}, 'Parameters only (for pasting)'), h('p', { class: 'mono' }, paramsText), h('div', { class: 'row' }, copyButton(paramsText))));
     const missing = new Set(c.missing_commitments());
     nodes.push(h('div', { class: 'card' }, h('h2', {}, 'Commitments from others'),
       ...others.map((i) => h('div', { class: 'member' }, `Member ${i}: `, missing.has(i) ? h('span', { class: 'muted' }, 'waiting') : h('span', { class: 'ok' }, 'received'))),
