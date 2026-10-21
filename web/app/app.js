@@ -592,5 +592,14 @@ async function route() {
 
 await init();
 window.addEventListener('hashchange', route);
-if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(() => {});
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('./sw.js').then((reg) => reg.update()).catch(() => {});
+  // When a new version takes over, reload once so the page runs the new code.
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloaded || !navigator.serviceWorker.controller) return;
+    reloaded = true;
+    location.reload();
+  });
+}
 route();
