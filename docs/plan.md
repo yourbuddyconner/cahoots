@@ -53,6 +53,18 @@ Design in `docs/use-cases.md` section 8.
 | A3 Reducer runtime | WASM reducer host in `cahoots-wasm` and the PWA, with send quotas, mandatory bucket padding, and a visibly separate app frame | The vote app runs in three clients and agrees on the tally from the square's order | A2 |
 | A4 Protocol v2 items | Anonymous region with a retry rule for collisions; hidden circle ID in the header | Vectors published; v1 and v2 messages coexist by version byte | A3 |
 
+## Chat track (new, 2026-10-20)
+
+Design in `docs/chat.md`: epoch keys from 32-byte pad spends, per-sender symmetric ratchets, ChaCha20-Poly1305, relayed over the Numbers Station.
+
+| Milestone | Scope | Done when | Depends on |
+|---|---|---|---|
+| C1 Chat crate | `cahoots-chat`: epoch derivation, chains, message format, session state, vectors | Three sessions round-trip with rotation, out-of-order delivery, tamper and replay rejection; builds for wasm32 and thumbv7em | M1 |
+| C2 Numbers Station | `cahoots-station`: hash-chained append-only log, pure-pad reuse refusal, long-poll feed, display page, Dockerfile | Integration test posts and reads through HTTP; a broken chain refuses to start | M1 |
+| C3 CLI demo | `cahoots-chat` binary: local dev ceremony, REPL client against the relay | Three terminals chat through one relay; an epoch rotates; a tampered entry is rejected | C1, C2 |
+| C4 PWA chat | Chat screen in `web/app` over the wasm bindings, relay URL setting, session persisted in IndexedDB | Two browser tabs chat through the relay; the UI says "end-to-end encrypted, pad-hedged" | C1, C2, M2 |
+| C5 TVC deploy | The station as a TVC2 workload with its head anchored | The deploy record pins the image and the log head is anchored | C2, access to `tkhq/test-tvc-2` |
+
 ## Open decisions
 
 Carried from the handoff section 7, with additions.
@@ -69,3 +81,4 @@ Carried from the handoff section 7, with additions.
 10. **New.** Whether the first network demo is WireGuard between laptops (N1, no hardware) or a Meshtastic circle (N4, needs radios). WireGuard is faster to ship. Meshtastic is closer to the community angle.
 11. **New.** Whether the federation profile (N5) is worth its ceremony cost before there is a multi-party deployment that needs it.
 12. **New.** Whether circle apps (A2, A3) come before or after the TVC app (M3). They share the control-subtype work in N2.
+13. **New.** Whether the genesis manifest (regions, holders, purposes, spend rules) replaces slices now, before C4 lands, or after. It touches core, vectors, provider, wasm, and host. Decided in conversation on 2026-10-20 to adopt the manifest and drop delegation; timing open.

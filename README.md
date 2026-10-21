@@ -1,6 +1,6 @@
 # Cahoots
 
-Cahoots is a set of small hardware badges and a phone app for private group messaging with one-time pads.
+Cahoots is in-person key agreement and rotation for the protocols you already run. A group meets once, builds a shared pad of random bytes with hardware badges or phones, and then spends those bytes as keys: for WireGuard tunnels, encrypted files, group chat, approvals, and for short messages that no amount of computing power can read.
 
 ## The mental model
 
@@ -14,7 +14,9 @@ The hard part is getting the same random file to every member without anyone els
 4. Every device XORs all contributions into one shared pad.
 5. The members read six check words aloud to confirm every device holds the same pad.
 
-The group is now a **cahoot** (a circle). Any member can encrypt a short message and post it anywhere, including the public **Numbers Station** feed. Only circle members can read it. Any change to it is detected.
+The group is now a **cahoot** (a circle). The pad is a key budget. Spending 32 bytes seeds a session of any size in WireGuard, HPKE, age, or the pad-seeded chat, hedged so an attacker must break both the math and the pad. Spending one byte per byte encrypts a short message that nothing can break. Every spend is recorded in a ledger and the bytes are erased, so no key is ever used twice.
+
+Ciphertext travels over the **Numbers Station**, an append-only public feed. Anyone can read it. Only circle members can decrypt or forge an entry.
 
 A circle can also give a seat to an AI agent. The agent's copy of the pad lives inside a Turnkey Verifiable Cloud (TVC) enclave, and a pinned policy decides each read and send. Circles without an agent seat have a simple guarantee: even Turnkey can't read your circle.
 
