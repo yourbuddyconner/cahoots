@@ -6,7 +6,13 @@ members = [
     "provider",
     "firmware/hal",
     "firmware/host",
+    "yk",
+    "web/wasm",
+    "adapters/hpke",
+    "adapters/wireguard",
+    "adapters/age-plugin-cahoots",
 ]
+exclude = ["fuzz"]
 # Not workspace members: firmware/esp32s3 (needs the xtensa/riscv esp toolchain),
 # firmware/dabao (built with `cargo xtask dabao` inside xous-core), web (wasm-pack),
 # tvc-app (built as an OCI image). Each has its own README.
@@ -21,6 +27,7 @@ repository = "https://github.com/yourbuddyconner/cahoots"
 [workspace.dependencies]
 cahoots-core = { path = "core", default-features = false }
 cahoots-hal = { path = "firmware/hal" }
+cahoots-provider = { path = "provider" }
 sha2 = { version = "0.10", default-features = false }
 poly1305 = { version = "0.8", default-features = false }
 subtle = { version = "2.6", default-features = false }

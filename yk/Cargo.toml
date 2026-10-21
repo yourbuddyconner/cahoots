@@ -1,0 +1,10 @@
+[package]
+name = "cahoots-yk"
+description = "YubiKey OpenPGP GET CHALLENGE entropy source and CLI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cahoots-core = { workspace = true, features = ["std"] }

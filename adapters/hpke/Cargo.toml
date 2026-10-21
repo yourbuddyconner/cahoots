@@ -1,0 +1,10 @@
+[package]
+name = "cahoots-hpke"
+description = "HPKE mode_psk adapter over cahoots-provider."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cahoots-core = { workspace = true, features = ["std"] }

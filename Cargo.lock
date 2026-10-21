@@ -3,6 +3,13 @@
 version = 4
 
 [[package]]
+name = "age-plugin-cahoots"
+version = "0.1.0"
+dependencies = [
+ "cahoots-core",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -102,6 +109,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "cahoots-hpke"
+version = "0.1.0"
+dependencies = [
+ "cahoots-core",
+]
+
+[[package]]
 name = "cahoots-provider"
 version = "0.1.0"
 dependencies = [
@@ -117,6 +131,27 @@ dependencies = [
  "hex",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "cahoots-wasm"
+version = "0.1.0"
+dependencies = [
+ "cahoots-core",
+]
+
+[[package]]
+name = "cahoots-wireguard"
+version = "0.1.0"
+dependencies = [
+ "cahoots-core",
+]
+
+[[package]]
+name = "cahoots-yk"
+version = "0.1.0"
+dependencies = [
+ "cahoots-core",
 ]
 
 [[package]]
