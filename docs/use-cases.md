@@ -147,7 +147,7 @@ The `context` bound into the PSK HKDF salt is the `purpose` byte followed by the
 ### 5.2 The fleet profile and the federation profile
 
 - **Fleet profile** (v1): one group pad, as specified. One operator, or a group that trusts every member with every tunnel. All of sections 3 and 4 work in this profile.
-- **Federation profile** (later): at the ceremony, every pair of devices also touches directly and runs a two-member sub-ceremony. Each pair holds a **pairwise pad** that nobody else has. Pairwise pads prove which member sent a message (out of scope for v1 otherwise) and keep each tunnel's key private to its two ends. The cost is `n(n-1)/2` touches, which is 28 for eight members. The group pad stays for circle-wide messages.
+- **Federation profile** (later): at the ceremony, every pair of devices also touches directly and runs a two-member sub-ceremony. Each pair holds a **pairwise pad** that nobody else has. Pairwise pads prove which member sent a message with the pad's strength and keep each tunnel's key private to its two ends. The cost is `n(n-1)/2` touches, which is 28 for eight members. The group pad stays for circle-wide messages. Since sealed reveals, every pair already holds a **pair key** at X-Wing strength with no extra touches (protocol §3.3), which is enough for sender proof and hello words. The pairwise pad is for when the proof has to be unconditional.
 
 The federation profile is the version that scales from "my boxes" to "our neighbourhood network".
 
@@ -170,7 +170,7 @@ A node that lives in the cloud, such as a gateway, can still take part: it holds
 
 ## 7. Other properties worth building on
 
-These follow from having shared random bytes and a record of which ones were used. Each is cheap because the pad does the work.
+These follow from having shared random bytes and a record of which ones were used. Each is cheap because the pad does the work. What they add up to when everyone carries a card is in [Cards for every gathering](gatherings.md).
 
 1. **Hello words** (built, 2026-10-21). Every pair of members leaves the ceremony with a key only those two hold, so the app can show two words for you to say and two for the other person to say back. A voice clone cannot produce them. If a call feels wrong, both people tap Next and the words change; whoever cannot say the new ones does not hold the key. This is the one feature that names an individual rather than the circle, and it is as strong as X-Wing rather than unconditional. See protocol §3.3 and the [app notes](../web/README.md#hello-words).
 2. **Sender-anonymous messages.** The tag proves some member wrote a message, not which. Reserve a shared anonymous region where members spend at random offsets and treat a collision there as a retry, and the circle has anonymous votes with information-theoretic strength. This is a protocol version 2 change, because it alters the reuse rule for one region.

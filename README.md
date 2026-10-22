@@ -76,7 +76,7 @@ See `docs/threat-model.md` for the full list.
 
 ## What it is for
 
-`docs/tiers.md` defines the device tiers, from a phone (T0) to inspected silicon (T4), and the rule that a circle is only as protected as its least protected member. `docs/use-cases.md` lists concrete uses, from group chat to bootstrapping WireGuard and physical mesh networks from a ceremony. `docs/diy-badge.md` is how to build a badge, in either hardware family. `docs/plan.md` is the roadmap. `docs/glossary.md` defines the terms.
+`docs/tiers.md` defines the device tiers, from a phone (T0) to inspected silicon (T4), and the rule that a circle is only as protected as its least protected member. `docs/use-cases.md` lists concrete uses, from group chat to bootstrapping WireGuard and physical mesh networks from a ceremony. `docs/gatherings.md` is the concept of a card for every gathering: storage, messages from old circles, the web of trust a card accumulates, and a social network with no accounts. `docs/diy-badge.md` is how to build a badge, in either hardware family. `docs/plan.md` is the roadmap. `docs/glossary.md` defines the terms.
 
 ## Working rules
 
