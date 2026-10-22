@@ -34,15 +34,15 @@ export const s = (sec: number) => Math.round(sec * FPS);
 // ───────────── registries (generic) ─────────────
 export type HitKind = "key" | "enter" | "line" | "click" | "check" | "swap" | "chapter" | "flash" | "fly" | "slam" | "whoosh" | "tick";
 export interface Hit { f: number; kind: HitKind; note: string; onBeat: boolean }
-/** A text state. `pause` holds the words from index `after` back by `frames`, so a second sentence can land later under the first. */
-export interface TextCue { id: string; text: string; in: number; out: number; slot?: string; pause?: { after: number; frames: number } }
+/** A text state. A cube face enters or leaves by the roll (`enter`/`exit` "roll") instead of word by word. */
+export interface TextCue { id: string; text: string; in: number; out: number; slot?: string; enter?: "roll"; exit?: "roll" }
 export interface Move { id: string; from: number; dur: number; role: "hero" | "secondary"; travel: number; hero?: string }
 export const HITS: Hit[] = [];
 export const TEXTS: TextCue[] = [];
 export const MOVES: Move[] = [];
 
 /** Register a text state shown from `in` (reveal starts) to `out` (exit starts). Same `slot` = same screen position. */
-export const text = (id: string, t: string, inF: number, out: number, slot?: string, pause?: { after: number; frames: number }) => (TEXTS.push({ id, text: t, in: inF, out, slot, pause }), inF);
+export const text = (id: string, t: string, inF: number, out: number, slot?: string, opts?: { enter?: "roll"; exit?: "roll" }) => (TEXTS.push({ id, text: t, in: inF, out, slot, ...opts }), inF);
 /** Frame when a text that starts leaving at `out` has fully left (word exits stagger 2 f). */
 export const goneAt = (t: string, out: number) => out + DUR.textOut + 2 * (t.trim().split(/\s+/).length - 1);
 export const hero = (id: string, from: number, dur: number, travel = 1) => (MOVES.push({ id, from, dur, role: "hero", travel }), from);
@@ -88,29 +88,31 @@ export const OPEN = (() => {
   return { mark, word, ticker, out };
 })();
 
-// BADGE: the problem, then the badge that answers it.
+// BADGE: the problem, then the badge that answers it. The headline is a cube: it rolls to its second half.
 export const BADGE = (() => {
   const drop = hero("badge.drop", hit(6.6), DUR.panelIn);
   mark_(drop, "slam", "badge lands");
-  // The second sentence lands under the first at 11.4, and both leave together.
-  const head = text("badge.head", "Every key you trust came from someone else's random numbers. You weren't there.", hit(7.0), hit(14.0), "head", { after: 10, frames: hit(11.4) - hit(7.0) });
+  const flip = hero("badge.flip", hit(11.4), DUR.flip);
+  const head = text("badge.cubeA", "Every key you trust came from someone else's random numbers.", hit(7.0), flip, "head", { exit: "roll" });
+  const head2 = text("badge.cubeB", "You weren't there when they were generated.", flip, hit(14.6), "head", { enter: "roll" });
   const turn = hero("badge.turn", hit(10.2), DUR.lift);
   mark_(turn, "swap", "badge tilts to camera");
-  return { drop, head, turn };
+  return { drop, flip, head, head2, turn };
 })();
 
-// EXPLODE: the parts separate over two bars; a label per part on every beat; the headline's second sentence after the last label.
+// EXPLODE: the parts separate over two bars; a label per part on every beat; the headline rolls the other way to its second half.
 export const PARTS = ["Clear card", "E-paper", "Baochip-1x", "Magnets and pads", "Coin cell"];
 export const EXPLODE = (() => {
   const apart = hero("explode.apart", hit(14.5), DUR.explode);
   mark_(apart, "whoosh", "parts separate");
-  // The second sentence lands under the first right after the last part label.
-  const head = text("explode.head", "This card makes its own random numbers. You watch it happen.", hit(15.0), hit(19.8), "head", { after: 7, frames: hit(17.4) - hit(15.0) });
+  const flip = hero("explode.flip", hit(18.8), DUR.flip);
+  const head = text("explode.cubeA", "This card makes its own random numbers.", hit(15.4), flip, "head", { exit: "roll" });
+  const head2 = text("explode.cubeB", "You watch it happen.", flip, hit(21.0), "head", { enter: "roll" });
   const labels = nextBeats(hit(15.4) - 1, PARTS.length, 1);
   labels.forEach((f, i) => { text(`explode.label${i}`, PARTS[i], f, hit(19.8), `label${i}`); mark_(f, "tick", PARTS[i]); });
   const together = hero("explode.together", hit(19.4), DUR.panelIn);
   mark_(together, "swap", "parts assemble");
-  return { apart, head, labels, together };
+  return { apart, flip, head, head2, labels, together };
 })();
 
 // TOUCH: a second card lands on the first, a pulse runs along the pads, the top card lifts off and both screens flip to the same six words.
@@ -145,10 +147,10 @@ export const NETWORK = (() => {
   mark_(rotate, "fly", "keys rotate down the links");
   // The second line is a cube: "No server, no CA." rolls over to its generalization on the bar between the two key rotations.
   const head3 = text("net.head3", "Keys rotate from the badge for years.", hit(34.2), hit(40.3), "head");
-  const cubeA = text("net.cubeA", "No server, no CA.", hit(34.2), hit(37.0), "cubeA");
+  const cubeA = text("net.cubeA", "No server, no CA.", hit(34.2), hit(37.0), "cubeA", { exit: "roll" });
   const flip = hero("net.flip", hit(37.0), DUR.flip);
   mark_(flip, "swap", "cube rolls to the generalization");
-  const cubeB = text("net.cubeB", "No man in the middle.", hit(37.0), hit(40.3), "cubeB");
+  const cubeB = text("net.cubeB", "No man in the middle.", hit(37.0), hit(40.3), "cubeB", { enter: "roll" });
   const rotate2 = hero("net.rotate2", hit(38.6), DUR.explode / 2);
   mark_(rotate2, "fly", "keys rotate again");
   return { recede, links, head2, rotate, head3, cubeA, flip, cubeB, rotate2 };

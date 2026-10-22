@@ -143,19 +143,18 @@ function placeLabel(id: string, pos: THREE.Vector3) {
 // ───────────── DOM overlay ─────────────
 const overlay = document.getElementById("overlay")!;
 const els = new Map<string, HTMLElement>();
-function el(id: string, cls: string, textContent: string, breakBefore = -1) {
+function el(id: string, cls: string, textContent: string) {
   let e = els.get(id);
   if (!e) {
     e = document.createElement("div");
     e.className = cls;
     e.dataset.id = id;
-    textContent.split(/\s+/).forEach((w, i) => {
-      if (i === breakBefore) e!.appendChild(document.createElement("br"));
+    for (const w of textContent.split(/\s+/)) {
       const s = document.createElement("span");
       s.className = "w";
       s.textContent = w;
-      e!.appendChild(s);
-    });
+      e.appendChild(s);
+    }
     overlay.appendChild(e);
     els.set(id, e);
   }
@@ -168,16 +167,13 @@ function textState(f: number, id: string, cls: string, preShown = false) {
   // A pre-shown text finished its reveal before frame 0, so frame 0 is a finished frame (the thumbnail).
   const shift = preShown ? DUR.textIn + STAGGER.word * c.text.split(/\s+/).length : 0;
   f += shift;
-  const e = el(id, cls, c.text, c.pause?.after ?? -1);
+  const e = el(id, cls, c.text);
   const words = e.querySelectorAll<HTMLElement>(".w");
   const visible = f >= c.in && f - shift < c.out + DUR.textOut + STAGGER.word * words.length;
   e.style.display = visible ? "" : "none";
   if (!visible) return;
   words.forEach((w, i) => {
-    // Words after a pause land later, as a second sentence under the first.
-    const paused = c.pause && i >= c.pause.after;
-    const start = paused ? c.in + c.pause!.frames + (i - c.pause!.after) * STAGGER.word : c.in + i * STAGGER.word;
-    const pin = EASE.enter(prog(f, start, start + DUR.textIn));
+    const pin = EASE.enter(prog(f, c.in + i * STAGGER.word, c.in + i * STAGGER.word + DUR.textIn));
     const pout = EASE.exit(prog(f - shift, c.out + i * 2, c.out + i * 2 + DUR.textOut));
     const o = Math.min(pin, 1 - pout);
     w.style.opacity = String(o);
@@ -185,48 +181,66 @@ function textState(f: number, id: string, cls: string, preShown = false) {
   });
 }
 
-/** The network's second headline: a fixed first line and a second line that rolls like a cube between two faces. */
-function cubeHead(f: number) {
-  const line = cue("net.head3"), a = cue("net.cubeA"), b = cue("net.cubeB");
-  let e = els.get("net.cube");
+/** A headline with a second half: face A rolls like a cube to face B on the flip move. An optional
+ *  fixed line sits above the cube. `dir` 1 rolls the way the network cube does, −1 the other way.
+ *  The cube is as tall as its taller face, so faces may wrap to several lines. */
+interface Cube { id: string; cls: string; line?: string; a: string; b: string; flip: string; dir: 1 | -1 }
+const CUBES: Record<string, Cube> = {
+  badge: { id: "badge.cube", cls: "head cubehead narrow", a: "badge.cubeA", b: "badge.cubeB", flip: "badge.flip", dir: 1 },
+  explode: { id: "explode.cube", cls: "head cubehead narrow", a: "explode.cubeA", b: "explode.cubeB", flip: "explode.flip", dir: -1 },
+  net: { id: "net.cube", cls: "head cubehead", line: "net.head3", a: "net.cubeA", b: "net.cubeB", flip: "net.flip", dir: 1 },
+};
+const words = (txt: string, parent: HTMLElement) => {
+  for (const w of txt.split(/\s+/)) { const s = document.createElement("span"); s.className = "w"; s.textContent = w; parent.appendChild(s); }
+};
+function rollHead(f: number, spec: Cube) {
+  const a = cue(spec.a), b = cue(spec.b), line = spec.line ? cue(spec.line) : null;
+  let e = els.get(spec.id);
   if (!e) {
     e = document.createElement("div");
-    e.className = "head cubehead";
-    const l1 = document.createElement("div");
-    l1.className = "line";
-    for (const w of line.text.split(/\s+/)) { const s = document.createElement("span"); s.className = "w"; s.textContent = w; l1.appendChild(s); }
+    e.className = spec.cls;
+    if (line) { const l1 = document.createElement("div"); l1.className = "line"; words(line.text, l1); e.appendChild(l1); }
     const cube = document.createElement("div");
     cube.className = "cube";
     for (const [cls, txt] of [["a", a.text], ["b", b.text]] as const) {
       const face = document.createElement("div");
       face.className = `face ${cls}`;
-      for (const w of txt.split(/\s+/)) { const s = document.createElement("span"); s.className = "w"; s.textContent = w; face.appendChild(s); }
+      words(txt, face);
       cube.appendChild(face);
     }
     const wrap = document.createElement("div");
     wrap.className = "cubewrap";
     wrap.appendChild(cube);
-    e.append(l1, wrap);
+    e.appendChild(wrap);
     overlay.appendChild(e);
-    els.set("net.cube", e);
+    // Size the cube to its taller face, measured now while the element is displayed.
+    const fa = cube.querySelector<HTMLElement>(".face.a")!, fb = cube.querySelector<HTMLElement>(".face.b")!;
+    const h = Math.max(fa.offsetHeight, fb.offsetHeight);
+    cube.style.height = `${h}px`;
+    fa.style.transform = `translateZ(${h / 2}px)`;
+    fb.style.transform = `rotateX(${spec.dir * 90}deg) translateZ(${h / 2}px)`;
+    els.set(spec.id, e);
   }
-  const visible = f >= line.in && f < line.out + DUR.textOut + STAGGER.word * 8;
+  const inF = line ? Math.min(line.in, a.in) : a.in;
+  const outF = line ? line.out : b.out;
+  const longest = Math.max(...[line?.text, a.text, b.text].filter(Boolean).map((t) => t!.split(/\s+/).length));
+  const visible = f >= inF && f < outF + DUR.textOut + STAGGER.word * longest;
   e.style.display = visible ? "" : "none";
   if (!visible) return;
-  const reveal = (el: HTMLElement, inF: number) => {
+  const reveal = (el: HTMLElement, inFrame: number) => {
     el.querySelectorAll<HTMLElement>(".w").forEach((w, i) => {
-      const pin = EASE.enter(prog(f, inF + i * STAGGER.word, inF + i * STAGGER.word + DUR.textIn));
-      const pout = EASE.exit(prog(f, line.out + i * 2, line.out + i * 2 + DUR.textOut));
+      const pin = EASE.enter(prog(f, inFrame + i * STAGGER.word, inFrame + i * STAGGER.word + DUR.textIn));
+      const pout = EASE.exit(prog(f, outF + i * 2, outF + i * 2 + DUR.textOut));
       w.style.opacity = String(Math.min(pin, 1 - pout));
       w.style.transform = `translateY(${(1 - pin) * 0.35}em)`;
     });
   };
-  reveal(e.querySelector(".line")!, line.in);
+  if (line) reveal(e.querySelector(".line")!, line.in);
   reveal(e.querySelector(".face.a")!, a.in);
-  // Face b is revealed by the roll itself, so its words are fully opaque once the roll starts.
-  reveal(e.querySelector(".face.b")!, b.in - DUR.textIn - STAGGER.word * 5);
-  const roll = mv(f, "net.flip");
-  (e.querySelector(".cube") as HTMLElement).style.transform = `rotateX(${-90 * roll}deg)`;
+  // Face B is revealed by the roll itself, so its words are fully opaque once the roll starts.
+  reveal(e.querySelector(".face.b")!, b.in - DUR.textIn - STAGGER.word * b.text.split(/\s+/).length);
+  const roll = mv(f, spec.flip);
+  (e.querySelector(".cube") as HTMLElement).style.transform = `rotateX(${-spec.dir * 90 * roll}deg)`;
 }
 
 const ticker = document.getElementById("ticker")!;
@@ -310,7 +324,7 @@ async function renderFrame(f: number) {
     A.group.rotation.y = (-0.5 + ambient * (sec - CH.badge[0] / FPS)) * (1 - turn);
     A.group.rotation.x = 0.1 + turn * 0.3;
     setCam(RIG.hero, RIG.hero, 0);
-    textState(f, "badge.head", "head");
+    rollHead(f, CUBES.badge);
   }
 
   // EXPLODE
@@ -323,7 +337,7 @@ async function renderFrame(f: number) {
     A.group.rotation.x = 0.1 + 0.3 * (1 - together) * (1 - apart);
     A.group.position.y = REST - 0.3 * apart * (1 - together);
     setCam(RIG.hero, RIG.explode, e);
-    textState(f, "explode.head", "head");
+    rollHead(f, CUBES.explode);
     PARTS.forEach((_, i) => textState(f, `explode.label${i}`, `label l${i}`));
   }
 
@@ -365,6 +379,8 @@ async function renderFrame(f: number) {
         pulse.material.color.copy(PULSE).multiplyScalar(0.2 + 2.2 * glow);
       }
     }
+    // The explode headline's second face runs into this chapter; keep drawing it until it leaves.
+    rollHead(f, CUBES.explode);
     // Both screens wait, then refresh to the same six words on the beat.
     const flip = prog(f, TOUCH.flip, TOUCH.flip + DUR.flip);
     const tex = flip <= 0 ? waitingTex : flip < 0.5 ? blankTex : wordsTex;
@@ -398,7 +414,7 @@ async function renderFrame(f: number) {
       placeLabel(`net.node${i}`, nodes[i].pos);
     });
     textState(f, "net.head2", "head");
-    cubeHead(f);
+    rollHead(f, CUBES.net);
   }
 
   // CLOSE

@@ -19,12 +19,11 @@
   .w + .w { margin-left: 0.26em; }
   .head { left: 160px; bottom: 150px; width: 1000px; font-family: "Inter Tight", sans-serif; font-weight: 600; font-size: 84px; line-height: 1.02; letter-spacing: -0.035em; }
   .cubehead { width: 1400px; }
+  .cubehead.narrow { width: 1000px; }
   .cubehead .line { display: block; }
   .cubewrap { perspective: 1200px; perspective-origin: 50% 50%; }
-  .cube { position: relative; display: block; height: 1.02em; transform-style: preserve-3d; transform-origin: 50% 50%; }
-  .cube .face { position: absolute; left: 0; top: 0; white-space: nowrap; backface-visibility: hidden; }
-  .cube .face.a { transform: translateZ(0.51em); }
-  .cube .face.b { transform: rotateX(90deg) translateZ(0.51em); }
+  .cube { position: relative; display: block; transform-style: preserve-3d; transform-origin: 50% 50%; }
+  .cube .face { position: absolute; left: 0; top: 0; width: 100%; backface-visibility: hidden; }
   .wordmark { left: 50%; top: 50%; transform: translate(-50%, -50%); margin-left: 56px; font-family: "Inter Tight", sans-serif; font-weight: 600; font-size: 132px; letter-spacing: -0.03em; }
   #mark { position: absolute; left: 50%; top: 50%; width: 84px; height: 84px; transform: translate(-50%, -50%); margin-left: -268px; opacity: 0; }
   .label { font-family: "JetBrains Mono", monospace; font-weight: 500; font-size: 36px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--amber); left: 1400px; }
