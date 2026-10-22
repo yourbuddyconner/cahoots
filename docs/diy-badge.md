@@ -22,6 +22,29 @@ Both run the same Rust core and the same ceremony. Both are USB devices, so the 
 - **A wire to the next badge.** The touch link. On the Baochip it is a UART between two boards. On the Pico it is the same, or the spare port on the secure element's Qwiic breakout. Reveals are sealed to every member before they go on the wire, so the wire carries no secret and needs no handshake of its own. No radio is used during a ceremony on either family.
 - **USB to a phone or laptop.** The browser app connects over WebUSB or WebSerial and becomes the badge's camera: it scans the other members' codes with the phone camera and passes them down the cable, and it can mirror the badge's screen. The secret never goes up the cable. Only commitments, reveals, sealed messages, and the ledger position do. This is roadmap item M4d, and it works the same for both families.
 
+## The manufactured badge: the benchmark
+
+The DIY families below are as thick as their boards and modules make them. The badge we are designing toward is a card: 54 × 86 mm, 3 mm thick, clear polycarbonate, with a slot at one end for a lanyard. It is the model on the landing page. Nothing is stacked inside except on the board; the display, the chip and the battery sit side by side.
+
+| Part | How | mm |
+|---|---|---|
+| Bottom tray | moulded polycarbonate floor, 0.6 mm walls | 0.8 |
+| Board | thin FR4, cutouts for the cell and the magnets | 0.4 |
+| Display | 1.54" glass e-paper on the board, its own top surface | 1.1 |
+| Chip and passives | any normal package, beside the display | 0.9 |
+| Battery | CR2016 coin cell in a board cutout, on the floor | 1.6 |
+| Buttons | two metal domes under the top sheet | 0.3 |
+| Contacts | spring fingers under the card, gold pads on the face | 1.0 |
+| Top sheet | clear film, printed on its underside | 0.3 |
+
+The tallest column is the battery's, and with adhesive and tolerance the card comes out at 2.9 to 3.2 mm: four credit cards. A pile of eight is 25 mm.
+
+**Cards stack instead of lining up.** Four magnets in the floor line a card up on the one below and hold it a fraction of a millimetre above it, with opposite poles so it only snaps on one way round. Four gold pads on the face at the contacts end meet four spring fingers under the card above. A pile is a line of links, so each card has one link up and one down. The firmware this needs, not built yet: the ring driver floods each new frame on every link except the one it came from, which the dedupe it already does makes correct on a line, a ring, or a pair; and a badge counts hops to the bottom of the pile to learn its seat, so nobody says a seat number out loud. The ritual becomes: press B, put your card on the pile, wait for the buzz, lift, read the words.
+
+**What 3 mm costs.** No USB-C: the receptacle alone needs about 3.2 mm of device, so the phone link runs through the same pads over a small dock with a USB-C socket on it. A coin cell instead of a charger: e-paper draws only when it changes, a ceremony is a few seconds of compute, and sleep is microamps, so a CR2016 runs the badge for a year or more and is replaceable anywhere. Glass in the card: the e-paper is glass, so this is a badge on a lanyard, not a card in a back pocket.
+
+Two millimetres would need a flexible e-paper, a thin-film cell, a wafer-level chip package and a laminated card build. That is a card manufacturer's process, and nobody could build the same thing on a bench, so it is not the first target.
+
 ## Family 1: Baochip
 
 The native badge. The Dabao is the Baochip-1x on a small two-layer board: a 350 MHz VexRiscv RV32-IMAC core with an MMU, four 700 MHz PicoRV I/O cores, 4 MiB of on-chip RRAM, 2 MiB of SRAM, USB-C as a high-speed USB device, and 20 pinned-out I/Os. $12 plus shipping, from Crowd Supply, shipping 15 December 2026. Most of the chip's RTL is published, and its package lets an owner compare the die with the design under an infrared microscope.

@@ -9,7 +9,7 @@ mkdir -p site/docs/md && cp README.md site/docs/md/readme.md && cp docs/*.md sit
 cd site && python3 -m http.server 8787
 ```
 
-The exploded badge in `main.js` is the reference hardware design built from three.js primitives: an ID-1 card footprint, two polycarbonate shells with four screws and a lanyard slot, a 1.54" e-paper on a ribbon, the Baochip-1x on a black board, a four-pin magnetic touch link on each short edge, a 400 mAh LiPo, USB-C, and one confirm button. 1 mm is 0.05 scene units, so dimensions in the file are the real ones.
+The exploded badge in `main.js` is the manufactured badge as designed, built in `badge.js` from swept outlines and primitives so nothing is fetched: a credit-card footprint 2.9 mm thick, a clear polycarbonate tray and top sheet with a lanyard slot, a 1.54" e-paper, the Baochip-1x on a black board, a CR2016 coin cell in a board cutout, two dome buttons, and the stacking link: four magnets in the floor, four gold pads on the face, four spring fingers underneath. 1 mm is 0.05 scene units, so dimensions in the file are the real ones. `rig.js` holds the studio environment, lights, the backdrop and the ambient-occlusion composer, and is shared with the launch video.
 
 ## One-time setup
 
