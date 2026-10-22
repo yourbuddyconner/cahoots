@@ -91,10 +91,11 @@ export const OPEN = (() => {
 export const BADGE = (() => {
   const drop = hero("badge.drop", hit(6.6), DUR.panelIn);
   mark_(drop, "slam", "badge lands");
-  const head = text("badge.head", "Every key you trust came from someone else's random numbers.", hit(7.4), hit(13.8), "head");
+  const head = text("badge.head", "Every key you trust came from someone else's random numbers.", hit(7.0), hit(12.0), "head");
   const turn = hero("badge.turn", hit(10.2), DUR.lift);
   mark_(turn, "swap", "badge tilts to camera");
-  return { drop, head, turn };
+  const head2 = text("badge.head2", "Sight unseen.", hit(13.0), hit(14.6), "head");
+  return { drop, head, turn, head2 };
 })();
 
 // EXPLODE: the parts separate over two bars; a label per part on every beat.
@@ -115,7 +116,7 @@ export const TOUCH = (() => {
   const land = hit(21.4);
   const snap = hero("touch.snap", land - DUR.snap, DUR.snap);
   mark_(land, "slam", "the second card lands on the pile");
-  const head = text("touch.head", "Touch two. They share a secret nobody else has.", hit(21.8), hit(26.7), "head");
+  const head = text("touch.head", "Touch two. They share a secret nobody else has.", hit(21.4), hit(26.0), "head");
   const pulse = hero("touch.pulse", hit(22.6), DUR.connector);
   mark_(pulse, "fly", "pulse along the pads");
   const pulse2 = hero("touch.pulse2", hit(23.4), DUR.connector);
@@ -151,19 +152,20 @@ export const NETWORK = (() => {
   return { recede, links, head2, rotate, head3, cubeA, flip, cubeB, rotate2 };
 })();
 
-// CLOSE: the line, the address, a settle, then black.
+// CLOSE: what the whole thing means, then the line, the address, a settle, then black.
 export const CLOSE = (() => {
   const title = hero("close.title", hit(41.5), DUR.panelIn);
-  mark_(title, "enter", "get in cahoots");
-  const head = text("close.head", "Get in cahoots.", CH.close[0], TOTAL - DUR.fade, "head");
-  const url = text("close.url", "cahoots.network", hit(43.1), TOTAL - DUR.fade, "url");
-  mark_(hit(43.1), "tick", "address");
+  mark_(title, "enter", "the close begins");
+  const pre = text("close.pre", "Nothing was sent. Nothing to decrypt.", CH.close[0], hit(45.0), "head");
+  const head = text("close.head", "Get in cahoots.", hit(46.0), TOTAL - DUR.fade, "head");
+  const url = text("close.url", "cahoots.network", hit(47.0), TOTAL - DUR.fade, "url");
+  mark_(hit(47.0), "tick", "address");
   const settle = hero("close.settle", hit(46.3), DUR.lift);
   mark_(settle, "tick", "badges settle");
   const dim = hero("close.dim", hit(49.4), DUR.lift);
   mark_(dim, "tick", "scene dims");
   const fade = hero("close.fade", TOTAL - DUR.fade, DUR.fade);
-  return { title, head, url, settle, dim, fade };
+  return { title, pre, head, url, settle, dim, fade };
 })();
 
 HITS.sort((a, b) => a.f - b.f);

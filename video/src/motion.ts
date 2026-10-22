@@ -29,8 +29,8 @@ export const EASE = {
 
 /** Durations in frames at 60 fps. Exits are 50% of their entrance. */
 export const DUR = {
-  textIn: 18, // 600 ms
-  textOut: 9,
+  textIn: 12, // 400 ms
+  textOut: 6,
   panelIn: 23, // 750 ms hero reveal
   panelOut: 12,
   pointer: 18,
@@ -51,7 +51,7 @@ export const DUR = {
   fade: 20, // final fade to black
 };
 
-export const STAGGER = { word: 3, item: 2, row: 3, card: 9 };
+export const STAGGER = { word: 2, item: 2, row: 3, card: 9 };
 /** Secondary moves start this many frames after the hero, at this fraction of its travel. */
 export const SECONDARY = { delay: 5, travel: 0.6 };
 

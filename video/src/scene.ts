@@ -307,6 +307,7 @@ async function renderFrame(f: number) {
     A.group.rotation.x = 0.1 + turn * 0.3;
     setCam(RIG.hero, RIG.hero, 0);
     textState(f, "badge.head", "head");
+    textState(f, "badge.head2", "head");
   }
 
   // EXPLODE
@@ -409,6 +410,7 @@ async function renderFrame(f: number) {
     B.group.rotation.y = spin * (1 - settle);
     const dim = mv(f, "close.dim");
     renderer.toneMappingExposure = EXPOSURE * (1 - 0.8 * dim);
+    textState(f, "close.pre", "head");
     textState(f, "close.head", "head");
     textState(f, "close.url", "url");
     ticker.parentElement!.style.opacity = String(title * (1 - dim));

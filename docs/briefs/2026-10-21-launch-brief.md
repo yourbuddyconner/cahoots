@@ -4,6 +4,8 @@ GOAL: A viewer on X comes away with "I want one": a badge that makes its own ran
 
 Rev B (2026-10-21): the six check words were taking a full chapter for a verification step. Cut to a beat inside the touch chapter. The payoff is now a 14 s network chapter.
 
+Rev D (2026-10-21, late): the word reveals were breathing too long. Text reveal 12 f instead of 18, words 2 f apart instead of 3, exits 6 f. The time that freed took two more lines: "Sight unseen." after the badge headline, and "Nothing was sent. Nothing to decrypt." at the top of the close, before "Get in cahoots." Holds measured from the last word landing. The audit now lives in `video/audit.mts`.
+
 Rev C (2026-10-21, evening): the badge became the 3 mm card that stacks (`docs/diy-badge.md`, "The manufactured badge"). Same timeline, same frames, same sound; the touch chapter is restaged as a pile: the second card comes down from above and lands on the first, the pulse runs along the pads at the near edge, then the top card lifts off and both screens show the words. Part labels follow the new parts. Rendering moved to an opaque canvas with ambient occlusion and the page colour drawn in-scene, because thin clear plastic does not render on a transparent canvas.
 
 OUTPUT: three.js scene in `video/src/scene.ts` rendered frame by frame through Playwright and Chrome, 1920 x 1080, H.264 High, yuv420p, CRF 16, AAC 192k, faststart. Output `video/out/cahoots-launch.mp4`.
@@ -14,20 +16,20 @@ LOOK: base #0a0a0b, text #f4f4f5, dim text #a1a1aa, accent amber #e5a33a, e-pape
 
 MOTION (tokens in `video/src/motion.ts`; no inline numbers in scenes):
 - Easing: enter ease-out-expo (0.16, 1, 0.3, 1); move ease-in-out-quart (0.76, 0, 0.24, 1); exit ease-in-expo (0.7, 0, 0.84, 0).
-- Exits 50% of entrances. Text 18 f reveal, 9 f exit. Panels 23 f, 12 f.
+- Exits 50% of entrances. Text 12 f reveal, 6 f exit. Panels 23 f, 12 f.
 - Springs by damping ratio: badge drop ζ 0.8 at 1.1 Hz; snap ζ 0.6 at 2.2 Hz (one visible settle, the magnet); mark ζ 0.7 at 1.6 Hz. Text never overshoots.
-- Stagger: words 3 f, items 2 f.
+- Stagger: words 2 f, items 2 f.
 - One hero per shot. Secondaries +5 f after the hero at 0.6 of its travel. Ambient (the badge's slow turn) under 5% of hero travel and never on text being read.
-- Holds ≥ 0.3 s/word + 0.5 s.
+- Holds ≥ 0.3 s/word + 0.5 s, counted from the moment the last word has landed.
 - Visual hits 1 frame before the beat; sound on the beat.
 
 SHOTS (one hero each; frames from `timeline.ts`, the audit prints them):
 - 00 open (0 to 6.6): the logo is on screen from frame 0 (the thumbnail), the ticker starts at the section change (3.4), the logo leaves as the badge drops.
-- 01 badge (6.6 to 14.5): the assembled badge drops and lands on the beat (ζ 0.8), tilts to camera at 10.2. Headline "Every key you trust came from someone else's random numbers." Hands off by the explode starting on the bar.
+- 01 badge (6.6 to 14.5): the assembled badge drops and lands on the beat (ζ 0.8), tilts to camera at 10.2. Headline "Every key you trust came from someone else's random numbers." to 12.0, then "Sight unseen." from 13.0. Hands off by the explode starting on the bar.
 - 02 explode (14.5 to 20.2): parts separate over two bars, one label per beat: clear card, e-paper, Baochip-1x, magnets and pads, coin cell. Headline "This one rolls its own. Open hardware, nothing hidden." Hands off by the parts assembling at 19.4.
 - 03 touch (20.2 to 27.1): a second card comes down and lands on the first (ζ 0.6) on the beat, the magnets taking it the last bit; an amber pulse runs along the pads at the near edge and returns; the camera pushes in while the top card lifts off beside the pile, and both screens refresh to the same six words on the beat. Headline "Touch two. They share a secret nobody else has." Hands off by the top card settling back onto the pile as it pulls back.
 - 04 network (27.1 to 41.5): the payoff. The pile pulls back; an amber link grows from it to one of six devices on every beat (WireGuard peer, mesh radio, laptop, phone, server, second site), each device's ring lighting as its link lands; then keys run down every link at 35.4 and again at 38.6. Headlines "One meeting gives the whole network its keys." then "Keys rotate from the badge for years." over a second line that rolls like a cube on the bar at 37.0 from "No server, no CA." to "No man in the middle." Hands off by the last headline leaving before the close.
-- 05 close (41.5 to 52.28): "Get in cahoots." then the address; the pile settles to camera at 46.3; the scene dims at 49.4; fade to black over the last 20 frames.
+- 05 close (41.5 to 52.28): "Nothing was sent. Nothing to decrypt." to 45.0, then "Get in cahoots." at 46.0 and the address at 47.0; the pile settles to camera at 46.3; the scene dims at 49.4; fade to black over the last 20 frames.
 
 BANNED: the skill's starting list, plus: lens flare or bloom on the polycarbonate; particles; any text over the e-paper; a scale bump of the whole frame on beats; the badge spinning while a headline is read; fade-and-slide-up on every line; headlines that are slogans (every headline above is a statement someone would say); the amber used for anything but the accent, the labels, and the pulse.
 
