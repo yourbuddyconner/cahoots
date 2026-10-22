@@ -59,7 +59,9 @@ impl Args {
     }
 }
 
-fn connect_ring(listen: &str, next: &str) -> std::io::Result<SocketLink> {
+/// Two cables: one from the previous device (it connects to us) and one to the next (we
+/// connect to it). Frames flood both ways, so this works as a closed ring or an open line.
+fn connect_ring(listen: &str, next: &str) -> std::io::Result<(SocketLink, SocketLink)> {
     let _ = std::fs::remove_file(listen);
     let listener = UnixListener::bind(listen)?;
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -73,8 +75,8 @@ fn connect_ring(listen: &str, next: &str) -> std::io::Result<SocketLink> {
             Err(e) => return Err(e),
         }
     };
-    let (rx, _) = listener.accept()?;
-    SocketLink::new(tx, rx)
+    let (prev, _) = listener.accept()?;
+    Ok((SocketLink::new(prev)?, SocketLink::new(tx)?))
 }
 
 fn main() {
@@ -102,20 +104,21 @@ fn main() {
                     eprintln!("{e}");
                     std::process::exit(2)
                 });
-            let link =
-                connect_ring(&args.req("--listen"), &args.req("--next")).unwrap_or_else(|e| {
+            let (prev, next) = connect_ring(&args.req("--listen"), &args.req("--next"))
+                .unwrap_or_else(|e| {
                     eprintln!("link: {e}");
                     std::process::exit(1)
                 });
+            let links = vec![prev, next];
             let tests = HealthTests::for_min_entropy(7);
             let r = match args.get("--seed") {
                 Some(s) => {
                     let mut e = Tested::new(Seeded(s.parse().expect("--seed")), tests);
-                    Device::ceremony(&state, params, index, &mut e, link)
+                    Device::ceremony(&state, params, index, &mut e, links)
                 }
                 None => {
                     let mut e = Tested::new(OsEntropy, tests);
-                    Device::ceremony(&state, params, index, &mut e, link)
+                    Device::ceremony(&state, params, index, &mut e, links)
                 }
             };
             r.map(|d| {

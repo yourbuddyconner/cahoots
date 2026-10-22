@@ -5,7 +5,7 @@ Runs the real `cahoots-hal` device logic on a laptop with stand-ins for the hard
 | Hardware | Simulator |
 |---|---|
 | TRNG | OS CSPRNG (`getrandom`), behind the SP 800-90B health tests. Or `--seed N` for a reproducible demo. |
-| Touch link (UART) | Unix-domain socket to the next device in the ring |
+| Touch link (UART) | A Unix-domain socket to each neighbour |
 | Pad region (NOR flash or RRAM) | `pad.bin`, 4 KiB erase unit, erase = overwrite zeros + sync |
 | Ledger region | `ledger.bin`, 64 KiB of `0xFF`, 16-byte append-only records |
 | 200x200 e-paper | `display.png`, re-rendered on every status change |
@@ -14,7 +14,7 @@ A simulated badge is a `CSPRNG` source, not a hardware TRNG. Its circles are lab
 
 ## Four devices on one laptop
 
-Each device listens on its own socket and connects to the next one. Device 3 connects back to device 0 to close the ring. Start all four within 30 seconds of each other.
+Each device listens on its own socket and connects to the next one, so every device has a socket to both neighbours. Frames travel both ways over every socket, as they do through the pads in a pile, so the ring may be closed or left open. Start all four within 30 seconds of each other.
 
 ```sh
 cargo build -p cahoots-host

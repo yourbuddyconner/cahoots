@@ -3,25 +3,22 @@ use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
 
-/// One hop of the ring: `tx` goes to the next device, `rx` comes from the previous one.
+/// One cable to one neighbour: a Unix socket, written and read on this end.
 ///
 /// Writes never block. Bytes that do not fit the socket buffer wait in `pending` and are
 /// flushed on every later `send` or `recv`. A ring of devices that all wrote blocking
 /// would deadlock once the reveals outgrow the socket buffers.
 pub struct SocketLink {
-    tx: UnixStream,
-    rx: UnixStream,
+    stream: UnixStream,
     pending: VecDeque<u8>,
     broken: bool,
 }
 
 impl SocketLink {
-    pub fn new(tx: UnixStream, rx: UnixStream) -> io::Result<Self> {
-        rx.set_nonblocking(true)?;
-        tx.set_nonblocking(true)?;
+    pub fn new(stream: UnixStream) -> io::Result<Self> {
+        stream.set_nonblocking(true)?;
         Ok(SocketLink {
-            tx,
-            rx,
+            stream,
             pending: VecDeque::new(),
             broken: false,
         })
@@ -30,7 +27,7 @@ impl SocketLink {
     fn flush(&mut self) {
         while !self.pending.is_empty() {
             let (head, _) = self.pending.as_slices();
-            match self.tx.write(head) {
+            match self.stream.write(head) {
                 Ok(0) => {
                     self.broken = true;
                     return;
@@ -62,7 +59,7 @@ impl Link for SocketLink {
 
     fn recv(&mut self, buf: &mut [u8]) -> usize {
         self.flush();
-        match self.rx.read(buf) {
+        match self.stream.read(buf) {
             Ok(0) => {
                 self.broken = true;
                 0

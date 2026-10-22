@@ -1,11 +1,14 @@
-//! The ring ceremony driver (handoff 3.4, "Transport on devices").
+//! The ceremony driver over touch links (handoff 3.4, "Transport on devices").
 //!
-//! Every device has one [`Link`]: it transmits to the next device and receives from the
-//! previous one. Each device originates its own params, commitment, and reveal frames and
-//! forwards every frame it sees for the first time, keyed by (kind, member index). Frames
-//! that come all the way round are dropped by that dedupe. A device sends its reveal only
-//! once it holds all `n` commitments. Hops deliver bytes in order, so a reveal never
-//! overtakes the commitments that precede it; early reveals are buffered anyway.
+//! Every device has one or more [`Link`]s, one per cable: two in a pile (down and up) or in a
+//! closed ring (previous and next), one in a pair. Each device originates its own params,
+//! commitment, and reveal frames on every link, and forwards every frame it sees for the first
+//! time on every link except the one it arrived on, keyed by (kind, member index). Copies that
+//! come back round, or arrive from both sides, are dropped by that dedupe, so the same driver
+//! is correct on a line, a ring, or a pair. A device sends its reveal only once it holds all
+//! `n` commitments. Hops deliver bytes in order, so a reveal never overtakes the commitments
+//! that precede it; early reveals are buffered anyway. Frames of the pile layer (kinds 16 and
+//! up, see [`crate::pile`]) are ignored.
 //!
 //! Frame payloads:
 //!
@@ -63,13 +66,14 @@ pub enum Step {
 const MAX_MEMBERS: usize = 8;
 
 pub struct RingCeremony<L: Link> {
-    link: L,
+    links: Vec<L>,
     ceremony: Ceremony,
     params_bytes: Vec<u8>,
     n: u8,
     index: u8,
     seq: u32,
-    rx: Vec<u8>,
+    /// Bytes received and not yet decoded, per link.
+    rx: Vec<Vec<u8>>,
     seen_params: [bool; MAX_MEMBERS],
     seen_commit: [bool; MAX_MEMBERS],
     seen_reveal: [bool; MAX_MEMBERS],
@@ -87,8 +91,21 @@ impl<L: Link> RingCeremony<L> {
         params: CircleParams,
         index: u8,
         entropy: &mut dyn Entropy,
-        link: L,
+        links: Vec<L>,
     ) -> Result<Self, RingError> {
+        Self::new_buffered(params, index, entropy, links, Vec::new())
+    }
+
+    /// Like [`new`](Self::new), with bytes that already arrived on each link before the
+    /// ceremony took the links over (a neighbour that started first).
+    pub fn new_buffered(
+        params: CircleParams,
+        index: u8,
+        entropy: &mut dyn Entropy,
+        links: Vec<L>,
+        mut buffered: Vec<Vec<u8>>,
+    ) -> Result<Self, RingError> {
+        buffered.resize(links.len(), Vec::new());
         let mut contribution = Zeroizing::new(vec![0u8; params.pad_len as usize]);
         entropy.fill(&mut contribution).map_err(RingError::Health)?;
         let mut kem_seed = Zeroizing::new([0u8; KEM_SEED_LEN]);
@@ -104,13 +121,13 @@ impl<L: Link> RingCeremony<L> {
             *kem_seed,
         )?;
         Ok(RingCeremony {
-            link,
+            links,
             ceremony,
             params_bytes,
             n,
             index,
             seq: 0,
-            rx: Vec::new(),
+            rx: buffered,
             seen_params: [false; MAX_MEMBERS],
             seen_commit: [false; MAX_MEMBERS],
             seen_reveal: [false; MAX_MEMBERS],
@@ -121,8 +138,8 @@ impl<L: Link> RingCeremony<L> {
         })
     }
 
-    pub fn link(&self) -> &L {
-        &self.link
+    pub fn links(&self) -> &[L] {
+        &self.links
     }
     pub fn phase(&self) -> Phase {
         self.ceremony.phase()
@@ -134,18 +151,29 @@ impl<L: Link> RingCeremony<L> {
         self.seen_reveal.iter().filter(|&&s| s).count() as u8
     }
 
+    /// Send on every link that has a peer.
     fn send(&mut self, kind: Frame, index: u8, body: &[u8]) {
+        self.send_except(kind as u8, index, body, None);
+    }
+
+    /// Send on every link that has a peer, except `except`: the link a frame arrived on.
+    fn send_except(&mut self, kind: u8, index: u8, body: &[u8], except: Option<usize>) {
         let mut payload = Vec::with_capacity(1 + body.len());
         payload.push(index);
         payload.extend_from_slice(body);
         let f = frame::Frame {
-            kind: kind as u8,
+            kind,
             seq: self.seq,
             payload: &payload,
         };
         self.seq = self.seq.wrapping_add(1);
         let bytes = frame::encode(&f);
-        self.link.send(&bytes);
+        for (k, link) in self.links.iter_mut().enumerate() {
+            if Some(k) == except || !link.peer_present() {
+                continue;
+            }
+            link.send(&bytes);
+        }
     }
 
     /// Send our parameters and commitment.
@@ -169,14 +197,16 @@ impl<L: Link> RingCeremony<L> {
         e
     }
 
-    fn drain_link(&mut self) {
+    fn drain_links(&mut self) {
         let mut buf = [0u8; 256];
-        loop {
-            let n = self.link.recv(&mut buf);
-            if n == 0 {
-                break;
+        for (k, link) in self.links.iter_mut().enumerate() {
+            loop {
+                let n = link.recv(&mut buf);
+                if n == 0 {
+                    break;
+                }
+                self.rx[k].extend_from_slice(&buf[..n]);
             }
-            self.rx.extend_from_slice(&buf[..n]);
         }
     }
 
@@ -185,24 +215,26 @@ impl<L: Link> RingCeremony<L> {
         if let Some(e) = self.aborted {
             return Err(e);
         }
-        self.drain_link();
-        loop {
-            let (kind, index, body, used) = match frame::decode(&self.rx) {
-                Ok((f, used)) => {
-                    if f.payload.is_empty() {
-                        return Err(self.abort(RingError::Protocol));
+        self.drain_links();
+        for k in 0..self.links.len() {
+            loop {
+                let (kind, index, body, used) = match frame::decode(&self.rx[k]) {
+                    Ok((f, used)) => {
+                        if f.payload.is_empty() {
+                            return Err(self.abort(RingError::Protocol));
+                        }
+                        (f.kind, f.payload[0], f.payload[1..].to_vec(), used)
                     }
-                    (f.kind, f.payload[0], f.payload[1..].to_vec(), used)
-                }
-                Err(FrameError::Incomplete) => break,
-                Err(FrameError::Crc) => {
-                    // Resync: drop one byte and scan for the next frame.
-                    self.rx.remove(0);
-                    continue;
-                }
-            };
-            self.rx.drain(..used);
-            self.handle(kind, index, body)?;
+                    Err(FrameError::Incomplete) => break,
+                    Err(FrameError::Crc) => {
+                        // Resync: drop one byte and scan for the next frame.
+                        self.rx[k].remove(0);
+                        continue;
+                    }
+                };
+                self.rx[k].drain(..used);
+                self.handle(kind, index, body, k)?;
+            }
         }
         self.maybe_reveal()?;
         Ok(if self.ceremony.phase() == Phase::Complete {
@@ -212,7 +244,11 @@ impl<L: Link> RingCeremony<L> {
         })
     }
 
-    fn handle(&mut self, kind: u8, index: u8, body: Vec<u8>) -> Result<(), RingError> {
+    fn handle(&mut self, kind: u8, index: u8, body: Vec<u8>, from: usize) -> Result<(), RingError> {
+        if kind >= crate::pile::KIND_FIRST {
+            // The pile layer talking after the ceremony began. Not ours.
+            return Ok(());
+        }
         if index >= self.n {
             return Err(self.abort(RingError::Protocol));
         }
@@ -224,7 +260,7 @@ impl<L: Link> RingCeremony<L> {
                 }
                 if !self.seen_params[i] {
                     self.seen_params[i] = true;
-                    self.send(Frame::Params, index, &body);
+                    self.send_except(kind, index, &body, Some(from));
                 }
             }
             k if k == Frame::Commit as u8 => {
@@ -237,13 +273,13 @@ impl<L: Link> RingCeremony<L> {
                 }
                 if !self.seen_commit[i] {
                     self.seen_commit[i] = true;
-                    self.send(Frame::Commit, index, &body);
+                    self.send_except(kind, index, &body, Some(from));
                 }
             }
             k if k == Frame::Reveal as u8 => {
                 if !self.seen_reveal[i] {
                     self.seen_reveal[i] = true;
-                    self.send(Frame::Reveal, index, &body);
+                    self.send_except(kind, index, &body, Some(from));
                     self.pending_reveals.push((index, Zeroizing::new(body)));
                 }
             }
@@ -289,10 +325,10 @@ impl<L: Link> RingCeremony<L> {
         Ok(())
     }
 
-    /// Erase contributions and hand back the pad and the link.
-    pub fn finish(self) -> Result<(CeremonyResult, L), RingError> {
+    /// Erase contributions and hand back the pad and the links.
+    pub fn finish(self) -> Result<(CeremonyResult, Vec<L>), RingError> {
         let r = self.ceremony.finish()?;
-        Ok((r, self.link))
+        Ok((r, self.links))
     }
 
     /// Drive the ceremony to completion, reporting progress on `display` and calling
@@ -301,9 +337,9 @@ impl<L: Link> RingCeremony<L> {
         mut self,
         display: &mut D,
         mut idle: impl FnMut(),
-    ) -> Result<(CeremonyResult, L), RingError> {
+    ) -> Result<(CeremonyResult, Vec<L>), RingError> {
         let mut last = (0u8, 0u8);
-        display.show_status("ceremony: waiting for ring");
+        display.show_status("ceremony: waiting for the others");
         self.start();
         loop {
             let step = match self.poll() {
@@ -334,13 +370,22 @@ impl<L: Link> RingCeremony<L> {
         }
         // Our neighbours may still need the frames we forwarded last. Keep reading while
         // we flush, so a neighbour that is also flushing toward us is never blocked.
-        while !self.link.flush() {
-            self.drain_link();
+        loop {
+            let mut done = true;
+            for link in self.links.iter_mut() {
+                if !link.flush() {
+                    done = false;
+                }
+            }
+            if done {
+                break;
+            }
+            self.drain_links();
             idle();
         }
-        let (result, link) = self.finish()?;
+        let (result, links) = self.finish()?;
         display.show_words(&result.check_words);
-        Ok((result, link))
+        Ok((result, links))
     }
 }
 

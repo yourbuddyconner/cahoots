@@ -1,4 +1,4 @@
-//! Four simulated devices, in threads, linked by Unix socket pairs, run a ring ceremony.
+//! Four simulated devices, in threads, each with a socket to both neighbours, run a ceremony.
 //! Then device 0 sends a message that device 3 decrypts, and the pad files show erased bytes.
 
 use cahoots_core::checkwords::check_words;
@@ -26,24 +26,26 @@ impl Entropy for Det {
 fn four_devices_ring_ceremony_then_message() {
     const L: u32 = 16 * 1024;
     let params = CircleParams::new(4, L, "sim", false).unwrap();
-    // Ring: pair i carries device i -> device i+1.
-    let pairs: Vec<(UnixStream, UnixStream)> =
-        (0..4).map(|_| UnixStream::pair().unwrap()).collect();
-    let mut tx: Vec<Option<UnixStream>> = Vec::new();
-    let mut rx: Vec<Option<UnixStream>> = Vec::new();
-    for (a, b) in pairs {
-        tx.push(Some(a));
-        rx.push(Some(b));
+    // Ring: cable i joins device i and device i+1; each device holds one end of two cables.
+    let mut next: Vec<Option<UnixStream>> = (0..4).map(|_| None).collect();
+    let mut prev: Vec<Option<UnixStream>> = (0..4).map(|_| None).collect();
+    for i in 0..4 {
+        let (a, b) = UnixStream::pair().unwrap();
+        next[i] = Some(a);
+        prev[(i + 1) % 4] = Some(b);
     }
     let tmp = tempfile::tempdir().unwrap();
     let mut handles = Vec::new();
     for i in 0..4usize {
-        let link = SocketLink::new(tx[i].take().unwrap(), rx[(i + 3) % 4].take().unwrap()).unwrap();
+        let links = vec![
+            SocketLink::new(prev[i].take().unwrap()).unwrap(),
+            SocketLink::new(next[i].take().unwrap()).unwrap(),
+        ];
         let params = params.clone();
         let dir = tmp.path().join(format!("dev{i}"));
         handles.push(std::thread::spawn(move || {
             let mut entropy = Det(5000 + i as u64);
-            Device::ceremony(&dir, params, i as u8, &mut entropy, link).unwrap()
+            Device::ceremony(&dir, params, i as u8, &mut entropy, links).unwrap()
         }));
     }
     let mut devices: Vec<Device> = handles.into_iter().map(|h| h.join().unwrap()).collect();

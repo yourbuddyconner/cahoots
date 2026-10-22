@@ -2,7 +2,8 @@
 //! plus the device logic written against them:
 //!
 //! - [`health`]: SP 800-90B continuous health tests wrapping any [`Entropy`] source.
-//! - [`ring`]: the touch-link ring ceremony driver over any [`Link`].
+//! - [`ring`]: the touch-link ceremony driver over any set of [`Link`]s: a pile, a ring, a pair.
+//! - [`pile`]: how a card in a stack learns its seat and the count before the ceremony.
 //! - [`store`]: adapts a [`PadStore`] to `cahoots_core::pad::PadStorage` with verified erase.
 //! - [`ledger`]: a power-fail-safe spent-range ledger over a raw record region.
 //!
@@ -15,6 +16,7 @@ extern crate alloc;
 
 pub mod health;
 pub mod ledger;
+pub mod pile;
 pub mod ring;
 pub mod store;
 
@@ -66,13 +68,15 @@ pub trait Display {
     fn show_status(&mut self, s: &str);
 }
 
-/// The touch link: a byte channel to the next device in the ring.
+/// A touch link: a byte channel over one cable or one set of contacts to one neighbour.
+/// A card in a pile has two, down and up; a device in a closed ring has two, previous and next.
 ///
 /// `recv` is non-blocking: it copies whatever bytes are available (possibly none) and
 /// returns the count. Bytes arrive in order on a given hop.
 pub trait Link {
     fn send(&mut self, frame: &[u8]);
     fn recv(&mut self, buf: &mut [u8]) -> usize;
+    /// The detect line: true while something is plugged into this connector.
     fn peer_present(&self) -> bool;
     /// Push queued bytes toward the wire. Returns true once nothing is left queued.
     /// The ring driver calls this until it returns true before it finishes, so the last

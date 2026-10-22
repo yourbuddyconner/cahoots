@@ -6,10 +6,9 @@ use std::os::unix::net::UnixStream;
 
 #[test]
 fn socket_link_delivers_in_order_and_is_non_blocking() {
-    let (a_tx, b_rx) = UnixStream::pair().unwrap();
-    let (b_tx, a_rx) = UnixStream::pair().unwrap();
-    let mut a = SocketLink::new(a_tx, a_rx).unwrap();
-    let mut b = SocketLink::new(b_tx, b_rx).unwrap();
+    let (a_end, b_end) = UnixStream::pair().unwrap();
+    let mut a = SocketLink::new(a_end).unwrap();
+    let mut b = SocketLink::new(b_end).unwrap();
     let mut buf = [0u8; 16];
     assert_eq!(b.recv(&mut buf), 0, "nothing yet, must not block");
     a.send(b"hello");

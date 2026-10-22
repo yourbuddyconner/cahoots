@@ -55,20 +55,20 @@ pub struct Device {
 }
 
 impl Device {
-    /// Run a ring ceremony over `link` and persist the result under `dir`.
+    /// Run a ceremony over `links` (one per neighbour) and persist the result under `dir`.
     pub fn ceremony<L: Link>(
         dir: &Path,
         params: CircleParams,
         index: u8,
         entropy: &mut dyn Entropy,
-        link: L,
+        links: Vec<L>,
     ) -> Result<Self, DeviceError> {
         std::fs::create_dir_all(dir)?;
         let name = format!("dev{index}");
         let mut display = PngDisplay::new(&dir.join("display.png"), &name);
         let ring =
-            RingCeremony::new(params.clone(), index, entropy, link).map_err(DeviceError::Ring)?;
-        let (result, _link) = ring
+            RingCeremony::new(params.clone(), index, entropy, links).map_err(DeviceError::Ring)?;
+        let (result, _links) = ring
             .run(&mut display, || {
                 std::thread::sleep(std::time::Duration::from_millis(1))
             })

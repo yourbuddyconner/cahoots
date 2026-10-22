@@ -49,4 +49,4 @@ If someone joined late and is still scanning at step 2 after you reached step 3,
 
 ## Badges
 
-The hardware badge replaces scanning with touching: badges snap together and pass the codes over their pins. The steps and the six words are the same. This section will grow once the first ceremonies have run on real badges.
+The hardware badge replaces scanning with stacking. Put the cards in a pile: magnets line each one up on the one below, and the pile passes the codes through the pads. The bottom card names the circle. Press B on the top card, wait for the buzz, lift your card off, and read the six words from its screen. The steps and the words are the same as on a phone; the seats come from the pile, so nobody says a number out loud. This section will grow once the first ceremonies have run on real badges.

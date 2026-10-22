@@ -43,8 +43,8 @@ Every Rust crate lives under `crates/`. The PWA lives under `web/app`.
 | `crates/yk` | `cahoots-yk` | YubiKey OpenPGP `GET CHALLENGE` entropy source and CLI. | done (M2), throughput not yet measured |
 | `crates/wasm` | `cahoots-wasm` | Browser bindings: ceremony, circle, fountain-coded animated QR, QR rendering. | done (M2) |
 | `web/app` | | Offline PWA phone and laptop client, including hello words for calls. | done (M2), camera scanning untested |
-| `crates/hal` | `cahoots-hal` | HAL traits, ring ceremony driver, SP 800-90B health tests, persistent ledger. `no_std`. | done (M4a) |
-| `crates/host` | `cahoots-host` | Desktop simulator: socket Link, file PadStore, PNG Display. Four processes run a ring ceremony. | done (M4a) |
+| `crates/hal` | `cahoots-hal` | HAL traits, the ceremony driver over any set of touch links (a pile, a ring, a pair), pile discovery (seat and count from the stack), SP 800-90B health tests, persistent ledger. `no_std`. | done (M4a) |
+| `crates/host` | `cahoots-host` | Desktop simulator: socket Link, file PadStore, PNG Display. Four processes, each with a socket to both neighbours, run a ceremony. | done (M4a) |
 | `crates/esp32s3` | | `esp-hal` + Embassy firmware, a third hardware family. The first two are the Pico (tinkering) and the Baochip Dabao (native); see `docs/diy-badge.md`. | placeholder |
 | `crates/dabao` | | Xous app for the Baochip-1x Dabao, the native badge family. | placeholder (M4c, M5) |
 | `crates/chat` | `cahoots-chat` | Pad-seeded end-to-end chat: epoch keys, sender ratchets, ChaCha20-Poly1305, plus the `cahoots-chat` CLI demo. | done (C1, C3) |
