@@ -143,18 +143,19 @@ function placeLabel(id: string, pos: THREE.Vector3) {
 // ───────────── DOM overlay ─────────────
 const overlay = document.getElementById("overlay")!;
 const els = new Map<string, HTMLElement>();
-function el(id: string, cls: string, textContent: string) {
+function el(id: string, cls: string, textContent: string, breakBefore = -1) {
   let e = els.get(id);
   if (!e) {
     e = document.createElement("div");
     e.className = cls;
     e.dataset.id = id;
-    for (const w of textContent.split(/\s+/)) {
+    textContent.split(/\s+/).forEach((w, i) => {
+      if (i === breakBefore) e!.appendChild(document.createElement("br"));
       const s = document.createElement("span");
       s.className = "w";
       s.textContent = w;
-      e.appendChild(s);
-    }
+      e!.appendChild(s);
+    });
     overlay.appendChild(e);
     els.set(id, e);
   }
@@ -167,13 +168,16 @@ function textState(f: number, id: string, cls: string, preShown = false) {
   // A pre-shown text finished its reveal before frame 0, so frame 0 is a finished frame (the thumbnail).
   const shift = preShown ? DUR.textIn + STAGGER.word * c.text.split(/\s+/).length : 0;
   f += shift;
-  const e = el(id, cls, c.text);
+  const e = el(id, cls, c.text, c.pause?.after ?? -1);
   const words = e.querySelectorAll<HTMLElement>(".w");
   const visible = f >= c.in && f - shift < c.out + DUR.textOut + STAGGER.word * words.length;
   e.style.display = visible ? "" : "none";
   if (!visible) return;
   words.forEach((w, i) => {
-    const pin = EASE.enter(prog(f, c.in + i * STAGGER.word, c.in + i * STAGGER.word + DUR.textIn));
+    // Words after a pause land later, as a second sentence under the first.
+    const paused = c.pause && i >= c.pause.after;
+    const start = paused ? c.in + c.pause!.frames + (i - c.pause!.after) * STAGGER.word : c.in + i * STAGGER.word;
+    const pin = EASE.enter(prog(f, start, start + DUR.textIn));
     const pout = EASE.exit(prog(f - shift, c.out + i * 2, c.out + i * 2 + DUR.textOut));
     const o = Math.min(pin, 1 - pout);
     w.style.opacity = String(o);
@@ -307,7 +311,6 @@ async function renderFrame(f: number) {
     A.group.rotation.x = 0.1 + turn * 0.3;
     setCam(RIG.hero, RIG.hero, 0);
     textState(f, "badge.head", "head");
-    textState(f, "badge.head2", "head");
   }
 
   // EXPLODE

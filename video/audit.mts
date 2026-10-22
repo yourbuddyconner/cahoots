@@ -6,15 +6,21 @@ let fails = 0;
 const fail = (msg: string) => { fails++; console.log("FAIL", msg); };
 const sec = (f: number) => (f / FPS).toFixed(2);
 
-// 1. Every text holds at least 0.3 s per word + 0.5 s once fully revealed.
+// 1. Every text holds at least 0.3 s per word + 0.5 s once fully revealed. A text with a pause
+//    is two sentences, each judged from the frame its own last word lands.
 for (const t of TEXTS) {
-  const words = t.text.trim().split(/\s+/).length;
-  const shown = t.in + DUR.textIn + STAGGER.word * (words - 1);
-  const hold = t.out - shown;
-  const need = minHold(t.text);
-  const ok = hold >= need;
-  console.log(`${ok ? "ok  " : "FAIL"} ${t.id.padEnd(16)} ${sec(t.in)}-${sec(t.out)}  hold ${sec(hold)} s (min ${sec(need)}) ${words}w slot=${t.slot ?? "-"}`);
-  if (!ok) fails++;
+  const all = t.text.trim().split(/\s+/);
+  const segments = t.pause ? [[all.slice(0, t.pause.after), 0], [all.slice(t.pause.after), t.pause.frames]] as const : [[all, 0]] as const;
+  let first = 0;
+  for (const [words, delay] of segments) {
+    const shown = t.in + delay + (words.length - 1) * STAGGER.word + DUR.textIn;
+    const hold = t.out - shown;
+    const need = minHold(words.join(" "));
+    const ok = hold >= need;
+    console.log(`${ok ? "ok  " : "FAIL"} ${t.id.padEnd(16)} ${sec(t.in + delay)}-${sec(t.out)}  hold ${sec(hold)} s (min ${sec(need)}) ${words.length}w slot=${t.slot ?? "-"}`);
+    if (!ok) fails++;
+    first += words.length;
+  }
 }
 // 2. A text in a slot starts only after the previous one in that slot has fully left.
 const bySlot = new Map<string, typeof TEXTS>();

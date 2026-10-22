@@ -34,14 +34,15 @@ export const s = (sec: number) => Math.round(sec * FPS);
 // ───────────── registries (generic) ─────────────
 export type HitKind = "key" | "enter" | "line" | "click" | "check" | "swap" | "chapter" | "flash" | "fly" | "slam" | "whoosh" | "tick";
 export interface Hit { f: number; kind: HitKind; note: string; onBeat: boolean }
-export interface TextCue { id: string; text: string; in: number; out: number; slot?: string }
+/** A text state. `pause` holds the words from index `after` back by `frames`, so a second sentence can land later under the first. */
+export interface TextCue { id: string; text: string; in: number; out: number; slot?: string; pause?: { after: number; frames: number } }
 export interface Move { id: string; from: number; dur: number; role: "hero" | "secondary"; travel: number; hero?: string }
 export const HITS: Hit[] = [];
 export const TEXTS: TextCue[] = [];
 export const MOVES: Move[] = [];
 
 /** Register a text state shown from `in` (reveal starts) to `out` (exit starts). Same `slot` = same screen position. */
-export const text = (id: string, t: string, inF: number, out: number, slot?: string) => (TEXTS.push({ id, text: t, in: inF, out, slot }), inF);
+export const text = (id: string, t: string, inF: number, out: number, slot?: string, pause?: { after: number; frames: number }) => (TEXTS.push({ id, text: t, in: inF, out, slot, pause }), inF);
 /** Frame when a text that starts leaving at `out` has fully left (word exits stagger 2 f). */
 export const goneAt = (t: string, out: number) => out + DUR.textOut + 2 * (t.trim().split(/\s+/).length - 1);
 export const hero = (id: string, from: number, dur: number, travel = 1) => (MOVES.push({ id, from, dur, role: "hero", travel }), from);
@@ -91,11 +92,11 @@ export const OPEN = (() => {
 export const BADGE = (() => {
   const drop = hero("badge.drop", hit(6.6), DUR.panelIn);
   mark_(drop, "slam", "badge lands");
-  const head = text("badge.head", "Every key you trust came from someone else's random numbers.", hit(7.0), hit(12.0), "head");
+  // The second sentence lands under the first at 11.4, and both leave together.
+  const head = text("badge.head", "Every key you trust came from someone else's random numbers. You weren't there.", hit(7.0), hit(14.0), "head", { after: 10, frames: hit(11.4) - hit(7.0) });
   const turn = hero("badge.turn", hit(10.2), DUR.lift);
   mark_(turn, "swap", "badge tilts to camera");
-  const head2 = text("badge.head2", "Sight unseen.", hit(13.0), hit(14.6), "head");
-  return { drop, head, turn, head2 };
+  return { drop, head, turn };
 })();
 
 // EXPLODE: the parts separate over two bars; a label per part on every beat.
@@ -116,7 +117,7 @@ export const TOUCH = (() => {
   const land = hit(21.4);
   const snap = hero("touch.snap", land - DUR.snap, DUR.snap);
   mark_(land, "slam", "the second card lands on the pile");
-  const head = text("touch.head", "Touch two. They share a secret nobody else has.", hit(21.4), hit(26.0), "head");
+  const head = text("touch.head", "Stack two. The numbers are made between them.", hit(21.4), hit(26.0), "head");
   const pulse = hero("touch.pulse", hit(22.6), DUR.connector);
   mark_(pulse, "fly", "pulse along the pads");
   const pulse2 = hero("touch.pulse2", hit(23.4), DUR.connector);
