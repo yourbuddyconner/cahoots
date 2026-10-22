@@ -18,8 +18,8 @@ members = [
 ]
 exclude = ["crates/fuzz"]
 # Not workspace members: crates/esp32s3 (needs the esp toolchain), crates/dabao (built with
-# `cargo xtask dabao` inside xous-core), crates/fuzz (cargo-fuzz, nightly), web/app (static PWA),
-# tvc-app (OCI image). Each has its own README.
+# `cargo xtask dabao` inside xous-core), crates/fuzz (cargo-fuzz, nightly), web/app (static PWA).
+# The station ships as an OCI image for Turnkey Verifiable Cloud (https://docs.turnkey.com/features/verifiable-cloud/overview). Each has its own README.
 
 [workspace.package]
 version = "0.1.0"

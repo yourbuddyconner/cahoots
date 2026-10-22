@@ -24,7 +24,7 @@ Ciphertext travels over the **Numbers Station**, an append-only public feed. Any
 
 ![Anyone can read the feed. Only the group can read the messages.](docs/diagrams/station.svg)
 
-A circle can also give a seat to a hosted software member, such as an AI agent. That member's copy of the pad lives inside a Turnkey Verifiable Cloud (TVC) enclave, and a pinned policy decides each read and send. This integration is optional. Circles without a hosted seat have a simple guarantee: nobody who runs the feed can read the circle.
+A circle can also give a seat to a hosted software member, such as an AI agent. That member's copy of the pad lives inside a [Turnkey Verifiable Cloud (TVC)](https://docs.turnkey.com/features/verifiable-cloud/overview) enclave, and a pinned policy decides each read and send. This integration is optional. Circles without a hosted seat have a simple guarantee: nobody who runs the feed can read the circle.
 
 ## Repository layout
 
@@ -48,7 +48,7 @@ Every Rust crate lives under `crates/`. The PWA lives under `web/app`.
 | `crates/esp32s3` | | `esp-hal` + Embassy firmware, a third hardware family. The first two are the Pico (tinkering) and the Baochip Dabao (native); see `docs/diy-badge.md`. | placeholder |
 | `crates/dabao` | | Xous app for the Baochip-1x Dabao, the native badge family. | placeholder (M4c, M5) |
 | `crates/chat` | `cahoots-chat` | Pad-seeded end-to-end chat: epoch keys, sender ratchets, ChaCha20-Poly1305, plus the `cahoots-chat` CLI demo. | done (C1, C3) |
-| `crates/station` | `cahoots-station` | The Numbers Station relay: hash-chained log, reuse refusal, long-poll feed, display page, Dockerfile. | done (C2); TVC deploy pending |
+| `crates/station` | `cahoots-station` | The Numbers Station relay: hash-chained log, reuse refusal, long-poll feed, display page, Dockerfile. | done (C2); [TVC](https://docs.turnkey.com/features/verifiable-cloud/overview) deploy pending |
 | `crates/fuzz` | | `cargo-fuzz` targets for every parser. Not a workspace member. | done |
 | `docs/` | | Protocol spec, threat model, use cases, plan, ceremony guide. | |
 

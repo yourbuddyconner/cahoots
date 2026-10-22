@@ -1,6 +1,6 @@
 [package]
 name = "cahoots-provider"
-description = "Pad provider API: psk and spend over memory, file, device, and TVC backends. Owns the spent-range ledger. See handoff section 10."
+description = "Pad provider API: psk and spend over memory, file, device, and TVC (Turnkey Verifiable Cloud, https://docs.turnkey.com/features/verifiable-cloud/overview) backends. Owns the spent-range ledger. See handoff section 10."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

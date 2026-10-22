@@ -44,7 +44,7 @@ The words these documents use, in plain terms. Where a term has a precise defini
 
 **Hosted seat, agent seat.** A group member that is a program running in a cloud enclave instead of a person with a device. Its copy of the pad lives in the enclave under a policy the group pinned.
 
-**TVC.** Turnkey Verifiable Cloud: a cloud service that runs programs inside secure enclaves and publishes proof of exactly what is running.
+**TVC.** [Turnkey Verifiable Cloud](https://docs.turnkey.com/features/verifiable-cloud/overview): a cloud service that runs programs inside secure enclaves and publishes proof of exactly what is running.
 
 **Badge.** The device Cahoots is designed around: a credit-card-sized board with a small screen, a wired touch link, and a hardware random number generator.
 

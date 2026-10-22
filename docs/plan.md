@@ -81,7 +81,7 @@ Goal: a group chat where the keys come from the pad and the messages travel over
 | C2 The feed | The public relay (the Numbers Station): an append-only log where each entry is chained to the last, and which refuses any message that reuses pad bytes | Posting and reading work over HTTP. A tampered log refuses to start | **done** |
 | C3 CLI demo | A terminal chat client for trying the protocol without hardware | Three terminals chat through one relay, rotate keys, and reject a tampered entry | **done** |
 | C4 Chat in the app | A chat screen in the browser app, with a relay address setting | Two browser tabs chat through the relay | **done** |
-| C5 Hosted feed | The relay running inside a Turnkey Verifiable Cloud enclave, with the head of its log anchored so it cannot be rewritten | The deployment pins the exact image, and the log head is anchored | after C2, needs access to the TVC test environment |
+| C5 Hosted feed | The relay running inside a [Turnkey Verifiable Cloud](https://docs.turnkey.com/features/verifiable-cloud/overview) enclave, with the head of its log anchored so it cannot be rewritten | The deployment pins the exact image, and the log head is anchored | after C2, needs [TVC](https://docs.turnkey.com/features/verifiable-cloud/overview) access |
 
 ## Apps
 

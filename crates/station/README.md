@@ -65,9 +65,9 @@ Clients that keep the last head they saw can detect a rollback: a later head who
 - **Pure pad, version byte 1.** Parsed with `cahoots_core::message::parse`. The spent range is `[offset, offset + 32 + len)`.
 - **Chat, version byte 2.** `version | circle_id (16) | epoch_id (5) | sender (1) | counter (u32) | len (u32) | type (1) | ciphertext`, where the ciphertext is exactly `len + 16` bytes. Only the length arithmetic is checked.
 
-## Deploying as a TVC workload
+## Deploying as a [TVC](https://docs.turnkey.com/features/verifiable-cloud/overview) workload
 
-The station is built as an OCI image so it can run inside Turnkey Verifiable Cloud, where the log head is anchored and the operator cannot roll the log back or show different readers different histories. **The TVC2 deploy itself was not done.** It needs access to `tkhq/test-tvc-2` (private), its simulation mode, and the app-record leaf in `tvc-log`. Until then this binary runs anywhere, and anchoring is a promise the operator makes, not one the enclave enforces.
+The station is built as an OCI image so it can run inside [Turnkey Verifiable Cloud](https://docs.turnkey.com/features/verifiable-cloud/overview), where the log head is anchored and the operator cannot roll the log back or show different readers different histories. **That deploy has not been done yet.** Until it is, this binary runs anywhere, and anchoring is a promise the operator makes, not one the enclave enforces.
 
 The deploy record must pin:
 
@@ -75,7 +75,7 @@ The deploy record must pin:
 - the log file location inside the sealed volume (`/data/station.jsonl`);
 - the policy hash. The station has no policy today, so this is a placeholder for the hosted-member policy that will share the workload (`appManifestDigest`).
 
-What anchoring adds once deployed: the station periodically commits its head hash to the TVC log. A reader who verifies the anchored head against the chain knows the history is the one everyone else sees.
+What anchoring adds once deployed: the station periodically commits its head hash to the [TVC](https://docs.turnkey.com/features/verifiable-cloud/overview) log. A reader who verifies the anchored head against the chain knows the history is the one everyone else sees.
 
 ## CORS
 

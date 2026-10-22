@@ -5,7 +5,7 @@
 //! it, and only then returns the bytes.
 //!
 //! Backends: [`MemProvider`] (tests, WASM), [`FileProvider`] (development, encrypted at
-//! rest). Device-over-USB and TVC backends are later milestones.
+//! rest). Device-over-USB and [TVC](https://docs.turnkey.com/features/verifiable-cloud/overview) backends are later milestones.
 
 mod circle;
 mod file;

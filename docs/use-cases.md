@@ -200,7 +200,7 @@ Design rules:
 | Host | Verdict |
 |---|---|
 | Phone and laptop clients, WASM reducers | Build first. Above the provider boundary, deterministic, hash-pinned. |
-| TVC, as a seat with a pinned policy | The agent seat generalized. The module hash belongs in the deploy record. |
+| [TVC](https://docs.turnkey.com/features/verifiable-cloud/overview), as a seat with a pinned policy | The agent seat generalized. The module hash belongs in the deploy record. |
 | The badge, as a Xous detached app | Later. Needs the pad service to own the pad and the display. Not on the ESP32 build. |
 | JavaScript plugins with pad access, or anything active during a ceremony | Never. |
 

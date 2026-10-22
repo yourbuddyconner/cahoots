@@ -1,4 +1,4 @@
-//! Generates `vectors/*.json` from `cahoots-core`. Every client (WASM, firmware, TVC app)
+//! Generates `vectors/*.json` from `cahoots-core`. Every client (WASM, firmware, the [TVC](https://docs.turnkey.com/features/verifiable-cloud/overview) app)
 //! must reproduce these. Run `cargo run -p cahoots-vectors` to regenerate and
 //! `cargo run -p cahoots-vectors -- --check` to verify the committed files are current.
 
