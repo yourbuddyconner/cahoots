@@ -99,12 +99,13 @@ export const BADGE = (() => {
   return { drop, head, turn };
 })();
 
-// EXPLODE: the parts separate over two bars; a label per part on every beat.
+// EXPLODE: the parts separate over two bars; a label per part on every beat; the headline's second sentence after the last label.
 export const PARTS = ["Clear card", "E-paper", "Baochip-1x", "Magnets and pads", "Coin cell"];
 export const EXPLODE = (() => {
   const apart = hero("explode.apart", hit(14.5), DUR.explode);
   mark_(apart, "whoosh", "parts separate");
-  const head = text("explode.head", "This one rolls its own. Open hardware, nothing hidden.", hit(15.0), hit(19.8), "head");
+  // The second sentence lands under the first right after the last part label.
+  const head = text("explode.head", "This card makes its own random numbers. You watch it happen.", hit(15.0), hit(19.8), "head", { after: 7, frames: hit(17.4) - hit(15.0) });
   const labels = nextBeats(hit(15.4) - 1, PARTS.length, 1);
   labels.forEach((f, i) => { text(`explode.label${i}`, PARTS[i], f, hit(19.8), `label${i}`); mark_(f, "tick", PARTS[i]); });
   const together = hero("explode.together", hit(19.4), DUR.panelIn);
