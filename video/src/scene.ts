@@ -2,7 +2,7 @@
 // window.renderFrame(f) and screenshots the page. Every number comes from motion.ts or timeline.ts.
 import * as THREE from "three";
 import { makeBadge } from "../../site/badge.js";
-import { addGround, addLights, enableShadows, setupEnvironment } from "../../site/rig.js";
+import { addGround, addLights, enableShadows, makeBackdrop, makeComposer, setupEnvironment } from "../../site/rig.js";
 import { DUR, EASE, FPS, SPRING, STAGGER, prog, springAt } from "./motion";
 import { BADGE, CH, EXPLODE, NETWORK, NODES, OPEN, PARTS, TOTAL, TOUCH, cue, move } from "./timeline";
 
@@ -12,73 +12,83 @@ declare global {
 
 const W = 1920, H = 1080;
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
+// Opaque canvas: thin clear plastic only renders right with an opaque backdrop. The page colour
+// and the glow are a plane far behind the subject, drawn so they come out of tone mapping as
+// exactly the page's own colours; the CSS glow is switched off so it is not doubled.
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, preserveDrawingBuffer: true });
 renderer.setPixelRatio(1);
 renderer.setSize(W, H, false);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-const EXPOSURE = 0.8;
+const EXPOSURE = 0.9;
 renderer.toneMappingExposure = EXPOSURE;
-renderer.setClearColor(0x000000, 0);
+document.getElementById("glow")!.style.display = "none";
 
 const scene = new THREE.Scene();
 enableShadows(renderer);
-const envReady = setupEnvironment(renderer, scene, "../../site/assets/hdr/studio.hdr", 0.9);
+const envReady = setupEnvironment(renderer, scene, null, 1.0);
 const camera = new THREE.PerspectiveCamera(30, W / H, 0.1, 100);
 addLights(scene);
 const ground = addGround(scene, 0, 0.5);
+const { composer } = makeComposer(renderer, scene, camera, W, H);
+const backdrop = makeBackdrop(renderer, { strength: 0.12 });
+scene.add(backdrop);
+const viewDir = new THREE.Vector3();
+/** Keep the backdrop square to the camera, far behind the subject, covering the frame. */
+function placeBackdrop() {
+  const dist = 60;
+  camera.getWorldDirection(viewDir);
+  backdrop.position.copy(camera.position).addScaledVector(viewDir, dist);
+  backdrop.lookAt(camera.position);
+  const side = 2 * (dist + 14) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect * 1.3;
+  backdrop.scale.set(side, side, 1);
+}
 
-// Two badges. B is the one that slides in and snaps on from the right (+x), pins to pads.
+// The screens and the board carry text drawn into textures: wait for the mono font first.
+await document.fonts.load('500 20px "JetBrains Mono"');
+await document.fonts.load('600 19px "JetBrains Mono"');
+
+// Two cards. B is the one that comes down from above and lands on A, fingers to pads.
 const A = makeBadge(renderer);
 const B = makeBadge(renderer);
 const stage = new THREE.Group();
 stage.add(A.group, B.group);
 scene.add(stage);
-const GAP = A.W + 0.0; // B sits edge to edge with A when snapped
+const PX = 1.4; // where the pile stands in the touch, network and close chapters
+const PITCH = A.PITCH; // card to card in a pile
+const REST = 0.55; // the bottom card's height above the ground plane
 
-// E-paper states. The site texture shows the words; the "waiting" state is drawn here.
+// E-paper states: the site's words, a waiting screen, and the dark flash of a refresh.
 const wordsTex = A.materials.paperMat.map!;
-wordsTex.rotation = 0; // the badges lie with the lanyard away from the camera, so the words read upright
-B.materials.paperMat.map!.rotation = 0;
-function paperTexture(draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void) {
-  const c = document.createElement("canvas");
-  c.width = c.height = 512;
-  draw(c.getContext("2d")!, 512, 512);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.center.set(0.5, 0.5);
-  t.rotation = 0;
-  return t;
-}
-const waitingTex = paperTexture((ctx, w, h) => {
-  ctx.fillStyle = "#e6e2d8";
-  ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = "#17191b";
-  ctx.font = `500 ${w * 0.052}px "JetBrains Mono", monospace`;
-  ctx.fillText("sf-meetup", w * 0.07, h * 0.13);
-  ctx.textAlign = "right";
-  ctx.font = `400 ${w * 0.042}px "JetBrains Mono", monospace`;
-  ctx.fillText("2 of 2", w * 0.93, h * 0.13);
-  ctx.textAlign = "left";
-  ctx.fillRect(w * 0.07, h * 0.18, w * 0.86, 2);
-  ctx.font = `500 ${w * 0.07}px "JetBrains Mono", monospace`;
-  ctx.fillText("touching…", w * 0.07, h * 0.5);
-  ctx.font = `400 ${w * 0.042}px "JetBrains Mono", monospace`;
-  ctx.fillText("hold the badges together", w * 0.07, h * 0.92);
+const waitingTex = A.screen((g: CanvasRenderingContext2D) => {
+  g.font = '500 11px "JetBrains Mono", monospace';
+  g.fillText("sf-meetup", 8, 19);
+  g.textAlign = "right";
+  g.font = '400 9px "JetBrains Mono", monospace';
+  g.fillText("2 in", 192, 19);
+  g.textAlign = "left";
+  g.fillRect(8, 26, 184, 1);
+  g.font = '600 19px "JetBrains Mono", monospace';
+  g.fillText("touching…", 8, 100);
+  g.font = '400 9px "JetBrains Mono", monospace';
+  g.fillText("wait for the buzz", 8, 188);
+  g.fillRect(8, 170, 184, 1);
 });
-const blankTex = paperTexture((ctx, w, h) => {
-  ctx.fillStyle = "#17191b";
-  ctx.fillRect(0, 0, w, h);
+const blankTex = A.screen((g: CanvasRenderingContext2D) => {
+  g.fillStyle = "#1b1d1f";
+  g.fillRect(0, 0, 200, 200);
 });
 // Each badge gets its own paper material so the two can flip independently.
 const paperA = A.materials.paperMat;
 const paperB = B.materials.paperMat;
 
-// The amber pulse that crosses the pins.
-const pulse = new THREE.Mesh(
-  new THREE.SphereGeometry(0.06, 16, 12),
-  new THREE.MeshBasicMaterial({ color: 0xe5a33a, transparent: true, opacity: 0 }),
-);
-stage.add(pulse);
+// The amber pulse that runs along the pads, in the seam between the two cards. Opaque, so it
+// shows through the clear plastic (transmission only sees opaque objects), and at the card's
+// near edge so half of it is in the open. Its brightness fades through the colour, not alpha.
+const PULSE = new THREE.Color(0xffc46a);
+const pulse = new THREE.Mesh(new THREE.SphereGeometry(0.085, 16, 12), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+pulse.visible = false;
+A.group.add(pulse);
+const PADS = { x: 0.45, y: A.T + (PITCH - A.T) / 2, z: 2.14 }; // the pads row, 9 mm either side, at the card's near edge
 
 // The network: six devices on an arc behind the pair, a link to each, and key pulses that run down the links.
 const NET_CENTER = new THREE.Vector3(1.4, 0.3, 0);
@@ -239,9 +249,9 @@ const mv = (f: number, id: string, ease = EASE.move) => {
 // Camera rigs, as (position, lookAt) pairs the chapters blend between.
 const RIG: Record<string, { p: THREE.Vector3; l: THREE.Vector3 }> = {
   hero: { p: new THREE.Vector3(0, 5.2, 9.6), l: new THREE.Vector3(-2.0, 0.1, 0) },
-  explode: { p: new THREE.Vector3(0, 4.2, 16.5), l: new THREE.Vector3(-1.7, 0.9, 0) },
-  pair: { p: new THREE.Vector3(1.4, 5.6, 10.4), l: new THREE.Vector3(1.4, -0.6, 0) },
-  screens: { p: new THREE.Vector3(1.4, 7.4, 6.2), l: new THREE.Vector3(1.4, -1.3, 0.5) },
+  explode: { p: new THREE.Vector3(0, 3.3, 11.0), l: new THREE.Vector3(-1.4, 0.6, 0) },
+  pair: { p: new THREE.Vector3(1.4, 5.3, 10.0), l: new THREE.Vector3(1.4, -0.15, -0.3) },
+  screens: { p: new THREE.Vector3(2.4, 7.4, 6.2), l: new THREE.Vector3(2.4, -0.9, 0.5) },
   net: { p: new THREE.Vector3(1.0, 8.6, 12.8), l: new THREE.Vector3(0.9, 0.0, -2.4) },
   close: { p: new THREE.Vector3(1.4, 7.0, 9.0), l: new THREE.Vector3(1.4, -0.7, 0) },
 };
@@ -258,15 +268,15 @@ async function renderFrame(f: number) {
   // Defaults every frame, so a chapter only has to set what differs.
   A.group.visible = true;
   B.group.visible = false;
-  A.group.position.set(0, 0.55, 0);
+  A.group.position.set(0, REST, 0);
   A.group.rotation.set(0.1, 0, 0);
-  B.group.position.set(GAP, 0.55, 0);
+  B.group.position.set(PX, REST + PITCH, 0);
   B.group.rotation.set(0.1, 0, 0);
   A.explode(0);
   B.explode(0);
   paperA.map = wordsTex;
   paperB.map = wordsTex;
-  pulse.material.opacity = 0;
+  pulse.visible = false;
   net.visible = false;
   stage.visible = true;
   markEl.style.opacity = "0";
@@ -291,7 +301,7 @@ async function renderFrame(f: number) {
   // BADGE
   if (between(f, CH.badge[0] - 1, CH.explode[0])) {
     const drop = springAt(f, BADGE.drop, SPRING.badge);
-    A.group.position.y = lerp(4.5, 0.55, Math.min(1, drop));
+    A.group.position.y = lerp(4.5, REST, Math.min(1, drop));
     const turn = mv(f, "badge.turn");
     A.group.rotation.y = (-0.5 + ambient * (sec - CH.badge[0] / FPS)) * (1 - turn);
     A.group.rotation.x = 0.1 + turn * 0.3;
@@ -307,33 +317,48 @@ async function renderFrame(f: number) {
     A.explode(e);
     A.group.rotation.y = -0.45 * e;
     A.group.rotation.x = 0.1 + 0.3 * (1 - together) * (1 - apart);
-    A.group.position.y = 0.55 - 0.5 * apart * (1 - together);
+    A.group.position.y = REST - 0.3 * apart * (1 - together);
     setCam(RIG.hero, RIG.explode, e);
     textState(f, "explode.head", "head");
     PARTS.forEach((_, i) => textState(f, `explode.label${i}`, `label l${i}`));
   }
 
+  // Where the top card goes when it lifts off the pile to show its screen: up, aside, tilted to camera.
+  const LIFT = { dx: 2.2, dy: 0.95, dz: 0.5, tilt: 0.16 };
+  function liftB(t: number) {
+    B.group.position.set(PX + LIFT.dx * t, REST + PITCH + LIFT.dy * t, LIFT.dz * t);
+    B.group.rotation.set(0.1 + LIFT.tilt * t, 0, 0);
+  }
+
   // TOUCH
   if (between(f, CH.touch[0], CH.network[0])) {
     B.group.visible = true;
+    A.group.position.x = PX;
+    A.group.rotation.y = 0;
     const t0 = TOUCH.snap;
     const slide = EASE.move(prog(f, t0, t0 + DUR.snap * 0.6));
     const land = springAt(f, TOUCH.land, SPRING.snap);
-    const x = f < TOUCH.land ? lerp(GAP + 6.5, GAP + 0.9, slide) : lerp(GAP + 0.9, GAP, Math.min(1.08, land));
-    B.group.position.x = x;
-    A.group.rotation.y = 0;
-    B.group.rotation.y = 0;
+    const high = REST + PITCH + 3.4, near = REST + PITCH + 0.75;
+    // Down from above, slowing as it nears, then the magnets take it the last bit with one settle.
+    const y = f < TOUCH.land ? lerp(high, near, slide) : lerp(near, REST + PITCH, Math.min(1, land));
+    const tilt = f < TOUCH.land ? 0.14 : 0.14 * (1 - Math.min(1, land));
+    B.group.position.set(PX, y, 0.12 * (f < TOUCH.land ? 1 - slide : 0));
+    B.group.rotation.set(0.1 + tilt, 0, 0);
     const camT = EASE.move(prog(f, CH.touch[0], CH.touch[0] + DUR.panelIn));
     const push = mv(f, "touch.push");
-    if (push > 0) setCam(RIG.pair, RIG.touchEnd, push);
-    else setCam(RIG.explode, RIG.pair, camT);
+    if (push > 0) {
+      setCam(RIG.pair, RIG.touchEnd, push);
+      liftB(push);
+    } else setCam(RIG.explode, RIG.pair, camT);
     for (const id of ["touch.pulse", "touch.pulse2"]) {
       const m = move(id);
       const p = EASE.move(prog(f, m.from, m.from + m.dur));
       if (f >= m.from && f < m.from + m.dur + 4) {
         const dir = id === "touch.pulse" ? 1 : -1;
-        pulse.position.set(lerp(A.W / 2 - 0.6, GAP + 0.6, dir > 0 ? p : 1 - p), 0.55 + 0.12, -0.05);
-        pulse.material.opacity = Math.sin(Math.PI * Math.min(1, p)) * 0.95;
+        pulse.position.set(lerp(-PADS.x, PADS.x, dir > 0 ? p : 1 - p), PADS.y, PADS.z);
+        const glow = Math.sin(Math.PI * Math.min(1, p));
+        pulse.visible = glow > 0.02;
+        pulse.material.color.copy(PULSE).multiplyScalar(0.2 + 2.2 * glow);
       }
     }
     // Both screens wait, then refresh to the same six words on the beat.
@@ -344,13 +369,14 @@ async function renderFrame(f: number) {
     textState(f, "touch.head", "head");
   }
 
-  // NETWORK: the pair pulls back, links grow to six devices one per beat, then keys run down every link.
+  // NETWORK: the pile pulls back as the top card settles onto it, links grow to six devices one per beat, then keys run down every link.
   if (between(f, CH.network[0], CH.close[0])) {
     B.group.visible = true;
+    A.group.position.x = PX;
     A.group.rotation.y = 0;
-    B.group.rotation.y = 0;
     net.visible = true;
     const r = mv(f, "net.recede");
+    liftB(1 - r);
     setCam(RIG.touchEnd, RIG.net, r);
     NODES.forEach((_, i) => {
       const grow = EASE.enter(prog(f, NETWORK.links[i], NETWORK.links[i] + DUR.connector));
@@ -374,6 +400,7 @@ async function renderFrame(f: number) {
   // CLOSE
   if (f >= CH.close[0]) {
     B.group.visible = true;
+    A.group.position.x = PX;
     const title = mv(f, "close.title");
     const settle = mv(f, "close.settle");
     setCam(RIG.net, RIG.close, Math.max(title, settle));
@@ -397,7 +424,8 @@ async function renderFrame(f: number) {
   stage.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(stage);
   ground.position.y = box.min.y - 0.01;
-  renderer.render(scene, camera);
+  placeBackdrop();
+  composer.render();
   await new Promise((r) => requestAnimationFrame(() => r(null)));
 }
 

@@ -98,7 +98,7 @@ export const BADGE = (() => {
 })();
 
 // EXPLODE: the parts separate over two bars; a label per part on every beat.
-export const PARTS = ["Clear case", "E-paper screen", "Baochip-1x", "Touch pins", "Battery and USB-C"];
+export const PARTS = ["Clear card", "E-paper", "Baochip-1x", "Magnets and pads", "Coin cell"];
 export const EXPLODE = (() => {
   const apart = hero("explode.apart", hit(14.5), DUR.explode);
   mark_(apart, "whoosh", "parts separate");
@@ -110,14 +110,14 @@ export const EXPLODE = (() => {
   return { apart, head, labels, together };
 })();
 
-// TOUCH: a second badge snaps on, a pulse crosses the pins, both screens flip to the same six words.
+// TOUCH: a second card lands on the first, a pulse runs along the pads, the top card lifts off and both screens flip to the same six words.
 export const TOUCH = (() => {
   const land = hit(21.4);
   const snap = hero("touch.snap", land - DUR.snap, DUR.snap);
-  mark_(land, "slam", "badges snap together");
+  mark_(land, "slam", "the second card lands on the pile");
   const head = text("touch.head", "Touch two. They share a secret nobody else has.", hit(21.8), hit(26.7), "head");
   const pulse = hero("touch.pulse", hit(22.6), DUR.connector);
-  mark_(pulse, "fly", "pulse over the pins");
+  mark_(pulse, "fly", "pulse along the pads");
   const pulse2 = hero("touch.pulse2", hit(23.4), DUR.connector);
   mark_(pulse2, "fly", "pulse back");
   const push = hero("touch.push", hit(24.2), DUR.push);

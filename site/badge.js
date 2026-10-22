@@ -187,8 +187,8 @@ let seed = 11;
 const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
 
 // The e-paper: the whole glass (32 × 37.5 mm), with the 200 × 200 active area drawn at native
-// resolution and scaled up without smoothing, so it has the pixel grid of the real thing.
-function epaperTexture(renderer, words) {
+// resolution by `draw` and scaled up without smoothing, so it has the pixel grid of the real thing.
+function epaperTexture(renderer, draw) {
   const S = 64, GW = 32, GH = 37.5, A = 27.6, a0 = 2.2;
   return canvasTexture(renderer, GW * S, GH * S, (ctx, w, h) => {
     ctx.fillStyle = "#c9c7c0";
@@ -211,18 +211,7 @@ function epaperTexture(renderer, words) {
     g.fillStyle = "#e9e6de";
     g.fillRect(0, 0, 200, 200);
     g.fillStyle = "#1b1d1f";
-    g.font = `500 11px ${MONO}`;
-    g.fillText("sf-meetup", 8, 19);
-    g.textAlign = "right";
-    g.font = `400 9px ${MONO}`;
-    g.fillText("TRNG · T4", 192, 19);
-    g.textAlign = "left";
-    g.fillRect(8, 26, 184, 1);
-    g.font = `600 19px ${MONO}`;
-    words.forEach((word, i) => g.fillText(word, 8 + (i % 2) * 96, 62 + Math.floor(i / 2) * 36));
-    g.font = `400 9px ${MONO}`;
-    g.fillText("read aloud · B to confirm", 8, 188);
-    g.fillRect(8, 170, 184, 1);
+    draw(g);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(e, a0 * S, a0 * S, A * S, A * S);
     ctx.imageSmoothingEnabled = true;
@@ -232,6 +221,21 @@ function epaperTexture(renderer, words) {
     ctx.strokeRect(a0 * S, a0 * S, A * S, A * S);
   });
 }
+/** What the screen shows after a ceremony: the circle, its source label, and the six words. */
+export const wordsScreen = (words, name = "sf-meetup", label = "TRNG · T4") => (g) => {
+  g.font = `500 11px ${MONO}`;
+  g.fillText(name, 8, 19);
+  g.textAlign = "right";
+  g.font = `400 9px ${MONO}`;
+  g.fillText(label, 192, 19);
+  g.textAlign = "left";
+  g.fillRect(8, 26, 184, 1);
+  g.font = `600 19px ${MONO}`;
+  words.forEach((word, i) => g.fillText(word, 8 + (i % 2) * 96, 62 + Math.floor(i / 2) * 36));
+  g.font = `400 9px ${MONO}`;
+  g.fillText("read aloud · B to confirm", 8, 188);
+  g.fillRect(8, 170, 184, 1);
+};
 
 // The board: black solder mask, gold where copper is exposed, white silkscreen. Drawn twice, once
 // in color and once as a roughness/metalness map (green = roughness, blue = metalness).
@@ -335,7 +339,9 @@ export function makeBadge(renderer, { words = ["sunset", "valve", "present", "ra
   ].map(([x, z, rot]) => ({ x, z, w: 1.0, d: 0.5, rot: !!rot }));
 
   // ----- textures -----
-  const epaperTex = planar(epaperTexture(renderer, words), 32, 37.5);
+  const GLASS = { w: 32, h: 37.5, z: -11 }; // the e-paper glass, centred on the card's long axis
+  const screen = (draw) => planar(epaperTexture(renderer, draw), GLASS.w, GLASS.h, 0, GLASS.z);
+  const epaperTex = screen(wordsScreen(words));
   const pal = { mask: "#15171b", trace: "#1f2329", gold: "#d9b25a", goldCore: "#3b2f12", silk: "#e3e0d6", speckle: true };
   const orm = { mask: "rgb(255,135,0)", trace: "rgb(255,120,0)", gold: "rgb(255,70,255)", goldCore: "rgb(255,120,255)", silk: "rgb(255,215,0)" };
   const BW = 1536, BH = Math.round((BOARD.h / BOARD.w) * 1536);
@@ -559,8 +565,7 @@ export function makeBadge(renderer, { words = ["sunset", "valve", "present", "ra
 
   // ----- E-paper: the glass on the board, the ribbon to its connector. Step 1. -----
   const display = new THREE.Group();
-  const glass = new THREE.Mesh(slab({ outline: at(rrect(32, 37.5, 0.5), 0, -11), t: 1.1, rTop: 0.08, rBot: 0.08, k: 2 }), [glassEdge, paperMat, glassEdge]);
-  planar(epaperTex, 32, 37.5, 0, -11);
+  const glass = new THREE.Mesh(slab({ outline: at(rrect(GLASS.w, GLASS.h, 0.5), 0, GLASS.z), t: 1.1, rTop: 0.08, rBot: 0.08, k: 2 }), [glassEdge, paperMat, glassEdge]);
   display.add(glass);
   const ribbon = rbox(10, 0.12, 5.5, 0.05, ribbonMat, 1);
   ribbon.position.set(0, u(1.0), u(9));
@@ -583,6 +588,8 @@ export function makeBadge(renderer, { words = ["sunset", "valve", "present", "ra
   return {
     group, stack, explode,
     materials: { polycarbonate, paperMat, gold },
+    /** A texture for this badge's screen from a 200 × 200 drawing; assign it to paperMat.map. */
+    screen,
     MM, W: u(W), L: u(L), T: u(T),
     /** Card-to-card pitch in a pile: the thickness plus the standoff the magnets leave. */
     PITCH: u(T + 0.3),
