@@ -146,7 +146,8 @@ fn reveal_not_for_me_is_refused() {
         &contribution(1),
         &mut filler(1),
     )
-    .unwrap();
+    .unwrap()
+    .blob;
     assert_eq!(
         devs[0].add_reveal(1, &blob).unwrap_err(),
         CeremonyError::Corrupted(1)
@@ -170,7 +171,8 @@ fn a_validly_sealed_wrong_contribution_aborts() {
         &bad,
         &mut filler(1),
     )
-    .unwrap();
+    .unwrap()
+    .blob;
     assert_eq!(
         devs[0].add_reveal(1, &blob).unwrap_err(),
         CeremonyError::CommitMismatch(1)
@@ -334,4 +336,71 @@ fn extra_source_is_xored_into_own_contribution_before_commit() {
     let plain = Ceremony::new(params(), 0, mixed, seed(0)).unwrap();
     assert_eq!(d.my_commitment(), plain.my_commitment());
     assert_eq!(d.my_public_key(), plain.my_public_key());
+}
+
+#[test]
+fn every_pair_shares_a_key_nobody_else_has() {
+    use cahoots_core::pairwise::words;
+    let mut devs: Vec<Ceremony> = (0..3).map(new).collect();
+    exchange_commitments(&mut devs);
+    let reveals = seal_all(&mut devs);
+    for d in devs.iter_mut() {
+        for (j, r) in reveals.iter().enumerate() {
+            d.add_reveal(j as u8, r).unwrap();
+        }
+    }
+    let results: Vec<_> = devs.into_iter().map(|d| d.finish().unwrap()).collect();
+    for r in &results {
+        assert_eq!(r.pair_keys.len(), 3);
+    }
+    let k = |i: usize, j: usize| results[i].pair_keys[j].as_ref().unwrap().clone();
+    assert!(results[0].pair_keys[0].is_none(), "no key with yourself");
+    assert_eq!(*k(0, 1), *k(1, 0), "0 and 1 agree");
+    assert_eq!(*k(0, 2), *k(2, 0), "0 and 2 agree");
+    assert_eq!(*k(1, 2), *k(2, 1), "1 and 2 agree");
+    assert_ne!(*k(0, 1), *k(0, 2), "different pairs, different keys");
+    assert_ne!(*k(0, 1), *k(1, 2));
+    // Words: each speaker has its own pair, and the counter changes them.
+    let a = words(&k(0, 1), 0, 7);
+    let b = words(&k(0, 1), 1, 7);
+    assert_ne!(a, b);
+    assert_eq!(
+        a,
+        words(&k(1, 0), 0, 7),
+        "both sides compute the same words"
+    );
+    assert_ne!(a, words(&k(0, 1), 0, 8));
+    assert_ne!(
+        a,
+        words(&k(0, 2), 0, 7),
+        "a third member gets different words"
+    );
+}
+
+#[test]
+fn late_path_still_yields_pair_keys() {
+    let mut devs: Vec<Ceremony> = (0..3).map(new).collect();
+    let c0 = (devs[0].my_commitment(), *devs[0].my_public_key());
+    for d in devs[1..].iter_mut() {
+        d.add_commitment(0, c0.0, &c0.1).unwrap();
+    }
+    exchange_commitments(&mut devs[1..]);
+    let r1 = devs[1].my_reveal(&mut filler(1)).unwrap().to_vec();
+    let r2 = devs[2].my_reveal(&mut filler(2)).unwrap().to_vec();
+    devs[0].add_reveal(1, &r1).unwrap();
+    devs[0].add_reveal(2, &r2).unwrap();
+    let r0 = devs[0].my_reveal(&mut filler(0)).unwrap().to_vec();
+    devs[1].add_reveal(0, &r0).unwrap();
+    devs[1].add_reveal(2, &r2).unwrap();
+    devs[2].add_reveal(0, &r0).unwrap();
+    devs[2].add_reveal(1, &r1).unwrap();
+    let results: Vec<_> = devs.into_iter().map(|d| d.finish().unwrap()).collect();
+    assert_eq!(
+        *results[0].pair_keys[1].as_ref().unwrap(),
+        *results[1].pair_keys[0].as_ref().unwrap()
+    );
+    assert_eq!(
+        *results[0].pair_keys[2].as_ref().unwrap(),
+        *results[2].pair_keys[0].as_ref().unwrap()
+    );
 }

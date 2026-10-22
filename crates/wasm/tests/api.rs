@@ -240,3 +240,77 @@ fn late_reveal_can_stand_in_for_its_commitment() {
         b.finish("CSPRNG").unwrap().words()
     );
 }
+
+#[test]
+fn hello_words_are_pairwise_and_move_with_the_counter() {
+    let l = 512;
+    let mut devs: Vec<WasmCeremony> = (0..3u8)
+        .map(|i| {
+            WasmCeremony::new(3, l, "hi", false, i, &contribution(i, 512), None, &seed(i)).unwrap()
+        })
+        .collect();
+    let commits: Vec<_> = devs.iter().map(|d| d.commitment()).collect();
+    for (i, d) in devs.iter_mut().enumerate() {
+        for (j, c) in commits.iter().enumerate() {
+            if i != j {
+                d.add_commitment(j as u8, c).unwrap();
+            }
+        }
+    }
+    let reveals: Vec<_> = devs
+        .iter_mut()
+        .enumerate()
+        .map(|(i, d)| d.reveal(&rand(d, i as u8)).unwrap().unwrap())
+        .collect();
+    for (i, d) in devs.iter_mut().enumerate() {
+        for (j, r) in reveals.iter().enumerate() {
+            if i != j {
+                d.add_reveal(j as u8, r).unwrap();
+            }
+        }
+    }
+    let mut circles: Vec<Circle> = devs
+        .into_iter()
+        .map(|d| d.finish("CSPRNG").unwrap().into_circle())
+        .collect();
+    assert!(!circles[0].has_pair_key(0), "no key with yourself");
+    assert!(circles[0].has_pair_key(1));
+    assert!(circles[0].has_pair_key(2));
+    let a = circles[0].hello_words(1).unwrap();
+    let b = circles[1].hello_words(0).unwrap();
+    assert_eq!(a.counter(), 0);
+    assert_eq!(a.mine(), b.theirs(), "what 0 says is what 1 expects");
+    assert_eq!(a.theirs(), b.mine());
+    assert_ne!(a.mine(), a.theirs());
+    assert_eq!(a.mine().split(' ').count(), 2);
+    let c = circles[2].hello_words(0).unwrap();
+    assert_ne!(
+        c.theirs(),
+        a.mine(),
+        "a third member expects different words from 0"
+    );
+    // Next on both sides: same new words, different from before.
+    let a2 = circles[0].next_hello(1).unwrap();
+    let b2 = circles[1].next_hello(0).unwrap();
+    assert_eq!(a2.counter(), 1);
+    assert_eq!(circles[0].pair_counter(1), 1);
+    assert_eq!(a2.mine(), b2.theirs());
+    assert_ne!(a2.mine(), a.mine());
+    // Out of step: set the number by hand and they agree again.
+    circles[1].set_pair_counter(0, 5);
+    circles[0].set_pair_counter(1, 5);
+    assert_eq!(
+        circles[0].hello_words(1).unwrap().mine(),
+        circles[1].hello_words(0).unwrap().theirs()
+    );
+    // Keys and counters survive export/import.
+    let restored = Circle::import(&circles[0].export()).unwrap();
+    assert_eq!(restored.pair_counter(1), 5);
+    assert_eq!(
+        restored.hello_words(1).unwrap().mine(),
+        circles[0].hello_words(1).unwrap().mine()
+    );
+    assert!(!restored.has_pair_key(0));
+    assert_eq!(circles[0].hello_words(0).unwrap_err(), "no-pair-key");
+    assert_eq!(circles[0].hello_words(9).unwrap_err(), "no-pair-key");
+}

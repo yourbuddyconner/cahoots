@@ -42,6 +42,12 @@ The service worker fetches from the network first and falls back to its cache, s
 
 Messages are base64url text shown as a QR and as copyable text. Reads take a scan or a paste. Reuse and tag failures show distinct refusals.
 
+## Hello words
+
+**Hello words** on a cahoot's screen is for a phone or video call. Pick the person (the only other member is picked for you in a two-person cahoot). The screen shows two words you say and two words they say back, with a hello number. Both devices show the same four words for the same number. Tap **Next hello** on both devices to move on, which you do whenever a call feels wrong: the person who cannot say the new words is not the person from the ceremony. The menu lets you name the person on this device, which the chat then uses instead of a seat number, and set the hello number by hand if the two of you drift apart.
+
+The words come from the pair keys made during the sealed reveal step, so a cahoot made before that step has none and the screen says so. The hello number is saved with the cahoot. Nothing about hello words touches the pad or the network.
+
 ## Chat (pad-seeded, over a relay)
 
 **Chat** on a cahoot's screen opens the chat for that circle. The header reads "End-to-end encrypted, pad-hedged": the pad seeds the keys and ChaCha20-Poly1305 encrypts, per `docs/chat.md`. The relay sees ciphertext and traffic shape only.

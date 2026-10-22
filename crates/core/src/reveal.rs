@@ -111,7 +111,7 @@ pub fn seal(
     recipients: &[(u8, &[u8])],
     contribution: &[u8],
     fill: &mut dyn FnMut(&mut [u8]),
-) -> Result<Vec<u8>, RevealError> {
+) -> Result<Sealed, RevealError> {
     if pk_from.len() != PUBLIC_KEY_LEN || recipients.len() > 255 {
         return Err(RevealError::Malformed);
     }
@@ -121,6 +121,7 @@ pub fn seal(
         .collect::<Result<Vec<_>, _>>()?;
     let mut content_key = Zeroizing::new([0u8; CONTENT_KEY_LEN]);
     fill(content_key.as_mut());
+    let mut secrets = Vec::with_capacity(recipients.len());
 
     let mut out = Vec::with_capacity(
         HEADER_LEN + ENTRY_LEN * recipients.len() + contribution.len() + TAG_LEN,
@@ -135,6 +136,9 @@ pub fn seal(
         let randomness: Array<u8, hybrid_array::sizes::U64> = (*eseed).into();
         let (ct, shared) = ek.encapsulate_deterministic(&randomness);
         let wk = wrap_key(params, from, *to, &shared);
+        let mut s = Zeroizing::new([0u8; 32]);
+        s.copy_from_slice(&shared);
+        secrets.push((*to, s));
         let cipher = ChaCha20Poly1305::new(Key::from_slice(wk.as_ref()));
         let wrap = cipher
             .encrypt(
@@ -160,7 +164,14 @@ pub fn seal(
         )
         .expect("encryption cannot fail");
     out.extend_from_slice(&body);
-    Ok(out)
+    Ok(Sealed { blob: out, secrets })
+}
+
+/// A sealed reveal and the shared secret established with each recipient.
+#[derive(Debug)]
+pub struct Sealed {
+    pub blob: Vec<u8>,
+    pub secrets: Vec<(u8, Zeroizing<[u8; 32]>)>,
 }
 
 /// Who sealed this blob, read without decrypting anything.
@@ -173,6 +184,8 @@ pub struct Opened {
     pub from: u8,
     pub public_key: [u8; PUBLIC_KEY_LEN],
     pub contribution: Zeroizing<Vec<u8>>,
+    /// The X-Wing shared secret the sender encapsulated to us. Input to the pair key.
+    pub shared: Zeroizing<[u8; 32]>,
 }
 
 /// Open a sealed reveal as member `me` with decapsulation key `dk`.
@@ -201,6 +214,8 @@ pub fn open(
         Ciphertext::try_from(&mine[1..1 + CIPHERTEXT_LEN]).map_err(|_| RevealError::Malformed)?;
     let shared = dk.decapsulate(&ct);
     let wk = wrap_key(params, from, me, &shared);
+    let mut shared_out = Zeroizing::new([0u8; 32]);
+    shared_out.copy_from_slice(&shared);
     let cipher = ChaCha20Poly1305::new(Key::from_slice(wk.as_ref()));
     let content_key = Zeroizing::new(
         cipher
@@ -232,5 +247,6 @@ pub fn open(
         from,
         public_key,
         contribution,
+        shared: shared_out,
     })
 }

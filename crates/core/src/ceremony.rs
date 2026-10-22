@@ -9,6 +9,7 @@ use crate::checkwords::check_words;
 use crate::circle_id::{circle_id, CircleId};
 use crate::combine::combine_into;
 use crate::commit::{commit, verify_commit, Commitment};
+use crate::pairwise::pair_key;
 use crate::params::CircleParams;
 use crate::reveal::{self, RevealError, KEM_SEED_LEN, PUBLIC_KEY_LEN};
 use alloc::vec;
@@ -50,6 +51,9 @@ pub struct CeremonyResult {
     pub pad: Zeroizing<Vec<u8>>,
     pub check_words: [&'static str; 6],
     pub circle_id: CircleId,
+    /// One key per other member, derived from the two X-Wing secrets exchanged with it.
+    /// `None` for our own index. See `crate::pairwise`.
+    pub pair_keys: Vec<Option<Zeroizing<[u8; 32]>>>,
 }
 
 #[derive(Debug)]
@@ -68,6 +72,9 @@ pub struct Ceremony {
     /// their commitment). Applied when the reveal phase opens.
     pending: Vec<(u8, Zeroizing<Vec<u8>>)>,
     sealed: Option<Vec<u8>>,
+    /// Shared secrets: what we encapsulated to each member, and what each encapsulated to us.
+    sent: Vec<Option<Zeroizing<[u8; 32]>>>,
+    received: Vec<Option<Zeroizing<[u8; 32]>>>,
     phase: Phase,
 }
 
@@ -108,6 +115,8 @@ impl Ceremony {
             revealed,
             pending: Vec::new(),
             sealed: None,
+            sent: vec![None; n],
+            received: vec![None; n],
             phase: Phase::Commit,
         })
     }
@@ -168,7 +177,7 @@ impl Ceremony {
                     )
                 })
                 .collect();
-            let blob = reveal::seal(
+            let sealed = reveal::seal(
                 &self.params,
                 self.index,
                 &self.pk,
@@ -177,7 +186,10 @@ impl Ceremony {
                 fill,
             )
             .expect("own key and held keys are valid");
-            self.sealed = Some(blob);
+            for (to, s) in sealed.secrets {
+                self.sent[usize::from(to)] = Some(s);
+            }
+            self.sealed = Some(sealed.blob);
         }
         self.sealed.as_deref()
     }
@@ -266,6 +278,8 @@ impl Ceremony {
         self.pad.fill(0);
         self.pending.clear();
         self.sealed = None;
+        self.sent.iter_mut().for_each(|s| *s = None);
+        self.received.iter_mut().for_each(|s| *s = None);
     }
 
     /// Open a sealed reveal from `from` and fold it in.
@@ -294,6 +308,7 @@ impl Ceremony {
             }
         };
         let i = usize::from(from);
+        self.received[i] = Some(opened.shared.clone());
         match self.commitments[i] {
             Some(expected) => {
                 let pk = self.public_keys[i].expect("key stored with commitment");
@@ -325,11 +340,28 @@ impl Ceremony {
         }
         let words = check_words(&self.params, &self.pad);
         let id = circle_id(&self.pad);
+        let pair_keys = (0..self.params.n)
+            .map(|j| {
+                if j == self.index {
+                    return None;
+                }
+                let to_j = self.sent[usize::from(j)].as_ref()?;
+                let to_me = self.received[usize::from(j)].as_ref()?;
+                Some(pair_key(
+                    &self.params,
+                    self.index,
+                    j,
+                    to_j.as_ref(),
+                    to_me.as_ref(),
+                ))
+            })
+            .collect();
         Ok(CeremonyResult {
             check_words: words,
             circle_id: id,
             pad: self.pad,
             params: self.params,
+            pair_keys,
         })
         // `self.contribution` and `self.dk` are wiped on drop here.
     }

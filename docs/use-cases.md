@@ -14,6 +14,10 @@ The two modes share a pad, a ledger, and a circle ID. A circle can use both.
 
 ## 2. Concrete uses
 
+### 2.0 Calls where you know who is talking
+
+A cloned voice on the phone asking for money, a password, or a wire is now a cheap attack. The circle gives every pair of members a key only they hold, and the app turns it into **hello words**: two words you say, two words they say back, different for every hello and different for every pair. A clone of their voice cannot produce the words, and a recording of a past call does not help, because each hello is used once. If someone on the line is acting strangely, both of you tap Next; the person who cannot say the new words is not the person you made the circle with.
+
 ### 2.1 Group chat that cannot be broken later
 
 The meetup demo. Members post encrypted messages to the public feed (the Numbers Station). Anyone who records the feed today and waits for a bigger computer, even a quantum one, still gets nothing. This is the only use where that guarantee holds end to end.
@@ -168,7 +172,7 @@ A node that lives in the cloud, such as a gateway, can still take part: it holds
 
 These follow from having shared random bytes and a record of which ones were used. Each is cheap because the pad does the work.
 
-1. **Spoken challenge words.** Spend 4 bytes, map them to two BIP-39 words, and both sides say them at the start of a call. No voice clone can produce them. One `words` command in the client.
+1. **Hello words** (built, 2026-10-21). Every pair of members leaves the ceremony with a key only those two hold, so the app can show two words for you to say and two for the other person to say back. A voice clone cannot produce them. If a call feels wrong, both people tap Next and the words change; whoever cannot say the new ones does not hold the key. This is the one feature that names an individual rather than the circle, and it is as strong as X-Wing rather than unconditional. See protocol §3.3 and the [app notes](../web/README.md#hello-words).
 2. **Sender-anonymous messages.** The tag proves some member wrote a message, not which. Reserve a shared anonymous region where members spend at random offsets and treat a collision there as a retry, and the circle has anonymous votes with information-theoretic strength. This is a protocol version 2 change, because it alters the reuse rule for one region.
 3. **Perfect deniability after erasure.** For any ciphertext and tag there is a pad that decrypts it to any plaintext of the same length, including a Poly1305 key that reproduces the tag. Once the real bytes are erased, no transcript proves what was said. This holds only for human-only circles. The threat model should say so, and a "forge a transcript" tool makes it believable.
 4. **Proof of life and a dead man's switch.** A daily counter sealed with the pad proves the sender is still there and still free. Hold recovery shares in an enclave with a policy that releases them when the daily messages stop, and it becomes a continuity plan with a verifiable trigger.

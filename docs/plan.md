@@ -89,7 +89,7 @@ Goal: small programs, such as a vote, that every member runs over the same order
 
 | Milestone | What it delivers | Done when | Status |
 |---|---|---|---|
-| A1 Property demos | Four small demonstrations: spoken challenge words for calls, a fair random draw, SSH key setup from a group, and a tool that forges a plausible transcript to show that erased messages cannot be proven | Each has a test and a one-paragraph description of what it does and does not guarantee | after M2 and N2 |
+| A1 Property demos | Four small demonstrations: hello words for calls, a fair random draw, SSH key setup from a group, and a tool that forges a plausible transcript to show that erased messages cannot be proven | Each has a test and a one-paragraph description of what it does and does not guarantee | **hello words done** (2026-10-21): pair keys from the sealed reveals, two words each way per hello number, Next on both devices to move on; in the app with vectors and an e2e test. The other three after M2 and N2 |
 | A2 App distribution | A group agrees on an app the same way it agrees on the pad: by posting the app's hash. Clients refuse apps the group has not posted | A posted hash enables an app on every member's client. An unposted one is refused | after N2 |
 | A3 Runtime | A sandbox in the browser app that runs these programs with a daily send budget, fixed message sizes, and a visibly separate frame | A vote app runs in three clients and agrees on the tally | after A2 |
 | A4 Protocol v2 | Two protocol changes apps need: messages that hide who sent them, and messages that hide which group they belong to | Test vectors published. Version 1 and version 2 messages coexist | after A3 |

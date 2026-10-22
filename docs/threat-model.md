@@ -7,12 +7,13 @@
 - **A compromised enclave** exposes only the circles that gave a hosted software member a seat.
 - **A malicious member** can't bias the pad during the ceremony, because of commit-then-reveal.
 - **A replayed message** is detected by the spent-range ledger and flagged as possible reuse.
+- **A voice clone, or anyone who overheard a call,** cannot produce the hello words for a pair, and cannot answer with the other side's words. Moving the hello number on makes every overheard pair useless. A stolen, unlocked device still shows the words: that is the device compromise below, not something the words defend against.
 - **Someone within antenna or camera range during the ceremony** sees commitments and public keys, which are public, and sealed reveals, which they would have to break X-Wing (X25519 and ML-KEM-768) to open, once per member. They do not get the pad. Someone spliced into the cable who substitutes keys is caught by the commitment check and the ceremony aborts.
 
 ## Not covered
 
 - Members can read everything in their circle. That is the design.
-- The circle tag proves some member wrote a message, not which member. Proving a specific sender needs pairwise pads, which are out of scope for v1.
+- The circle tag proves some member wrote a message, not which member. Proving a specific sender needs pairwise pads, which are out of scope for v1. Hello words are the exception: they use the pair keys from the sealed reveals, so they do name an individual, with X-Wing strength rather than the pad's.
 - A stolen or compromised device exposes that device's pad. A device PIN and a lockout are future work.
 - Erasure on phone storage is best effort.
 - Coercion of members.

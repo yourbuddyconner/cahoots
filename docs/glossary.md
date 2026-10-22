@@ -18,6 +18,10 @@ The words these documents use, in plain terms. Where a term has a precise defini
 
 **Check words.** Six English words that every device shows after the ceremony. They are derived from the pad. If everyone sees the same six words, everyone holds the same pad.
 
+**Hello words.** Two words you say and two words another member says back, on a call, to know it is really them. They come from a key that only the two of you hold, made during the ceremony, and they change every time either of you taps Next.
+
+**Pair key.** A key that exactly two members of a circle hold, made from the keys they exchanged during the ceremony. It is what hello words come from. Unlike the pad, it depends on the math of X-Wing.
+
 **Circle ID.** A short public label for a group, derived from the pad. It identifies a group on the feed without revealing anything about the pad.
 
 **Slice, part.** The region of the pad that one member sends from. Everyone holds the whole pad. Giving each member their own region means two people never use the same bytes.

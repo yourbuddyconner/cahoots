@@ -42,7 +42,7 @@ Every Rust crate lives under `crates/`. The PWA lives under `web/app`.
 | `crates/meshtastic` | `cahoots-meshtastic` | Meshtastic channel keys from the pad, over the feed or by paste; prints the channel URL and CLI command. `cahoots-mesh`. | done (N4, Meshtastic part) |
 | `crates/yk` | `cahoots-yk` | YubiKey OpenPGP `GET CHALLENGE` entropy source and CLI. | done (M2), throughput not yet measured |
 | `crates/wasm` | `cahoots-wasm` | Browser bindings: ceremony, circle, fountain-coded animated QR, QR rendering. | done (M2) |
-| `web/app` | | Offline PWA phone and laptop client. | done (M2), camera scanning untested |
+| `web/app` | | Offline PWA phone and laptop client, including hello words for calls. | done (M2), camera scanning untested |
 | `crates/hal` | `cahoots-hal` | HAL traits, ring ceremony driver, SP 800-90B health tests, persistent ledger. `no_std`. | done (M4a) |
 | `crates/host` | `cahoots-host` | Desktop simulator: socket Link, file PadStore, PNG Display. Four processes run a ring ceremony. | done (M4a) |
 | `crates/esp32s3` | | `esp-hal` + Embassy firmware, a third hardware family. The first two are the Pico (tinkering) and the Baochip Dabao (native); see `docs/diy-badge.md`. | placeholder |

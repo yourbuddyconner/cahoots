@@ -90,6 +90,7 @@ const saveChat = (m) => tx('chat', 'readwrite', (s) => s.add(m));
 const loadChat = (id) => tx('chat', 'readonly', (s) => s.index('circle').getAll(id));
 const loadSettings = async (id) => (await tx('settings', 'readonly', (s) => s.get(id))) || { id, relay: DEFAULT_RELAY };
 const saveSettings = (row) => tx('settings', 'readwrite', (s) => s.put(row));
+const nameOf = (settings, seat) => settings.names?.[seat] || `Seat ${seat + 1}`;
 
 const live = new Map(); // circle id -> Circle (WASM object)
 async function openCircle(id) {
@@ -610,6 +611,7 @@ async function screenCircle(id) {
           h('a', { class: 'row-item', href: `#/c/${id}/send` }, h('div', {}, h('b', {}, 'Send a message'), h('span', {}, 'short · unbreakable · shown as a code to scan or paste')), h('span', { class: 'arrow' }, '›')),
           h('a', { class: 'row-item', href: `#/c/${id}/read` }, h('div', {}, h('b', {}, 'Read a message'), h('span', {}, 'scan a code or paste one')), h('span', { class: 'arrow' }, '›')),
           h('a', { class: 'row-item', href: `#/chat/${id}` }, h('div', {}, h('b', {}, 'Chat'), h('span', {}, 'over a relay you run · end-to-end encrypted')), h('span', { class: 'arrow' }, '›')),
+          h('a', { class: 'row-item', href: `#/c/${id}/hello` }, h('div', {}, h('b', {}, 'Hello words'), h('span', {}, 'on a call, know it is really them · two words each')), h('span', { class: 'arrow' }, '›')),
           h('a', { class: 'row-item', href: `#/c/${id}/history` }, h('div', {}, h('b', {}, 'History'), h('span', {}, 'messages on this device')), h('span', { class: 'arrow' }, '›')))),
     ],
   });
@@ -698,6 +700,76 @@ async function screenHistory(id) {
   });
 }
 
+// ---------------------------------------------------------------- hello words: pairwise, spoken, moved on demand
+async function screenHello(id, peerStr) {
+  const circle = await openCircle(id);
+  if (!circle) return go('#/');
+  const me = circle.my_slice();
+  const settings = await loadSettings(id);
+  const others = [...Array(circle.members()).keys()].filter((s) => s !== me);
+  const tooOld = () => screen({
+    title: 'Hello words', sub: circle.name(), back: `#/c/${id}`,
+    body: [h('div', { class: 'empty' }, h('h1', {}, 'This cahoot is from before hello words.'), h('p', { class: 'lead' }, 'The words come from keys made during the ceremony. Run a new ceremony and they will be there.'))],
+    actions: [btn('Back', () => go(`#/c/${id}`), 'primary')],
+  });
+  if (!others.some((s) => circle.has_pair_key(s))) return tooOld();
+  if (peerStr === undefined && others.length === 1) peerStr = String(others[0]);
+  if (peerStr === undefined) {
+    screen({
+      title: 'Hello words', sub: circle.name(), back: `#/c/${id}`,
+      body: [
+        next('Who are you talking to?'),
+        h('div', { class: 'rows' }, ...others.map((s) => h('a', { class: 'row-item', href: `#/c/${id}/hello/${s}` },
+          h('div', {}, h('b', {}, nameOf(settings, s)), h('span', {}, circle.has_pair_key(s) ? `hello #${circle.pair_counter(s) + 1}` : 'no key with this seat')),
+          h('span', { class: 'arrow' }, '›')))),
+      ],
+    });
+    return;
+  }
+  const peer = Number(peerStr);
+  if (!circle.has_pair_key(peer)) return tooOld();
+  const who = () => nameOf(settings, peer);
+  const render = () => {
+    const w = circle.hello_words(peer);
+    const n = w.counter() + 1;
+    screen({
+      title: 'Hello words', sub: `with ${who()} · #${n}`, back: others.length === 1 ? `#/c/${id}` : `#/c/${id}/hello`,
+      menu: () => sheet((close) => {
+        const nameIn = input({ type: 'text', value: settings.names?.[peer] || '', placeholder: `Seat ${peer + 1}`, maxlength: '24', autocomplete: 'off' });
+        const numIn = input({ type: 'number', value: String(n), min: '1', max: '4294967295', inputmode: 'numeric' });
+        return h('div', { class: 'stack' },
+          h('h2', {}, 'How hello words work'),
+          h('p', { class: 'muted' }, `Only your two devices can make these words: they come from a key that you and ${who()} made together during the ceremony. A voice clone cannot say them. Each hello number has its own words, and every word is said once.`),
+          h('p', { class: 'muted' }, 'If you are on different numbers, set the same one here on both devices.'),
+          field('Their name on this device', nameIn),
+          field('Hello number', numIn),
+          btn('Save', async () => {
+            const names = { ...(settings.names || {}) };
+            if (nameIn.value.trim()) names[peer] = nameIn.value.trim(); else delete names[peer];
+            settings.names = names;
+            await saveSettings({ ...settings, id });
+            const num = Math.max(1, Math.floor(Number(numIn.value) || 1));
+            if (num !== n) { circle.set_pair_counter(peer, num - 1); await saveCircle(circle); }
+            close(); render();
+          }, 'primary'));
+      }),
+      body: [
+        next(`Say yours. If ${who()} answers with theirs, it is really them.`),
+        h('div', { class: 'panel' },
+          h('div', { class: 'cap' }, h('span', {}, `${circle.name()} · hello #${n}`), h('span', {}, `seat ${me + 1} ↔ seat ${peer + 1}`)),
+          h('div', { class: 'hello' },
+            h('div', { class: 'who' }, 'You say'), h('div', { class: 'pair' }, w.mine()),
+            h('div', { class: 'who' }, `${who()} says back`), h('div', { class: 'pair' }, w.theirs()))),
+        h('p', { class: 'muted center' }, 'Something feel off? Both of you tap Next hello. If they cannot say the new words, that is not them.'),
+      ],
+      actions: [
+        btn('Next hello', async () => { circle.next_hello(peer); await saveCircle(circle); buzz(); toast(`Now on hello #${circle.pair_counter(peer) + 1}. Make sure ${who()} moves too.`); render(); }, 'primary'),
+      ],
+    });
+  };
+  render();
+}
+
 // ---------------------------------------------------------------- chat (pad-seeded, over the Numbers Station)
 let chatRun = 0; // bumps on every render; a stale poll loop sees a different value and stops
 window.addEventListener('hashchange', () => { chatRun++; });
@@ -715,7 +787,7 @@ async function screenChat(id) {
   const epoch = () => { const e = circle.current_epoch(); return e ? `epoch ${e}` : 'no epoch yet'; };
   const bubble = (m) => m.dir === 'rejected'
     ? h('div', { class: 'bubble rejected' }, `rejected · ${friendly(m.reason)} · seq ${m.seq}`)
-    : h('div', { class: `bubble ${m.dir}` }, h('div', { class: 'meta' }, `${m.dir === 'out' ? 'you' : `seat ${m.sender + 1}`} · ${new Date(m.ts).toLocaleTimeString()}`), h('div', {}, m.text));
+    : h('div', { class: `bubble ${m.dir}` }, h('div', { class: 'meta' }, `${m.dir === 'out' ? 'you' : nameOf(settings, m.sender)} · ${new Date(m.ts).toLocaleTimeString()}`), h('div', {}, m.text));
   const append = (m) => { list.append(bubble(m)); list.scrollTop = list.scrollHeight; };
   const history = await loadChat(id);
   for (const m of history) append(m);
@@ -825,6 +897,7 @@ async function route() {
       if (parts[2] === 'send') await screenSend(parts[1]);
       else if (parts[2] === 'read') await screenRead(parts[1]);
       else if (parts[2] === 'history') await screenHistory(parts[1]);
+      else if (parts[2] === 'hello') await screenHello(parts[1], parts[3]);
       else await screenCircle(parts[1]);
     } else if (parts[0] === 'chat') await screenChat(parts[1]);
     else await screenHome();

@@ -14,6 +14,7 @@ pub mod frame;
 pub mod ledger;
 pub mod message;
 pub mod pad;
+pub mod pairwise;
 pub mod params;
 pub mod reveal;
 

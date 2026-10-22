@@ -82,6 +82,29 @@ On the ring, sealed reveals are forwarded unchanged: every hop is a member and c
 
 Implementation: `crates/core/src/reveal.rs`.
 
+### 3.3 Pair keys and hello words
+
+The sealed reveals leave every pair of members with two X-Wing shared secrets that nobody else can compute: the one `a` encapsulated to `b`, and the one `b` encapsulated to `a`. For members `lo < hi`:
+
+```
+pair_key(lo, hi) = HKDF-SHA256(salt = "cahoots/pair/v1",
+                               ikm  = ss(lo → hi) || ss(hi → lo),
+                               info = params || lo || hi)        32 bytes
+```
+
+Both members hold both secrets, so both derive the same key, and no third member can. Unlike the pad, this key is computational (as strong as X-Wing). Unlike the pad, it names an individual: something produced under `pair_key(a, b)` came from `a` or `b`, not from "some member". A device keeps `n - 1` pair keys next to the pad. A circle made before sealed reveals has none.
+
+Hello words are the spoken form. Each pair keeps a counter, and for each counter value each member has two words to say:
+
+```
+v = LE32(HKDF-SHA256(no salt, ikm = pair_key, info = "cahoots/words/v1" || speaker || LE32(counter))[0..4])
+words(speaker, counter) = WORDLIST[v & 0x7ff], WORDLIST[(v >> 11) & 0x7ff]
+```
+
+One member says their pair, the other answers with theirs. A listener who records one side's words cannot answer as the other side, and either side moving the counter on makes everything recorded so far useless. The counter is not sent anywhere; both members move it, and the apps show its number so they can resynchronise by saying it. The words are a function of the key, so there is nothing to rotate but the counter: a key only changes when the circle is made again.
+
+Implementation: `crates/core/src/pairwise.rs`. Vectors: `pair_keys` and `hello_words` in `ceremony.json`.
+
 ## 4. Messages
 
 Each message spends `32 + len` bytes from the sender's slice, starting at the sender's next unused offset `o`.

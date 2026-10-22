@@ -52,7 +52,8 @@ fn every_recipient_opens_and_nobody_else() {
         &contribution,
         &mut filler(1),
     )
-    .unwrap();
+    .unwrap()
+    .blob;
     let expected_len = 1 + 1 + PUBLIC_KEY_LEN + 1 + 3 * (1 + CIPHERTEXT_LEN + WRAP_LEN) + 256 + 16;
     assert_eq!(blob.len(), expected_len);
     assert_eq!(reveal::sender(&blob), Some(1));
@@ -87,7 +88,8 @@ fn any_flipped_byte_is_corrupted_not_a_different_contribution() {
         &contribution,
         &mut filler(2),
     )
-    .unwrap();
+    .unwrap()
+    .blob;
     let p = CircleParams::new(2, 256, "seal", false).unwrap();
     for pos in [
         3usize,

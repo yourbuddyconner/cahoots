@@ -11,6 +11,7 @@ use cahoots_core::frame;
 use cahoots_core::ledger::{MemLedger, SpentLedger};
 use cahoots_core::message::{self, MessageType};
 use cahoots_core::pad::{bucket_pad, MemPadStorage, Pad, PadError, PadStorage};
+use cahoots_core::pairwise;
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::{self, randomness_len};
 use serde_json::{json, Value};
@@ -69,7 +70,8 @@ fn ceremony_vectors() -> Value {
         }
         assert_eq!(d.phase(), Phase::Complete);
     }
-    let result = devs.pop().unwrap().finish().unwrap();
+    let results: Vec<_> = devs.into_iter().map(|d| d.finish().unwrap()).collect();
+    let result = &results[2];
     let mut expected = vec![0u8; 192];
     for c in &contributions {
         for (e, b) in expected.iter_mut().zip(c) {
@@ -91,7 +93,9 @@ fn ceremony_vectors() -> Value {
         buf.copy_from_slice(&rand[1][pos..pos + buf.len()]);
         pos += buf.len();
     };
-    let bad_reveal = reveal::seal(&params, 1, &commits[1].1, &recipients, &bad, &mut f).unwrap();
+    let bad_reveal = reveal::seal(&params, 1, &commits[1].1, &recipients, &bad, &mut f)
+        .unwrap()
+        .blob;
     let err = victim.add_reveal(1, &bad_reveal).unwrap_err();
     assert_eq!(err, CeremonyError::CommitMismatch(1));
     assert_eq!(victim.phase(), Phase::Aborted);
@@ -125,6 +129,17 @@ fn ceremony_vectors() -> Value {
         "pad": hex::encode(&*result.pad),
         "check_words": result.check_words,
         "circle_id": hex::encode(result.circle_id),
+        "pair_keys": {
+            "description": "pair_key(a, b) = HKDF-SHA256(salt \"cahoots/pair/v1\", ikm = ss(lo->hi) || ss(hi->lo), info = params || lo || hi), 32 bytes, where lo < hi are the two member indices and ss(x->y) is the X-Wing shared secret that x encapsulated to y in its sealed reveal (crates/core/src/pairwise.rs). keys[i][j] is member i's key with member j; null at j = i.",
+            "keys": results.iter().map(|r| r.pair_keys.iter().map(|k| k.as_ref().map(|k| hex::encode(k.as_ref()))).collect::<Vec<_>>()).collect::<Vec<_>>(),
+        },
+        "hello_words": {
+            "description": "words(pair_key, speaker, counter): v = LE32(HKDF-SHA256(no salt, ikm = pair_key, info = \"cahoots/words/v1\" || speaker || LE32(counter))[0..4]); the words are WORDLIST[v & 0x7ff] and WORDLIST[(v >> 11) & 0x7ff]. For the pair (0, 1).",
+            "at": (0..3u32).map(|c| {
+                let k = results[0].pair_keys[1].as_ref().unwrap();
+                json!({ "counter": c, "member_0_says": pairwise::words(k, 0, c), "member_1_says": pairwise::words(k, 1, c) })
+            }).collect::<Vec<_>>(),
+        },
         "mismatch_abort": {
             "description": "Member 0, holding all commitments, receives this reveal for member 1. It opens, but the contribution does not match the commitment. It MUST abort.",
             "member": 1,

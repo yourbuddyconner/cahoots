@@ -114,6 +114,29 @@ await L.page.click("text=They match"); await J.page.click("text=They match");
 await L.page.waitForSelector(".budget"); await J.page.waitForSelector(".budget");
 await L.snap("hub"); await J.snap("hub");
 
+// Hello words: what the leader says is what the joiner expects, both move together, and the number survives a reload.
+await L.page.click("text=Hello words"); await L.page.waitForSelector(".hello");
+await J.page.click("text=Hello words"); await J.page.waitForSelector(".hello");
+await L.snap("hello");
+const hello = (p) => p.$$eval(".hello .pair", (els) => els.map((e) => e.textContent.trim()));
+const [lMine, lTheirs] = await hello(L.page);
+const [jMine, jTheirs] = await hello(J.page);
+if (lMine !== jTheirs || lTheirs !== jMine) throw new Error(`hello words disagree: leader ${lMine}/${lTheirs}, joiner ${jMine}/${jTheirs}`);
+if (lMine === lTheirs || lMine.split(" ").length !== 2) throw new Error(`hello words look wrong: ${lMine}`);
+console.log("hello words:", lMine, "/", lTheirs);
+await L.page.click('button:text-is("Next hello")'); await J.page.click('button:text-is("Next hello")');
+await L.page.waitForSelector('.bar .title small:has-text("#2")'); await J.page.waitForSelector('.bar .title small:has-text("#2")');
+const [lMine2, lTheirs2] = await hello(L.page);
+const [jMine2, jTheirs2] = await hello(J.page);
+if (lMine2 !== jTheirs2 || lTheirs2 !== jMine2) throw new Error("hello words disagree after next");
+if (lMine2 === lMine) throw new Error("next hello did not change the words");
+await L.snap("hello-next");
+await J.page.reload(); await J.page.waitForSelector(".hello");
+const [jMine3] = await hello(J.page);
+if (jMine3 !== jMine2) throw new Error("hello number did not survive a reload");
+await L.page.click('button[aria-label="Back"]'); await L.page.waitForSelector(".budget");
+await J.page.click('button[aria-label="Back"]'); await J.page.waitForSelector(".budget");
+
 // Leader sends a one-time-pad message as text; joiner reads it.
 await L.page.click("text=Send a message");
 await L.snap("send");

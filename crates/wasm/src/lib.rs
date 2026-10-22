@@ -11,6 +11,7 @@ use cahoots_core::ceremony::{Ceremony, CeremonyError, Phase};
 use cahoots_core::ledger::{MemLedger, SpentLedger};
 use cahoots_core::message::{MessageError, MessageType};
 use cahoots_core::pad::{self, MemPadStorage, Pad, PadError, PadStorage};
+use cahoots_core::pairwise;
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::PUBLIC_KEY_LEN;
 use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
@@ -255,7 +256,7 @@ impl WasmCeremony {
         .map_err(pad_err)?;
         Ok(CeremonyOutput {
             words,
-            circle: Some(Circle::from_pad(pad, label)),
+            circle: Some(Circle::from_pad_with_pairs(pad, label, r.pair_keys)),
         })
     }
 }
@@ -324,7 +325,7 @@ fn pad_err(e: PadError) -> String {
 }
 
 /// State format: v1 is pad + ledger + label; v2 appends chat session state and the relay seq.
-const STATE_VERSION: u8 = 2;
+const STATE_VERSION: u8 = 3;
 
 fn chat_err(e: ChatError) -> String {
     match e {
@@ -354,6 +355,10 @@ pub struct Circle {
     chat: ChatSession<MemPadStorage, MemLedger>,
     label: Label,
     relay_seq: Option<u64>,
+    /// One X-Wing-derived key per other member, from the sealed reveals. See `cahoots_core::pairwise`.
+    pair_keys: Vec<Option<Zeroizing<[u8; 32]>>>,
+    /// Where the hello words with each member currently stand.
+    pair_counters: Vec<u32>,
 }
 
 /// A decrypted chat message.
@@ -386,11 +391,22 @@ impl ChatReceived {
 
 impl Circle {
     fn from_pad(pad: Pad<MemPadStorage, MemLedger>, label: Label) -> Circle {
+        let n = usize::from(pad.params().n);
+        Circle::from_pad_with_pairs(pad, label, vec![None; n])
+    }
+    fn from_pad_with_pairs(
+        pad: Pad<MemPadStorage, MemLedger>,
+        label: Label,
+        pair_keys: Vec<Option<Zeroizing<[u8; 32]>>>,
+    ) -> Circle {
         let me = pad.my_slice();
+        let n = pair_keys.len();
         Circle {
             chat: ChatSession::new(pad, me),
             label,
             relay_seq: None,
+            pair_keys,
+            pair_counters: vec![0; n],
         }
     }
     fn pad(&self) -> &Pad<MemPadStorage, MemLedger> {
@@ -402,6 +418,30 @@ impl Circle {
 }
 
 /// A decrypted message.
+/// The hello words with one member at one counter value.
+#[wasm_bindgen]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelloWords {
+    mine: String,
+    theirs: String,
+    counter: u32,
+}
+
+#[wasm_bindgen]
+impl HelloWords {
+    /// Two words you say, separated by a space.
+    pub fn mine(&self) -> String {
+        self.mine.clone()
+    }
+    /// Two words they say back.
+    pub fn theirs(&self) -> String {
+        self.theirs.clone()
+    }
+    pub fn counter(&self) -> u32 {
+        self.counter
+    }
+}
+
 #[wasm_bindgen]
 #[derive(Debug)]
 pub struct Received {
@@ -493,6 +533,50 @@ impl Circle {
     pub fn relay_seq(&self) -> Option<u64> {
         self.relay_seq
     }
+
+    /// Whether this circle holds a pair key with `peer` (false for yourself and for circles made
+    /// before sealed reveals).
+    pub fn has_pair_key(&self, peer: u8) -> bool {
+        self.pair_keys
+            .get(usize::from(peer))
+            .map(Option::is_some)
+            .unwrap_or(false)
+    }
+    pub fn pair_counter(&self, peer: u8) -> u32 {
+        self.pair_counters
+            .get(usize::from(peer))
+            .copied()
+            .unwrap_or(0)
+    }
+    pub fn set_pair_counter(&mut self, peer: u8, counter: u32) {
+        if let Some(c) = self.pair_counters.get_mut(usize::from(peer)) {
+            *c = counter;
+        }
+    }
+    /// The hello words with `peer` at the current counter: what you say, what they say back.
+    pub fn hello_words(&self, peer: u8) -> Result<HelloWords, String> {
+        let key = self
+            .pair_keys
+            .get(usize::from(peer))
+            .and_then(Option::as_ref)
+            .ok_or_else(|| "no-pair-key".to_string())?;
+        let counter = self.pair_counter(peer);
+        let me = self.pad().my_slice();
+        Ok(HelloWords {
+            mine: pairwise::words(key, me, counter).join(" "),
+            theirs: pairwise::words(key, peer, counter).join(" "),
+            counter,
+        })
+    }
+    /// Move to the next hello words with `peer`. Both sides do this.
+    pub fn next_hello(&mut self, peer: u8) -> Result<HelloWords, String> {
+        if !self.has_pair_key(peer) {
+            return Err("no-pair-key".into());
+        }
+        let next = self.pair_counter(peer).wrapping_add(1);
+        self.set_pair_counter(peer, next);
+        self.hello_words(peer)
+    }
     pub fn set_relay_seq(&mut self, seq: Option<u64>) {
         self.relay_seq = seq;
     }
@@ -558,6 +642,19 @@ impl Circle {
             }
             None => out.extend_from_slice(&[0; 9]),
         }
+        out.push(self.pair_keys.len() as u8);
+        for k in &self.pair_keys {
+            match k {
+                Some(k) => {
+                    out.push(1);
+                    out.extend_from_slice(k.as_ref());
+                }
+                None => out.extend_from_slice(&[0; 33]),
+            }
+        }
+        for c in &self.pair_counters {
+            out.extend_from_slice(&c.to_le_bytes());
+        }
         out
     }
 
@@ -565,7 +662,7 @@ impl Circle {
         let mut r = Reader(state);
         let err = |_: ()| "state".to_string();
         let version = r.u8().map_err(err)?;
-        if version != 1 && version != STATE_VERSION {
+        if !(1..=STATE_VERSION).contains(&version) {
             return Err("state-version".into());
         }
         let label = match r.u8().map_err(err)? {
@@ -578,6 +675,7 @@ impl Circle {
         circle_id.copy_from_slice(r.take(16).map_err(err)?);
         let plen = usize::from(r.u16().map_err(err)?);
         let params = CircleParams::decode(r.take(plen).map_err(err)?).map_err(params_err)?;
+        let params_n = params.n;
         let slices = r.u8().map_err(err)?;
         if slices != params.slices() {
             return Err("state".into());
@@ -619,6 +717,33 @@ impl Circle {
             1 => Some(r.u64().map_err(err)?),
             _ => return Err("state".into()),
         };
+        let n = usize::from(params_n);
+        let (pair_keys, pair_counters) = if version >= 3 {
+            if usize::from(r.u8().map_err(err)?) != n {
+                return Err("state".into());
+            }
+            let mut keys = Vec::with_capacity(n);
+            for _ in 0..n {
+                let present = r.u8().map_err(err)?;
+                let bytes = r.take(32).map_err(err)?;
+                keys.push(match present {
+                    0 => None,
+                    1 => {
+                        let mut k = Zeroizing::new([0u8; 32]);
+                        k.copy_from_slice(bytes);
+                        Some(k)
+                    }
+                    _ => return Err("state".into()),
+                });
+            }
+            let mut counters = Vec::with_capacity(n);
+            for _ in 0..n {
+                counters.push(r.u32().map_err(err)?);
+            }
+            (keys, counters)
+        } else {
+            (vec![None; n], vec![0; n])
+        };
         if !r.0.is_empty() {
             return Err("state".into());
         }
@@ -627,6 +752,8 @@ impl Circle {
             chat,
             label,
             relay_seq,
+            pair_keys,
+            pair_counters,
         })
     }
 }
