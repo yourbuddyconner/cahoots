@@ -110,6 +110,10 @@ pub enum Control {
     SliceTransfer { member: u8 },
 }
 
+/// `peer_b` of a `psk` message that keys every member at once, such as a Meshtastic channel.
+/// Every member accepts it and spends the same range of the issuer's slice.
+pub const EVERYONE: u8 = 255;
+
 pub const SUBTYPE_PEER: u8 = 0;
 pub const SUBTYPE_PSK: u8 = 1;
 pub const SUBTYPE_ROTATE: u8 = 2;

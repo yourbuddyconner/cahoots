@@ -430,6 +430,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cahoots-meshtastic"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "cahoots-core",
+ "cahoots-provider",
+ "cahoots-relay",
+ "cahoots-wireguard",
+ "clap",
+ "hex",
+ "serde_json",
+ "tempfile",
+ "zeroize",
+]
+
+[[package]]
 name = "cahoots-provider"
 version = "0.1.0"
 dependencies = [

@@ -319,7 +319,9 @@ fn run() -> Result<(), String> {
                         .into_iter()
                         .filter_map(|i| match i {
                             FeedItem::Psk(t)
-                                if t.to == me && !state.accepted.contains(&t.encode()) =>
+                                if t.purpose == cahoots_wireguard::PURPOSE
+                                    && t.to == me
+                                    && !state.accepted.contains(&t.encode()) =>
                             {
                                 Some(t)
                             }

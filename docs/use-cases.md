@@ -83,6 +83,14 @@ Both are fine when one operator runs every node. Call this the **fleet profile**
 
 ## 4. Bootstrapping physical mesh networks
 
+The shape of it, decided on 2026-10-21: **LoRa carries the control plane, a faster radio carries the data plane.** The messages that set a network up, `peer` and `psk`, are about a hundred bytes each, which is one LoRa packet. So a node with only a LoRa radio can receive its peers and its keys over the air from kilometres away, bring up its Wi-Fi mesh or WireGuard interface already keyed, and from then on the real traffic rides the fast link. The pad-encrypted feed over LoRa is what makes the first contact possible with no uplink at all, and none of the stacks below can do that for themselves.
+
+| Over LoRa | What it gives you | What Cahoots fills | Status |
+|---|---|---|---|
+| Meshtastic | Flood-routed text, positions, telemetry, on cheap boards | The channel key, with rotation (`cahoots-mesh`) | built |
+| Reticulum | Addresses, routing, encrypted links, file transfer: the closest thing to a network at LoRa speeds | The interface access key that gates who can join, and the link keys | next |
+| An IP mesh on a faster radio (802.11s, Wi-Fi HaLow) with WireGuard pairs | Real IP: SSH, HTTP, a LAN | Exactly the WireGuard bootstrap in section 3, with the announcements and keys arriving over LoRa | after the LoRa link exists |
+
 ### 4.1 Why mesh networks are the right target
 
 Mesh networks have the bootstrap problem in its purest form. There is no internet to fetch a certificate from. Nodes join and leave. Links are slow, lossy, and sometimes one-way. Deployments happen in the field, by people with a bag of hardware. And the communities that build them, off-grid radio, disaster response, neighbourhood networks, already meet in person.

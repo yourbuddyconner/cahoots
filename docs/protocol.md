@@ -134,7 +134,7 @@ A `control` message (type `3`) bootstraps a network. Its plaintext is one subtyp
 | `2` | `rotate` | `purpose (u8) \| peer_a (u8) \| peer_b (u8) \| not_after (u64 Unix seconds)` |
 | `3` | `slice-transfer` | `member (u8)`. The member's slice now lives on a node, not a badge. |
 
-A pre-shared key named by a `psk` message is the 32 bytes at `offset` of the issuer's slice, derived with the context `purpose || peer_a || peer_b`, so a key issued for WireGuard between A and B cannot be reused for another purpose or another pair. The acceptor marks that range spent in its own ledger; a second `psk` message for the same range is refused as reuse.
+A pre-shared key named by a `psk` message is the 32 bytes at `offset` of the issuer's slice, derived with the context `purpose || peer_a || peer_b`, so a key issued for WireGuard between A and B cannot be reused for another purpose or another pair. The acceptor marks that range spent in its own ledger; a second `psk` message for the same range is refused as reuse. `peer_b = 255` means every member: a group key, such as a Meshtastic channel key, which every member accepts from the same message.
 
 Control messages are ordinary messages: posted anywhere, including the Numbers Station, and readable or forgeable only by members. The feed is a channel, not a party.
 

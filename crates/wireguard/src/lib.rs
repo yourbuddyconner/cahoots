@@ -138,10 +138,20 @@ pub fn issue(
     circle: &CircleId,
     to: u8,
 ) -> Result<Issued, WgError> {
-    let (handle, psk) = provider.psk(circle, &PURPOSE.context(0, 0))?;
+    issue_for(provider, circle, PURPOSE, to)
+}
+
+/// `issue` for any purpose. `to` may be [`cahoots_core::control::EVERYONE`] for a group key.
+pub fn issue_for(
+    provider: &mut impl PadProvider,
+    circle: &CircleId,
+    purpose: Purpose,
+    to: u8,
+) -> Result<Issued, WgError> {
+    let (handle, psk) = provider.psk(circle, &purpose.context(0, 0))?;
     let token = PskToken {
         handle,
-        purpose: PURPOSE,
+        purpose,
         to,
     };
     Ok(Issued {
@@ -301,10 +311,34 @@ pub fn issue_on_feed<S: PadStorage, L: SpentLedger>(
     pad: &mut Pad<S, L>,
     to: u8,
 ) -> Result<(Issued, Vec<u8>), WgError> {
+    issue_on_feed_for(pad, PURPOSE, to)
+}
+
+/// The raw 32-byte key for a token, for adapters that do not want base64.
+pub fn accept_bytes(
+    provider: &mut impl PadProvider,
+    token: &PskToken,
+) -> Result<Zeroizing<[u8; 32]>, WgError> {
+    let psk = provider.psk_for(&token.handle, &token.context())?;
+    Ok(Zeroizing::new(derive_session_key(
+        &psk,
+        &token.handle,
+        &token.context(),
+        b"",
+        b"",
+    )))
+}
+
+/// `issue_on_feed` for any purpose.
+pub fn issue_on_feed_for<S: PadStorage, L: SpentLedger>(
+    pad: &mut Pad<S, L>,
+    purpose: Purpose,
+    to: u8,
+) -> Result<(Issued, Vec<u8>), WgError> {
     let circle = pad.circle_id();
-    let issued = issue(pad, &circle, to)?;
+    let issued = issue_for(pad, &circle, purpose, to)?;
     let body = Control::Psk {
-        purpose: PURPOSE,
+        purpose,
         peer_a: issued.token.from_seat(),
         peer_b: to,
         offset: issued.token.handle.offset,
