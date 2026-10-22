@@ -30,6 +30,8 @@ fn cli_issue_then_accept_yields_same_psk() {
             "issue",
             "--circle",
             &hex::encode(cid),
+            "--to",
+            "2",
             "--raw",
         ])
         .output()
@@ -43,7 +45,7 @@ fn cli_issue_then_accept_yields_same_psk() {
     let stderr = String::from_utf8(out.stderr).unwrap();
     let token = stderr
         .trim()
-        .strip_prefix("handle for peer: ")
+        .strip_prefix("handle for seat 2: ")
         .unwrap()
         .to_string();
     let out = Command::new(bin)
@@ -51,6 +53,8 @@ fn cli_issue_then_accept_yields_same_psk() {
             "--dir",
             dir_b.path().to_str().unwrap(),
             "accept",
+            "--circle",
+            &hex::encode(cid),
             "--handle",
             &token,
             "--peer",
@@ -77,6 +81,8 @@ fn cli_issue_then_accept_yields_same_psk() {
             "--dir",
             dir_b.path().to_str().unwrap(),
             "accept",
+            "--circle",
+            &hex::encode(cid),
             "--handle",
             &token,
             "--raw",
@@ -84,7 +90,7 @@ fn cli_issue_then_accept_yields_same_psk() {
         .output()
         .unwrap();
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("AlreadySpent"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("already spent"));
 }
 
 /// Interop with the real `wg` tool. Needs `wireguard-tools` installed; skipped otherwise.

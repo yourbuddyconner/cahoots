@@ -50,11 +50,15 @@ A circle removes the channel. Members touch devices once. From then on each of t
 
 ### 3.2 How it works
 
+This is built: `cahoots-wg announce`, `peers`, `issue --relay`, and `accept --relay` do it over the Numbers Station, and `scripts/wg-demo.sh` runs it end to end in CI between two Linux network namespaces. The relay is a channel the members do not have to trust: it carries sealed bytes and sequence numbers. The first tunnel can skip it entirely, with the strings pasted or exchanged at the ceremony.
+
 Three message types do the whole job. They are circle messages, so they can be posted anywhere, including the Numbers Station, and only circle members can read or forge them.
 
 1. **Peer announcement** (`control` message, subtype `peer`). A member posts its WireGuard public key, its endpoint, and its allowed IPs. Every member now knows every peer. The announcement is authenticated by the pad, so a swapped public key is detected.
 2. **PSK issue** (`control`, subtype `psk`). To set up or rotate the tunnel to peer B, member A spends 32 bytes from its slice and posts the handle `(circle_id, slice, offset)` and the pair it is for. B calls `psk_for(handle)` and spends the same bytes. Both sides now hold the same `PresharedKey`. The handle is a pointer, not a secret. It can travel in the clear.
-3. **Rotation** is a new PSK issue on a schedule. The `cahoots-wg` helper renders the `wg set` command and the `[Peer]` config block.
+3. **Rotation** is a new PSK issue on a schedule. `cahoots-wg` renders the `[Peer]` block or runs `wg set` itself with `--apply`. Order matters: the acceptor installs first, then the issuer, because WireGuard holds one key per peer and switches at the next handshake.
+
+Addresses need no server either: the circle ID picks a `10.x.y.0/24`, and seat k is `.k+1` (`cahoots-wg address`). A full mesh is every host installing every other host's announcement, with one pre-shared key per pair, lower seat issuing to higher.
 
 The first tunnel needs no network at all: the announcements and the first PSK issues can be exchanged over the touch link at the ceremony itself. After that, rotation handles travel inside the existing tunnel.
 
@@ -111,11 +115,11 @@ Three things make mesh bootstrap harder than WireGuard between two servers.
 
 A Cahoots badge with a LoRa radio is a numbers station in the literal sense. It broadcasts pad-encrypted text that anyone can hear and only the circle can read. Pure-pad messages are small, carry their own integrity, and need no handshake. This is the most on-brand demo the project can do. It is listed as a later milestone because the touch link and the device policy are no-radio during the ceremony, and a LoRa radio on the badge must be verifiably off while contributions are generated.
 
-## 5. Spec additions (draft, not yet normative)
-
-These extend `docs/protocol.md`. They are marked draft until the first `cahoots-wg` bootstrap works end to end.
+## 5. Spec additions
 
 ### 5.1 Control message subtypes
+
+Now normative: [protocol](protocol.md) section 4.3. Implemented in `crates/core/src/control.rs` and used by `cahoots-wg`. The table is kept here for the discussion that follows.
 
 A `control` message's plaintext begins with one subtype byte.
 

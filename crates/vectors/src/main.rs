@@ -6,6 +6,7 @@ use cahoots_core::ceremony::{Ceremony, CeremonyError, Phase};
 use cahoots_core::checkwords::check_words;
 use cahoots_core::circle_id::circle_id;
 use cahoots_core::commit::commit;
+use cahoots_core::control::{Control, Proto, Purpose};
 use cahoots_core::frame;
 use cahoots_core::ledger::{MemLedger, SpentLedger};
 use cahoots_core::message::{self, MessageType};
@@ -146,6 +147,45 @@ fn ceremony_vectors() -> Value {
     })
 }
 
+fn control_vectors() -> Value {
+    let peer = Control::Peer {
+        proto: Proto::WireGuard,
+        public_key: fill(500, 32),
+        endpoint: "203.0.113.7:51820".into(),
+        allowed_ips: "10.8.200.2/32".into(),
+    };
+    let psk = Control::Psk {
+        purpose: Purpose::WireGuard,
+        peer_a: 0,
+        peer_b: 1,
+        offset: 64,
+    };
+    let rotate = Control::Rotate {
+        purpose: Purpose::WireGuard,
+        peer_a: 0,
+        peer_b: 1,
+        not_after: 1_761_000_000,
+    };
+    let transfer = Control::SliceTransfer { member: 3 };
+    let enc = |c: &Control| hex::encode(c.encode().unwrap());
+    for c in [&peer, &psk, &rotate, &transfer] {
+        assert_eq!(&Control::decode(&c.encode().unwrap()).unwrap(), c);
+    }
+    json!({
+        "description": "Control message plaintexts (docs/protocol.md section 4.3): one subtype byte then the fields, little-endian. A pre-shared key for purpose p between seats a and b is derived with context p || a || b.",
+        "peer": { "proto": "wireguard", "public_key": hex::encode(fill(500, 32)), "endpoint": "203.0.113.7:51820", "allowed_ips": "10.8.200.2/32", "encoded": enc(&peer) },
+        "psk": { "purpose": "wireguard", "peer_a": 0, "peer_b": 1, "offset": 64, "encoded": enc(&psk), "context": hex::encode(Purpose::WireGuard.context(0, 1)) },
+        "rotate": { "purpose": "wireguard", "peer_a": 0, "peer_b": 1, "not_after": 1_761_000_000u64, "encoded": enc(&rotate) },
+        "slice_transfer": { "member": 3, "encoded": enc(&transfer) },
+        "malformed": [
+            { "bytes": "", "expected": "length" },
+            { "bytes": "09", "expected": "unknown subtype 9" },
+            { "bytes": "0100000100000000ff", "expected": "length: trailing byte" },
+            { "bytes": "0107000100000000", "expected": "value: unknown purpose" }
+        ]
+    })
+}
+
 fn checkword_vectors() -> Value {
     let params = CircleParams::new(2, 96, "words", true).unwrap();
     let cases: Vec<Value> = (0..4u64)
@@ -282,6 +322,7 @@ fn main() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let files = [
         ("ceremony.json", ceremony_vectors()),
+        ("control.json", control_vectors()),
         ("checkwords.json", checkword_vectors()),
         ("messages.json", message_vectors()),
         ("spend.json", spend_vectors()),

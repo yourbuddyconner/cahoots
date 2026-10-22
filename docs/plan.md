@@ -62,14 +62,14 @@ Goal: a group that met once can set up a VPN or a mesh network with no coordinat
 
 | Milestone | What it delivers | Done when | Status |
 |---|---|---|---|
-| N1 WireGuard | A command that sets up and rotates WireGuard tunnels between group members from the pad alone | Two Linux machines bring up a tunnel whose keys came only from the group. Rotation works over the tunnel. A replayed key is refused on both ends | up next (needs S1, which is done) |
-| N2 Control messages | Standard message types for "here is my public key", "here is a key for our tunnel", and "rotate now" | Test vectors are published and the app shows peer announcements | up next |
+| N1 WireGuard | A command that sets up and rotates WireGuard tunnels between group members from the pad alone, with the handles and announcements carried by the feed or pasted | Two Linux hosts bring up a tunnel whose keys came only from the group. Rotation works. A replayed key is refused on both ends | **done** (2026-10-21): `scripts/wg-demo.sh` runs in CI between two network namespaces |
+| N2 Control messages | Standard message types for "here is my public key", "here is a key for our tunnel", and "rotate now" | Test vectors are published and the app shows peer announcements | **done** for the format and the vectors (2026-10-21); the app does not show announcements yet |
 | N3 Headless nodes | A way to hand a node with no screen, such as a router on a roof, its share of the pad from a badge, with the badge wiping its copy | A simulated node receives its share from a simulated badge, and the badge's copy reads back empty | after M4a, then M4b |
 | N4 Mesh radios | Adapters for Meshtastic, Wi-Fi mesh (802.11s), and Reticulum | Each adapter has a test against the real stack, or a written manual test where that is impossible | after N1 |
 | N5 Federation | Pairwise secrets between each two members, so a member cannot forge another member's messages | Three devices complete the group and pairwise ceremonies. A member cannot post as another | after M4b |
 | N6 LoRa feed | A badge with a LoRa radio that broadcasts encrypted messages, with the radio provably off during the ceremony | A message sent over LoRa decrypts on a phone, and a radio capture shows only noise | after M4b and M7 |
 
-Suggested order: N1 and N2 first, because they need no hardware and give the first "I set up a real network from a ceremony" story.
+N1 and N2 shipped first, because they needed no hardware. What a Tailscale-like mesh still needs on top: a `mesh` command that loops the pair steps over every announced peer, and a relay for hosts behind NAT, which WireGuard cannot do on its own.
 
 ## Chat
 

@@ -1,0 +1,15 @@
+[package]
+name = "cahoots-relay"
+description = "Numbers Station relay client shared by the Cahoots command-line tools."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cahoots-core = { workspace = true, features = ["std"] }
+ureq = { version = "2.12", default-features = false, features = ["json"] }
+serde_json = "1"
+base64 = "0.22"
+hex = "0.4"

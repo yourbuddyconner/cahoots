@@ -32,3 +32,15 @@ jobs:
       - name: vectors are up to date
         run: |
           cargo run -p cahoots-vectors -- --check
+
+  wg-demo:
+    name: WireGuard tunnel from a cahoot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94"
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y wireguard-tools libpcsclite-dev
+      - run: scripts/wg-demo.sh

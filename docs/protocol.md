@@ -123,6 +123,23 @@ A crash between steps 3 and 5 loses a message. It never leaves a range reusable.
 
 Implementation: `crates/core/src/pad.rs`, `crates/core/src/ledger.rs`.
 
+### 4.3 Control messages
+
+A `control` message (type `3`) bootstraps a network. Its plaintext is one subtype byte, then the fields below. All integers little-endian.
+
+| Subtype | Name | Payload |
+|---|---|---|
+| `0` | `peer` | `proto (u8) \| pubkey_len (u8) \| pubkey \| endpoint_len (u8) \| endpoint (UTF-8) \| allowed_len (u8) \| allowed_ips (UTF-8)`. `proto`: `0` WireGuard, `1` Reticulum, `2` Yggdrasil, `3` Meshtastic. |
+| `1` | `psk` | `purpose (u8) \| peer_a (u8) \| peer_b (u8) \| offset (u32)`. The issuer's slice is the message's own slice; `peer_a` MUST equal it. `purpose`: `0` WireGuard, `1` TLS, `2` MLS, `3` Wi-Fi, `4` Meshtastic, `5` other. |
+| `2` | `rotate` | `purpose (u8) \| peer_a (u8) \| peer_b (u8) \| not_after (u64 Unix seconds)` |
+| `3` | `slice-transfer` | `member (u8)`. The member's slice now lives on a node, not a badge. |
+
+A pre-shared key named by a `psk` message is the 32 bytes at `offset` of the issuer's slice, derived with the context `purpose || peer_a || peer_b`, so a key issued for WireGuard between A and B cannot be reused for another purpose or another pair. The acceptor marks that range spent in its own ledger; a second `psk` message for the same range is refused as reuse.
+
+Control messages are ordinary messages: posted anywhere, including the Numbers Station, and readable or forgeable only by members. The feed is a channel, not a party.
+
+Implementation: `crates/core/src/control.rs`; the WireGuard use is `crates/wireguard`.
+
 ## 5. Storage and erasure
 
 - The pad lives in a dedicated region of non-volatile memory, not in a file on a filesystem with a translation layer.
@@ -132,4 +149,4 @@ Implementation: `crates/core/src/pad.rs`, `crates/core/src/ledger.rs`.
 
 ## 6. Test vectors
 
-`crates/vectors/*.json` are generated from `cahoots-core` by `cargo run -p cahoots-vectors`. They cover the ceremony (KEM seeds, public keys, sealing randomness, sealed reveals, a mismatch abort, and a garbled reveal), check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. Every client MUST reproduce them.
+`crates/vectors/*.json` are generated from `cahoots-core` by `cargo run -p cahoots-vectors`. They cover the ceremony (KEM seeds, public keys, sealing randomness, sealed reveals, a mismatch abort, and a garbled reveal), control messages, check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. Every client MUST reproduce them.

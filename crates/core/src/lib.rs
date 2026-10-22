@@ -9,6 +9,7 @@ pub mod checkwords;
 pub mod circle_id;
 pub mod combine;
 pub mod commit;
+pub mod control;
 pub mod frame;
 pub mod ledger;
 pub mod message;

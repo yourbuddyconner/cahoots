@@ -360,6 +360,7 @@ dependencies = [
  "base64 0.22.1",
  "cahoots-core",
  "cahoots-provider",
+ "cahoots-relay",
  "cahoots-station",
  "chacha20poly1305 0.10.1",
  "clap",
@@ -445,6 +446,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cahoots-relay"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "cahoots-core",
+ "hex",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "cahoots-station"
 version = "0.1.0"
 dependencies = [
@@ -495,8 +507,11 @@ dependencies = [
  "base64 0.22.1",
  "cahoots-core",
  "cahoots-provider",
+ "cahoots-relay",
  "clap",
  "hex",
+ "serde",
+ "serde_json",
  "tempfile",
  "zeroize",
 ]

@@ -37,7 +37,8 @@ Every Rust crate lives under `crates/`. The PWA lives under `web/app`.
 | `crates/provider` | `cahoots-provider` | Pad provider API (`psk`, `spend`) with memory and encrypted-file backends, plus the HKDF session-key derivation. | done (S1) |
 | `crates/hpke` | `cahoots-hpke` | HPKE `mode_psk` adapter (X25519 and X-Wing suites). | done (S1) |
 | `crates/age-plugin-cahoots` | `age-plugin-cahoots` | age plugin: recipient `cahoots:<circle>`. | done (S1), untested against the `age` CLI |
-| `crates/wireguard` | `cahoots-wireguard` | WireGuard `PresharedKey` helper and the `cahoots-wg` CLI. | done (S1), `wg` interop test pending |
+| `crates/wireguard` | `cahoots-wireguard` | WireGuard `PresharedKey` helper and the `cahoots-wg` CLI: announce, peers, issue, accept over the feed or by paste; `--apply` runs `wg set`. | done (S1, N1); `scripts/wg-demo.sh` runs a two-host tunnel in CI |
+| `crates/relay` | `cahoots-relay` | Numbers Station client shared by the CLIs. | done |
 | `crates/yk` | `cahoots-yk` | YubiKey OpenPGP `GET CHALLENGE` entropy source and CLI. | done (M2), throughput not yet measured |
 | `crates/wasm` | `cahoots-wasm` | Browser bindings: ceremony, circle, fountain-coded animated QR, QR rendering. | done (M2) |
 | `web/app` | | Offline PWA phone and laptop client. | done (M2), camera scanning untested |

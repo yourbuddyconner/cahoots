@@ -225,6 +225,32 @@ impl FileProvider {
     }
 
     /// Store a freshly combined pad. Returns its circle ID.
+    /// Open one circle of a provider directory as a core `Pad`, which can both derive
+    /// pre-shared keys (through `PadProvider`) and seal and open messages. Use this instead of
+    /// a `FileProvider` for the same directory: both would own the same files.
+    pub fn open_pad(
+        root: impl AsRef<Path>,
+        id: &CircleId,
+    ) -> Result<cahoots_core::pad::Pad<FileStorage, FileLedger>, PadError> {
+        let root = root.as_ref().to_path_buf();
+        let key = Self::load_or_create_key(&root)?;
+        let dir = root.join(hex::encode(id));
+        let params = CircleParams::decode(&fs::read(dir.join("params")).map_err(io)?)
+            .map_err(|e| PadError::Storage(format!("params: {e:?}")))?;
+        let slice = fs::read(dir.join("slice")).map_err(io)?;
+        let my_slice = *slice.first().ok_or(PadError::Config)?;
+        let pad_path = dir.join("pad.enc");
+        let bytes = open_pad(&key, &fs::read(&pad_path).map_err(io)?)?;
+        let storage = FileStorage {
+            path: pad_path,
+            key: key.clone(),
+            bytes,
+        };
+        let ledger = FileLedger::open(&dir.join("ledger"), params.slices())?;
+        cahoots_core::pad::Pad::with_circle_id(params, my_slice, *id, storage, ledger)
+            .map_err(core_pad_err)
+    }
+
     pub fn add_circle(
         &mut self,
         params: CircleParams,
@@ -319,4 +345,8 @@ impl PadProvider for FileProvider {
             .map(|c| c.low_pad())
             .unwrap_or(true)
     }
+}
+
+fn core_pad_err(e: cahoots_core::pad::PadError) -> PadError {
+    PadError::Storage(format!("{e:?}"))
 }

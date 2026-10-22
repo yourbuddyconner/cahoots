@@ -13,7 +13,7 @@ mod mem;
 mod session;
 
 pub use cahoots_core::CircleId;
-pub use file::FileProvider;
+pub use file::{FileLedger, FileProvider, FileStorage};
 pub use mem::MemProvider;
 pub use session::{derive_session_key, PSK_SALT_DOMAIN, SESSION_KEY_INFO};
 use zeroize::Zeroizing;
@@ -97,4 +97,102 @@ pub trait PadProvider {
     fn remaining(&self, circle: &CircleId) -> u64;
     /// True when 10% or less of the caller's slice remains. The fix is a new ceremony.
     fn low_pad(&self, circle: &CircleId) -> bool;
+}
+
+/// A core `Pad` is a provider too: handles name its own slice, and `psk_for` spends the
+/// peer's range. This lets one object both derive pre-shared keys and seal messages.
+impl<S: cahoots_core::pad::PadStorage, L: cahoots_core::ledger::SpentLedger> PadProvider
+    for cahoots_core::pad::Pad<S, L>
+{
+    fn psk(
+        &mut self,
+        circle: &CircleId,
+        _context: &[u8],
+    ) -> Result<(PskHandle, Zeroizing<[u8; 32]>), PadError> {
+        if *circle != self.circle_id() {
+            return Err(PadError::UnknownCircle);
+        }
+        let (offset, bytes) = self.spend_next(PSK_LEN).map_err(core_err)?;
+        let handle = PskHandle {
+            circle_id: *circle,
+            slice: self.my_slice(),
+            offset,
+        };
+        Ok((handle, mem::to_psk(bytes)))
+    }
+
+    fn psk_for(
+        &mut self,
+        handle: &PskHandle,
+        _context: &[u8],
+    ) -> Result<Zeroizing<[u8; 32]>, PadError> {
+        if handle.circle_id != self.circle_id() {
+            return Err(PadError::UnknownCircle);
+        }
+        if handle.slice == self.my_slice() {
+            return Err(PadError::AlreadySpent);
+        }
+        let bytes = self
+            .spend_range(handle.slice, handle.offset, PSK_LEN)
+            .map_err(core_err)?;
+        Ok(mem::to_psk(bytes))
+    }
+
+    fn spend(
+        &mut self,
+        circle: &CircleId,
+        len: u32,
+    ) -> Result<(PskHandle, Zeroizing<Vec<u8>>), PadError> {
+        if *circle != self.circle_id() {
+            return Err(PadError::UnknownCircle);
+        }
+        let (offset, bytes) = self.spend_next(len).map_err(core_err)?;
+        Ok((
+            PskHandle {
+                circle_id: *circle,
+                slice: self.my_slice(),
+                offset,
+            },
+            bytes,
+        ))
+    }
+
+    fn spend_for(&mut self, handle: &PskHandle, len: u32) -> Result<Zeroizing<Vec<u8>>, PadError> {
+        if handle.circle_id != self.circle_id() {
+            return Err(PadError::UnknownCircle);
+        }
+        self.spend_range(handle.slice, handle.offset, len)
+            .map_err(core_err)
+    }
+
+    fn remaining(&self, circle: &CircleId) -> u64 {
+        if *circle != self.circle_id() {
+            return 0;
+        }
+        u64::from(cahoots_core::pad::Pad::remaining(self))
+    }
+
+    fn low_pad(&self, circle: &CircleId) -> bool {
+        if *circle != self.circle_id() {
+            return true;
+        }
+        u64::from(cahoots_core::pad::Pad::remaining(self)) * 100
+            <= u64::from(self.params().slice_len()) * LOW_PAD_PERCENT
+    }
+}
+
+fn core_err(e: cahoots_core::pad::PadError) -> PadError {
+    use cahoots_core::pad::PadError as E;
+    match e {
+        E::WrongCircle => PadError::UnknownCircle,
+        E::OutOfRange => PadError::OutOfRange,
+        E::Reuse => PadError::AlreadySpent,
+        E::Exhausted => PadError::Exhausted,
+        E::Config => PadError::Config,
+        other => PadError::Storage(alloc_format(&other)),
+    }
+}
+
+fn alloc_format(e: &dyn core::fmt::Debug) -> String {
+    format!("{e:?}")
 }

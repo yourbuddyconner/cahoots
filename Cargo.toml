@@ -13,6 +13,7 @@ members = [
     "crates/age-plugin-cahoots",
     "crates/chat",
     "crates/station",
+    "crates/relay",
 ]
 exclude = ["crates/fuzz"]
 # Not workspace members: crates/esp32s3 (needs the esp toolchain), crates/dabao (built with
