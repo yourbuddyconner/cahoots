@@ -74,7 +74,24 @@ The sketch runs three cycles of five screens, then puts the panel to sleep. Pres
 | The same QR at 5 px per module, 165 px wide | full | The fallback if the first needs a real quiet zone. |
 | Waiting: "touching..." / "wait for the buzz" | full | Legibility of the ceremony prompt. |
 
-Numbers worth recording: the full refresh time (about 2 s is normal for this panel), the partial refresh time, how many partial refreshes it takes before ghosting shows, and the distance at which each QR scans. Those feed the firmware's screen driver and the DIY guide's claims.
+Numbers worth recording: the full refresh time, the partial refresh time, how many partial refreshes it takes before ghosting shows, and the distance at which each QR scans. Those feed the firmware's screen driver and the DIY guide's claims.
+
+Measured on this pair on 2026-10-23, SPI at 1 MHz:
+
+| Screen | Panel busy | Total, with the 5000-byte transfer |
+|---|---|---|
+| Full refresh | 1.29 s | 1.52 s |
+| Partial refresh of the footer band | 0.33 s | 0.37 s |
+| Version 4 QR | 33 modules: 198 px at 6 px per module, 165 px at 5 | |
+
+## If the panel stays blank
+
+Two things went wrong on the first try, and both are quick to tell apart.
+
+- **No serial port on the Mac at all, and nothing on the USB bus.** The cable. Many USB-C cables carry power only. Swap in one that syncs a phone.
+- **The log shows refresh times of a few milliseconds instead of about two seconds.** The panel never heard the commands. A real full refresh holds BUSY for 1.3 to 2 s. The library drives SPI at 10 MHz by default, and through the module's level shifter and jumper wires nothing got through; at 1 MHz everything works, and the sketch now sets that. If you change the wiring and the panel goes blank again, this is the first thing to suspect.
+
+If both of those are fine and the panel is still blank, check the eight wires by the names printed on the module's back, not by colour, and that VCC is on 3V3 and GND on GND.
 
 ## What this does not test
 

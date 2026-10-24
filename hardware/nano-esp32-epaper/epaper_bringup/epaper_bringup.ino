@@ -154,6 +154,10 @@ void setup() {
   uint32_t until = millis() + 3000;
   while (!Serial && millis() < until) delay(10); // runs unattended too
   Serial.println("cahoots screen bring-up: Nano ESP32 + Waveshare 1.54 V2");
+  // 1 MHz, not the library's 10 MHz: at 10 MHz nothing got through the module's level shifter and the
+  // jumper wires, and every refresh "finished" in a few milliseconds with a blank panel. A frame is 5000
+  // bytes, so 1 MHz costs 40 ms. Raise it later with short wires or a soldered build.
+  display.epd2.selectSPI(SPI, SPISettings(1000000, MSBFIRST, SPI_MODE0));
   display.init(115200, true, 2, false); // 2 ms reset pulse: what Waveshare boards want
   display.setRotation(0);
 }
