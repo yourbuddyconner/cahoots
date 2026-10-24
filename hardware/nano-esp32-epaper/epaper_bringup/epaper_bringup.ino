@@ -43,8 +43,9 @@ GxEPD2_BW<GxEPD2_154_D67, GxEPD2_154_D67::HEIGHT> display(GxEPD2_154_D67(EPD_CS,
 static const char* WORDS[6] = {"sunset", "valve", "present", "raven", "curtain", "pudding"};
 static const char* CIRCLE = "sf-meetup";
 static const char* LABEL = "TRNG T2"; // an ESP32-S3 with its radio off is tier 2
-// A stand-in for what the badge will encode: an address with 43 base64 characters, the size of a 32-byte hash.
-static const char* QR_TEXT = "https://cahoots.network/#c=3kq1v9ZrWw2m8Hc5TtLxPfDgYn7eJbQ4uR6sVaK0oMI";
+// A stand-in for what the badge will encode: a bare address plus 43 base64 characters, the size of a 32-byte hash.
+// 62 bytes, which is exactly what a version 4 code holds at error level M.
+static const char* QR_TEXT = "cahoots.network/#c=3kq1v9ZrWw2m8Hc5TtLxPfDgYn7eJbQ4uR6sVaK0oMI";
 
 static uint32_t t0;
 static void tick(const char* what) { t0 = millis(); Serial.printf("%-28s", what); }
@@ -126,7 +127,7 @@ static void showQr(uint8_t px) {
   esp_qrcode_config_t cfg;
   cfg.display_func = drawQrModules;
   cfg.max_qrcode_version = 4;                // the generator picks the smallest version that fits, capped here
-  cfg.qrcode_ecc_level = ESP_QRCODE_ECC_MED; // 70 bytes need version 4 at this level: 33 x 33 modules
+  cfg.qrcode_ecc_level = ESP_QRCODE_ECC_MED; // 62 bytes fill version 4 at this level: 33 x 33 modules
   if (esp_qrcode_generate(&cfg, QR_TEXT) != ESP_OK) Serial.print("QR text does not fit in version 4, ");
   tock();
 }
