@@ -22,6 +22,22 @@ Read the labels printed on the module's board, not the wire colours. The module 
 | RST | D8 | reset |
 | BUSY | D7 | busy, high while the panel refreshes |
 
+### Where those pins are
+
+Hold the Nano component side up with the USB-C at the top. The headers are two columns of 15 pins.
+
+- Left column, counting down from the USB end: pin 1 is D13 and pin 2 is 3V3. CLK and VCC go there. Pin 14, second from the bottom, is a GND.
+- Right column, counting down from the USB end: pin 1 is D12, which stays empty. Pins 2 to 6 are D11, D10, D9, D8, D7, and DIN, CS, DC, RST, BUSY go onto them in that order, the same order the labels run on the module. Pin 12 is the other GND.
+
+The kit's cable has a small 8-pin plug for the module and eight single female sockets at the other end. The names are printed on the module's driver board beside its connector, and the sockets are usually coloured red VCC, black GND, blue DIN, yellow CLK, orange CS, green DC, white RST, purple BUSY. Trust the printed names if the colours differ.
+
+Two ways to join the sockets to the Nano's pins:
+
+- **On a breadboard.** Seat the Nano across the centre channel. For each signal, push a male-to-male jumper into the breadboard row beside the pin and plug the cable's socket onto the jumper's free end.
+- **Without one.** The sockets fit straight onto the Nano's header pins from the underside. Hold the board on its edge, push each socket on, and let the board rest on the cable. Fine for a desk test.
+
+Leave the two solder-pad settings on the back of the module as shipped: 4-wire SPI is what the sketch uses. The board's version is printed on the back too. From V2.1 it has a level shifter and runs from 3V3; if an older board shows nothing, move VCC to VUSB for 5 V, and leave every signal on 3.3 V pins. Nothing else goes near VUSB or VIN: the Nano's pins are not 5 V tolerant.
+
 ## Running it
 
 In the Arduino IDE:
