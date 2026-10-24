@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" width="1000" height="620" role="img" aria-label="Wiring the Waveshare 1.54 inch e-paper cable to the Arduino Nano ESP32: CLK to D13 and VCC to 3V3 on the left header; DIN, CS, DC, RST and BUSY to D11, D10, D9, D8 and D7 on the right header; GND to the right header GND." font-family="ui-sans-serif, system-ui, Helvetica, Arial, sans-serif" font-size="12">
-<rect width="1000" height="620" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700" width="1000" height="700" role="img" aria-label="Wiring the Waveshare 1.54 inch e-paper cable to the Arduino Nano ESP32: CLK to D13 and VCC to 3V3 on the left header; DIN, CS, DC, RST and BUSY to D11, D10, D9, D8 and D7 on the right header; GND to the right header GND." font-family="ui-sans-serif, system-ui, Helvetica, Arial, sans-serif" font-size="12">
+<rect width="1000" height="700" fill="#ffffff"/>
 <text x="500.0" y="26" text-anchor="middle" font-size="14" font-weight="600" fill="#111">Waveshare 1.54" e-Paper Module V2 → Arduino Nano ESP32 (top view, USB-C up)</text>
 <path d="M 700 200 L 670 200 L 670 50 L 94 50 L 94 156 L 165 156" fill="none" stroke="#d62828" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M 700 236 L 640 236 L 640 66 L 112 66 L 112 128 L 165 128" fill="none" stroke="#d9a400" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
@@ -153,4 +153,30 @@
 <text x="700" y="492" font-size="11" fill="#444">Their other end is one keyed plug</text>
 <text x="700" y="506" font-size="11" fill="#444">into the module's socket. Colours are</text>
 <text x="700" y="520" font-size="11" fill="#444">the usual ones; the printed names win.</text>
+<text x="700" y="538" font-size="11" fill="#444">Module end, back of the board, text upright:</text>
+<rect x="700" y="548" width="280" height="140" rx="4" fill="#1f4fb0" stroke="#163a80"/>
+<text x="850.0" y="563" text-anchor="middle" font-size="9" fill="#ffffff">1.54inch e-Paper Module</text>
+<rect x="704" y="570" width="18" height="102" rx="2" fill="#f1e9d2" stroke="#b8ab85"/>
+<rect x="708" y="576" width="10" height="5" fill="#9a9a9a"/>
+<text x="728" y="582" font-size="9" font-weight="700" fill="#ffffff">BUSY</text>
+<rect x="708" y="588" width="10" height="5" fill="#9a9a9a"/>
+<text x="728" y="594" font-size="9" font-weight="700" fill="#ffffff">RST</text>
+<rect x="708" y="600" width="10" height="5" fill="#9a9a9a"/>
+<text x="728" y="606" font-size="9" font-weight="700" fill="#ffffff">DC</text>
+<rect x="708" y="612" width="10" height="5" fill="#9a9a9a"/>
+<text x="728" y="618" font-size="9" font-weight="700" fill="#ffffff">CS</text>
+<rect x="708" y="624" width="10" height="5" fill="#9a9a9a"/>
+<text x="728" y="630" font-size="9" font-weight="700" fill="#ffffff">CLK</text>
+<rect x="708" y="636" width="10" height="5" fill="#9a9a9a"/>
+<text x="728" y="642" font-size="9" font-weight="700" fill="#ffffff">DIN</text>
+<rect x="708" y="648" width="10" height="5" fill="#9a9a9a"/>
+<text x="728" y="654" font-size="9" font-weight="700" fill="#ffffff">GND</text>
+<rect x="708" y="660" width="10" height="5" fill="#9a9a9a"/>
+<text x="728" y="666" font-size="9" font-weight="700" fill="#ffffff">VCC</text>
+<text x="706" y="682" font-size="9" font-weight="700" fill="#ffffff">Waveshare</text>
+<text x="790" y="596" font-size="9" fill="#ffffff">The plug is keyed, so the wires leave</text>
+<text x="790" y="609" font-size="9" fill="#ffffff">the socket in this same order.</text>
+<text x="790" y="622" font-size="9" fill="#ffffff">VCC is the pin nearest the</text>
+<text x="790" y="635" font-size="9" fill="#ffffff">Waveshare logo; BUSY is the</text>
+<text x="790" y="648" font-size="9" fill="#ffffff">one nearest the title.</text>
 </svg>

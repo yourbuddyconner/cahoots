@@ -33,6 +33,8 @@ Hold the Nano component side up with the USB-C at the top. The headers are two c
 
 The kit's cable has a small 8-pin plug for the module and eight single female sockets at the other end. The names are printed on the module's driver board beside its connector, and the sockets are usually coloured red VCC, black GND, blue DIN, yellow CLK, orange CS, green DC, white RST, purple BUSY. Trust the printed names if the colours differ.
 
+At the module end there is nothing to count: the plug is keyed. But if you want to check a wire, the names are printed on the back of the driver board beside the socket. With the board's text upright the socket is on the left edge, and the names read top to bottom BUSY, RST, DC, CS, CLK, DIN, GND, VCC. VCC is the pin nearest the Waveshare logo. Follow a wire from its position in the plug to its socket end and you have its name.
+
 Two ways to join the sockets to the Nano's pins:
 
 - **On a breadboard.** Seat the Nano across the centre channel. For each signal, push a male-to-male jumper into the breadboard row beside the pin and plug the cable's socket onto the jumper's free end.
