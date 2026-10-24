@@ -26,6 +26,7 @@
 #include <Fonts/FreeMono9pt7b.h>
 #include <Fonts/FreeMonoBold9pt7b.h>
 #include <Fonts/FreeMonoBold12pt7b.h>
+#include "FreeMonoBold10pt7b.h" // the words: FreeMono Bold 15% larger than the stock 9pt, see the README
 #include "qrcode.h" // the board package's generator, not the QRCode library
 
 #define EPD_CS 10
@@ -33,10 +34,11 @@
 #define EPD_RST 8
 #define EPD_BUSY 7
 
-// The words font. 9pt bold mono fits two columns of 8-letter words in 200 px (11 px per letter).
-// 12pt is closer to the manufactured badge's design but overflows the right column on 8-letter words:
-// try it to see how much larger the type could be.
-#define WORD_FONT FreeMonoBold9pt7b
+// The words font, 12 px per letter. The left column is left-aligned and the right column right-aligned,
+// so a row holds up to 15 letters plus a 4 px gap. The one pair that cannot fit, 8 + 8 letters, is 0.2%
+// of rows; that screen falls back to WORD_FONT_SMALL, the stock 9pt at 11 px per letter.
+#define WORD_FONT FreeMonoBold10pt7b
+#define WORD_FONT_SMALL FreeMonoBold9pt7b
 
 GxEPD2_BW<GxEPD2_154_D67, GxEPD2_154_D67::HEIGHT> display(GxEPD2_154_D67(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
 
@@ -50,6 +52,40 @@ static const char* QR_TEXT = "cahoots.network/#c=3kq1v9ZrWw2m8Hc5TtLxPfDgYn7eJbQ
 static uint32_t t0;
 static void tick(const char* what) { t0 = millis(); Serial.printf("%-28s", what); }
 static void tock() { Serial.printf("%5lu ms\n", (unsigned long)(millis() - t0)); }
+
+// Width of a string in the current font, as the renderer will draw it.
+static uint16_t textWidth(const char* s, int16_t* x1) {
+  int16_t y1;
+  uint16_t w, h;
+  display.getTextBounds(s, 0, 0, x1, &y1, &w, &h);
+  return w;
+}
+
+// Three rows of two words between x = 8 and x = 192: left word left-aligned, right word right-aligned.
+// Measures every row first; if one would not leave a 4 px gap, the whole grid drops to the small font.
+static void drawWordGrid() {
+  const GFXfont* font = &WORD_FONT;
+  display.setFont(font);
+  for (int r = 0; r < 3; r++) {
+    int16_t x1;
+    uint16_t wl = textWidth(WORDS[2 * r], &x1), wr = textWidth(WORDS[2 * r + 1], &x1);
+    if (wl + 4 + wr > 184) {
+      font = &WORD_FONT_SMALL;
+      Serial.print("(a row of 16 letters: small font) ");
+      break;
+    }
+  }
+  display.setFont(font);
+  for (int r = 0; r < 3; r++) {
+    const int16_t y = 62 + r * 36;
+    display.setCursor(8, y);
+    display.print(WORDS[2 * r]);
+    int16_t x1;
+    uint16_t w = textWidth(WORDS[2 * r + 1], &x1);
+    display.setCursor(192 - w - x1, y);
+    display.print(WORDS[2 * r + 1]);
+  }
+}
 
 // Mirrors wordsScreen() in site/badge.js: the same positions on the same 200 x 200 grid.
 static void drawWords() {
@@ -65,11 +101,7 @@ static void drawWords() {
   display.setCursor(192 - w, 12);
   display.print(LABEL);
   display.fillRect(8, 26, 184, 1, GxEPD_BLACK);
-  display.setFont(&WORD_FONT);
-  for (int i = 0; i < 6; i++) {
-    display.setCursor(8 + (i % 2) * 96, 62 + (i / 2) * 36);
-    display.print(WORDS[i]);
-  }
+  drawWordGrid();
   display.fillRect(8, 170, 184, 1, GxEPD_BLACK);
   display.setFont(NULL);
   display.setCursor(8, 181);

@@ -68,7 +68,7 @@ The sketch runs three cycles of five screens, then puts the panel to sleep. Pres
 
 | Screen | Refresh | What to check |
 |---|---|---|
-| Words: circle name, tier label, six words in two columns, the confirm line | full | Can you read six 9pt mono words from a normal reading distance? This is the layout from the site's render, `wordsScreen()` in `site/badge.js`. Change `WORD_FONT` to 12pt to see larger type overflow on 8-letter words. |
+| Words: circle name, tier label, six words in two columns, the confirm line | full | Can you read the six words from a normal reading distance? The layout is the site's render, `wordsScreen()` in `site/badge.js`, with the right column right-aligned. The font is FreeMono Bold at 12 px per letter and 17% taller than the stock 9pt, generated into `FreeMonoBold10pt7b.h`; a row holds 15 letters, and the one pair that cannot fit, 8 + 8 letters, drops that screen to the stock 9pt. `WORD_FONT` and `WORD_FONT_SMALL` in the sketch pick both. |
 | Status line counting "commits 1/4" to "4/4" | partial, footer band only | How long does a partial refresh take, and does the rest of the screen flicker? This is what `show_status()` does during a ceremony. |
 | Version 4 QR at 6 px per module, 198 px wide | full | The DIY guide's claim: a phone reads it at arm's length. Try a phone camera from 60 cm. The quiet zone is only the panel's bezel. |
 | The same QR at 5 px per module, 165 px wide | full | The fallback if the first needs a real quiet zone. |
