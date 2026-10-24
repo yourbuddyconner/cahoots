@@ -1,0 +1,156 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" width="1000" height="620" role="img" aria-label="Wiring the Waveshare 1.54 inch e-paper cable to the Arduino Nano ESP32: CLK to D13 and VCC to 3V3 on the left header; DIN, CS, DC, RST and BUSY to D11, D10, D9, D8 and D7 on the right header; GND to the right header GND." font-family="ui-sans-serif, system-ui, Helvetica, Arial, sans-serif" font-size="12">
+<rect width="1000" height="620" fill="#ffffff"/>
+<text x="500.0" y="26" text-anchor="middle" font-size="14" font-weight="600" fill="#111">Waveshare 1.54" e-Paper Module V2 → Arduino Nano ESP32 (top view, USB-C up)</text>
+<path d="M 700 200 L 670 200 L 670 50 L 94 50 L 94 156 L 165 156" fill="none" stroke="#d62828" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 700 236 L 640 236 L 640 66 L 112 66 L 112 128 L 165 128" fill="none" stroke="#d9a400" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 700 272 L 600 272 L 600 156 L 315 156" fill="none" stroke="#1d4ed8" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 700 308 L 560 308 L 560 184 L 315 184" fill="none" stroke="#f97316" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 700 344 L 520 344 L 520 212 L 315 212" fill="none" stroke="#16a34a" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 700 380 L 480 380 L 480 240 L 315 240" fill="none" stroke="#8a8a8a" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 700 380 L 480 380 L 480 240 L 315 240" fill="none" stroke="#f4f4f4" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 700 416 L 440 416 L 440 268 L 315 268" fill="none" stroke="#7c3aed" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 700 452 L 400 452 L 400 436 L 315 436" fill="none" stroke="#111111" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="150" y="100" width="180" height="450" rx="8" fill="#0b6e7f" stroke="#064e5a" stroke-width="2"/>
+<rect x="215.0" y="84" width="50" height="30" rx="4" fill="#c9ccd1" stroke="#8a8f96"/>
+<text x="240.0" y="78" text-anchor="middle" font-size="11" fill="#444">USB-C</text>
+<rect x="216" y="400" width="48" height="110" rx="3" fill="#b9bdc3" stroke="#7d828a"/>
+<text x="240.0" y="458" text-anchor="middle" font-size="8" fill="#333">ESP32-S3</text>
+<text x="240.0" y="572" text-anchor="middle" font-size="11" fill="#444">Arduino Nano ESP32, component side up</text>
+<circle cx="165" cy="128" r="7" fill="#ffffff"/>
+<circle cx="165" cy="128" r="5" fill="#d9a400" stroke="#333" stroke-width="1"/>
+<text x="177" y="132" text-anchor="start" font-size="11" fill="#ffffff" font-weight="700">D13</text>
+<circle cx="165" cy="156" r="7" fill="#ffffff"/>
+<circle cx="165" cy="156" r="5" fill="#d62828" stroke="#333" stroke-width="1"/>
+<text x="177" y="160" text-anchor="start" font-size="11" fill="#ffffff" font-weight="700">3V3</text>
+<circle cx="165" cy="184" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="165" cy="184" r="2" fill="#0b6e7f"/>
+<text x="177" y="188" text-anchor="start" font-size="11" fill="#ffffff">B0</text>
+<circle cx="165" cy="212" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="165" cy="212" r="2" fill="#0b6e7f"/>
+<text x="177" y="216" text-anchor="start" font-size="11" fill="#ffffff">A0</text>
+<circle cx="165" cy="240" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="165" cy="240" r="2" fill="#0b6e7f"/>
+<text x="177" y="244" text-anchor="start" font-size="11" fill="#ffffff">A1</text>
+<circle cx="165" cy="268" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="165" cy="268" r="2" fill="#0b6e7f"/>
+<text x="177" y="272" text-anchor="start" font-size="11" fill="#ffffff">A2</text>
+<circle cx="165" cy="296" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="165" cy="296" r="2" fill="#0b6e7f"/>
+<text x="177" y="300" text-anchor="start" font-size="11" fill="#ffffff">A3</text>
+<circle cx="165" cy="324" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="165" cy="324" r="2" fill="#0b6e7f"/>
+<text x="177" y="328" text-anchor="start" font-size="11" fill="#ffffff">A4</text>
+<circle cx="165" cy="352" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="165" cy="352" r="2" fill="#0b6e7f"/>
+<text x="177" y="356" text-anchor="start" font-size="11" fill="#ffffff">A5</text>
+<circle cx="165" cy="380" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="165" cy="380" r="2" fill="#0b6e7f"/>
+<text x="177" y="384" text-anchor="start" font-size="11" fill="#ffffff">A6</text>
+<circle cx="165" cy="408" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="165" cy="408" r="2" fill="#0b6e7f"/>
+<text x="177" y="412" text-anchor="start" font-size="11" fill="#ffffff">A7</text>
+<circle cx="165" cy="436" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="165" cy="436" r="2" fill="#0b6e7f"/>
+<text x="177" y="440" text-anchor="start" font-size="11" fill="#ffffff">VUSB</text>
+<circle cx="165" cy="464" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="165" cy="464" r="2" fill="#0b6e7f"/>
+<text x="177" y="468" text-anchor="start" font-size="11" fill="#ffffff">B1</text>
+<circle cx="165" cy="492" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="165" cy="492" r="2" fill="#0b6e7f"/>
+<text x="177" y="496" text-anchor="start" font-size="11" fill="#ffffff">GND</text>
+<circle cx="165" cy="520" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="165" cy="520" r="2" fill="#0b6e7f"/>
+<text x="177" y="524" text-anchor="start" font-size="11" fill="#ffffff">VIN</text>
+<circle cx="315" cy="128" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="315" cy="128" r="2" fill="#0b6e7f"/>
+<text x="303" y="132" text-anchor="end" font-size="11" fill="#ffffff">D12</text>
+<circle cx="315" cy="156" r="7" fill="#ffffff"/>
+<circle cx="315" cy="156" r="5" fill="#1d4ed8" stroke="#333" stroke-width="1"/>
+<text x="303" y="160" text-anchor="end" font-size="11" fill="#ffffff" font-weight="700">D11</text>
+<circle cx="315" cy="184" r="7" fill="#ffffff"/>
+<circle cx="315" cy="184" r="5" fill="#f97316" stroke="#333" stroke-width="1"/>
+<text x="303" y="188" text-anchor="end" font-size="11" fill="#ffffff" font-weight="700">D10</text>
+<circle cx="315" cy="212" r="7" fill="#ffffff"/>
+<circle cx="315" cy="212" r="5" fill="#16a34a" stroke="#333" stroke-width="1"/>
+<text x="303" y="216" text-anchor="end" font-size="11" fill="#ffffff" font-weight="700">D9</text>
+<circle cx="315" cy="240" r="7" fill="#ffffff"/>
+<circle cx="315" cy="240" r="5" fill="#f4f4f4" stroke="#333" stroke-width="1"/>
+<text x="303" y="244" text-anchor="end" font-size="11" fill="#ffffff" font-weight="700">D8</text>
+<circle cx="315" cy="268" r="7" fill="#ffffff"/>
+<circle cx="315" cy="268" r="5" fill="#7c3aed" stroke="#333" stroke-width="1"/>
+<text x="303" y="272" text-anchor="end" font-size="11" fill="#ffffff" font-weight="700">D7</text>
+<circle cx="315" cy="296" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="315" cy="296" r="2" fill="#0b6e7f"/>
+<text x="303" y="300" text-anchor="end" font-size="11" fill="#ffffff">D6</text>
+<circle cx="315" cy="324" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="315" cy="324" r="2" fill="#0b6e7f"/>
+<text x="303" y="328" text-anchor="end" font-size="11" fill="#ffffff">D5</text>
+<circle cx="315" cy="352" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="315" cy="352" r="2" fill="#0b6e7f"/>
+<text x="303" y="356" text-anchor="end" font-size="11" fill="#ffffff">D4</text>
+<circle cx="315" cy="380" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="315" cy="380" r="2" fill="#0b6e7f"/>
+<text x="303" y="384" text-anchor="end" font-size="11" fill="#ffffff">D3</text>
+<circle cx="315" cy="408" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="315" cy="408" r="2" fill="#0b6e7f"/>
+<text x="303" y="412" text-anchor="end" font-size="11" fill="#ffffff">D2</text>
+<circle cx="315" cy="436" r="7" fill="#ffffff"/>
+<circle cx="315" cy="436" r="5" fill="#111111" stroke="#333" stroke-width="1"/>
+<text x="303" y="440" text-anchor="end" font-size="11" fill="#ffffff" font-weight="700">GND</text>
+<circle cx="315" cy="464" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="315" cy="464" r="2" fill="#0b6e7f"/>
+<text x="303" y="468" text-anchor="end" font-size="11" fill="#ffffff">RST</text>
+<circle cx="315" cy="492" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="315" cy="492" r="2" fill="#0b6e7f"/>
+<text x="303" y="496" text-anchor="end" font-size="11" fill="#ffffff">D0</text>
+<circle cx="315" cy="520" r="5" fill="#d8b24a" stroke="#6b5a1e" stroke-width="1"/>
+<circle cx="315" cy="520" r="2" fill="#0b6e7f"/>
+<text x="303" y="524" text-anchor="end" font-size="11" fill="#ffffff">D1</text>
+<text x="144" y="149" text-anchor="end" font-size="9" fill="#666">pin 2</text>
+<text x="144" y="121" text-anchor="end" font-size="9" fill="#666">pin 1</text>
+<text x="336" y="149" text-anchor="start" font-size="9" fill="#666">pin 2</text>
+<text x="336" y="177" text-anchor="start" font-size="9" fill="#666">pin 3</text>
+<text x="336" y="205" text-anchor="start" font-size="9" fill="#666">pin 4</text>
+<text x="336" y="233" text-anchor="start" font-size="9" fill="#666">pin 5</text>
+<text x="336" y="261" text-anchor="start" font-size="9" fill="#666">pin 6</text>
+<text x="336" y="429" text-anchor="start" font-size="9" fill="#666">pin 12</text>
+<text x="144" y="216" text-anchor="end" font-size="9" fill="#666">pins counted</text>
+<text x="144" y="227" text-anchor="end" font-size="9" fill="#666">from the USB end</text>
+<text x="700" y="160" font-size="11" fill="#444">The cable's eight socket ends,</text>
+<text x="700" y="174" font-size="11" fill="#444">by the name printed on the module:</text>
+<rect x="700" y="192" width="30" height="16" rx="2" fill="#222"/>
+<rect x="704" y="195" width="22" height="10" rx="1" fill="#d62828" stroke="#777" stroke-width="0.5"/>
+<text x="740" y="204" font-size="12" font-weight="700" fill="#111">VCC</text>
+<text x="792" y="204" font-size="11" fill="#555">→ 3V3</text>
+<rect x="700" y="228" width="30" height="16" rx="2" fill="#222"/>
+<rect x="704" y="231" width="22" height="10" rx="1" fill="#d9a400" stroke="#777" stroke-width="0.5"/>
+<text x="740" y="240" font-size="12" font-weight="700" fill="#111">CLK</text>
+<text x="792" y="240" font-size="11" fill="#555">→ D13</text>
+<rect x="700" y="264" width="30" height="16" rx="2" fill="#222"/>
+<rect x="704" y="267" width="22" height="10" rx="1" fill="#1d4ed8" stroke="#777" stroke-width="0.5"/>
+<text x="740" y="276" font-size="12" font-weight="700" fill="#111">DIN</text>
+<text x="792" y="276" font-size="11" fill="#555">→ D11</text>
+<rect x="700" y="300" width="30" height="16" rx="2" fill="#222"/>
+<rect x="704" y="303" width="22" height="10" rx="1" fill="#f97316" stroke="#777" stroke-width="0.5"/>
+<text x="740" y="312" font-size="12" font-weight="700" fill="#111">CS</text>
+<text x="792" y="312" font-size="11" fill="#555">→ D10</text>
+<rect x="700" y="336" width="30" height="16" rx="2" fill="#222"/>
+<rect x="704" y="339" width="22" height="10" rx="1" fill="#16a34a" stroke="#777" stroke-width="0.5"/>
+<text x="740" y="348" font-size="12" font-weight="700" fill="#111">DC</text>
+<text x="792" y="348" font-size="11" fill="#555">→ D9</text>
+<rect x="700" y="372" width="30" height="16" rx="2" fill="#222"/>
+<rect x="704" y="375" width="22" height="10" rx="1" fill="#f4f4f4" stroke="#777" stroke-width="0.5"/>
+<text x="740" y="384" font-size="12" font-weight="700" fill="#111">RST</text>
+<text x="792" y="384" font-size="11" fill="#555">→ D8</text>
+<rect x="700" y="408" width="30" height="16" rx="2" fill="#222"/>
+<rect x="704" y="411" width="22" height="10" rx="1" fill="#7c3aed" stroke="#777" stroke-width="0.5"/>
+<text x="740" y="420" font-size="12" font-weight="700" fill="#111">BUSY</text>
+<text x="792" y="420" font-size="11" fill="#555">→ D7</text>
+<rect x="700" y="444" width="30" height="16" rx="2" fill="#222"/>
+<rect x="704" y="447" width="22" height="10" rx="1" fill="#111111" stroke="#777" stroke-width="0.5"/>
+<text x="740" y="456" font-size="12" font-weight="700" fill="#111">GND</text>
+<text x="792" y="456" font-size="11" fill="#555">→ GND</text>
+<text x="700" y="492" font-size="11" fill="#444">Their other end is one keyed plug</text>
+<text x="700" y="506" font-size="11" fill="#444">into the module's socket. Colours are</text>
+<text x="700" y="520" font-size="11" fill="#444">the usual ones; the printed names win.</text>
+</svg>

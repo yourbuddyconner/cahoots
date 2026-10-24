@@ -22,6 +22,8 @@ Read the labels printed on the module's board, not the wire colours. The module 
 | RST | D8 | reset |
 | BUSY | D7 | busy, high while the panel refreshes |
 
+![Wiring diagram: the eight cable ends to the Nano ESP32's header pins](wiring.svg)
+
 ### Where those pins are
 
 Hold the Nano component side up with the USB-C at the top. The headers are two columns of 15 pins.
