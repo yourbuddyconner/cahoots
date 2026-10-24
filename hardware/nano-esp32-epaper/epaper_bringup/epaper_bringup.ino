@@ -191,12 +191,14 @@ static void showWaiting() {
 
 static Btn btnA = {BTN_A, "A", false, 0}, btnB = {BTN_B, "B", false, 0};
 
-// True once per press, on the press edge, with a 30 ms debounce.
+// True once per press, on the press edge, with a 30 ms debounce. Every change is logged, so a
+// button that never says "down" is open, and one that says "down" once and never "up" is shorted.
 static bool pressed(Btn& b) {
   bool now = digitalRead(b.pin) == LOW;
   if (now != b.down && millis() - b.t > 30) {
     b.down = now;
     b.t = millis();
+    Serial.printf("[%s %s] ", b.name, now ? "down" : "up");
     return now;
   }
   return false;
@@ -225,9 +227,11 @@ void setup() {
   pinMode(BTN_A, INPUT_PULLUP);
   pinMode(BTN_B, INPUT_PULLUP);
   delay(50);
-  for (Btn* b : {&btnA, &btnB})
-    if (digitalRead(b->pin) == LOW)
-      Serial.printf("button %s reads held down at boot: its two wires are on legs that are joined inside the switch. Move one to the other pair.\n", b->name);
+  for (Btn* b : {&btnA, &btnB}) {
+    b->down = digitalRead(b->pin) == LOW; // a held button is not a press
+    if (b->down)
+      Serial.printf("button %s reads held down at boot: its two wires are joined, by the switch's own pair or by a breadboard row. Move one.\n", b->name);
+  }
   // 1 MHz, not the library's 10 MHz: at 10 MHz nothing got through the module's level shifter and the
   // jumper wires, and every refresh "finished" in a few milliseconds with a blank panel. A frame is 5000
   // bytes, so 1 MHz costs 40 ms. Raise it later with short wires or a soldered build.

@@ -51,7 +51,7 @@ Two 6 mm tactile switches, the square ones with four legs. Each goes between a p
 | A | D2 | next |
 | B | D3 | confirm |
 
-A four-pin switch has two pairs of legs joined inside it, and pressing joins the pairs. Legs that come out of the same edge are one pair. On a breadboard, set the switch across the centre channel so each pair sits on its own side; put the pin wire in a row on one side and the GND wire in a row on the other. If the two wires land on the same pair, the button reads pressed all the time, and the sketch says so on the serial monitor at boot.
+A four-pin switch has two pairs of legs joined inside it, and pressing joins the pairs. Legs that come out of the same edge are one pair. On a breadboard, set the switch across the centre channel so each pair sits on its own side; put the pin wire in a row on one side and the GND wire in a row on the other. If the two wires land on the same pair, the button reads pressed all the time, and the sketch says so on the serial monitor at boot. The same happens if the switch sits on one half of the breadboard instead of across the channel: each row then joins two of its legs, and the switch's own pairs join the rows. The serial log also prints every press and release, so an open button never says "down" and a shorted one says "down" once and never "up".
 
 With the buttons in, the screens are button-driven, as on the badge: A steps through words, QR at 6 px, QR at 5 px, waiting; B confirms where that means something, by partial refresh. After two idle minutes the panel sleeps and the next press redraws.
 
