@@ -14,13 +14,18 @@
 //   CS   -> D10          DC   -> D9
 //   RST  -> D8           BUSY -> D7
 //
-// It cycles these screens three times, printing each refresh time on the serial monitor at 115200,
-// then puts the panel to sleep. Press reset to run it again.
-//   1. The words screen: circle name, source label, six words, the confirm line.  Full refresh.
-//   2. The status line counting "commits 1/4" to "commits 4/4".                   Partial refresh.
-//   3. A version 4 QR at 6 px per module: the size the DIY guide says a phone reads at arm's length.
-//   4. The same QR at 5 px per module, which leaves a quiet zone of about three modules.
-//   5. The waiting screen: "touching..." / "wait for the buzz".
+// Two tactile switches, one leg to the pin and the other to GND, using the chip's pull-ups:
+//   A (next)    -> D2      B (confirm) -> D3
+// A four-pin switch has two pairs of legs joined inside it. Put the GND wire and the pin wire on
+// legs from different pairs; if they share a pair the sketch sees the button held down at boot and says so.
+//
+// The screens are button-driven, as on the badge. A steps through them, B confirms on the ones that take it.
+// Each refresh time is printed on the serial monitor at 115200.
+//   1. The words screen: circle name, source label, six words, the confirm line.  B: footer "confirmed", partial.
+//   2. A version 4 QR at 6 px per module: the size the DIY guide says a phone reads at arm's length.
+//   3. The same QR at 5 px per module, which leaves a quiet zone of about three modules.
+//   4. The waiting screen: "touching..." / "wait for the buzz".  B: counts "commits n/4" on the footer, partial.
+// After two idle minutes the panel sleeps; the next press redraws the screen.
 
 #include <GxEPD2_BW.h>
 #include <Fonts/FreeMono9pt7b.h>
@@ -28,11 +33,14 @@
 #include <Fonts/FreeMonoBold12pt7b.h>
 #include "FreeMonoBold10pt7b.h" // the words: FreeMono Bold 15% larger than the stock 9pt, see the README
 #include "qrcode.h" // the board package's generator, not the QRCode library
+#include "types.h"
 
 #define EPD_CS 10
 #define EPD_DC 9
 #define EPD_RST 8
 #define EPD_BUSY 7
+#define BTN_A 2 // next
+#define BTN_B 3 // confirm
 
 // The words font, 12 px per letter. The left column is left-aligned and the right column right-aligned,
 // so a row holds up to 15 letters plus a 4 px gap. The one pair that cannot fit, 8 + 8 letters, is 0.2%
@@ -181,39 +189,75 @@ static void showWaiting() {
   tock();
 }
 
+static Btn btnA = {BTN_A, "A", false, 0}, btnB = {BTN_B, "B", false, 0};
+
+// True once per press, on the press edge, with a 30 ms debounce.
+static bool pressed(Btn& b) {
+  bool now = digitalRead(b.pin) == LOW;
+  if (now != b.down && millis() - b.t > 30) {
+    b.down = now;
+    b.t = millis();
+    return now;
+  }
+  return false;
+}
+
+static Screen screen = SCREEN_WORDS;
+static int commits = 0;
+static uint32_t lastPress = 0;
+static bool asleep = false;
+
+static void show(Screen s) {
+  asleep = false;
+  switch (s) {
+    case SCREEN_WORDS: showWords(); break;
+    case SCREEN_QR6: showQr(6); break;
+    case SCREEN_QR5: showQr(5); break;
+    case SCREEN_WAITING: commits = 0; showWaiting(); break;
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   uint32_t until = millis() + 3000;
   while (!Serial && millis() < until) delay(10); // runs unattended too
-  Serial.println("cahoots screen bring-up: Nano ESP32 + Waveshare 1.54 V2");
+  Serial.println("cahoots screen bring-up: Nano ESP32 + Waveshare 1.54 V2, two buttons");
+  pinMode(BTN_A, INPUT_PULLUP);
+  pinMode(BTN_B, INPUT_PULLUP);
+  delay(50);
+  for (Btn* b : {&btnA, &btnB})
+    if (digitalRead(b->pin) == LOW)
+      Serial.printf("button %s reads held down at boot: its two wires are on legs that are joined inside the switch. Move one to the other pair.\n", b->name);
   // 1 MHz, not the library's 10 MHz: at 10 MHz nothing got through the module's level shifter and the
   // jumper wires, and every refresh "finished" in a few milliseconds with a blank panel. A frame is 5000
   // bytes, so 1 MHz costs 40 ms. Raise it later with short wires or a soldered build.
   display.epd2.selectSPI(SPI, SPISettings(1000000, MSBFIRST, SPI_MODE0));
   display.init(115200, true, 2, false); // 2 ms reset pulse: what Waveshare boards want
   display.setRotation(0);
+  show(screen);
+  lastPress = millis();
+  Serial.println("A: next screen. B: confirm.");
 }
 
 void loop() {
-  for (int cycle = 1; cycle <= 3; cycle++) {
-    Serial.printf("--- cycle %d\n", cycle);
-    showWords();
-    delay(6000);
-    for (int n = 1; n <= 4; n++) {
-      char s[20];
-      snprintf(s, sizeof s, "commits %d/4", n);
-      showStatus(s);
-      delay(1000);
-    }
-    delay(3000);
-    showQr(6);
-    delay(8000);
-    showQr(5);
-    delay(8000);
-    showWaiting();
-    delay(4000);
+  if (pressed(btnA)) {
+    lastPress = millis();
+    screen = (Screen)((screen + 1) % 4);
+    Serial.print("A -> ");
+    show(screen);
   }
-  display.hibernate();
-  Serial.println("done: panel asleep. Press reset to run again.");
-  while (true) delay(1000);
+  if (pressed(btnB)) {
+    lastPress = millis();
+    Serial.print("B -> ");
+    if (asleep) show(screen);
+    else if (screen == SCREEN_WORDS) showStatus("confirmed");
+    else if (screen == SCREEN_WAITING) { char s[20]; commits = commits % 4 + 1; snprintf(s, sizeof s, "commits %d/4", commits); showStatus(s); }
+    else Serial.println("nothing to confirm here");
+  }
+  if (!asleep && millis() - lastPress > 120000) {
+    display.hibernate();
+    asleep = true;
+    Serial.println("idle: panel asleep, the image stays. Any press redraws.");
+  }
+  delay(5);
 }

@@ -42,6 +42,19 @@ Two ways to join the sockets to the Nano's pins:
 
 Leave the two solder-pad settings on the back of the module as shipped: 4-wire SPI is what the sketch uses. The board's version is printed on the back too. From V2.1 it has a level shifter and runs from 3V3; if an older board shows nothing, move VCC to VUSB for 5 V, and leave every signal on 3.3 V pins. Nothing else goes near VUSB or VIN: the Nano's pins are not 5 V tolerant.
 
+## Buttons
+
+Two 6 mm tactile switches, the square ones with four legs. Each goes between a pin and GND, and the chip's internal pull-up does the rest: no resistor.
+
+| Button | Nano ESP32 pin | Meaning |
+|---|---|---|
+| A | D2 | next |
+| B | D3 | confirm |
+
+A four-pin switch has two pairs of legs joined inside it, and pressing joins the pairs. Legs that come out of the same edge are one pair. On a breadboard, set the switch across the centre channel so each pair sits on its own side; put the pin wire in a row on one side and the GND wire in a row on the other. If the two wires land on the same pair, the button reads pressed all the time, and the sketch says so on the serial monitor at boot.
+
+With the buttons in, the screens are button-driven, as on the badge: A steps through words, QR at 6 px, QR at 5 px, waiting; B confirms where that means something, by partial refresh. After two idle minutes the panel sleeps and the next press redraws.
+
 ## Running it
 
 In the Arduino IDE:
@@ -64,12 +77,12 @@ arduino-cli monitor -p /dev/cu.usbmodem* -c baudrate=115200
 
 ## What it shows, and what to write down
 
-The sketch runs three cycles of five screens, then puts the panel to sleep. Press reset to run it again.
+A steps through the screens. B confirms. The serial monitor prints what each press did and how long each refresh took.
 
 | Screen | Refresh | What to check |
 |---|---|---|
 | Words: circle name, tier label, six words in two columns, the confirm line | full | Can you read the six words from a normal reading distance? The layout is the site's render, `wordsScreen()` in `site/badge.js`, with the right column right-aligned. The font is FreeMono Bold at 12 px per letter and 17% taller than the stock 9pt, generated into `FreeMonoBold10pt7b.h`; a row holds 15 letters, and the one pair that cannot fit, 8 + 8 letters, drops that screen to the stock 9pt. `WORD_FONT` and `WORD_FONT_SMALL` in the sketch pick both. |
-| Status line counting "commits 1/4" to "4/4" | partial, footer band only | How long does a partial refresh take, and does the rest of the screen flicker? This is what `show_status()` does during a ceremony. |
+| B on the words screen writes "confirmed" on the footer; B on the waiting screen counts "commits 1/4" to "4/4" | partial, footer band only | How long does a partial refresh take, and does the rest of the screen flicker? This is what `show_status()` does during a ceremony. |
 | Version 4 QR at 6 px per module, 198 px wide | full | The DIY guide's claim: a phone reads it at arm's length. Try a phone camera from 60 cm. The quiet zone is only the panel's bezel. |
 | The same QR at 5 px per module, 165 px wide | full | The fallback if the first needs a real quiet zone. |
 | Waiting: "touching..." / "wait for the buzz" | full | Legibility of the ceremony prompt. |
