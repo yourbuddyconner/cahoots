@@ -48,3 +48,12 @@ The base64url message can be pasted into the browser app (Read a message) or pos
 ## Ring driver notes
 
 Writes on the socket link never block. Bytes that do not fit the socket buffer are queued and flushed on every later call. The ring driver keeps reading while it flushes its last forwarded frames before it finishes, so a device that completes first never strands its neighbour. Both behaviours are what a UART driver with a DMA ring buffer needs too.
+
+## A pile on the laptop, with a real board on top
+
+```sh
+cargo run -p cahoots-host -- pile --cards 3 --state /tmp/pile                       # three simulated cards
+cargo run -p cahoots-host -- pile --cards 3 --serial /dev/cu.usbmodem* --state /tmp/pile   # two simulated, a board on top
+```
+
+`pile` stacks cards on Unix sockets, bottom first, and runs `hal::pile` discovery on each: the bottom card names the circle, the top card presses B. With `--serial`, the top simulated card's up link is that serial port and a real badge is the top card; its button starts the count. `SerialLink` mirrors `SocketLink` and adds what a USB port needs: a `Ping` frame twice a second so the board can tell the laptop is there, and the board's `Log` frames printed here as `[board] ...`.

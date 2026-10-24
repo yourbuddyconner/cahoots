@@ -11,4 +11,5 @@ pub mod device;
 pub mod display;
 mod font;
 pub mod link;
+pub mod pile;
 pub mod store;

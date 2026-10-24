@@ -73,6 +73,17 @@ impl Device {
                 std::thread::sleep(std::time::Duration::from_millis(1))
             })
             .map_err(DeviceError::Ring)?;
+        Self::from_result(dir, params, index, &result)
+    }
+
+    /// Persist a finished ceremony under `dir` and open the device on it.
+    pub fn from_result(
+        dir: &Path,
+        params: CircleParams,
+        index: u8,
+        result: &cahoots_core::ceremony::CeremonyResult,
+    ) -> Result<Self, DeviceError> {
+        std::fs::create_dir_all(dir)?;
         let store = FilePadStore::create(&dir.join("pad.bin"), &result.pad)?;
         let records = FileRecordStore::create(&dir.join("ledger.bin"), LEDGER_BYTES)?;
         let ledger = PersistentLedger::open(records, params.slices())

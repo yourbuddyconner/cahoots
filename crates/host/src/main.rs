@@ -6,7 +6,11 @@
 //! cahoots-host send --state /tmp/dev0 --text "hello"
 //! cahoots-host recv --state /tmp/dev3 --message <base64url>
 //! cahoots-host status --state /tmp/dev0
+//! cahoots-host pile --cards 3 --state /tmp/pile [--serial /dev/cu.usbmodem...] [--name sf] [--pad-len 16384]
 //! ```
+//!
+//! `pile` runs a stack of cards on this machine, bottom first, over Unix sockets. With
+//! `--serial`, the top card is a real board on that port and `--cards` counts it.
 
 use base64::Engine;
 use cahoots_core::message::MessageType;
@@ -82,7 +86,7 @@ fn connect_ring(listen: &str, next: &str) -> std::io::Result<(SocketLink, Socket
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let Some(cmd) = argv.first().cloned() else {
-        eprintln!("usage: cahoots-host <ceremony|send|recv|status> ...");
+        eprintln!("usage: cahoots-host <ceremony|pile|send|recv|status> ...");
         std::process::exit(2);
     };
     let args = Args(argv[1..].to_vec());
@@ -155,6 +159,23 @@ fn main() {
                     })
                     .map_err(|e| e.to_string())
             })
+        }
+        "pile" => {
+            let cards: usize = args.req("--cards").parse().expect("--cards");
+            let pad_len: u32 = args
+                .get("--pad-len")
+                .map(|s| s.parse().expect("--pad-len"))
+                .unwrap_or(16 * 1024);
+            let name = args.get("--name").unwrap_or("cahoot").to_string();
+            let state = PathBuf::from(args.req("--state"));
+            let seed = args.get("--seed").map(|s| s.parse().expect("--seed"));
+            cahoots_host::pile::run_pile(cards, args.get("--serial"), &name, pad_len, &state, seed)
+                .map(|devices| {
+                    for (i, d) in devices.iter().enumerate() {
+                        println!("card{i} seat {i} circle_id {} words {}", hex(&d.circle_id()), d.check_words().join(" "));
+                    }
+                })
+                .map_err(|e| e.to_string())
         }
         "status" => {
             let state = PathBuf::from(args.req("--state"));

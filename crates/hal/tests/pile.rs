@@ -110,3 +110,51 @@ fn a_pile_of_four_completes_a_ceremony() {
         assert_eq!(r.check_words, words);
     }
 }
+
+/// A `Ping` or `Log` frame on a link is ignored: it is a presence beacon or a log line, not a
+/// pile message, so it must not disturb the seats or raise an error.
+#[test]
+fn ping_and_log_frames_are_ignored_by_the_pile() {
+    use cahoots_core::frame::{encode, Frame};
+    use cahoots_hal::pile::{KIND_LOG, KIND_PING};
+    let (lower, upper) = cable();
+    let inject_into_card1 = upper.rx.clone();
+    let inject_into_card0 = lower.rx.clone();
+    let mut cards = vec![
+        Pile::new(open_end(), lower, "card0", 4096, false),
+        Pile::new(upper, open_end(), "card1", 4096, false),
+    ];
+    settle(&mut cards);
+    assert_eq!(cards[1].seat(), Some(1));
+    for (kind, body) in [(KIND_PING, &b""[..]), (KIND_LOG, &b"hello from a board"[..])] {
+        let bytes = encode(&Frame { kind, seq: 7, payload: body });
+        inject_into_card0.borrow_mut().extend(bytes.iter().copied());
+        inject_into_card1.borrow_mut().extend(bytes.iter().copied());
+    }
+    settle(&mut cards);
+    assert_eq!(cards[0].seat(), Some(0));
+    assert_eq!(cards[1].seat(), Some(1));
+    assert!(cards.iter().all(|c| c.count().is_none()));
+}
+
+/// A boxed link behaves like the link it holds, so one pile can mix link types.
+#[test]
+fn a_pile_can_be_built_from_boxed_links() {
+    use cahoots_hal::Link;
+    let (lower, upper) = cable();
+    let down0: Box<dyn Link> = Box::new(open_end());
+    let up0: Box<dyn Link> = Box::new(lower);
+    let down1: Box<dyn Link> = Box::new(upper);
+    let up1: Box<dyn Link> = Box::new(open_end());
+    let mut cards = [
+        Pile::new(down0, up0, "card0", 4096, false),
+        Pile::new(down1, up1, "card1", 4096, false),
+    ];
+    for _ in 0..20 {
+        for c in cards.iter_mut() {
+            c.poll().unwrap();
+        }
+    }
+    assert_eq!(cards[0].seat(), Some(0));
+    assert_eq!(cards[1].seat(), Some(1));
+}

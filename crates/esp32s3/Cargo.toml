@@ -1,0 +1,30 @@
+[package]
+name = "cahoots-esp32s3"
+description = "Cahoots badge firmware for the ESP32-S3: the Arduino Nano ESP32 with the Waveshare 1.54\" e-paper and two buttons."
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+cahoots-core = { path = "../core", default-features = false }
+cahoots-hal = { path = "../hal" }
+critical-section = "1.2.0"
+embedded-graphics = "0.8.2"
+embedded-hal = "1.0.0"
+embedded-hal-bus = "0.3.0"
+epd-waveshare = "0.6.0"
+esp-alloc = { version = "0.11.0", features = ["esp32s3"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
+esp-hal = { version = "1.2.2", features = ["esp32s3", "unstable"] }
+esp-storage = { version = "0.10.0", features = ["esp32s3"] }
+
+[profile.release]
+opt-level = "s"
+debug = true
+codegen-units = 1
+lto = "fat"
+
+[profile.dev]
+opt-level = "s"
+debug = true

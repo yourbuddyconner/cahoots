@@ -85,3 +85,20 @@ pub trait Link {
         true
     }
 }
+
+/// A boxed link is a link, so a device can hold links of different kinds: a cable to one
+/// neighbour and a serial port to a laptop standing in for the rest of the pile.
+impl<L: Link + ?Sized> Link for alloc::boxed::Box<L> {
+    fn send(&mut self, frame: &[u8]) {
+        (**self).send(frame)
+    }
+    fn recv(&mut self, buf: &mut [u8]) -> usize {
+        (**self).recv(buf)
+    }
+    fn peer_present(&self) -> bool {
+        (**self).peer_present()
+    }
+    fn flush(&mut self) -> bool {
+        (**self).flush()
+    }
+}

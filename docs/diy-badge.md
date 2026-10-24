@@ -7,6 +7,7 @@ Two hardware families come first. More can follow.
 | Family | Board | What it is for | Tier | When |
 |---|---|---|---|---|
 | **Baochip** (native, fully supported) | Dabao evaluation board, Baochip-1x | The badge we stand behind. RISC-V, a hardware key store, on-chip RRAM, silicon you can inspect. No radio. | T3; T4 for anyone who inspects the chip | Boards ship 15 December 2026 |
+| **ESP32-S3** (tinkering, first firmware) | Arduino Nano ESP32 | The board on the bench, so the firmware runs here first: `crates/esp32s3`, with the 1.54" module and two tactile switches wired as in [hardware/nano-esp32-epaper](../hardware/nano-esp32-epaper/README.md). Radio present, off by firmware; pad plaintext on flash until flash encryption is turned on. | T2 | Now |
 | **Raspberry Pi Pico** (tinkering) | Pico 2 or Pico 2 W, RP2350 | Buy it today anywhere. Wi-Fi on the W for tinkering, a huge ecosystem, WebUSB to the phone. Needs a $5 secure element to be honest about its tier. | T2 | Now |
 
 Both run the same Rust core and the same ceremony. Both are USB devices, so the browser app can drive either one. The RP2350 can boot its RISC-V cores instead of its Arm cores, so the firmware can be RISC-V on both.
@@ -123,7 +124,7 @@ Every member holds the whole pad, and the pad is too big for any secure element.
 
 ## Adding a family
 
-Implement the four HAL traits (`Entropy`, `PadStore`, `Display`, `Link`) in a crate for the board. Run the device suite against the host simulator: a board passes by completing a ring ceremony with simulated peers and producing the right six words. Write the crate's README with the tier the board earns and why, judged by what its storage and boot chain can actually do, not by what the crate claims. The ESP32-S3 target that was planned first is one such family and stays in the tree.
+Implement the four HAL traits (`Entropy`, `PadStore`, `Display`, `Link`) in a crate for the board. Run the device suite against the host simulator: a board passes by completing a ring ceremony with simulated peers and producing the right six words. Write the crate's README with the tier the board earns and why, judged by what its storage and boot chain can actually do, not by what the crate claims. The ESP32-S3 crate is the first of these to run on real hardware; its four implementations are the template for the Pico's.
 
 ## Open questions
 

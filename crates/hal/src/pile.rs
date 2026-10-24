@@ -18,6 +18,8 @@
 //! | `Hello` 16 | none |
 //! | `Seat` 17 | `seat u8 \| pad_len u32 LE \| agent u8 \| name` |
 //! | `Count` 18 | `n u8` |
+//! | `Ping` 30 | none. A presence beacon for links with no detect line, such as a USB serial port: the side that can see the port is open sends one now and then, and the other side treats a recent `Ping` as "plugged in". Both layers ignore it. |
+//! | `Log` 31 | UTF-8 text. A line of the sender's log, for a host on the other end of the cable to print. Both layers ignore it. |
 
 use crate::ring::{RingCeremony, RingError};
 use crate::{Entropy, Link};
@@ -32,6 +34,8 @@ pub const KIND_FIRST: u8 = 16;
 pub const KIND_HELLO: u8 = 16;
 pub const KIND_SEAT: u8 = 17;
 pub const KIND_COUNT: u8 = 18;
+pub const KIND_PING: u8 = 30;
+pub const KIND_LOG: u8 = 31;
 
 const DOWN: usize = 0;
 const UP: usize = 1;

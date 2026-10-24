@@ -1,7 +1,81 @@
-# ESP32-S3 target (M4b)
+# ESP32-S3 badge firmware
 
-Planned: `esp-hal` + Embassy `no_std` firmware for the ESP32-S3-DevKitC-1 (N8R8) and the Arduino Nano ESP32, selected by Cargo feature. Built outside the workspace with the esp toolchain. Flash with `espflash`.
+The Cahoots badge on an Arduino Nano ESP32: the ESP32-S3 with 16 MB of flash, the Waveshare 1.54" V2 e-paper, two tactile switches, and the USB-C port as the link to a laptop. It runs the same `cahoots-hal` pile and ceremony code as the desktop simulator; only the four trait implementations are this board's. The design is in [docs/superpowers/specs/2026-10-23-esp32s3-firmware-design.md](../../docs/superpowers/specs/2026-10-23-esp32s3-firmware-design.md).
 
-Randomness gotcha to document and enforce: the S3 hardware RNG is true random only while an entropy source runs. Use `esp_hal::rng::Trng` with the ADC noise source on, keep the radio off, and run the SP 800-90B health tests. Not started.
+This is the first firmware board because it is the one on the bench. The Pico family in [Build a badge](../../docs/diy-badge.md) comes next as a port of `display.rs`, `link.rs`, `store.rs` and `entropy.rs`.
 
-Hardware on hand: an Arduino Nano ESP32 and the Waveshare 1.54" V2 panel. The screen bring-up sketch for that pair, with wiring, is in [hardware/nano-esp32-epaper](../../hardware/nano-esp32-epaper/README.md).
+## Wiring
+
+The same as the bring-up sketch in [hardware/nano-esp32-epaper](../../hardware/nano-esp32-epaper/README.md), diagram included there.
+
+| Function | Nano pin | GPIO |
+|---|---|---|
+| e-paper CLK, DIN | D13, D11 | 48, 38 |
+| e-paper CS, DC, RST, BUSY | D10, D9, D8, D7 | 21, 18, 17, 10 |
+| button A (next), B (confirm), to GND | D2, D3 | 5, 6 |
+| link to the laptop | USB-C | USB-Serial-JTAG |
+
+## What the board does
+
+1. **Self-test** on the screen and in the log: the random source through the SP 800-90B health tests, a flash sector erased, programmed and read back, the buttons, and whether a circle is stored. Holding A through the self-test forgets the stored circle.
+2. **If a circle is stored**, it recomputes the six words from the pad on flash and shows them.
+3. **Pile.** The board waits for a pile below it on the USB link. A laptop running `cahoots-host pile --serial` stands in for the other cards. The board is the top card: when its seat appears on the status line, press B and it counts the pile.
+4. **Ceremony.** The status line shows commits and reveals arriving; the six words appear. B keeps the circle, writing the pad to flash with the ledger and the circle record; A discards it.
+
+## Build
+
+Needs the `esp` toolchain from [espup](https://github.com/esp-rs/espup) and `espflash`:
+
+```sh
+cargo install espup espflash
+espup install --targets esp32s3 --export-file ~/.cargo/esp-env.sh
+source ~/.cargo/esp-env.sh        # every new shell: puts the Xtensa linker on PATH
+cd crates/esp32s3
+cargo build --release             # rust-toolchain.toml selects the esp channel
+```
+
+The crate is outside the workspace because the Xtensa target needs that toolchain.
+
+## Flash
+
+The first time, the chip must be in its ROM download mode, because the board ships with Arduino's bootloader, which only speaks DFU:
+
+1. Unplug USB. Connect **B1** (left header, pin 13 from the USB end) to **GND** with a jumper.
+2. Plug USB in. Remove the jumper. The Mac now sees a "USB JTAG/serial debug unit".
+3. `cargo run --release` flashes through espflash and opens its monitor. Quit the monitor with Ctrl-C; the badge needs the port for `cahoots-host`.
+
+After that, espflash resets the board into download mode by itself over the same port.
+
+Flashing replaces the Arduino bootloader. To run the Arduino bring-up sketch again, put the board in ROM download mode as above and run `arduino-cli burn-bootloader -b arduino:esp32:nano_nora -p <port>`, or the IDE's Tools > Burn Bootloader.
+
+## Run a ceremony with the laptop as the pile
+
+```sh
+cargo run -p cahoots-host -- pile --cards 3 --serial /dev/cu.usbmodem* --name bench --state /tmp/pile
+```
+
+The laptop runs two simulated cards, bottom first, with the serial port as the top simulated card's up link; the board is card 3. On the board, wait for "seat 2" on the status line, press B, watch the commits and reveals count up, read the words, and press B to keep them. The host prints each simulated card's words and circle id; they match the glass. The board's log lines arrive on the same port and the host prints them as `[board] ...`.
+
+## The link over USB
+
+A USB port has no detect line, so `peer_present` on the board is "a frame arrived in the last two seconds", and the host's `SerialLink` sends a `Ping` frame (kind 30) twice a second. The board's log lines travel as `Log` frames (kind 31) on the same port. Both the pile layer and the ceremony driver ignore those two kinds.
+
+## Flash layout
+
+`partitions.csv` reserves three regions, read and written by address through `esp-storage`:
+
+| Region | Offset | Size | What |
+|---|---|---|---|
+| pad | 0x300000 | 1 MiB | the pad, written once onto erased sectors; spent ranges are programmed to zero in place |
+| ledger | 0x400000 | 64 KiB | `hal::ledger` records, 16 bytes each, appended onto erased flash |
+| circle | 0x410000 | 4 KiB | params, seat and circle id |
+
+The pad is plaintext on flash. Flash encryption and secure boot are one-way eFuse operations and wait for Conner's sign-off, so the board is tier 2: a hardware random source with health tests, no radio during a ceremony because no radio code is linked, and a pad that a reader with physical access can copy.
+
+## Randomness
+
+The ESP32-S3's RNG is a true random source only while an entropy source feeds it. `main` keeps `TrngSource` alive with the ADC noise source on for the whole run and reads through `Trng`, wrapped in `hal::health::Tested` with a claimed min-entropy of 6 bits per byte. That claim has not been estimated yet; a `trng-dump` mode over the link, run through SP 800-90B's estimator, is the follow-up.
+
+## Not yet
+
+A UART link to a second board, PIN entry, the QR screen (drawn as text until something calls it), PSRAM, the second button's long-press menu.
