@@ -27,6 +27,8 @@ A few terms repeat below. The [glossary](glossary.md) defines all of them. The o
 
 ## Hardware
 
+*How the badge gets from a breadboard to a board you can order is in [manufacturing](manufacturing.md).*
+
 Goal: a badge you can hold, that makes the secret in a room and never puts it on a network.
 
 | Milestone | What it delivers | Done when | Status |
