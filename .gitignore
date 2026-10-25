@@ -17,6 +17,8 @@ out/
 /site/blog/index.html
 /site/blog/feed.xml
 /site/blog/*/
+!/site/blog/img/
+/site/docs/diagrams
 /site/og/blog*.html
 /site/assets/og-blog*.png
 /site/assets/hero-blog*.png
