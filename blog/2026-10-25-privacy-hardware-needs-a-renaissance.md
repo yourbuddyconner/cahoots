@@ -55,8 +55,14 @@ For a person, that means being able to keep things between you and the people yo
 
 The tools are there. The knowledge is learnable. What's been missing is the first step, and the habit.
 
-## In public
+## What comes next
 
-I'm building Cahoots in the open. The protocol, the code, the hardware, and the mistakes. I'd rather be corrected early than wrong for a long time. And I don't think I'm the only one who felt this shift in the last few weeks.
+This post is the why. The rest of this blog is the how, and the how is mostly hardware.
 
-If you did too, come along. The site is at [cahoots.network](https://cahoots.network). Everything is there.
+A phone can run Cahoots today, and the browser app proves the protocol works. But a phone is a general-purpose computer with a radio, a cloud account, and a few hundred apps that would love to know what it's doing. Privacy hardware has a different job: do one thing, hold one secret, and give an attacker as little surface as possible. That means a device with no network, a screen you can read, a button you can press, and a way to hand randomness to the device next to it with nothing in between. It also means parts you can buy, a board you can inspect, and a design you can build yourself.
+
+That is a harder problem than it sounds, and it has had very little attention outside of wallets and login keys. Those got us partway. I think it's time for another run at it.
+
+So the next post starts the series on getting the badge manufactured. It covers the design of the first board and the constraints that shaped it: what privacy hardware has to do differently from everything else on your desk, which of those constraints are physics and which are habit, and the tradeoffs I made for a first run.
+
+If you've built hardware like this, or tried to, I'd like to hear what you ran into. The code and the board files are on [GitHub](https://github.com/yourbuddyconner/cahoots), and the mistakes will be here.
