@@ -25,19 +25,24 @@ Yes, we design a PCB. In fact we design two: V1 soon, a simple board to learn th
 
 **Power.** The 3 mm card assumed a CR2016 coin cell, because a ceremony is a few seconds of compute and e-paper draws only when it changes. But a CR2016 delivers a few milliamps continuously and short pulses of perhaps twenty; an ESP32-S3 at full clock draws tens of milliamps for the seconds the ceremony takes, and the panel draws about twenty for two seconds per refresh. The numbers may still work with a slower clock and a capacitor to cover the peaks, or they may not. Card-format products with displays use thin rechargeable pouch cells, half a millimetre to a millimetre and a half thick, charged through the same pads the dock uses. The measurement that decides this is one afternoon with a current meter on the Nano during a ceremony and a refresh. Until it is done, the battery, and with it the thickness, is open.
 
-**Chip.** The product is designed around the Baochip-1x, which is why its tier is what it is: a hardware key store, on-chip memory, no radio. Those boards ship in December 2026, and the card cannot be laid out until the package height and the power draw are in hand. The ESP32-S3 is what we have now, and it has two problems for the card: the certified module is 3.2 mm tall on its own, and a bare chip needs its own flash, a crystal and a four-layer board. So the ESP32-S3 is the chip for V1, and the Baochip is the chip for V2, unless December brings a surprise.
+**Chip.** The product is designed around the Baochip-1x, which is why its tier is what it is: a hardware key store, on-chip memory, no radio. Those boards ship in December 2026, and the card cannot be laid out until the package height and the power draw are in hand. The ESP32-S3 is what we have now, and it has two problems for the card: the certified module is 3.2 mm tall on its own, and a bare chip needs its own flash, a crystal and a four-layer board. So the ESP32-S3 is the chip we learned on, the RP2350 is the chip for V1, and the Baochip is the chip for V2, unless December brings a surprise.
 
 ## V1
 
-The first badge we can order: a complete badge, designed now with low risk, even if it is not a thin one. About 8 mm thick, 54 × 86 mm, two layers.
+The first badge we can order: a complete badge, designed now with low risk, even if it is not a thin one. 54 × 86 mm, two copper layers, about 6 mm thick with the panel on top.
 
-- The ESP32-S3-WROOM-1 module: certified, in every assembler's library, the same chip the firmware runs on today.
+The chip is the RP2350, as the roadmap decided for the tinkering family, and it arrives on V1 as a whole Raspberry Pi Pico 2 soldered flat onto our board through its castellated edges. That keeps every chip-level question off V1: the Pico 2 brings its own crystal, flash, regulator, USB-C and ROM bootloader, Raspberry Pi has done the layout, and the part costs five dollars from anyone. Our board is then a connector board: the panel, the buttons, the battery, the pile contacts, and a footprint for the Pico 2. If the bare RP2350 is in the assembler's stock when V2 comes, that is when it goes on a board directly.
+
+Why the RP2350 and not the ESP32-S3 the firmware runs on today: it has no radio, so "no radio during the ceremony" is a fact about the silicon; it has a hardware random source, signed boot, one-time-programmable key storage and glitch detectors; it draws about half the current under load and sleeps in microamps; and Rust targets it upstream, with drag-and-drop flashing over USB. The port is the four board modules, since the display driver and the pile and ceremony code are shared. The ESP32-S3 boards stay as the second family in the pile.
+
+- A Pico 2, the plain one without headers and without the wireless chip, soldered down.
 - The raw 1.54" panel, the GDEH0154D67 from Good Display, on its 24-pin flex connector, with the boost circuit from the open reference schematics. The same panel as the Waveshare module, five to seven dollars.
-- Two tactile switches, a CR2032 holder for the prototype, a USB-C for flashing and the dock.
+- Two tactile switches, a CR2032 holder for the prototype. The Pico's USB-C is the flashing and dock port.
 - Four gold pads on the face at the contacts end, four spring contacts underneath, four magnet pockets in the tray: the pile mechanics, so they get tested on real cards before the thin one is designed.
 - A lanyard slot, and a clear tray printed in resin.
+- Open: whether an Infineon Trust M goes on V1 for a wrapping key that never leaves a chip, as the DIY guide's Pico kit has it. The same decision as flash encryption on the ESP32, settled before V1 is laid out.
 
-Cost for ten: about $40 to $60 a badge, plus the mechanical prototypes. Time: a week to design, three weeks per spin, two spins. I can draft the schematic, the bill of materials and a first layout in KiCad; you review, order and build the first one on the bench. What it buys: a meetup with ten real badges, the pile ritual tested with magnets and pads, and the whole process learned on something forgiving.
+Cost for ten: about $35 to $50 a badge, plus the mechanical prototypes. Time: a week to design, three weeks per spin, two spins. I draft the schematic, the bill of materials and a first layout in KiCad; you review, order and build the first one on the bench. What it buys: a meetup with ten real badges, the pile ritual tested with magnets and pads, and the whole process learned on something forgiving.
 
 ## V2: the card
 
@@ -55,8 +60,9 @@ What the unit costs at five hundred: a bill of materials around $25 to $35, so a
 ## In what order
 
 1. Finish the firmware on the Nano and run the first ceremony with the laptop as the pile. In progress.
-2. Measure power during a ceremony and a refresh. One afternoon. Decides the battery and the thickness.
-3. Design and order V1. Ten units for the first meetup, the pile mechanics tested for real.
-4. December: Dabao boards arrive. Port the firmware; measure the Baochip's power and height.
-5. Brief a hardware engineer for V2 with the measurements, the V1 lessons and the benchmark from the DIY guide. Three spins.
-6. Crowd Supply for the first run.
+2. Order a Pico 2 and port the four board modules to it: the USB link, the flash store, the random source, the pins. A week.
+3. Measure power during a ceremony and a refresh, on both chips. One afternoon. Decides the battery and the thickness.
+4. Design and order V1 around the Pico 2 footprint. Ten units for the first meetup, the pile mechanics tested for real.
+5. December: Dabao boards arrive. Port the firmware; measure the Baochip's power and height.
+6. Brief a hardware engineer for V2 with the measurements, the V1 lessons and the benchmark from the DIY guide. Three spins.
+7. Crowd Supply for the first run.
