@@ -13,7 +13,7 @@ CLI = "/Applications/KiCad.app/Contents/MacOS/kicad-cli"
 board = pcbnew.LoadBoard(os.path.join(HERE, "v1.kicad_pcb"))
 
 def group_of(k, f):
-    return ("lid" if "lid.wrl" in f else "tray" if "tray.wrl" in f else "panel" if "panel.wrl" in f
+    return ("lid" if "lid.wrl" in f else "tray" if "tray.wrl" in f or "pogo_pads.wrl" in f else "panel" if "panel.wrl" in f
             else "magnet" if "magnet.wrl" in f else "cell" if "cell.wrl" in f else "board")
 
 base = {(fp.GetReference(), k): (m.m_Offset.x, m.m_Offset.z) for fp in board.GetFootprints() for k, m in enumerate(fp.Models())}

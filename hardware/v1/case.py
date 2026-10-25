@@ -29,6 +29,7 @@ z_floor_top = z_board_bottom - C["below"]
 z_floor_bottom = z_floor_top - C["floor"]
 z_wall_top = C["above"]                      # the tray's wall ends where the lid plate begins
 z_lid_top = z_wall_top + C["lid_t"]
+z_skirt_bottom = z_wall_top - C["skirt"]
 
 def rrect(w, h, r, z0, z1):
     return cq.Workplane("XY").workplane(offset=z0).rect(w, h).extrude(z1 - z0).edges("|Z").fillet(r)
@@ -46,23 +47,26 @@ tray = tray.cut(rrect(BW + 2 * C["gap"], BH + 2 * C["gap"], R + C["gap"], z_boar
 # magnet pockets in the floor's outer face
 for (x, y) in D.MAGNETS:
     tray = tray.cut(cq.Workplane("XY").workplane(offset=z_floor_bottom - 0.01).center(x, y).circle(C["magnet_d"] / 2).extrude(C["magnet_t"]))
-# a window in each end wall: the pogo half's body crosses the wall so its face sits flush with the lid's
-# skirt; at the bottom end the window also takes the two JST cables
-for sy, w in ((1, C["end_w_top"]), (-1, C["end_w_bottom"])):
-    tray = tray.cut(cq.Workplane("XY").workplane(offset=-0.2).center(0, sy * (TH / 2 - C["wall"] / 2)).rect(w, C["wall"] + 1).extrude(C["end_h"] + 0.2))
+# two openings in the end wall for the port cables, from the board's face up through the wall top
+for x in D.PORTS.values():
+    tray = tray.cut(cq.Workplane("XY").workplane(offset=-0.2).center(x, -TH / 2 + C["wall"] / 2).rect(C["port_w"], C["wall"] + 1).extrude(z_wall_top + 1))
+# the window in the floor the pad half sits in, face down and flush with the outside
+pw_, ph_ = C["pogo_win"]
+pogo_c = (0, D.POGO_Y + D.POGO["d"] / 2 - D.POGO["pin_to_back"])
+tray = tray.cut(cq.Workplane("XY").workplane(offset=z_floor_bottom - 1).center(*pogo_c).rect(pw_, ph_).extrude(C["floor"] + 2))
 # a notch in the right wall for the Pico's USB socket
 ux, uy, uw, uh = C["usb"]
 tray = tray.cut(cq.Workplane("XY").workplane(offset=z_board_bottom - uh).center(ux + C["gap"] + C["wall"] / 2, uy).rect(C["wall"] + C["gap"] + 2, uw).extrude(uh + 0.5))
 # four windows in the wall for the lid's snaps: through the wall, 1.6 above the board, two per long side
-snap_z0 = 1.4
+snap_z0 = C["snap_z"]
 for sx in (-1, 1):
     for sy in (-24.0, 24.0):
         tray = tray.cut(cq.Workplane("XY").workplane(offset=snap_z0).center(sx * (TW / 2 - C["wall"] / 2), sy).rect(C["wall"] + 1, C["snap_w"] + 0.4).extrude(1.4))
 
 # ---------- the lid ----------
-lid = rrect(LW, LH, LR, 0.0, z_lid_top)
+lid = rrect(LW, LH, LR, z_skirt_bottom, z_lid_top)
 # hollow: the skirt wraps the tray wall, the plate sits on the wall top
-lid = lid.cut(rrect(TW + 2 * C["skirt_gap"], TH + 2 * C["skirt_gap"], TR + C["skirt_gap"], -1, z_wall_top))
+lid = lid.cut(rrect(TW + 2 * C["skirt_gap"], TH + 2 * C["skirt_gap"], TR + C["skirt_gap"], z_skirt_bottom - 1, z_wall_top))
 # the panel window: a rabbet 1 mm deep the panel glues into, glass flush with the top; the inner
 # opening shows the active area with a 1.5 mm lip holding the glass
 pc, pw, ph = D.PANEL["center"], D.PANEL["w"], D.PANEL["h"]
@@ -78,9 +82,12 @@ for ref in ("SW2", "SW3"):
 # magnet pockets in the lid top
 for (x, y) in D.MAGNETS:
     lid = lid.cut(cq.Workplane("XY").workplane(offset=z_lid_top - C["magnet_t"]).center(x, y).circle(C["magnet_d"] / 2).extrude(C["magnet_t"] + 0.01))
-# the end windows continue through the lid's skirt
-for sy, w in ((1, C["end_w_top"]), (-1, C["end_w_bottom"])):
-    lid = lid.cut(cq.Workplane("XY").workplane(offset=-0.2).center(0, sy * (LH / 2 - C["skirt_t"] / 2)).rect(w, C["skirt_t"] + 1).extrude(C["end_h"] + 0.2))
+# the cable openings continue through the lid's skirt, and the socket bodies (4.3 tall) rise into windows in the plate
+for x in D.PORTS.values():
+    lid = lid.cut(cq.Workplane("XY").workplane(offset=-0.2).center(x, -LH / 2 + C["skirt_t"] / 2).rect(C["port_w"], C["skirt_t"] + 1).extrude(C["port_h"] + 0.2))
+    lid = lid.cut(cq.Workplane("XY").workplane(offset=z_wall_top - 1).center(x, D.PORT_Y).rect(C["port_w"], 7.0).extrude(C["lid_t"] + 2))
+# the window the pin half's body rises into, its face just under the lid's top and its pins above it
+lid = lid.cut(cq.Workplane("XY").workplane(offset=z_wall_top - 1).center(*pogo_c).rect(pw_, ph_).extrude(C["lid_t"] + 2))
 # the snaps: bumps on the skirt's inner face that drop into the tray's windows
 for sx in (-1, 1):
     for sy in (-24.0, 24.0):
@@ -93,7 +100,7 @@ for sx in (-1, 1):
         lid = lid.union(bump)
         # a slit each side of the bump so that part of the skirt can flex
         for dy in (-1, 1):
-            lid = lid.cut(cq.Workplane("XY").workplane(offset=-1).center(x_in + sx * C["skirt_t"] / 2, sy + dy * (C["snap_w"] / 2 + 0.6)).rect(C["skirt_t"] + 1, 0.6).extrude(C["skirt"] + 0.5))
+            lid = lid.cut(cq.Workplane("XY").workplane(offset=z_skirt_bottom - 0.5).center(x_in + sx * C["skirt_t"] / 2, sy + dy * (C["snap_w"] / 2 + 0.6)).rect(C["skirt_t"] + 1, 0.6).extrude(C["skirt"] + 0.5))
 # ribs that hold the board down onto the tray's ledge at its corners (clear of the magnet holes)
 for (x, y) in [(-24.5, 30), (24.5, 30), (-24.5, -30), (24.5, -30)]:
     lid = lid.union(cq.Workplane("XY").workplane(offset=0).center(x, y).rect(3.0, 6.0).extrude(z_wall_top))
@@ -112,4 +119,4 @@ def export(shape, name, rgb, alpha):
 export(tray, "tray", "0.88 0.92 0.97", 0.72)
 export(lid, "lid", "0.88 0.92 0.97", 0.72)
 print(f"tray {TW:.1f} x {TH:.1f} x {z_wall_top - z_floor_bottom:.1f} mm, lid {LW:.1f} x {LH:.1f}, badge {LW:.1f} x {LH:.1f} x {z_lid_top - z_floor_bottom:.1f} mm")
-print(f"pogo faces flush with the lid skirt at y = ±{LH / 2:.2f}; pin rows at ±{D.POGO_Y:.2f}")
+print(f"pogo pins stand {D.POGO['tall'] + 1.4 - z_lid_top:.1f} mm above the lid; the pad half's face is flush with the floor at z {z_floor_bottom:.1f}")

@@ -48,16 +48,27 @@ def custom_footprint(name):
         pad.SetNumber("1"); pad.SetShape(pcbnew.PAD_SHAPE_CIRCLE); pad.SetAttribute(pcbnew.PAD_ATTRIB_SMD)
         pad.SetSize(MM(2.4, 2.4)); pad.SetLayerSet(lset(pcbnew.F_Cu, pcbnew.F_Mask, pcbnew.F_Paste))
         fp.Add(pad)
-    elif name == "Pogo_MG05254_RA_1x05":
-        # Yiwei MG05254 right angle, pin or pad half: five 0.8 mm pins on 2.54, the face 5.4 mm toward +y
+    elif name == "Pogo_MG005_1x05":
+        # Weilichuang MG005 straight pin half: five 1.0 mm pins on 2.54, the body 1.75 behind and 2.45 ahead of the pin row (design +y)
         for i in range(5):
             pad = pcbnew.PAD(fp); pad.SetNumber(str(i + 1)); pad.SetShape(pcbnew.PAD_SHAPE_CIRCLE); pad.SetAttribute(pcbnew.PAD_ATTRIB_PTH)
-            pad.SetSize(MM(1.8, 1.8)); pad.SetDrillSize(MM(0.8, 0.8)); ls = pcbnew.LSET.AllCuMask(); ls.addLayer(pcbnew.F_Mask); ls.addLayer(pcbnew.B_Mask); pad.SetLayerSet(ls)
+            pad.SetSize(MM(2.0, 2.0)); pad.SetDrillSize(MM(1.0, 1.0))
+            ls = pcbnew.LSET.AllCuMask(); ls.addLayer(pcbnew.F_Mask); ls.addLayer(pcbnew.B_Mask); pad.SetLayerSet(ls)
             pad.SetPosition(MM((i - 2) * 2.54, 0)); fp.Add(pad)
         for layer in (pcbnew.F_Fab, pcbnew.F_CrtYd):
             body = pcbnew.PCB_SHAPE(fp); body.SetShape(pcbnew.SHAPE_T_RECT); body.SetLayer(layer)
-            body.SetStart(MM(-10.04, -5.4)); body.SetEnd(MM(10.04, -1.4)); body.SetWidth(pcbnew.FromMM(0.1)); fp.Add(body)   # KiCad's y points down: the face is at design +y
-        m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KIPRJMOD}/models/pogo.wrl"; fp.Models().push_back(m)
+            body.SetStart(MM(-10.04, -2.45)); body.SetEnd(MM(10.04, 1.75)); body.SetWidth(pcbnew.FromMM(0.1)); fp.Add(body)   # KiCad's y points down
+        m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KIPRJMOD}/models/pogo_pins.wrl"; fp.Models().push_back(m)
+        return fp
+    elif name == "Pogo_MG005_tray":
+        # the pad half, not on this board: it sits in the tray floor under the pin half, face down and flush with the floor's outside
+        body = pcbnew.PCB_SHAPE(fp); body.SetShape(pcbnew.SHAPE_T_RECT); body.SetLayer(pcbnew.F_Fab)
+        body.SetStart(MM(-10.04, -2.45)); body.SetEnd(MM(10.04, 1.75)); body.SetWidth(pcbnew.FromMM(0.1)); fp.Add(body)
+        c = D.CASE
+        m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KIPRJMOD}/models/pogo_pads.wrl"
+        m.m_Rotation.x = 180.0                                  # face down
+        m.m_Offset.z = -(c["board_t"] + c["below"] + c["floor"]) + D.POGO["tall"]   # face flush with the floor's outside
+        fp.Models().push_back(m)
         return fp
     elif name == "Magnet_NPTH_D5.1mm":
         pad.SetNumber(""); pad.SetShape(pcbnew.PAD_SHAPE_CIRCLE); pad.SetAttribute(pcbnew.PAD_ATTRIB_NPTH)
@@ -103,8 +114,6 @@ for ref, p in D.PARTS.items():
         # the BS-07 footprint names a model the library does not ship; the Keystone 3034 is the same shape of holder
         fp.Models().clear()
         m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KICAD10_3DMODEL_DIR}/Battery.3dshapes/BatteryHolder_Keystone_3034_1x20mm.step"; fp.Models().push_back(m)
-    if ref == "J4":
-        fp.Models()[0].m_Filename = "${KIPRJMOD}/models/pogo_pads.wrl"   # the pad half
     if ref in ("SW2", "SW3"):
         # the XKB footprint ships without a 3D model; borrow the 6 x 6 x 5 switch's for the renders
         m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KICAD10_3DMODEL_DIR}/Button_Switch_SMD.3dshapes/SW_Push_1TS009xxxx-xxxx-xxxx_6x6x5mm.step"; fp.Models().push_back(m)

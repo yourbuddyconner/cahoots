@@ -46,19 +46,20 @@ open(os.path.join(HERE, "magnet.wrl"), "w").write(disc(2.5, 2.0, "0.35 0.36 0.38
 open(os.path.join(HERE, "cell.wrl"), "w").write(disc(10.0, 3.2, "0.75 0.75 0.72", 0, 0.7))      # CR2032
 
 def pogo(pins):
-    """A pogo half, Yiwei MG05254 right angle: black body 20.08 wide, 4 deep (y 1.4 to 5.4 from the pin row),
-    4.2 tall, face toward +y; two nickel magnets and five gold contacts on the face, the pin half's standing proud."""
-    out = HEAD + box((20.08, 4.0, 4.2), "0.12 0.12 0.13", (0, 3.4, 2.1))
-    for x in (-8.5, 8.5):
-        out += prism(1.6, 0.3, "0.8 0.8 0.82", (x, 5.5, 2.1), "y", shiny=0.9)
+    """A straight MG005 half: black body 20.08 x 4.2, 4.0 tall, standing on the board with its face up;
+    two nickel magnets and five gold contacts on the face, the pin half's standing proud 1.4 mm."""
+    cy = 2.45 - 2.1   # the body's centre: 1.75 behind the pin row, 2.45 ahead
+    out = HEAD + box((20.08, 4.2, 4.0), "0.12 0.12 0.13", (0, cy, 2.0))
+    for x in (-8.2, 8.2):
+        out += prism(1.6, 0.3, "0.8 0.8 0.82", (x, cy, 4.1), "z", shiny=0.9)
     for i in range(5):
         x = (i - 2) * 2.54
         h = 1.4 if pins else 0.3
-        out += prism(0.5, h, "0.85 0.7 0.3", (x, 5.4 + h / 2, 2.1), "y", shiny=0.8)
+        out += prism(0.5, h, "0.85 0.7 0.3", (x, 0, 4.0 + h / 2), "z", shiny=0.8)
         if pins:
-            out += prism(0.3, 0.6, "0.85 0.7 0.3", (x, 6.8 + 0.3, 2.1), "y", shiny=0.8)   # the plunger tip
-        out += prism(0.3, 1.6, "0.85 0.7 0.3", (x, 0, -0.5), "z", shiny=0.8)             # the tail through the board
+            out += prism(0.3, 0.6, "0.85 0.7 0.3", (x, 0, 5.4 + 0.3), "z", shiny=0.8)   # the plunger tip
+        out += prism(0.35, 1.0, "0.85 0.7 0.3", (x, 0, -0.5), "z", shiny=0.8)          # the tail below the board
     return out
-open(os.path.join(HERE, "pogo.wrl"), "w").write(pogo(True))
+open(os.path.join(HERE, "pogo_pins.wrl"), "w").write(pogo(True))
 open(os.path.join(HERE, "pogo_pads.wrl"), "w").write(pogo(False))
 print("models written")

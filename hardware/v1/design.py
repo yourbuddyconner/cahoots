@@ -14,17 +14,16 @@ page 28); Raspberry Pi Pico 2 datasheet (pinout figure 2, SMT footprint figure 5
 
 BOARD_W, BOARD_H, CORNER_R = 54.0, 86.0, 3.0
 MAGNETS = [(-21, 39), (21, 39), (-21, -39), (21, -39)]  # 5 x 2 mm discs, glued into 5.1 mm holes
-# Pile links: badges lie end to end in a line and join by a magnetic pogo pair, Adafruit 5359
-# (Yiwei MG05254-M-RA-1N1S pins and -R-RA-1N1S pads): the pad half at the top end, UP, the pin
-# half at the bottom end, DN. Its 20 x 4.2 mm face sits flush with the case's end, 5.4 mm from
-# its pin row, so two badges' faces meet when their cases touch. Two JST-SH sockets at the
-# bottom edge take a cable instead, for a badge on the bench or a laptop.
-CASE_END = 0.3 + 1.6 + 0.15 + 1.2                    # board edge to the lid skirt's outer face (CASE gap, wall, skirt_gap, skirt_t)
-POGO_FACE = 5.4                                      # pin row to the mating face (drawing C-8100390-5)
-POGO_Y = BOARD_H / 2 + CASE_END - POGO_FACE          # 40.85: the pin row of the UP half; the DN half mirrors it
-POGO_AT = POGO_Y + 3.4                               # parts are placed by their body's centre, 3.4 mm beyond the pin row
-PORT_Y = -35.0                                       # 4 mm in from the pogo half's pin row, clear of the magnet holes
-PORTS = {"UP": 14.3, "DN": -14.3}                    # x of each JST socket, beside the pogo half
+# Pile links: badges stack face to face. A straight magnetic pogo pair, Adafruit 5413 (Weilichuang
+# MG005, drawings C-8100121-5 pins and C-8200121-5 pads): the pin half J4 stands on the board's front at
+# the top end, its pins up through a window in the lid; the pad half sits in a window in the tray's
+# floor, face down and flush, wired to the DN socket J3 with a short JST-SH pigtail. Stack two badges
+# and the pins of the lower one meet the pads of the upper one. Two JST-SH sockets at the bottom edge
+# take a cable instead, for a badge on the bench or a laptop.
+POGO_Y = 40.0                                        # the pin row, where the lanyard slot was
+POGO = dict(w=20.08, d=4.2, tall=4.0, pitch=2.54, pin_to_back=1.75)   # body width, depth, height; pins 1.75 from the back face
+PORT_Y = -39.5
+PORTS = {"UP": 13.0, "DN": -13.0}                    # x of each JST socket
 
 # Pico 2 pin number -> name, from the datasheet's figure 2.
 PICO_PINS = {
@@ -113,23 +112,12 @@ part("D4", "Device:D_Schottky", "Diode_SMD:D_SOD-123", "MBR0530", "C77336", "bac
 part("J2", "Connector_Generic:Conn_01x04", "Connector_JST:JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal", "UP port, JST-SH 4", "C160404 JST SM04B-SRSS-TB", "front", (PORTS["UP"], PORT_Y), 180, {"1": "GND", "3": "UP_TX", "4": "UP_RX", "MP": "GND"})
 part("J3", "Connector_Generic:Conn_01x04", "Connector_JST:JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal", "DN port, JST-SH 4", "C160404 JST SM04B-SRSS-TB", "front", (PORTS["DN"], PORT_Y), 180, {"1": "GND", "3": "DN_RX", "4": "DN_TX", "MP": "GND"})
 
-# ---- the magnetic pogo pair, one half at each end, both on the front ----
-# Pins 1 and 5 ground, 2 and 4 the UART, 3 spare. The DN half is turned 180 degrees, so when badge A's
-# top meets badge B's bottom, A's pin k touches B's pin 6-k: A.UP pin 2 (UP_TX) meets B.DN pin 4
-# (DN_RX), and the N magnet of one meets the S magnet of the other. Checked below from positions.
-part("J4", "Connector_Generic:Conn_01x05", "cahoots:Pogo_MG05254_RA_1x05", "UP, magnetic pads", "Adafruit 5359 pad half, MG05254-R-RA-1N1S", "front", (0.0, POGO_AT), 0, {"1": "GND", "2": "UP_TX", "4": "UP_RX", "5": "GND"})
-part("J5", "Connector_Generic:Conn_01x05", "cahoots:Pogo_MG05254_RA_1x05", "DN, magnetic pins", "Adafruit 5359 pin half, MG05254-M-RA-1N1S", "front", (0.0, -POGO_AT), 180, {"1": "GND", "2": "DN_TX", "4": "DN_RX", "5": "GND"})
-POGO_PITCH, POGO_BODY_W, POGO_BODY_H = 2.54, 20.08, 4.2   # pin pitch, face width, face height above the board
-
-def _pogo_x(ref, pin):
-    """World x of a pogo pin: pin 1 at -2 pitches in the footprint's frame, the DN half turned 180."""
-    local = (int(pin) - 3) * POGO_PITCH
-    return local if PARTS[ref]["rot"] == 0 else -local
-for k in range(1, 6):
-    # the mate of A's UP pin k is the DN pin at the same x on badge B above it
-    mate = next(m for m in range(1, 6) if abs(_pogo_x("J5", m) - _pogo_x("J4", k)) < 1e-6)
-    up_net, dn_net = PARTS["J4"]["pins"].get(str(k)), PARTS["J5"]["pins"].get(str(mate))
-    assert {up_net, dn_net} in ({"GND"}, {"UP_TX", "DN_RX"}, {"UP_RX", "DN_TX"}, {None}), (k, mate, up_net, dn_net)
+# ---- the magnetic pogo pair: the pin half on the board, the pad half loose in the tray floor ----
+# Pins 1 and 5 ground, 2 and 4 the UART, 3 spare. Face to face, pin k meets pin k and the magnets
+# attract. The pad half's pigtail: its pin 1 to J3 pin 1 (GND), pin 2 to J3 pin 3 (DN_RX), pin 4 to
+# J3 pin 4 (DN_TX); so the lower badge's UP_TX on pin 2 reaches the upper badge's DN_RX.
+part("J4", "Connector_Generic:Conn_01x05", "cahoots:Pogo_MG005_1x05", "UP, magnetic pogo pins", "Adafruit 5413 pair, pin half", "front", (0.0, POGO_Y + POGO["d"] / 2 - POGO["pin_to_back"]), 0, {"1": "GND", "2": "UP_TX", "4": "UP_RX", "5": "GND"})
+part("P1", None, "cahoots:Pogo_MG005_tray", "DN, magnetic pads, in the tray floor", "Adafruit 5413 pair, pad half; JST-SH 4 pigtail to J3", "front", (0.0, POGO_Y + POGO["d"] / 2 - POGO["pin_to_back"]), 0, {})
 
 # ---- magnet pockets: holes, no copper ----
 for i, (x, y) in enumerate(MAGNETS):
@@ -173,13 +161,12 @@ CASE = dict(
     board_t=1.6, gap=0.3,             # clearance around the board's edge
     wall=1.6, floor=2.0, lid_t=2.0,   # tray wall, tray floor, lid plate
     below=5.6,                        # cavity under the board, for the cell and the Pico
-    above=4.4,                        # cavity over the board, for the pogo halves (4.2), connector and switch bodies
-    skirt=4.0, skirt_t=1.2, skirt_gap=0.15,  # the lid's skirt overlaps the tray's wall outside
+    above=2.2,                        # cavity over the board: the flex connector is 2.0; the pogo body (4.0) and the sockets (4.3) rise into lid windows
+    skirt=6.0, skirt_t=1.2, skirt_gap=0.15,  # the lid's skirt overlaps the tray's wall outside, down past the board
+    snap_z=-3.2,                      # the snap windows' bottom, below the board so the short wall above it stays whole
     snap=0.45, snap_w=8.0,            # bump height and width; four of them, two per long side
-    button_hole=7.0,
-    end_h=4.6,                        # the end windows' height from the board top
-    end_w_top=21.0,                   # top end: the pogo pad half
-    end_w_bottom=38.0,                # bottom end: the pogo pin half with a JST socket each side, one opening
+    button_hole=7.0, port_w=8.0, port_h=4.6,   # cable openings in the end wall over each socket, and lid windows over the socket bodies
+    pogo_win=(20.6, 4.7),             # lid window the pin half's body rises into, and the floor window the pad half sits in
     usb=(27.0, 10.0, 12.0, 6.5),      # x of the edge, y centre, width, height of the USB notch in the tray wall
     magnet_d=5.2, magnet_t=2.2,       # pockets in the lid top and the tray floor at MAGNETS
     corner_r=3.0,
