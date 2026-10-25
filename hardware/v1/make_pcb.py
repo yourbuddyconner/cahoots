@@ -113,7 +113,9 @@ for ref, p in D.PARTS.items():
     if ref == "BT1":
         # the BS-07 footprint names a model the library does not ship; the Keystone 3034 is the same shape of holder
         fp.Models().clear()
-        m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KICAD10_3DMODEL_DIR}/Battery.3dshapes/BatteryHolder_Keystone_3034_1x20mm.step"; fp.Models().push_back(m)
+        m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KICAD10_3DMODEL_DIR}/Battery.3dshapes/BatteryHolder_Keystone_3034_1x20mm.step"
+        m.m_Offset.x = 12.4   # the BS-07 footprint's origin is its pin 1; its cell centre, and the Keystone model's origin, is 12.4 mm along
+        fp.Models().push_back(m)
     if ref in ("SW2", "SW3"):
         # the XKB footprint ships without a 3D model; borrow the 6 x 6 x 5 switch's for the renders
         m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KICAD10_3DMODEL_DIR}/Button_Switch_SMD.3dshapes/SW_Push_1TS009xxxx-xxxx-xxxx_6x6x5mm.step"; fp.Models().push_back(m)
