@@ -17,6 +17,7 @@ out/
 /site/blog/index.html
 /site/blog/feed.xml
 /site/blog/*/
+/site/blog/*.md
 !/site/blog/img/
 /site/docs/diagrams
 /site/og/blog*.html
