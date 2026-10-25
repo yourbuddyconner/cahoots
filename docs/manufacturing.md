@@ -27,7 +27,7 @@ Yes, we design a PCB. In fact we design two: a simple one soon, to learn the pro
 
 **Chip.** The product is designed around the Baochip-1x, which is why its tier is what it is: a hardware key store, on-chip memory, no radio. Those boards ship in December 2026, and the card cannot be laid out until the package height and the power draw are in hand. The ESP32-S3 is what we have now, and it has two problems for the card: the certified module is 3.2 mm tall on its own, and a bare chip needs its own flash, a crystal and a four-layer board. So the ESP32-S3 is the chip for the learning board, and the Baochip is the chip for the card, unless December brings a surprise.
 
-## Stage 1: the carrier badge
+## Stage 1: the meetup badge
 
 A board we can design now, with low risk, that is a complete badge even if it is not a thin one. About 8 mm thick, 54 × 86 mm, two layers.
 
@@ -56,7 +56,7 @@ What the unit costs at five hundred: a bill of materials around $25 to $35, so a
 
 1. Finish the firmware on the Nano and run the first ceremony with the laptop as the pile. In progress.
 2. Measure power during a ceremony and a refresh. One afternoon. Decides the battery and the thickness.
-3. Design and order the Stage 1 carrier badge. Ten units for the first meetup, the pile mechanics tested for real.
+3. Design and order the meetup badge. Ten units for the first meetup, the pile mechanics tested for real.
 4. December: Dabao boards arrive. Port the firmware; measure the Baochip's power and height.
 5. Brief a hardware engineer for the card with the measurements, the Stage 1 lessons and the benchmark from the DIY guide. Three spins.
 6. Crowd Supply for the first run.
