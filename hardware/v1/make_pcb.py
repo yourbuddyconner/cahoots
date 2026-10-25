@@ -48,6 +48,17 @@ def custom_footprint(name):
         pad.SetNumber("1"); pad.SetShape(pcbnew.PAD_SHAPE_CIRCLE); pad.SetAttribute(pcbnew.PAD_ATTRIB_SMD)
         pad.SetSize(MM(2.4, 2.4)); pad.SetLayerSet(lset(pcbnew.F_Cu, pcbnew.F_Mask, pcbnew.F_Paste))
         fp.Add(pad)
+    elif name == "Pogo_MG05254_RA_1x05":
+        # Yiwei MG05254 right angle, pin or pad half: five 0.8 mm pins on 2.54, the face 5.4 mm toward +y
+        for i in range(5):
+            pad = pcbnew.PAD(fp); pad.SetNumber(str(i + 1)); pad.SetShape(pcbnew.PAD_SHAPE_CIRCLE); pad.SetAttribute(pcbnew.PAD_ATTRIB_PTH)
+            pad.SetSize(MM(1.8, 1.8)); pad.SetDrillSize(MM(0.8, 0.8)); ls = pcbnew.LSET.AllCuMask(); ls.addLayer(pcbnew.F_Mask); ls.addLayer(pcbnew.B_Mask); pad.SetLayerSet(ls)
+            pad.SetPosition(MM((i - 2) * 2.54, 0)); fp.Add(pad)
+        for layer in (pcbnew.F_Fab, pcbnew.F_CrtYd):
+            body = pcbnew.PCB_SHAPE(fp); body.SetShape(pcbnew.SHAPE_T_RECT); body.SetLayer(layer)
+            body.SetStart(MM(-10.04, -5.4)); body.SetEnd(MM(10.04, -1.4)); body.SetWidth(pcbnew.FromMM(0.1)); fp.Add(body)   # KiCad's y points down: the face is at design +y
+        m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KIPRJMOD}/models/pogo.wrl"; fp.Models().push_back(m)
+        return fp
     elif name == "Magnet_NPTH_D5.1mm":
         pad.SetNumber(""); pad.SetShape(pcbnew.PAD_SHAPE_CIRCLE); pad.SetAttribute(pcbnew.PAD_ATTRIB_NPTH)
         pad.SetSize(MM(5.1, 5.1)); pad.SetDrillSize(MM(5.1, 5.1)); pad.SetLayerSet(pcbnew.LSET.AllCuMask())
@@ -92,6 +103,8 @@ for ref, p in D.PARTS.items():
         # the BS-07 footprint names a model the library does not ship; the Keystone 3034 is the same shape of holder
         fp.Models().clear()
         m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KICAD10_3DMODEL_DIR}/Battery.3dshapes/BatteryHolder_Keystone_3034_1x20mm.step"; fp.Models().push_back(m)
+    if ref == "J4":
+        fp.Models()[0].m_Filename = "${KIPRJMOD}/models/pogo_pads.wrl"   # the pad half
     if ref in ("SW2", "SW3"):
         # the XKB footprint ships without a 3D model; borrow the 6 x 6 x 5 switch's for the renders
         m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KICAD10_3DMODEL_DIR}/Button_Switch_SMD.3dshapes/SW_Push_1TS009xxxx-xxxx-xxxx_6x6x5mm.step"; fp.Models().push_back(m)
@@ -150,7 +163,7 @@ for net, steps in getattr(D, "MANUAL", {}).items():
             t = pcbnew.PCB_TRACK(board); t.SetStart(cur[0]); t.SetEnd(nxt[0]); t.SetLayer(nxt[1]); t.SetWidth(pcbnew.FromMM(0.25)); t.SetNet(nets[net]); t.SetLocked(True); board.Add(t)
         cur = nxt
 
-# ---- outline: rounded rectangle with a lanyard slot ----
+# ---- outline: rounded rectangle ----
 W, H, R = D.BOARD_W, D.BOARD_H, D.CORNER_R
 def seg(a, b, layer=pcbnew.Edge_Cuts):
     s = pcbnew.PCB_SHAPE(board); s.SetShape(pcbnew.SHAPE_T_SEGMENT); s.SetLayer(layer)
@@ -164,12 +177,6 @@ seg((-hw + R, hh), (hw - R, hh)); seg((hw, hh - R), (hw, -hh + R)); seg((hw - R,
 # corner arcs, drawn as quarter circles; KiCad's y is flipped so the sweep sign flips too
 arc((hw - R, hh - R), (hw - R, hh), 90); arc((hw - R, -hh + R), (hw, -hh + R), 90)
 arc((-hw + R, -hh + R), (-hw + R, -hh), 90); arc((-hw + R, hh - R), (-hw, hh - R), 90)
-# lanyard slot: a stadium 12 x 3
-sx, sy, sw, sh = 0.0, D.SLOT_Y, D.SLOT_W, D.SLOT_H
-r = sh / 2
-seg((sx - sw / 2 + r, sy + r), (sx + sw / 2 - r, sy + r)); seg((sx - sw / 2 + r, sy - r), (sx + sw / 2 - r, sy - r))
-arc((sx + sw / 2 - r, sy), (sx + sw / 2 - r, sy + r), 180); arc((sx - sw / 2 + r, sy), (sx - sw / 2 + r, sy - r), 180)
-
 # ---- the panel as a part with no pads, so the 3D view shows it ----
 panel = pcbnew.FOOTPRINT(board); panel.SetFPID(pcbnew.LIB_ID("cahoots", "Panel_GDEY0154D67")); panel.SetReference("DS1"); panel.SetValue("GDEY0154D67")
 panel.Reference().SetLayer(pcbnew.F_Fab); panel.Value().SetLayer(pcbnew.F_Fab)

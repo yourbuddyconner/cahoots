@@ -15,7 +15,7 @@ C = D.CASE
 
 board = pcbnew.LoadBoard(os.path.join(HERE, "v1.kicad_pcb"))
 
-def add_model(ref, path, z=0.0, scale=1 / 2.54):
+def add_model(ref, path, z=0.0, scale=1.0):   # models/ are written in KiCad's 0.1 inch units already
     for fp in board.GetFootprints():
         if fp.GetReference() == ref:
             m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KIPRJMOD}/models/" + path
@@ -33,7 +33,9 @@ for i in range(1, 5):
 # back-side footprints are flipped: their models' z runs into the board's back, so offsets are from the back face
 add_model("BT1", "cell.wrl", 2.2)                                   # the cell sits 2.2 mm off the back face in its holder
 
-CAMERA = {"assembled": ("-30,0,28", "0.72", True), "exploded": ("-30,0,28", "0.33", True), "exploded-side": ("-82,0,12", "0.50", False)}
+# rotate, zoom, perspective, pivot (cm from the board centre), image size
+CAMERA = {"assembled": ("-30,0,28", "0.72", True, None, (1800, 2600)), "exploded": ("-30,0,28", "0.33", True, None, (1800, 2600)),
+          "exploded-side": ("-82,0,12", "0.50", False, None, (1800, 2600)), "end": ("-70,0,0", "2.2", True, "0,-4.4,0.2", (1800, 1000))}
 
 def variant(name, lift):
     """Write a copy of the board with each part group lifted by lift[group] mm, and render it."""
@@ -50,9 +52,9 @@ def variant(name, lift):
     path = os.path.join(HERE, f"v1-{name}.kicad_pcb")
     board.Save(path)
     out = os.path.join(tempfile.gettempdir(), f"cahoots-{name}.png")
-    rot, zoom, persp = CAMERA[name]
-    subprocess.run([CLI, "pcb", "render", "--side", "top"] + (["--perspective"] if persp else []) + ["--rotate", rot, "--zoom", zoom,
-                    "--quality", "high", "--width", "1800", "--height", "2600", "--background", "transparent", "--floor", "-o", out, path],
+    rot, zoom, persp, pivot, (w, h) = CAMERA[name]
+    subprocess.run([CLI, "pcb", "render", "--side", "top"] + (["--perspective"] if persp else []) + (["--pivot", pivot] if pivot else [])
+                   + ["--rotate", rot, "--zoom", zoom, "--quality", "high", "--width", str(w), "--height", str(h), "--background", "transparent", "--floor", "-o", out, path],
                    check=True, capture_output=True)
     os.remove(path)
     return out
@@ -63,6 +65,7 @@ for fp in board.GetFootprints():
         base_z[(fp.GetReference(), k)] = m.m_Offset.z
 
 assembled = variant("assembled", {})
+end = variant("end", {})
 # world-space lifts, up positive; parts under the board go down
 LIFT = {"lid": 84, "magnet_lid": 104, "panel": 44, "cell": -26, "magnet_tray": -88, "tray": -64}
 exploded = variant("exploded", LIFT)
@@ -79,24 +82,26 @@ img{{position:absolute}}
 .ex{{left:0px;top:150px;width:860px}}
 .side{{left:840px;top:150px;width:760px}}
 .as{{left:1600px;top:200px;width:780px}}
+.end{{left:1480px;top:1330px;width:860px}}
 .cap{{position:absolute;color:#9aa0a6;font-size:21px;letter-spacing:0.06em;text-transform:uppercase;top:1300px}}
-ol{{position:absolute;left:80px;top:1370px;margin:0;padding:0 0 0 40px;width:2200px;font-size:24px;columns:2;column-gap:80px}}
+ol{{position:absolute;left:80px;top:1370px;margin:0;padding:0 0 0 40px;width:1320px;font-size:23px;line-height:1.3}}
 ol li{{margin:0 0 12px;break-inside:avoid}} ol b{{color:#fff;font-weight:500}}
 </style>
 <div class="sheet">
 <h1>Cahoots badge V1: parts and assembly</h1>
-<div class="sub">54 × 86 mm board; clear case 60 × 92 × 15 mm. Badges link in a line with a short cable from one's UP port to the next one's DN port.</div>
+<div class="sub">54 × 86 mm board; clear case 60 × 92 × 15 mm. Badges lie end to end: the magnetic pads at one's top end snap to the pogo pins at the next one's bottom end.</div>
 <img class="ex" src="{exploded}"><div class="cap" style="left:260px">Exploded, from above</div>
 <img class="side" src="{side}"><div class="cap" style="left:1060px">Exploded, from the side</div>
 <img class="as" src="{assembled}"><div class="cap" style="left:1880px">Assembled</div>
+<img class="end" src="{end}"><div class="cap" style="left:1560px;top:1750px">Bottom end: pogo pins and magnets, flush with the case</div>
 <ol>
-<li><b>Lid</b>, clear. Window for the panel, two button holes, lanyard slot. Snaps onto the tray.</li>
+<li><b>Lid</b>, clear. Window for the panel, two button holes, a window in each end for the magnetic connector. Snaps onto the tray.</li>
 <li><b>Magnets</b>, 5 × 2 mm, four in the lid and four in the tray floor.</li>
 <li><b>E-paper panel</b>, 1.54", glued into the lid's window, glass flush with the top. Its flex drops to the connector.</li>
-<li><b>Board</b>: flex connector, two switches, the UP and DN ports at the bottom edge; on the back the Raspberry Pi Pico 2, the boost circuit, the coin cell holder.</li>
+<li><b>Board</b>: flex connector, two switches, the magnetic pad half at the top edge and the pogo pin half at the bottom edge, two JST-SH sockets beside it; on the back the Raspberry Pi Pico 2, the boost circuit, the coin cell holder.</li>
 <li><b>CR2032 cell</b> in its holder on the back.</li>
-<li><b>Port cable</b>, JST-SH 4-pin, from one badge's UP to the next one's DN.</li>
-<li><b>Tray</b>, clear. The board sits on its ledge; notches for the USB and the two cables; four magnet pockets.</li>
+<li><b>Magnetic connector</b>, Adafruit 5359: five pogo pins on 2.54 mm with a magnet at each end, its face flush with the case end. Mates with the next badge's pad half.</li>
+<li><b>Tray</b>, clear. The board sits on its ledge; a window in each end wall for the connector, notches for the USB and the two cable sockets; four magnet pockets.</li>
 </ol>
 </div>'''
 page = os.path.join(tempfile.gettempdir(), "cahoots-assembly.html")

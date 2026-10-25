@@ -311,9 +311,10 @@ for i, (ref, net) in enumerate([("SW2", "BTN_A"), ("SW3", "BTN_B")]):
 
 # Pile ports: two JST-SH sockets, UP and DN, TX and RX crossed between them.
 CX, CY = 190.5, 165.1
-text("Pile ports. A straight cable from one badge's UP to the next one's DN. Pin 1 GND, pins 3 and 4 TX and RX, crossed.", CX - 10.16, CY - 15.24, 1.3)
-for i, ref in enumerate(("J2", "J3")):
-    labelled_block(ref, CX + i * 45.72, CY + 5.08, ref_at=(4, -9), val_at=(4, 9))
+text("Pile links. J4 and J5: the magnetic pogo pair, pads at the top end, pins at the bottom; pins 1 and 5 GND, 2 and 4 the UART, mirrored so pin 2 meets pin 4.", CX - 10.16, CY - 17.78, 1.3)
+text("J2 and J3: JST-SH sockets for a cable instead. Pin 1 GND, pins 3 and 4 TX and RX, crossed between UP and DN.", CX - 10.16, CY - 13.97, 1.3)
+for i, ref in enumerate(("J4", "J5", "J2", "J3")):
+    labelled_block(ref, CX + i * 40.64, CY + 5.08, ref_at=(4, -9), val_at=(4, 9))
 
 text("Cahoots badge V1: a board a Raspberry Pi Pico 2 solders onto. 54 x 86 mm, two layers. Labels with the same name are one net.", 25.4, 228.6, 1.5)
 text("design.py is the source; make_sch.py and make_pcb.py draw it; check.py confirms the schematic, the table and the board agree.", 25.4, 233, 1.5)
