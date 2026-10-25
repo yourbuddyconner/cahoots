@@ -19,3 +19,5 @@ out/
 /site/blog/*/
 /site/og/blog*.html
 /site/assets/og-blog*.png
+/site/assets/hero-blog*.png
+/site/og/hero-blog*.html

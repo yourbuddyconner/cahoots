@@ -2,6 +2,16 @@
 title: Privacy Hardware Needs a Renaissance
 date: 2026-10-25
 author: Conner Swann
+role: Building Cahoots
+tags: Building in public, Privacy
+about: Why Cahoots exists. A wake-up call about the trust infrastructure underneath privacy, what the real dependency is, and what a group can do about it on its own.
+audience: Anyone who cares about privacy or digital sovereignty, and teams that would rather run their own infrastructure than rent it.
+learn:
+- Why the certificate system failing is a canary, not the whole problem
+- What the real dependency is: the first secret, not the encryption
+- Which tools you can already run yourself once you have shared randomness
+- What Cahoots does, and which parts of your life it is for
+- Why privacy has to become a core competency for people and businesses
 description: The certificate system is just the canary. The tools for private infrastructure already exist. What is missing is the first secret, made by the people who will use it and nobody else.
 ---
 
