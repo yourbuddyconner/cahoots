@@ -14,7 +14,7 @@ learn:
 - Why Signal, Tailscale and a security key don't make this redundant
 - How a pad made in a room holds up if quantum computers break public-key cryptography
 - Why privacy has to become a core competency for people and businesses
-description: The certificate system is only the canary. The tools for private infrastructure already exist, and what's missing is a first secret made by the people who will use it and nobody else.
+description: Why I'm building Cahoots. The trust infrastructure underneath my privacy failed this month, and I would rather own mine than keep renting it.
 ---
 
 I care about privacy. I have for a long time. And for most of that time I could care about it comfortably, because the infrastructure underneath it was somebody else's problem. Certificate authorities, roots of trust, the quiet machinery that decides which connections are real. It had been boring and reliable for decades, not worth losing sleep over. You never thought about it because you never had to.
