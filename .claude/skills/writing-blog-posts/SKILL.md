@@ -7,7 +7,7 @@ description: Use when writing, editing, summarizing or excerpting a post for the
 
 ## Overview
 
-A Cahoots post is Conner's argument in Conner's words. The job is to carry the argument plainly, not to make it sound good. Every failure in this skill comes from one of two habits: summarizing the mechanism instead of the argument, and reaching for a phrase instead of saying the thing.
+A Cahoots post is the author's argument in the author's words. The job is to carry the argument plainly, not to make it sound good. Every failure in this skill comes from one of two habits: summarizing the mechanism instead of the argument, and reaching for a phrase instead of saying the thing.
 
 ## The two rules
 
@@ -20,10 +20,10 @@ The description line, the About box, a tweet, a caption: each says what the post
 
 Test: can a reader who never learns how the ceremony works still tell what the post wants them to believe? If the summary only works once you know the mechanism, it is the mechanism.
 
-The summary is third person unless Conner asks otherwise. Third person means no "I"; it does not mean narrating him ("Conner spent years... He argues that..."). State the claim as a claim. Take its sentences from the post's own thesis lines; do not compose new ones.
+The summary is third person unless the author asks otherwise. Third person means no "I"; it does not mean narrating the author ("The author spent years... and argues that..."). State the claim as a claim. Take its sentences from the post's own thesis lines; do not compose new ones.
 
-**2. Conner's sentences stay as he wrote them.**
-Text he pasted, dictated or edited is his. Edit only the sections you wrote. If a line of his seems like a tell, leave it and say so in the reply.
+**2. The author's sentences stay as written.**
+Text the author pasted, dictated or edited is theirs. Edit only the sections you wrote. If one of their lines seems like a tell, leave it and say so in the reply.
 
 ## Voice
 
@@ -46,22 +46,22 @@ Before returning any text, run the compressed-claim tests from `ai-patterns.md` 
 
 Front matter: `title`, `date`, `author`, `role`, `tags`, `about`, `audience`, `learn` (a `- ` list), `description`, optional `image`, `slug`, `draft`. The build renders the About box, reading time, the "In this article" list from h2 headings, one OG card and one hero per post.
 
-- Lead with the point. The first paragraph says what changed and what Conner is doing about it. Do not bury the lede under context.
-- Earnest over ideological. State what he felt and what he decided. No manifestos of pure conviction with the facts withheld.
+- Lead with the point. The first paragraph says what changed and what the author is doing about it. Do not bury the lede under context.
+- Earnest over ideological. State what the author felt and what they decided. No manifestos of pure conviction with the facts withheld.
 - Answer the obvious objection in its own section ("Why not just use Signal").
 - One picture per idea that needs one. Real artifacts first (a screenshot, the repo's own diagram), then a code-drawn card using the `.cr` markup in `site/blog/blog.css`. Captions are one plain sentence.
 - End by saying what comes next in the series, in prose, not by pointing at the site.
 
 Build and check: `python3 scripts/build-blog.py --out site --skip-og`, then serve `site/`. Without `--skip-og` it also renders the cards with Chrome. The Pages workflow does the full render on push.
 
-## Working with Conner on copy
+## Working with the author on copy
 
-He iterates by reaction. Each round, change what he pointed at and reread the rest for the same problem; do not recycle the previous draft with one line swapped. When he gives a definition or a checklist, apply it to the whole post, not to the one sentence he quoted. When he says a line is wrong, do not propose a cleverer line. Find the sentence in the post that already says it.
+The author iterates by reaction. Each round, change what they pointed at and reread the rest for the same problem; do not recycle the previous draft with one line swapped. When they give a definition or a checklist, apply it to the whole post, not to the one sentence they quoted. When they say a line is wrong, do not propose a cleverer line. Find the sentence in the post that already says it.
 
 ## Red flags
 
 - The summary mentions a room, a ceremony, randomness, or a secret being made. Mechanism.
 - Two short sentences that mirror each other. Reversal.
 - A sentence you are proud of. Rewrite it plainly.
-- You changed a sentence Conner wrote.
+- You changed a sentence the author wrote.
 - The tweet thread introduces the product before the reason.
