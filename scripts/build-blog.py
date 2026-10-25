@@ -393,7 +393,7 @@ def og_card(title, lede, foot_left, foot_right, sub="Blog"):
 <link href="{FONTS}" rel="stylesheet">
 <link rel="stylesheet" href="og.css"><style>h1 {{ max-width: 980px; }} .lede {{ max-width: 820px; }}</style></head><body>
 <div class="glow"></div>
-<div class="pcard">
+<div class="card">
   <div class="brand"><img src="../assets/mark.svg" alt="">Cahoots<span class="sub">{e(sub)}</span></div>
   <div>
     <h1 class="{size}">{e(title)}</h1>
