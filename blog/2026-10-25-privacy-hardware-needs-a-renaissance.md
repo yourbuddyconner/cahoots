@@ -17,7 +17,7 @@ learn:
 description: The certificate system is just the canary. The tools for private infrastructure already exist. What is missing is the first secret, made by the people who will use it and nobody else.
 ---
 
-I care about privacy. I have for a long time. And for most of that time I could care about it comfortably, because the infrastructure underneath it was somebody else's problem. Certificate authorities, roots of trust, the quiet machinery that decides which connections are real. It had been boring and reliable for decades, not worth losing sleep over. Nobody thought about it, because there was no reason to.
+I care about privacy. I have for a long time. And for most of that time I could care about it comfortably, because the infrastructure underneath it was somebody else's problem. Certificate authorities, roots of trust, the quiet machinery that decides which connections are real. It had been boring and reliable for decades, not worth losing sleep over. You never thought about it because you never had to.
 
 The last couple of weeks, that stopped being true for me.
 
@@ -28,7 +28,7 @@ I'm not going to relitigate what happened. You've seen it. What matters is what 
 <figcaption>The week's coverage. Eight signing keys from a trusted certificate authority turned out to be small integers.</figcaption>
 </figure>
 
-That was my wake-up call. I don't think everything is broken, but I had built my entire sense of privacy on a foundation I had never examined and could not repair. I was a tenant in a rent-seeking economy, and I'd never met the landlord.
+That was my wake-up call. Not that everything is broken. It isn't. But I had built my entire sense of privacy on a foundation I had never examined and could not repair. I was a tenant in a rent-seeking economy, and I'd never met the landlord.
 
 ## The canary
 
@@ -45,9 +45,9 @@ I don't think those institutions are villains. I think they're ordinary people l
 
 ## The tools already exist
 
-Here's what I keep coming back to. The technology for private infrastructure is already built, already open, and already good. (The quantum question deserves its own section, and there is one further down.) VPNs, mutual TLS, plain old private networking, encrypted files, group chat. None of it is exotic. You can run all of it yourself, on your own machines, for your own people.
+Here's what I keep coming back to. The technology for private infrastructure is already built, and setting aside any spectres of the quantum singularity they are already open, and already good. VPNs. Mutual TLS. Plain old private networking. Encrypted files. Group chat. None of it is exotic. You can run all of it yourself, on your own machines, for your own people.
 
-Before any of those tools can protect anything, somebody has to hand out the first secret, and it has to reach the right people and nobody else. Today that somebody is an institution. You apply for the secret, the institution issues it, and you trust that it did that correctly. The dependency isn't in the math. It's in who has to act first.
+Before any of those tools can protect anything, somebody has to hand out the first secret, and it has to reach the right people and nobody else. Today that somebody is an institution. You apply, it issues, you trust. The dependency was never in the math. It's in the order of operations.
 
 <div class="cr">
   <div class="cr-eyebrow">The first secret</div>
@@ -65,13 +65,13 @@ Before any of those tools can protect anything, somebody has to hand out the fir
   </div>
 </div>
 
-If you have a source of randomness that you share with the people you trust, and nobody else, you can build your own internet infrastructure on top of it. Your own tunnels, your own encrypted connections, your own signing, your own small piece of the internet with nothing in the middle.
+If you have a source of randomness that you share with the people you trust, and nobody else, you can build your own internet infrastructure on top of it. Your own tunnels. Your own encrypted connections. Your own signing. Your own small piece of the internet, with nothing in the middle.
 
 ## What Cahoots is
 
 Cahoots is a way to get that first secret without needing to rent it from someone who doesn't care about you outside of whatever immediate value you can provide them.
 
-A group of people meets in person. Friends, a family, a team, a company. Each person's device contributes randomness, and everyone leaves with the same shared secret, which no server, no authority, and no third party ever touched. From there, every key you need to communicate with that group comes out of it. A key for a VPN, a key for a connection between two of your machines, a key for a file or a chat or a message that nothing can read.
+A group of people meets in person. Friends, a family, a team, a company. Each person's device contributes randomness, and everyone leaves with the same shared secret, which no server, no authority, and no third party ever touched. From there, every key you need to communicate with that group comes out of it. A key for a VPN. A key for a connection between two of your machines. A key for a file, or a chat, or a message that nothing can read.
 
 <figure>
 <img src="/docs/diagrams/ceremony.svg" alt="The ceremony in five steps: set up, draw, touch, mix, say the words" width="960" height="364">
@@ -101,35 +101,35 @@ This is the first thing people say, and it's a fair question. Signal is excellen
 
 The claim is about where the first secret comes from. Look at where each of these tools gets it:
 
-- **Signal** makes keys on your phone, then asks a server to introduce you to your friend's keys. That server is run carefully by people I trust, and it is still a server, in a jurisdiction, run by a company that can be pressured, sold, or shut down.
-- **Tailscale** makes keys on your machine, then a control plane decides which machines are allowed to meet. You own the tunnel, but the control plane makes the introductions.
-- **A password manager** encrypts on your device, then syncs through an account. If you lose the account, or someone takes it from you, the vault goes with it.
-- **A security key** holds its secret in hardware, then gets enrolled through somebody's website, and that website decides when the key is accepted.
+- **Signal** makes keys on your phone. When you message someone, a Signal server hands your phone that person's public keys, and you trust that it handed you the right ones. The people who run that server are careful. It is still a server, in a jurisdiction, run by a company that can be pressured, sold, or shut down.
+- **Tailscale** makes keys on your machine. Tailscale's control plane then tells each of your machines the public keys of the others, and your access rules live on that control plane. The tunnel between two machines is yours. The list of who gets whose key is Tailscale's.
+- **A password manager** encrypts your vault on your device, then syncs it through an account with the vendor. If you lose that account, or someone takes it from you, you lose the vault with it.
+- **A security key** keeps its secret in hardware. Each website you enroll it with stores the matching public key, and that website decides whether to accept the key on each login.
 
-In each case, the thing that connects you to the people you trust passes through a party you don't know. These tools are honest about that, and they have done the hard work of making the middle as small and as well-behaved as it can be. That is a real achievement, but it is a different goal from having no middle at all.
+In each case, somebody you don't know is the one who hands you the keys of the people you do. The people who build these tools say so openly, and they have done the hard work of making that middle party as small and as well-behaved as it can be. That is a real achievement. Removing the middle party is a different goal.
 
 As I was finishing this post, a [report](https://tailworm.com/) claimed that one compromised machine on a Tailscale network could take root on every other machine it's allowed to reach. Tailscale is [looking into it](https://thehackernews.com/2026/10/unpatched-tailscale-ssh-flaws-could-let.html). I like Tailscale and I'll keep using it. But for a week, a tool I'd trust with every machine I own couldn't tell me whether I was affected, and I couldn't check. Preparing for the worst doesn't mean leaving. It means knowing exactly what you've handed over.
 
 Cahoots doesn't compete with those tools. It gives them their keys. A secret made in the room becomes:
 
-- the pre-shared key under a WireGuard tunnel. Tailscale uses WireGuard, so this is the same kind of tunnel, except that the extra key came from the room instead of from the control plane;
-- the seed for an encrypted chat;
-- the key under a file;
-- the credential between two of your machines.
+- the pre-shared key for a WireGuard tunnel. Tailscale builds its tunnels with WireGuard, so this is the same kind of tunnel. The difference is that the room made the extra key, and no control plane ever had it;
+- the seed for an encrypted group chat;
+- the key that encrypts a file;
+- the key that two of your machines use to recognize each other.
 
-The tools don't change. The difference is that you were introduced to each other in person instead of by a third party.
+The tools don't change. What changes is who introduced you. You met in person, so no third party had to vouch for either of you.
 
-The cost is that you have to be in the same room once. For strangers, that rules it out, and the tools above exist precisely because strangers need to talk to each other. For the people you'd hand a house key to, you've probably already met.
+The cost is that you have to be in the same room once. For strangers, that rules it out, and the tools above exist precisely because strangers need to talk to each other. The people you'd hand a house key to, you have already met.
 
 ## If the math breaks
 
 I should admit where this idea actually came from, because it wasn't the certificate story. It was a thought experiment about a worse world.
 
-Almost everything private on the internet rests on public-key cryptography. Two strangers can agree on a secret across an open wire because certain math problems are hard. That assumption has held for fifty years. A large enough quantum computer breaks it. Nobody knows when or whether that machine arrives, and the field is already moving to new math that's expected to survive it. Cahoots uses that new math too, for the one step where devices seal their contributions to each other.
+Almost every private connection on the internet starts with public-key cryptography. Two strangers can agree on a secret across an open wire because certain math problems are hard. That assumption has held for fifty years. A large enough quantum computer breaks it. Nobody knows when or whether that machine will exist. Cryptographers are already replacing the old math with new math that they expect to survive it. Cahoots uses the new math for the one step that needs any: each device seals its random bytes to the other devices before it sends them.
 
-But consider the pessimistic case. Suppose the new math falls as well, or suppose you'd simply rather not bet on it. What's left is the oldest method there is: a secret that was never sent, carried by a person to the people who need it. One-time pads carried by couriers, and trusted setups done in a room by people whose job is to be trusted. In that world, key material moves the way it did before the internet, by hand, and the people who run those rooms are the trust infrastructure.
+But consider the pessimistic case. Suppose the new math falls as well, or suppose you'd simply rather not bet on it. What's left is the oldest method there is. A person carries the secret to the people who need it, and it never goes over a wire. One-time pads carried by couriers, and trusted setups done in a room by people whose job is to be trusted. In that world, key material moves the way it did before the internet, by hand, and the people who run those rooms are the trust infrastructure.
 
-Cahoots is built so that it works in that world without changing. A pad made at a ceremony doesn't depend on any hard problem to stay secret, because it was never on a wire. Everything it keys is at least as strong as the pad, whatever happens to the math. If that world never arrives, you've lost nothing. If it does, you're already set up for it, and I'd like the courier to be a badge that people already carry.
+I built Cahoots so that it works in that world without changing. A pad made at a ceremony stays secret without any hard math problem, because it never went over a wire. Every key that comes out of the pad is at least as strong as the pad itself, whatever happens to the math. If that world never arrives, you've lost nothing. If it does, you're already set up for it, and I'd like the courier to be a badge that people already carry.
 
 I think that's the right posture for a privacy tool built now: assume the worst about the math, and design so that if the worst happens, nothing about the tool has to change.
 
@@ -139,7 +139,7 @@ I want to address the elephant in the room directly. Privacy has to become a cor
 
 For a person, that means being able to keep things between you and the people you choose, with no company in the loop. For a business, it means running your own connections, your own network, your own trust, so that a stranger's mistake never becomes your outage or your breach.
 
-The tools are there and the knowledge is learnable. What's been missing is the first step, and the habit of taking it.
+The tools are there. The knowledge is learnable. What's been missing is the first step, and the habit.
 
 ## What comes next
 
@@ -147,7 +147,7 @@ This post explains why I'm doing this. The rest of this blog will be about how, 
 
 A phone can run Cahoots today, and the browser app proves the protocol works. But a phone is a general-purpose computer with a radio, a cloud account, and a few hundred apps that would love to know what it's doing. Privacy hardware has a different job: do one thing, hold one secret, and give an attacker as little surface as possible. That means a device with no network, a screen you can read, a button you can press, and a way to hand randomness to the device next to it with nothing in between. It also means parts you can buy, a board you can inspect, and a design you can build yourself.
 
-That is a harder problem than it sounds, and it has had very little attention outside of wallets and login keys. Those got us part of the way. I think it's time for another run at it.
+That is a harder problem than it sounds. Hardware wallets and login keys are the only products that have taken it seriously, and they got us part of the way. I think it's time for another run at it.
 
 So the next post starts the series on getting the badge manufactured. It covers the design of the first board and the constraints that shaped it: what privacy hardware has to do differently from everything else on your desk, which of those constraints are physics and which are habit, and the tradeoffs I made for a first run.
 
