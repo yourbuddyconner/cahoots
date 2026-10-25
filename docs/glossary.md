@@ -62,4 +62,4 @@ The words these documents use, in plain terms. Where a term has a precise defini
 
 **Simulator.** A desktop program that behaves like a badge, used to develop and test without hardware.
 
-**Fountain code.** The way the phone app sends a large message as a loop of QR codes: any enough of the frames, in any order, rebuild the whole message.
+**Fountain code.** The way the phone app sends a large message as a loop of QR codes: enough of the frames, in any order, rebuild the whole message.

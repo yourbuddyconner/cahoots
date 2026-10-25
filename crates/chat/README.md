@@ -1,6 +1,6 @@
 # cahoots-chat
 
-Pad-seeded end-to-end encrypted group chat, and the demo client that runs it over the Numbers Station relay. The design is in `docs/chat.md`.
+This crate is pad-seeded end-to-end encrypted group chat, plus the demo client that runs it over the Numbers Station relay (the public feed). The design is in `docs/chat.md`.
 
 ## The security claim
 
@@ -12,8 +12,8 @@ One 32-byte pad spend keys an **epoch**. Inside an epoch every sender has its ow
 
 ## Limits
 
-- **`sender` is a chain label, not a person.** Every member can derive every sender's chain, exactly as every member holds every slice. The demo puts the typed name inside the plaintext as a courtesy, not as proof.
-- **The relay sees traffic shape.** It sees which circle posted, which epoch pointer and counter, when, and the bucketed size. It cannot read or forge an entry and cannot refuse chat messages for reuse, because an epoch pointer legitimately appears in many messages. Epoch reuse is refused by each member's own ledger.
+- **`sender` is a chain label, not a person.** Every member can derive every sender's chain, just as every member holds every slice. The demo puts the typed name inside the plaintext as a courtesy; it proves nothing.
+- **The relay sees traffic shape.** It sees which circle posted, which epoch pointer and counter, when, and the bucketed size. It cannot read or forge an entry and cannot refuse chat messages for reuse, because an epoch pointer legitimately appears in many messages. Each member's own ledger refuses epoch reuse.
 - A tampered message that is the **first** sighting of a new epoch still burns that epoch's 32-byte range on the reader, before the tag check. The untampered copy then decrypts.
 - The local ceremony is a development shortcut with OS randomness, so its circles carry the `CSPRNG` label.
 
@@ -53,7 +53,7 @@ Show a rotation by starting a member with `--rotate-after 2`: its third message 
 ./target/debug/cahoots-chat tamper-test --circle ./circles/member-2
 ```
 
-Every reader prints `[rejected seq N: Tag]`, and the next real message still decrypts. Open `http://127.0.0.1:8080/` to see the relay's view: ciphertext, circle ids, counts, and nothing else.
+Every reader prints `[rejected seq N: Tag]`, and the next real message still decrypts. Open `http://127.0.0.1:8080/` to see the relay's view, which is only ciphertext, circle ids, and counts.
 
 ## Files the client keeps
 

@@ -4,7 +4,7 @@ Cahoots is open hardware and open protocol. Anyone can build a badge from whatev
 
 ## The rule that makes tiers matter
 
-Every member holds the whole pad. A circle's protection against device theft or tampering is therefore the protection of its **least protected member**. The circle tier is the minimum of its members' device tiers, and the ceremony shows it before anyone confirms.
+Every member holds the whole pad. A circle's protection against device theft or tampering is therefore the protection of its least protected member. The circle tier is the minimum of its members' device tiers, and the ceremony shows it before anyone confirms.
 
 The randomness label (`TRNG` when every device used hardware randomness, `CSPRNG` otherwise) is a separate question, and it is also decided by the weakest member. A circle carries both labels.
 
@@ -31,4 +31,4 @@ Our badge targets T3 at launch and T4 for anyone willing to look.
 
 ## Building your own
 
-The HAL is four traits: `Entropy`, `PadStore`, `Display`, `Link` (`crates/hal`). A new board is a crate that implements them. The host simulator is the reference implementation and also the test harness: a board passes the device suite by completing a ceremony over its links against simulated peers. The tier a board earns is decided by what its `PadStore` and boot chain can actually do, not by what the crate says. The README for each target states its tier and why.
+The HAL is four traits: `Entropy`, `PadStore`, `Display`, `Link` (`crates/hal`). A new board is a crate that implements them. The host simulator is the reference implementation and also the test harness: a board passes the device suite by completing a ceremony over its links against simulated peers. The tier a board earns is decided by what its `PadStore` and boot chain can do. What the crate says about itself does not count. The README for each target states its tier and why.

@@ -4,7 +4,7 @@ The ceremony produces one thing: a pile of random bytes that a small group share
 
 ## 1. The two modes, restated
 
-**Pure-pad mode** ([protocol](protocol.md), section 4). One pad byte per message byte, plus 32 bytes for the seal. Nothing about its security depends on math being hard. Fit for short, high-value messages: a few hundred bytes at a time. A 256 KiB pad holds roughly 2,000 padded text messages across the circle.
+**Pure-pad mode** ([protocol](protocol.md), section 4). One pad byte per message byte, plus 32 bytes for the seal. Nothing about its security depends on math being hard. It fits short, high-value messages: a few hundred bytes at a time. A 256 KiB pad holds roughly 2,000 padded text messages across the circle.
 
 **PSK mode.** 32 pad bytes become one session key, mixed into an ordinary key exchange with HKDF. PSK stands for pre-shared key. The session stays confidential if the math holds **or** the pad stays secret, so an attacker has to beat both. A 256 KiB pad holds about 8,000 sessions of any size. This is the mode for files, tunnels, and anything bigger than a text message.
 
@@ -20,7 +20,7 @@ A cloned voice on the phone asking for money, a password, or a wire is now a che
 
 ### 2.1 Group chat that cannot be broken later
 
-The meetup demo. Members post encrypted messages to the public feed (the Numbers Station). Anyone who records the feed today and waits for a bigger computer, even a quantum one, still gets nothing. This is the only use where that guarantee holds end to end.
+This is the meetup demo. Members post encrypted messages to the public feed (the Numbers Station). Anyone who records the feed today and waits for a bigger computer, even a quantum one, still gets nothing. This is the only use where that guarantee holds end to end.
 
 ### 2.2 Approvals that do not depend on public-key crypto
 
@@ -32,7 +32,7 @@ An `approve` message carries the hash of an action, such as a transaction. A ver
 
 ### 2.4 Hedging ordinary tunnels: WireGuard, TLS, MLS
 
-Every one of these protocols already has a pre-shared-key slot that the designers added for exactly this reason: to hedge against the public-key layer failing. The slots are empty in almost every deployment because nobody has a good way to agree on the key. Cahoots fills the slot. The in-person ceremony is the key agreement.
+Every one of these protocols already has a pre-shared-key slot that the designers added for exactly this reason: to hedge against the public-key layer failing. The slots are empty in almost every deployment because nobody has a good way to agree on the key. Cahoots fills the slot, because the in-person ceremony is the key agreement.
 
 WireGuard's `PresharedKey` is the clearest case. The WireGuard paper describes it as a hedge against quantum attacks on Curve25519, mixed into the Noise handshake as the `psk2` modifier. Operators mostly leave it unset. See section 3.
 
@@ -42,7 +42,7 @@ At the ceremony, one device splits a recovery secret into shares (Shamir's schem
 
 ### 2.6 Bootstrapping networks
 
-This is the use the rest of this document is about. Every network has to start from something its members trust: a certificate authority's root, a coordination server's key, a vendor's signing key. Call that the network's starting trust. Today it is always downloaded from somewhere. **A circle can be that starting trust instead**, and it was made in a room by the people who run the network.
+This is the use the rest of this document is about. Every network has to start from something its members trust: a certificate authority's root, a coordination server's key, a vendor's signing key. Call that the network's starting trust. Today it is always downloaded from somewhere. A circle can be that starting trust instead, and it was made in a room by the people who run the network.
 
 ## 3. Bootstrapping a WireGuard network
 
@@ -50,7 +50,7 @@ This is the use the rest of this document is about. Every network has to start f
 
 To set up a WireGuard tunnel between two machines, you need three things: each side's public key, each side's endpoint and allowed IPs, and, optionally, a pre-shared key. All three travel over some channel before the tunnel exists. In practice that channel is a chat message, a wiki page, or a coordination server. Each of those is a place where a key can be swapped or read.
 
-A circle removes the channel. Members touch devices once. From then on each of them can send the others a message that is private and provably from inside the group, with no network and no public key involved.
+A circle removes the channel. After members touch devices once, each of them can send the others a message that is private and provably from inside the group. No network or public key is involved.
 
 ### 3.2 How it works
 
@@ -59,7 +59,7 @@ This is built: `cahoots-wg announce`, `peers`, `issue --relay`, and `accept --re
 Three message types do the whole job. They are circle messages, so they can be posted anywhere, including the Numbers Station, and only circle members can read or forge them.
 
 1. **Peer announcement** (`control` message, subtype `peer`). A member posts its WireGuard public key, its endpoint, and its allowed IPs. Every member now knows every peer. The announcement is authenticated by the pad, so a swapped public key is detected.
-2. **PSK issue** (`control`, subtype `psk`). To set up or rotate the tunnel to peer B, member A spends 32 bytes from its slice and posts the handle `(circle_id, slice, offset)` and the pair it is for. B calls `psk_for(handle)` and spends the same bytes. Both sides now hold the same `PresharedKey`. The handle is a pointer, not a secret. It can travel in the clear.
+2. **PSK issue** (`control`, subtype `psk`). To set up or rotate the tunnel to peer B, member A spends 32 bytes from its slice and posts the handle `(circle_id, slice, offset)` and the pair it is for. B calls `psk_for(handle)` and spends the same bytes. Both sides now hold the same `PresharedKey`. The handle only says where the bytes are, so it can travel in the clear.
 3. **Rotation** is a new PSK issue on a schedule. `cahoots-wg` renders the `[Peer]` block or runs `wg set` itself with `--apply`. Order matters: the acceptor installs first, then the issuer, because WireGuard holds one key per peer and switches at the next handshake.
 
 Addresses need no server either: the circle ID picks a `10.x.y.0/24`, and seat k is `.k+1` (`cahoots-wg address`). A full mesh is every host installing every other host's announcement, with one pre-shared key per pair, lower seat issuing to higher.
@@ -80,14 +80,14 @@ A 256 KiB pad lasts years at weekly rotation. On an ESP32-S3 with 8 MB of flash 
 
 Everyone in a circle holds the whole pad. That has two consequences for networks.
 
-- **A member can read any PSK issued in the circle.** For WireGuard this does not break the tunnel today, because the handshake still needs the Curve25519 secrets. It does mean the pad hedge protects the fleet from outsiders, not members from each other.
-- **A member can forge another member's announcement.** The circle tag proves that some member wrote a message, not which one.
+- **A member can read any PSK issued in the circle.** For WireGuard this does not break the tunnel today, because the handshake still needs the Curve25519 secrets. It does mean the pad hedge protects the fleet from outsiders. It does not protect members from each other.
+- **A member can forge another member's announcement.** The circle tag proves that some member wrote a message. It does not say which one.
 
-Both are fine when one operator runs every node. Call this the **fleet profile**: a person's home lab, a company's edge boxes, a research group's sensors. Both are a problem when the nodes belong to different people who do not fully trust each other. That needs the **federation profile** in section 5.
+Both are fine when one operator runs every node. Call this the **fleet profile**: a person's home lab, a company's edge boxes, a research group's sensors. When the nodes belong to different people who do not fully trust each other, both are a problem, and that needs the **federation profile** in section 5.
 
 ## 4. Bootstrapping physical mesh networks
 
-The shape of it, decided on 2026-10-21: **LoRa carries the control plane, a faster radio carries the data plane.** The messages that set a network up, `peer` and `psk`, are about a hundred bytes each, which is one LoRa packet. So a node with only a LoRa radio can receive its peers and its keys over the air from kilometres away, bring up its Wi-Fi mesh or WireGuard interface already keyed, and from then on the real traffic rides the fast link. The pad-encrypted feed over LoRa is what makes the first contact possible with no uplink at all, and none of the stacks below can do that for themselves.
+The shape of it, decided on 2026-10-21: LoRa carries the control plane and a faster radio carries the data plane. The messages that set a network up, `peer` and `psk`, are about a hundred bytes each, which is one LoRa packet. So a node with only a LoRa radio can receive its peers and its keys over the air from kilometres away, bring up its Wi-Fi mesh or WireGuard interface already keyed, and from then on the real traffic rides the fast link. The pad-encrypted feed over LoRa is what makes the first contact possible with no uplink at all, and none of the stacks below can do that for themselves.
 
 | Over LoRa | What it gives you | What Cahoots fills | Status |
 |---|---|---|---|
@@ -97,9 +97,9 @@ The shape of it, decided on 2026-10-21: **LoRa carries the control plane, a fast
 
 ### 4.1 Why mesh networks are the right target
 
-Mesh networks have the bootstrap problem in its purest form. There is no internet to fetch a certificate from. Nodes join and leave. Links are slow, lossy, and sometimes one-way. Deployments happen in the field, by people with a bag of hardware. And the communities that build them, off-grid radio, disaster response, neighbourhood networks, already meet in person.
+Mesh networks have the bootstrap problem in its purest form. There is no internet to fetch a certificate from. Nodes join and leave, and links are slow, lossy, and sometimes one-way. Deployments happen in the field, by people with a bag of hardware. And the communities that build them, off-grid radio, disaster response, neighbourhood networks, already meet in person.
 
-So the install goes like this. The crew runs the ceremony at the trailhead or in the van. Each node's badge, or the node itself, holds a part of the pad. The nodes then come up on the roof with every key they need, having trusted nothing from the network.
+So the install goes like this. The crew runs the ceremony at the trailhead or in the van. Each node's badge, or the node itself, holds a part of the pad. The nodes then come up on the roof with every key they need, and they have trusted nothing from the network.
 
 ### 4.2 Where the pad bytes go
 
@@ -121,7 +121,7 @@ Three things make mesh bootstrap harder than WireGuard between two servers.
 
 1. **Nodes have no screen and no operator at join time.** A node mounted on a roof cannot read check words. The badge does the ceremony; the node receives its slice afterwards over USB or the touch link. That transfer is a pad-to-node provisioning step that the protocol needs to name. Draft: the node's part of the pad is written to the node's storage and the badge erases its copy, the same move as handing over a recovery share.
 2. **Links are lossy.** Circle messages over LoRa need the fountain-coded framing the phone client uses for QR. The `raptorq` packets are already sized for that.
-3. **Nodes join after the ceremony.** Adding a member without a new ceremony is out of scope for v1. The practical answer today is to run the ceremony with a spare slice held by the operator's badge and hand that slice to the new node. The spare is a planned member, not an extension of the pad.
+3. **Nodes join after the ceremony.** Adding a member without a new ceremony is out of scope for v1. The practical answer today is to run the ceremony with a spare slice held by the operator's badge and hand that slice to the new node. The spare is a member planned at the ceremony, so the pad is not extended.
 
 ### 4.4 The Numbers Station over LoRa
 
@@ -164,7 +164,7 @@ A node provisioned this way holds the whole pad, as any member does. The federat
 
 Every network today starts from a secret that someone downloaded and chose to trust: a certificate authority's root, a coordination server's key, a vendor's signing key. If that secret is bad, as the eMudhra keys were, everything built on it is bad, and nobody in the network can tell.
 
-Cahoots replaces that downloaded secret with one the members made together, in the same room, on devices they can inspect. Nobody outside the room has seen it, so there is nothing for a third party to get wrong. For a mesh network on a hillside with no uplink, this is not a philosophical preference. It is the only way the network can start at all.
+Cahoots replaces that downloaded secret with one the members made together, in the same room, on devices they can inspect. Nobody outside the room has seen it, so there is nothing for a third party to get wrong. For a mesh network on a hillside with no uplink, this is the only way the network can start at all.
 
 A node that lives in the cloud, such as a gateway, can still take part: it holds its part of the pad inside a secure enclave under a policy the group pinned, and every key it issues or accepts is written to a log that cannot be rewritten.
 
@@ -173,7 +173,7 @@ A node that lives in the cloud, such as a gateway, can still take part: it holds
 These follow from having shared random bytes and a record of which ones were used. Each is cheap because the pad does the work. What they add up to when everyone carries a card is in [Cards for every gathering](gatherings.md).
 
 1. **Hello words** (built, 2026-10-21). Every pair of members leaves the ceremony with a key only those two hold, so the app can show two words for you to say and two for the other person to say back. A voice clone cannot produce them. If a call feels wrong, both people tap Next and the words change; whoever cannot say the new ones does not hold the key. This is the one feature that names an individual rather than the circle, and it is as strong as X-Wing rather than unconditional. See protocol §3.3 and the [app notes](../web/README.md#hello-words).
-2. **Sender-anonymous messages.** The tag proves some member wrote a message, not which. Reserve a shared anonymous region where members spend at random offsets and treat a collision there as a retry, and the circle has anonymous votes with information-theoretic strength. This is a protocol version 2 change, because it alters the reuse rule for one region.
+2. **Sender-anonymous messages.** The tag proves that some member wrote a message. It does not say which one. Reserve a shared anonymous region where members spend at random offsets and treat a collision there as a retry, and the circle has anonymous votes with information-theoretic strength. This is a protocol version 2 change, because it alters the reuse rule for one region.
 3. **Perfect deniability after erasure.** For any ciphertext and tag there is a pad that decrypts it to any plaintext of the same length, including a Poly1305 key that reproduces the tag. Once the real bytes are erased, no transcript proves what was said. This holds only for human-only circles. The threat model should say so, and a "forge a transcript" tool makes it believable.
 4. **Proof of life and a dead man's switch.** A daily counter sealed with the pad proves the sender is still there and still free. Hold recovery shares in an enclave with a policy that releases them when the daily messages stop, and it becomes a continuity plan with a verifiable trigger.
 5. **SSH setup.** Peer announcements carry host and user keys. A helper writes `known_hosts` and `authorized_keys`. Today SSH trusts a host's key the first time it sees it and hopes nobody was in the way. With a circle, the key was vouched for by someone in the room.

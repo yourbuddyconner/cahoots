@@ -16,7 +16,7 @@ The hard part is getting the same random file to every member without anyone els
 
 ![The ceremony in five steps](docs/diagrams/ceremony.svg)
 
-The group is now a **cahoot** (a circle). The pad is a key budget. Spending 32 bytes seeds a session of any size in WireGuard, HPKE, age, or the pad-seeded chat, hedged so an attacker must break both the math and the pad. Spending one byte per byte encrypts a short message that nothing can break. Every spend is recorded in a ledger and the bytes are erased, so no key is ever used twice.
+The group is now a **cahoot** (a circle). The pad is a key budget. Spending 32 bytes seeds a session of any size in WireGuard, HPKE, age, or the pad-seeded chat. An attacker then has to break both the math and the pad. Spending one byte per byte encrypts a short message that nothing can break. The device records every spend in a ledger and erases the bytes, so no key is ever used twice.
 
 ![The pad: everyone holds all of it, each member sends from their own part](docs/diagrams/pad.svg)
 
@@ -76,8 +76,8 @@ See `docs/threat-model.md` for the full list.
 
 ## What it is for
 
-`docs/tiers.md` defines the device tiers, from a phone (T0) to inspected silicon (T4), and the rule that a circle is only as protected as its least protected member. `docs/use-cases.md` lists concrete uses, from group chat to bootstrapping WireGuard and physical mesh networks from a ceremony. `docs/gatherings.md` is the concept of a card for every gathering: storage, messages from old circles, the web of trust a card accumulates, and a social network with no accounts. `docs/diy-badge.md` is how to build a badge, in either hardware family. `docs/plan.md` is the roadmap. `docs/glossary.md` defines the terms.
+`docs/tiers.md` defines the device tiers, from a phone (T0) to inspected silicon (T4), and the rule that a circle is only as protected as its least protected member. `docs/use-cases.md` lists concrete uses: group chat, and bootstrapping WireGuard and physical mesh networks from a ceremony. `docs/gatherings.md` is the concept of a card for every gathering: storage, messages from old circles, the web of trust a card accumulates, and a social network with no accounts. `docs/diy-badge.md` is how to build a badge, in either hardware family. `docs/plan.md` is the roadmap. `docs/glossary.md` defines the terms.
 
 ## Working rules
 
-Correctness of the crypto is the product. Every spend path erases before output. Every tag compare is constant time. The message decoder is property-tested against arbitrary bytes. Standards are used where they exist: Poly1305 (RFC 8439), BIP-39 words, HPKE (RFC 9180), and HKDF (RFC 5869).
+Correctness of the crypto is the product. Every spend path erases before output. Every tag compare is constant time. The message decoder is property-tested against arbitrary bytes. The code uses standards where they exist: Poly1305 (RFC 8439), BIP-39 words, HPKE (RFC 9180), and HKDF (RFC 5869).

@@ -2,29 +2,29 @@
 
 ## Covered
 
-- **A network attacker** sees ciphertext and lengths. They can't read messages or change them undetected. Confidentiality comes from the pad. Integrity comes from the one-time Poly1305 tag.
+- **A network attacker** sees ciphertext and lengths. They can't read messages or change them undetected. Confidentiality comes from the pad and integrity from the one-time Poly1305 tag.
 - **Whoever runs the feed, and whoever hosts the enclave,** can drop or delay messages. They can't read or forge messages in a circle made only of people. Because the head of the log is anchored, they also can't quietly remove entries or show different members different histories.
 - **A compromised enclave** exposes only the circles that gave a hosted software member a seat.
 - **A malicious member** can't bias the pad during the ceremony, because of commit-then-reveal.
 - **A replayed message** is detected by the spent-range ledger and flagged as possible reuse.
-- **A voice clone, or anyone who overheard a call,** cannot produce the hello words for a pair, and cannot answer with the other side's words. Moving the hello number on makes every overheard pair useless. A stolen, unlocked device still shows the words: that is the device compromise below, not something the words defend against.
+- **A voice clone, or anyone who overheard a call,** cannot produce the hello words for a pair, and cannot answer with the other side's words. Moving the hello number on makes every overheard pair useless. A stolen, unlocked device still shows the words: that is the device compromise below, and the words do not defend against it.
 - **Someone within antenna or camera range during the ceremony** sees commitments and public keys, which are public, and sealed reveals, which they would have to break X-Wing (X25519 and ML-KEM-768) to open, once per member. They do not get the pad. Someone spliced into the cable who substitutes keys is caught by the commitment check and the ceremony aborts.
 
 ## Not covered
 
 - Members can read everything in their circle. That is the design.
-- The circle tag proves some member wrote a message, not which member. Proving a specific sender needs pairwise pads, which are out of scope for v1. Hello words are the exception: they use the pair keys from the sealed reveals, so they do name an individual, with X-Wing strength rather than the pad's.
+- The circle tag proves that some member wrote a message. It does not prove which member. Proving a specific sender needs pairwise pads, which are out of scope for v1. Hello words are the exception: they use the pair keys from the sealed reveals, so they do name an individual, with X-Wing strength rather than the pad's.
 - A stolen or compromised device exposes that device's pad. A device PIN and a lockout are future work.
 - Erasure on phone storage is best effort.
 - Coercion of members.
-- Emanations after the ceremony: a device spending pad bytes, or drawing a decrypted message on its screen, can be read up close by the same kind of attacker. E-paper and on-die storage reduce the exposure; nothing removes it.
+- Emanations after the ceremony: a device spending pad bytes, or drawing a decrypted message on its screen, can be read up close by the same kind of attacker. E-paper and on-die storage reduce the exposure but do not remove it.
 - Phone screens show the six check words. They are derived from the pad by a hash and reveal nothing useful about it.
 
 ## Claims the UI may make
 
 - **Confidentiality.** For a `TRNG` circle: secure against unlimited computing power, as long as pad bytes are never reused, against anyone who did not record the ceremony from inside the room. Against someone who did, as strong as X-Wing. For a `CSPRNG` circle: computationally secure.
 - **Integrity inside the circle.** Information-theoretic, through the one-time Poly1305 key.
-- **The hosted member's policy and the feed's log** rely on enclave attestation and signatures. That is ordinary modern cryptography. The pad is the layer that does not depend on math. The enclave is the layer that governs the hosted member.
+- **The hosted member's policy and the feed's log** rely on enclave attestation and signatures. That is ordinary modern cryptography. The pad is the layer that does not depend on math, and the enclave is the layer that governs the hosted member.
 
 ## Randomness
 

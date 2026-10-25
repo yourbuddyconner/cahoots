@@ -6,7 +6,7 @@
 
 A dev board and a display module on jumper wires, with firmware that is about to run its first ceremony. That is a prototype of the electronics, not of the product. Nothing here is on a board we designed, nothing holds together without a breadboard, and the parts are sized for convenience rather than for a card.
 
-Yes, we design a PCB. In fact we design two: V1 soon, a simple board to learn the process on and to have something that works at a meetup, and V2, the card, once two questions below are answered.
+Yes, we design a PCB, and we design two: V1 soon, a simple board to learn the process on and to have something that works at a meetup, and V2, the card, once two questions below are answered.
 
 ## How a board gets made, in plain words
 
@@ -14,7 +14,7 @@ Yes, we design a PCB. In fact we design two: V1 soon, a simple board to learn th
 2. **Parts.** Choose exact part numbers with footprints, and check they are in stock at the assembler's supplier. For small runs that means the parts library at JLCPCB or PCBWay, fed by LCSC.
 3. **Schematic.** Draw the circuit in KiCad, which is free and open. Most of a design like ours is copied from reference designs: Espressif publishes the ESP32-S3 hardware guidelines, and the e-paper's boost circuit is on every open Waveshare schematic.
 4. **Layout.** Draw the board outline, place the parts, route the copper, run the design rule checks. Two copper layers for a simple board; four once a bare chip with its memory is on it.
-5. **Review.** Someone who has done it before reads the schematic and the layout. Cheap compared with a wasted spin.
+5. **Review.** Someone who has done it before reads the schematic and the layout. It is cheap compared with a wasted spin.
 6. **Order.** Export Gerbers, drill files, the bill of materials and the placement file. Upload to JLCPCB or PCBWay with assembly. Five boards arrive in two to three weeks, for $100 to $400 depending on the parts.
 7. **Bring-up.** Power first, with a current meter. Then flash the firmware, which already runs on this chip, and work through the self-test one peripheral at a time. Expect to find two or three mistakes, fix them, and order again. Two spins is normal, three is not a failure.
 8. **Mechanical.** The tray, the top sheet, the magnets, the contacts. Prototyped by 3D printing in clear resin or by machining polycarbonate; injection moulded only at hundreds of units, because the tool costs thousands.
@@ -46,7 +46,7 @@ Cost for ten: about $35 to $50 a badge, plus the mechanical prototypes. Time: a 
 
 ## V2: the card
 
-The product. Designed once the power and chip questions are answered, around the Baochip-1x, on a four-layer board the size of a credit card, with the e-paper's glass as the top surface, dome buttons under a sheet, a thin cell, the pads and magnets from V1. This is a job for a contract hardware engineer and a mechanical designer: a few weeks of work and a five-figure fee, with three spins planned. Small batches of the tray are machined or cast; a mould is justified at five hundred units.
+This is the product. It is designed once the power and chip questions are answered, around the Baochip-1x, on a four-layer board the size of a credit card, with the e-paper's glass as the top surface, dome buttons under a sheet, a thin cell, the pads and magnets from V1. This is a job for a contract hardware engineer and a mechanical designer: a few weeks of work and a five-figure fee, with three spins planned. Small batches of the tray are machined or cast; a mould is justified at five hundred units.
 
 What the unit costs at five hundred: a bill of materials around $25 to $35, so a $60 to $90 badge. The e-paper and the chip are most of it.
 
@@ -55,13 +55,13 @@ What the unit costs at five hundred: a bill of materials around $25 to $35, so a
 - **Prototypes.** V1: under $1,000 all in. V2: $15,000 to $40,000 for the engineering, plus $3,000 to $15,000 for a tool if moulded.
 - **Compliance.** A board with a radio chip on it needs radio certification only if the radio transmits; ours never does, but a bare ESP32-S3 still needs emissions testing as an ordinary electronic device, and a module carries much of that already. The Baochip has no radio, which is simpler and cheaper. Budget $5,000 to $15,000 for testing before anything is sold in volume. Hobby quantities handed out at a meetup are a different matter from a product.
 - **Batteries.** Coin cells and pouch cells both have shipping rules, and a pouch cell needs a protection circuit on the board.
-- **Fulfilment.** Crowd Supply does campaigns, manufacturing introductions and warehousing for exactly this kind of open hardware, and the Baochip itself ships through them.
+- **Fulfilment.** Crowd Supply does campaigns, manufacturing introductions and warehousing for this kind of open hardware, and the Baochip itself ships through them.
 
 ## In what order
 
 1. Finish the firmware on the Nano and run the first ceremony with the laptop as the pile. In progress.
 2. Order a Pico 2 and port the four board modules to it: the USB link, the flash store, the random source, the pins. A week.
-3. Measure power during a ceremony and a refresh, on both chips. One afternoon. Decides the battery and the thickness.
+3. Measure power during a ceremony and a refresh, on both chips. One afternoon. That decides the battery and the thickness.
 4. Design and order V1 around the Pico 2 footprint. Ten units for the first meetup, the pile mechanics tested for real.
 5. December: Dabao boards arrive. Port the firmware; measure the Baochip's power and height.
 6. Brief a hardware engineer for V2 with the measurements, the V1 lessons and the benchmark from the DIY guide. Three spins.

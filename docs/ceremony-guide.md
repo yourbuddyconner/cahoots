@@ -36,7 +36,7 @@ If someone joined late and is still scanning at step 2 after you reached step 3,
 
 ## After
 
-- Each device keeps the shared secret and nothing else. The random bytes each person contributed are erased.
+- Each device keeps only the shared secret. The random bytes each person contributed are erased.
 - Each device shows a label next to the name: **CSPRNG** if anyone used only their phone's own randomness, **TRNG** if every member added hardware randomness. It says where the randomness came from. It is not a warning.
 - The group can now send messages and chat. Nothing about the ceremony has to happen again until the secret runs low, and the app warns you when it does.
 

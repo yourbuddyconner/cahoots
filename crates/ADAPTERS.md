@@ -1,6 +1,6 @@
 # Adapters
 
-Thin crates that feed `cahoots-provider` output into standard pre-shared-key slots. Adapters never read the pad. They call `psk` / `psk_for` and derive a protocol-specific key with the `wireguard`, `hpke`, or `age` context, so a PSK released for one protocol can't be reused in another.
+These are thin crates that feed `cahoots-provider` output into standard pre-shared-key slots. Adapters never read the pad. They call `psk` / `psk_for` and derive a protocol-specific key with the `wireguard`, `hpke`, or `age` context, so a PSK released for one protocol can't be reused in another.
 
 | Crate | Slot | Status |
 |---|---|---|
@@ -11,7 +11,7 @@ Thin crates that feed `cahoots-provider` output into standard pre-shared-key slo
 | `tls-psk/` | TLS 1.3 external PSK importer (RFC 9258) | not started (S4) |
 | `mls/` | MLS external PSK proposals (RFC 9420) | not started (S4) |
 
-All three finished adapters are **PSK mode**: the data is computationally secure. Only pure-pad messages (`cahoots-core`) are one-time-pad encrypted.
+All four finished adapters are **PSK mode**: the data is computationally secure. Only pure-pad messages (`cahoots-core`) are one-time-pad encrypted.
 
 ## Try the age plugin
 

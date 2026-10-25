@@ -14,7 +14,7 @@ An append-only, hash-chained public relay for circle ciphertext. Anyone can read
 
 - Rate limiting per circle or per client. Add it at the front proxy for now.
 - Any decryption, tag verification, or membership check. It has no key material at all.
-- Authentication of posters. Anyone can post bytes that parse. The circle's tags are what make a message real; the station only orders and keeps.
+- Authentication of posters. Anyone can post bytes that parse. The circle's tags make a message real; the station only orders and keeps it.
 
 ## Run
 
@@ -58,7 +58,7 @@ hash[0]   = SHA-256(0x00 * 32 || seq=0 (u64 LE) || received_at (u64 LE) || messa
 hash[n]   = SHA-256(hash[n-1] || seq=n (u64 LE) || received_at (u64 LE) || message)
 ```
 
-Clients that keep the last head they saw can detect a rollback: a later head whose history does not include the remembered hash means the log was rewritten. A member's own chained spend ledger can be cross-checked against this chain to prove a dropped or reordered message.
+Clients that keep the last head they saw can detect a rollback: a later head whose history does not include the remembered hash means the log was rewritten. A member can cross-check its own chained spend ledger against this chain to prove that a message was dropped or reordered.
 
 ## Accepted message shapes
 
@@ -67,7 +67,7 @@ Clients that keep the last head they saw can detect a rollback: a later head who
 
 ## Deploying as a [TVC](https://docs.turnkey.com/features/verifiable-cloud/overview) workload
 
-The station is built as an OCI image so it can run inside [Turnkey Verifiable Cloud](https://docs.turnkey.com/features/verifiable-cloud/overview), where the log head is anchored and the operator cannot roll the log back or show different readers different histories. **That deploy has not been done yet.** Until it is, this binary runs anywhere, and anchoring is a promise the operator makes, not one the enclave enforces.
+The station is built as an OCI image so it can run inside [Turnkey Verifiable Cloud](https://docs.turnkey.com/features/verifiable-cloud/overview), where the log head is anchored and the operator cannot roll the log back or show different readers different histories. **That deploy has not been done yet.** Until it is, this binary runs anywhere, and anchoring depends on the operator's word rather than on the enclave.
 
 The deploy record must pin:
 

@@ -28,7 +28,7 @@ YubiKey output is conditioned inside the chip, so the raw-noise tests of NIST SP
 
 ## Why a YubiKey is never the only source
 
-The YubiKey's firmware and chip are closed. In 2019, Yubico's advisory YSA-2019-02 reported that YubiKey FIPS series 4 devices returned random values with reduced randomness after power-up. A device with that kind of fault would pass every check above. Cahoots therefore always XORs YubiKey bytes with the device TRNG or the platform CSPRNG. A YubiKey adds entropy. It never replaces a source.
+The YubiKey's firmware and chip are closed. In 2019, Yubico's advisory YSA-2019-02 reported that YubiKey FIPS series 4 devices returned random values with reduced randomness after power-up. A device with that kind of fault would pass every check above. Cahoots therefore always XORs YubiKey bytes with the device TRNG or the platform CSPRNG. A YubiKey adds entropy to that source and never replaces it.
 
 ## CLI
 

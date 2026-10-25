@@ -2,7 +2,7 @@
 
 Cahoots runs on any board that can do four things: make random numbers, store the pad and erase parts of it for real, show six words, and talk to the next badge over a wire. Those four are the HAL (`crates/hal`). A board that implements them and passes the device test suite is a Cahoots badge, and its README says which [tier](tiers.md) it reaches and why.
 
-Two hardware families come first. More can follow.
+Two hardware families come first, and more can follow.
 
 | Family | Board | What it is for | Tier | When |
 |---|---|---|---|---|
@@ -19,8 +19,8 @@ Both run the same Rust core and the same ceremony. Both are USB devices, so the 
 ![The stack](diagrams/diy-stack.svg)
 
 - **An e-paper screen.** The manufactured badge uses a 1.54" 200 × 200 e-paper panel, and the DIY builds use e-paper too. It holds the six words with no power, it is readable in sunlight, and it never needs to animate: a single code fits on it, and the reveal, which is too big for a single code, travels over the wire or the USB cable instead. A 200 × 200 panel shows a version 4 code at 6 pixels per module, which a phone reads at arm's length.
-- **Two buttons.** A is next, B is confirm. That is enough for every screen: cycle through a PIN digit with A and lock it with B, confirm the words with B or reject them with A, pick a seat with A and take it with B. No joystick.
-- **A wire to the next badge.** The touch link, one per neighbour. On the Baochip it is a UART between two boards. On the Pico it is the same, or the spare port on the secure element's Qwiic breakout. Reveals are sealed to every member before they go on the wire, so the wire carries no secret and needs no handshake of its own. No radio is used during a ceremony on either family.
+- **Two buttons.** A is next, B is confirm. That is enough for every screen: cycle through a PIN digit with A and lock it with B, confirm the words with B or reject them with A, pick a seat with A and take it with B. There is no joystick.
+- **A wire to the next badge.** This is the touch link, one per neighbour. On the Baochip it is a UART between two boards. On the Pico it is the same, or the spare port on the secure element's Qwiic breakout. Reveals are sealed to every member before they go on the wire, so the wire carries no secret and needs no handshake of its own. No radio is used during a ceremony on either family.
 - **USB to a phone or laptop.** The browser app connects over WebUSB or WebSerial and becomes the badge's camera: it scans the other members' codes with the phone camera and passes them down the cable, and it can mirror the badge's screen. The secret never goes up the cable. Only commitments, reveals, sealed messages, and the ledger position do. This is roadmap item M4d, and it works the same for both families.
 
 ## The manufactured badge: the benchmark
@@ -40,15 +40,15 @@ The DIY families below are as thick as their boards and modules make them. The b
 
 The tallest column is the battery's, and with adhesive and tolerance the card comes out at 2.9 to 3.2 mm: four credit cards. A pile of eight is 25 mm.
 
-**Cards stack instead of lining up.** Four magnets in the floor line a card up on the one below and hold it a fraction of a millimetre above it, with opposite poles so it only snaps on one way round. Four gold pads on the face at the contacts end meet four spring fingers under the card above. A pile is a line of links, so each card has one link up and one down. The firmware for it is in `crates/hal`: the ceremony driver floods each new frame on every link except the one it came from, which its dedupe makes correct on a line, a ring, or a pair; and the pile layer (`hal::pile`) gives each card its seat from the card below it, with the bottom card naming the circle, and sends the count down from the top card when its button is pressed. Nobody says a seat number out loud. The ritual: press B on the top card, wait for the buzz, lift, read the words.
+**Cards stack instead of lining up.** Four magnets in the floor line a card up on the one below and hold it a fraction of a millimetre above it, with opposite poles so it only snaps on one way round. Four gold pads on the face at the contacts end meet four spring fingers under the card above. A pile is a line of links, so each card has one link up and one down. The firmware for it is in `crates/hal`: the ceremony driver floods each new frame on every link except the one it came from, which its dedupe makes correct on a line, a ring, or a pair. The pile layer (`hal::pile`) gives each card its seat from the card below it, with the bottom card naming the circle, and sends the count down from the top card when its button is pressed. Nobody says a seat number out loud. The ritual: press B on the top card, wait for the buzz, lift, read the words.
 
-**What 3 mm costs.** No USB-C: the receptacle alone needs about 3.2 mm of device, so the phone link runs through the same pads over a small dock with a USB-C socket on it. A coin cell instead of a charger: e-paper draws only when it changes, a ceremony is a few seconds of compute, and sleep is microamps, so a CR2016 runs the badge for a year or more and is replaceable anywhere. Glass in the card: the e-paper is glass, so this is a badge on a lanyard, not a card in a back pocket.
+**What 3 mm costs.** No USB-C: the receptacle alone needs about 3.2 mm of device, so the phone link runs through the same pads over a small dock with a USB-C socket on it. A coin cell instead of a charger: e-paper draws only when it changes, a ceremony is a few seconds of compute, and sleep is microamps, so a CR2016 runs the badge for a year or more and is replaceable anywhere. Glass in the card: the e-paper is glass, so it hangs on a lanyard and should not ride in a back pocket.
 
 Two millimetres would need a flexible e-paper, a thin-film cell, a wafer-level chip package and a laminated card build. That is a card manufacturer's process, and nobody could build the same thing on a bench, so it is not the first target.
 
 ## Family 1: Baochip
 
-The native badge. The Dabao is the Baochip-1x on a small two-layer board: a 350 MHz VexRiscv RV32-IMAC core with an MMU, four 700 MHz PicoRV I/O cores, 4 MiB of on-chip RRAM, 2 MiB of SRAM, USB-C as a high-speed USB device, and 20 pinned-out I/Os. $12 plus shipping, from Crowd Supply, shipping 15 December 2026. Most of the chip's RTL is published, and its package lets an owner compare the die with the design under an infrared microscope.
+This is the native badge. The Dabao is the Baochip-1x on a small two-layer board: a 350 MHz VexRiscv RV32-IMAC core with an MMU, four 700 MHz PicoRV I/O cores, 4 MiB of on-chip RRAM, 2 MiB of SRAM, USB-C as a high-speed USB device, and 20 pinned-out I/Os. $12 plus shipping, from Crowd Supply, shipping 15 December 2026. Most of the chip's RTL is published, and its package lets an owner compare the die with the design under an infrared microscope.
 
 The board has no screen, no buttons, no battery, and no radio. You add:
 
@@ -67,7 +67,7 @@ Wiring will be published when the boards arrive. The Dabao's pinout is interacti
 
 ## Family 2: Raspberry Pi Pico
 
-The tinkering badge. Available everywhere today, cheap, and surrounded by parts that plug together without soldering. It needs one extra part to be honest about security: a secure element, because an RP2350 on its own cannot stop a copied flash from being restored, and that is the attack that lets pad bytes be reused.
+This is the tinkering badge. It is available everywhere today, cheap, and surrounded by parts that plug together without soldering. It needs one extra part to be honest about security: a secure element, because an RP2350 on its own cannot stop a copied flash from being restored, and that is the attack that lets pad bytes be reused.
 
 | Part | Price | Notes |
 |---|---|---|
@@ -109,7 +109,7 @@ A Pico 2 W has Wi-Fi and Bluetooth on board. For tinkering that is useful: flash
 
 ## Firmware and first boot
 
-Not published for either family yet. When it is: for the Pico, hold BOOTSEL while plugging in and drag the `.uf2` file onto the drive that appears. For the Dabao, `cargo xtask dabao` produces the images and the board's bootloader takes them over USB. The first screen on either shows the firmware hash so the group can compare it, then asks for a PIN.
+The firmware is not published for either family yet. When it is: for the Pico, hold BOOTSEL while plugging in and drag the `.uf2` file onto the drive that appears. For the Dabao, `cargo xtask dabao` produces the images and the board's bootloader takes them over USB. The first screen on either shows the firmware hash so the group can compare it, then asks for a PIN.
 
 What the firmware checks on first boot, and shows on the screen: the random sources pass the health tests; the screen and both buttons work; the pad region erases and reads back clean; on the Pico, the secure element answers on I2C.
 
@@ -124,7 +124,7 @@ Every member holds the whole pad, and the pad is too big for any secure element.
 
 ## Adding a family
 
-Implement the four HAL traits (`Entropy`, `PadStore`, `Display`, `Link`) in a crate for the board. Run the device suite against the host simulator: a board passes by completing a ring ceremony with simulated peers and producing the right six words. Write the crate's README with the tier the board earns and why, judged by what its storage and boot chain can actually do, not by what the crate claims. The ESP32-S3 crate is the first of these to run on real hardware; its four implementations are the template for the Pico's.
+Implement the four HAL traits (`Entropy`, `PadStore`, `Display`, `Link`) in a crate for the board. Run the device suite against the host simulator: a board passes by completing a ring ceremony with simulated peers and producing the right six words. Write the crate's README with the tier the board earns and why, judged by what its storage and boot chain can do, not by what the crate claims. The ESP32-S3 crate is the first of these to run on real hardware; its four implementations are the template for the Pico's.
 
 ## Open questions
 

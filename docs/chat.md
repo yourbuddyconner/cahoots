@@ -51,11 +51,11 @@ message = header || ct                                  // ct includes the 16-by
 
 Version `2` distinguishes chat messages from pure-pad messages (version `1`) on the same feed. `type`: `0` text, `1` control (reserved). `len` is the plaintext length. Plaintext SHOULD be bucket-padded to 64, 256, 1024, or 4096 bytes.
 
-The `sender` field is a claim. Any member can compute any sender's chain. It identifies a chain, not a person, exactly as slices do for pure-pad messages.
+The `sender` field is a claim. Any member can compute any sender's chain. It identifies a chain, not a person, as slices do for pure-pad messages.
 
 ## 4. Security properties
 
-- **Confidentiality and integrity**: computational, from ChaCha20-Poly1305 with keys an attacker can get only by knowing both the pad bytes of the epoch and nothing else. There is no public-key step to break.
+- **Confidentiality and integrity**: computational, from ChaCha20-Poly1305 with keys an attacker can get only by knowing the pad bytes of the epoch. There is no public-key step to break.
 - **Forward secrecy inside an epoch**: deleted chain and message keys cannot be recovered from a later memory dump.
 - **Post-compromise security at the next epoch**: a device whose memory was dumped is clean again after the next epoch, as long as the pad region was not taken. This comes from the pad, not from a fresh key exchange.
 - **Not provided**: sender authenticity among members, and protection against a member who leaks the epoch key.

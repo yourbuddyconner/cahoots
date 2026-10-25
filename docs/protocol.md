@@ -33,7 +33,7 @@ Implementation: `crates/core/src/params.rs`.
 
 ## 3. Ceremony
 
-Commit-then-reveal. Without it, the last member to reveal could choose a contribution after seeing everyone else's and bias the pad.
+The ceremony is commit-then-reveal. Without the commit step, the last member to reveal could choose a contribution after seeing everyone else's and bias the pad.
 
 ![The ceremony in five steps](diagrams/ceremony.svg)
 
@@ -61,7 +61,7 @@ Implementation: `crates/core/src/frame.rs`.
 
 The ceremony link radiates: a wire, a USB cable, or a phone screen can be read by an antenna or a camera nearby. Without this section, an attacker in range during the ceremony records every contribution and holds the pad. With it, that attacker has to break X-Wing (X25519 and ML-KEM-768, both) for every member. Nobody else is affected: the pad is still the XOR of the contributions and never depends on the key exchange, so the claim against an attacker who was not in the room is unchanged.
 
-The KEM is X-Wing (draft 06). `pk_i` is the 1216-byte encapsulation key derived from a 32-byte seed. Binding `pk_i` into `C_i` is what stops someone spliced into the cable from substituting keys: a reveal sealed with the real key then fails the commitment check and the ceremony aborts.
+The KEM is X-Wing (draft 06). `pk_i` is the 1216-byte encapsulation key derived from a 32-byte seed. Binding `pk_i` into `C_i` stops someone spliced into the cable from substituting keys: a reveal sealed with the real key then fails the commitment check and the ceremony aborts.
 
 A sealed reveal from member `i` to the other members is:
 
@@ -92,7 +92,7 @@ pair_key(lo, hi) = HKDF-SHA256(salt = "cahoots/pair/v1",
                                info = params || lo || hi)        32 bytes
 ```
 
-Both members hold both secrets, so both derive the same key, and no third member can. Unlike the pad, this key is computational (as strong as X-Wing). Unlike the pad, it names an individual: something produced under `pair_key(a, b)` came from `a` or `b`, not from "some member". A device keeps `n - 1` pair keys next to the pad. A circle made before sealed reveals has none.
+Both members hold both secrets, so both derive the same key, and no third member can. Unlike the pad, this key is computational (as strong as X-Wing), and it names an individual: something produced under `pair_key(a, b)` came from `a` or `b`, whereas a pad message could have come from any member. A device keeps `n - 1` pair keys next to the pad. A circle made before sealed reveals has none.
 
 Hello words are the spoken form. Each pair keeps a counter, and for each counter value each member has two words to say:
 
@@ -159,7 +159,7 @@ A `control` message (type `3`) bootstraps a network. Its plaintext is one subtyp
 
 A pre-shared key named by a `psk` message is the 32 bytes at `offset` of the issuer's slice, derived with the context `purpose || peer_a || peer_b`, so a key issued for WireGuard between A and B cannot be reused for another purpose or another pair. The acceptor marks that range spent in its own ledger; a second `psk` message for the same range is refused as reuse. `peer_b = 255` means every member: a group key, such as a Meshtastic channel key, which every member accepts from the same message.
 
-Control messages are ordinary messages: posted anywhere, including the Numbers Station, and readable or forgeable only by members. The feed is a channel, not a party.
+Control messages are ordinary messages: they can be posted anywhere, including the Numbers Station, and only members can read or forge them. The feed only carries them.
 
 Implementation: `crates/core/src/control.rs`; the WireGuard use is `crates/wireguard`.
 

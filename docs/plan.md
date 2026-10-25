@@ -16,7 +16,7 @@ The work runs on five tracks. Each milestone has a short code, such as `M2`, tha
 | Chat | Encrypted group chat and the public feed it runs over |
 | Apps | Small programs that run on top of a group's message stream |
 
-Status words mean exactly this:
+Status words mean this:
 
 - **done**: the code is merged and its tests pass in CI.
 - **partly done**: some of the scope is merged. The row says what is missing.
@@ -71,7 +71,7 @@ Goal: a group that met once can set up a VPN or a mesh network with no coordinat
 | N5 Federation | Pairwise secrets between each two members, so a member cannot forge another member's messages | Three devices complete the group and pairwise ceremonies. A member cannot post as another | after M4b |
 | N6 LoRa control plane | A `Link` over an SX1262 LoRa radio, the station able to gateway packets it hears, and the WireGuard bootstrap driven entirely by `peer` and `psk` messages received over LoRa. The radio is a separate hat that goes on after the ceremony, so "no radio during the ceremony" is physically true | A node with only a LoRa radio joins an IP mesh with keys it received over the air, and a radio capture shows only noise | after M4b; the Pico family makes this a $20 hat |
 
-N1 and N2 shipped first, because they needed no hardware. What a Tailscale-like mesh still needs on top: a `mesh` command that loops the pair steps over every announced peer, and a relay for hosts behind NAT, which WireGuard cannot do on its own.
+N1 and N2 shipped first, because they needed no hardware. A Tailscale-like mesh still needs two more things: a `mesh` command that loops the pair steps over every announced peer, and a relay for hosts behind NAT, which WireGuard cannot do on its own.
 
 ## Chat
 
@@ -107,9 +107,9 @@ Goal: small programs, such as a vote, that every member runs over the same order
 7. Who reviews the approvals, recovery, and hosted-keys work before it ships.
 8. Whether to buy an open-design USB random number generator as a second source that others can audit.
 9. Whether to permanently enable secure boot and storage encryption on the spare ESP32-S3. Needs Conner's approval, because it cannot be undone. Less pressing now that the DIY badge is the first board.
-10. Whether the first network demo is WireGuard between laptops (N1, no hardware) or a Meshtastic group (N4, needs radios). WireGuard ships faster. Meshtastic fits the community story better.
+10. Whether the first network demo is WireGuard between laptops (N1, no hardware) or a Meshtastic group (N4, needs radios). WireGuard ships faster, but Meshtastic fits the community story better.
 11. Whether pairwise secrets (N5) are worth the longer ceremony before a deployment with several parties needs them.
 12. Whether apps (A2, A3) come before or after the hosted seat (M3). They share the control-message work in N2.
 13. When to replace the fixed "one part of the pad per member" layout with a manifest written at the ceremony that names who may spend which bytes, for what. Decided on 2026-10-20 to adopt the manifest and drop delegation. The timing is open. The manifest should also record each member's device tier.
 14. Device tiers below T3 are declared, not proven. Whether a phone (T0) may join a group of T3 badges at all, or only with a loud warning, is a product decision.
-15. **New, 2026-10-21.** Hardware families. Decided: two to start, the Baochip (native, Dabao board, RISC-V, T3) and the Raspberry Pi Pico (tinkering, available now, wireless on the W, WebUSB, T2 with an Infineon Trust M). E-paper and two buttons on both; no joystick. More families welcome through the HAL. Open: the Pico screen, the 2.13" hat that plugs on or the 1.54" module both families would share; and whether a Pico badge's PIN is entered on the badge or on the phone.
+15. **New, 2026-10-21.** Hardware families. Decided: two to start, the Baochip (native, Dabao board, RISC-V, T3) and the Raspberry Pi Pico (tinkering, available now, wireless on the W, WebUSB, T2 with an Infineon Trust M). Both get e-paper and two buttons, and no joystick. More families can join through the HAL. Open: the Pico screen, the 2.13" hat that plugs on or the 1.54" module both families would share; and whether a Pico badge's PIN is entered on the badge or on the phone.
