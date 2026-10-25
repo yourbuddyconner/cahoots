@@ -17,7 +17,7 @@ subprocess.run([CLI, "sch", "export", "netlist", "--format", "kicadxml", "-o", x
 tree = ET.parse(xml_path)
 sch = {}
 for net in tree.getroot().iter("net"):
-    name = net.get("name")
+    name = net.get("name").lstrip("/")   # local labels export with the sheet path in front
     pins = frozenset((n.get("ref"), n.get("pin")) for n in net.findall("node"))
     if name.startswith("unconnected-"):
         continue

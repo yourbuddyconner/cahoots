@@ -19,6 +19,7 @@ Drawn and checked, not yet reviewed or ordered. The schematic passes KiCad's ele
 | `check.py` | Schematic netlist versus `design.py` versus the board. KiCad's Python. |
 | `make_bom.py` | `bom.csv` in the assembler's columns. |
 | `v1.kicad_pro`, `v1.kicad_sch`, `v1.kicad_pcb`, `bom.csv` | The generated project. Open `v1.kicad_pro` in KiCad to look. |
+| `schematic.png`, `front.png`, `back.png` | Renders of the schematic and both sides of the board, for reading without KiCad. |
 
 Regenerate everything:
 
@@ -31,6 +32,7 @@ java -jar freerouting.jar -de v1.dsn -do v1.ses -mp 80 -da -dl     # Freerouting
 $PY route.py import && $PY check.py
 kicad-cli pcb drc --severity-error v1.kicad_pcb
 kicad-cli pcb render --side top -o front.png v1.kicad_pcb
+kicad-cli sch export svg -o out v1.kicad_sch          # schematic.png is a rendering of that SVG
 ```
 
 Edit `design.py`, never the generated files: the next run overwrites them.
