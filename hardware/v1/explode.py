@@ -1,5 +1,7 @@
 """assembly.png: the badge exploded into its parts beside the assembled badge, for a reader or
-an image model to see what goes where. Run with KiCad's Python; needs the repo's video/ node_modules."""
+an image model to see what goes where. Run with KiCad's Python; needs the repo's video/ node_modules.
+Renders use KiCad's "user" quality, so ~/Library/Preferences/kicad/10.0/3d_viewer.json should have the raytracer on with
+raytrace_shadows and raytrace_backfloor off: no shadows under floating parts."""
 import os
 import subprocess
 import tempfile
@@ -57,7 +59,7 @@ def variant(name, lift):
     out = os.path.join(tempfile.gettempdir(), f"cahoots-{name}.png")
     rot, zoom, persp, pivot, (w, h), side_ = CAMERA[name]
     subprocess.run([CLI, "pcb", "render", "--side", side_] + (["--perspective"] if persp else []) + (["--pivot", pivot] if pivot else [])
-                   + ["--rotate", rot, "--zoom", zoom, "--quality", "high", "--width", str(w), "--height", str(h), "--background", "transparent", "--floor", "-o", out, path],
+                   + ["--rotate", rot, "--zoom", zoom, "--quality", "user", "--width", str(w), "--height", str(h), "--background", "transparent", "-o", out, path],
                    check=True, capture_output=True)
     os.remove(path)
     return out
