@@ -72,7 +72,7 @@ Cahoots is a way to get that first secret without needing to rent it from someon
 A group of people meets in person. Friends, a family, a team, a company. Each person's device contributes randomness, and everyone leaves with the same shared secret, which no server, no authority, and no third party ever touched. From there, every key you need to communicate with that group comes out of it. A key for a VPN. A key for a connection between two of your machines. A key for a file, or a chat, or a message that nothing can read.
 
 <figure>
-<img src="/docs/diagrams/ceremony.svg" alt="The ceremony in five steps: meet, generate, swap, combine, confirm" width="960" height="532">
+<img src="/docs/diagrams/ceremony.svg" alt="The ceremony in five steps: set up, draw, touch, mix, say the words" width="960" height="364">
 <figcaption>The ceremony. Set up, draw, touch, mix, say the words. The <a href="/docs/#/ceremony-guide">guide</a> has the details.</figcaption>
 </figure>
 

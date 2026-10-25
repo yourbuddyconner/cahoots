@@ -95,35 +95,87 @@ def badge(s, x, y, label, w=58, h=78, words=None):
 
 
 # 1. Ceremony -----------------------------------------------------------------
+def mini_badge(s, x, y, w=48, h=54, screen=None, screen_fill=PAPER, pins=True):
+    """A small badge seen from the front: shell, e-paper, three pins underneath."""
+    s.rect(x, y, w, h, fill=BG2, stroke=LINE, r=6)
+    s.rect(x + 6, y + 7, w - 12, h - 22, fill=screen_fill, stroke="none", r=2)
+    if screen:
+        s.lines(x + w / 2, y + 17, screen, size=6.5, fill=INK, anchor="middle", lh=8, mono=True)
+    if pins:
+        for i in range(3):
+            s.circle(x + w / 2 - 8 + i * 8, y + h - 6, 1.8, fill=AMBER, stroke="none")
+
+
+def wrap(text, width):
+    words, lines, cur = text.split(), [], ""
+    for w in words:
+        if len(cur) + len(w) + 1 > width:
+            lines.append(cur); cur = w
+        else:
+            cur = (cur + " " + w).strip()
+    lines.append(cur)
+    return lines
+
+
 def ceremony():
     steps = [
-        ("Set up", "One person names the group and the member count. Every device shows it. Everyone confirms."),
-        ("Draw", "Each device makes its own random bytes and locks them in with a fingerprint, before it sees anyone else's."),
-        ("Touch", "Devices connect in a ring. First the fingerprints go around, then the bytes. Nothing uses a radio."),
-        ("Mix", "Every device combines all the bytes into one secret. One honest member is enough to make it random."),
-        ("Say the words", "Six words appear on every screen. Read them aloud. If they match, the group is in cahoots."),
+        ("Set up", "One person names the group and its size. Every screen shows it. Everyone confirms."),
+        ("Draw", "Each device makes random bytes and seals a fingerprint of them before it sees anyone else's."),
+        ("Touch", "Devices link in a ring. Fingerprints go around first, then the bytes. No radio."),
+        ("Mix", "Every device combines all the bytes into one secret. One honest member makes it random."),
+        ("Say the words", "Six words appear on every screen. Read them aloud. If they match, you're in cahoots."),
     ]
-    rowh = 92
-    top = 28
-    s = Svg(960, top + rowh * len(steps) + 44, "The ceremony in five steps")
-    x_num, x_name, x_body = 36, 84, 330
+    W, n, gap, m = 960, len(steps), 14, 24
+    cw = (W - 2 * m - gap * (n - 1)) / n  # column width
+    rail_y, box_y, box_h = 44, 76, 118
+    title_y = box_y + box_h + 34
+    body_y = title_y + 24
+    s = Svg(W, body_y + 4 * 18 + 40, "The ceremony in five steps")
+    # the rail
+    s.line(m + cw / 2, rail_y, W - m - cw / 2, rail_y, color=LINE, sw=1.5)
     for i, (name, body) in enumerate(steps):
-        y = top + i * rowh
-        s.rect(20, y, 920, rowh - 12, fill=BG2, stroke=LINE, r=12)
-        s.text(x_num, y + 48, f"{i + 1:02d}", size=13, fill=AMBER, mono=True)
-        s.text(x_name, y + 49, name, size=20, fill=FG, weight=600)
-        # wrap the body to two lines of about 70 characters
-        words, lines, cur = body.split(), [], ""
-        for w in words:
-            if len(cur) + len(w) + 1 > 72:
-                lines.append(cur); cur = w
-            else:
-                cur = (cur + " " + w).strip()
-        lines.append(cur)
-        s.lines(x_body, y + 36 if len(lines) > 1 else y + 47, lines, size=14.5, fill=FG2, lh=22)
-        if i < len(steps) - 1:
-            s.arrow(x_num + 8, y + rowh - 12, x_num + 8, y + rowh - 1, color=FG3)
-    s.text(480, top + rowh * len(steps) + 22, "Steps 2 and 3 are what stop anyone from choosing their bytes after seeing everyone else's.", size=12.5, fill=FG3, anchor="middle")
+        x = m + i * (cw + gap)
+        cx = x + cw / 2
+        # numbered node
+        s.circle(cx, rail_y, 13, fill=BG, stroke=AMBER, sw=1.5)
+        s.text(cx, rail_y + 4.5, str(i + 1), size=12, fill=AMBER, anchor="middle", mono=True, weight=500)
+        # picture box
+        s.rect(x, box_y, cw, box_h, fill=BG2, stroke=LINE_SOFT, r=12)
+        by = box_y + box_h / 2
+        if i == 0:
+            mini_badge(s, cx - 24, by - 27, screen=["meetup", "4 of 4"])
+            s.text(cx, by + 40, "confirm", size=9.5, fill=FG3, anchor="middle", mono=True)
+        elif i == 1:
+            mini_badge(s, cx - 24, by - 27, screen=["7f3a91", "c0e2b8"])
+            # a seal: small amber lock to the right
+            lx, ly = cx + 36, by - 6
+            s.rect(lx - 7, ly, 14, 11, fill=AMBER, stroke="none", r=2)
+            s.path(f"M{lx - 4} {ly} v-4 a4 4 0 0 1 8 0 v4", stroke=AMBER, sw=1.8)
+        elif i == 2:
+            # four badges in a ring, linked by amber segments
+            r = 34
+            pts = [(cx, by - r), (cx + r, by), (cx, by + r), (cx - r, by)]
+            for (ax, ay), (bx, by2) in zip(pts, pts[1:] + pts[:1]):
+                s.line(ax, ay, bx, by2, color=AMBER, sw=1.5)
+            for px, py in pts:
+                s.rect(px - 11, py - 14, 22, 28, fill=BG2, stroke=LINE, r=4)
+                s.rect(px - 7, py - 10, 14, 13, fill=PAPER, stroke="none", r=1.5)
+        elif i == 3:
+            # four short bars fold into one
+            for k in range(4):
+                yy = by - 30 + k * 14
+                s.rect(cx - 62, yy, 36, 7, fill=FG3, stroke="none", r=2)
+                s.path(f"M{cx - 26} {yy + 3.5} C {cx - 8} {yy + 3.5}, {cx - 8} {by - 3.5}, {cx + 6} {by - 3.5}", stroke=LINE, sw=1)
+            s.text(cx - 14, by + 2, "⊕", size=12, fill=FG2, anchor="middle")
+            s.rect(cx + 6, by - 7, 52, 14, fill=AMBER, stroke="none", r=3)
+            s.text(cx + 32, by + 3.5, "secret", size=8.5, fill=INK, anchor="middle", mono=True, weight=500)
+        else:
+            mini_badge(s, cx - 40, by - 34, w=80, h=68, screen=["sunset  valve", "present  raven", "curtain  pudding"])
+            s.text(cx, by + 48, "\u201cmatch\u201d", size=9.5, fill=FG3, anchor="middle", mono=True)
+        s.text(cx, title_y, name, size=16, fill=FG, anchor="middle", weight=600)
+        s.lines(cx, body_y, wrap(body, 27), size=12, fill=FG2, anchor="middle", lh=18)
+    # the one thing to remember
+    s.text(W / 2, s.h - 20, "Steps 2 and 3 are what stop anyone from choosing their bytes after seeing everyone else\u2019s.", size=12, fill=FG3, anchor="middle")
     s.save("ceremony.svg")
 
 
