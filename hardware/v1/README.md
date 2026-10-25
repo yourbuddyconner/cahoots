@@ -19,7 +19,8 @@ Drawn and checked, not yet reviewed or ordered. The schematic passes KiCad's ele
 | `check.py` | Schematic netlist versus `design.py` versus the board. KiCad's Python. |
 | `make_bom.py` | `bom.csv` in the assembler's columns. |
 | `v1.kicad_pro`, `v1.kicad_sch`, `v1.kicad_pcb`, `bom.csv` | The generated project. Open `v1.kicad_pro` in KiCad to look. |
-| `schematic.png`, `front.png`, `back.png` | Renders of the schematic and both sides of the board, for reading without KiCad. |
+| `schematic.png`, `front.png`, `back.png`, `hero.png` | Renders of the schematic, both sides of the board, and an angled view of both for an article. |
+| `models/panel.wrl` | A box model of the panel, so the 3D view shows the glass and the flex. |
 
 Regenerate everything:
 

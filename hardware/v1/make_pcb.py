@@ -163,6 +163,12 @@ r = sh / 2
 seg((sx - sw / 2 + r, sy + r), (sx + sw / 2 - r, sy + r)); seg((sx - sw / 2 + r, sy - r), (sx + sw / 2 - r, sy - r))
 arc((sx + sw / 2 - r, sy), (sx + sw / 2 - r, sy + r), 180); arc((sx - sw / 2 + r, sy), (sx - sw / 2 + r, sy - r), 180)
 
+# ---- the panel as a part with no pads, so the 3D view shows it ----
+panel = pcbnew.FOOTPRINT(board); panel.SetFPID(pcbnew.LIB_ID("cahoots", "Panel_GDEY0154D67")); panel.SetReference("DS1"); panel.SetValue("GDEY0154D67")
+panel.Reference().SetLayer(pcbnew.F_Fab); panel.Value().SetLayer(pcbnew.F_Fab)
+m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KIPRJMOD}/models/panel.wrl"; panel.Models().push_back(m)
+board.Add(panel); panel.SetPosition(P(*D.PANEL["center"]))
+
 # ---- panel outline and flex on the front silkscreen ----
 pc = D.PANEL["center"]; pw, ph = D.PANEL["w"], D.PANEL["h"]
 for a, b in [((pc[0]-pw/2, pc[1]+ph/2), (pc[0]+pw/2, pc[1]+ph/2)), ((pc[0]+pw/2, pc[1]+ph/2), (pc[0]+pw/2, pc[1]-ph/2)),

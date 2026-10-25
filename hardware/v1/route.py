@@ -35,6 +35,10 @@ elif sys.argv[1] == "import":
             continue
         z.SetThermalReliefGap(pcbnew.FromMM(0.3)); z.SetThermalReliefSpokeWidth(pcbnew.FromMM(0.3))
         z.SetMinThickness(pcbnew.FromMM(0.2)); z.SetLocalClearance(pcbnew.FromMM(0.25))
+    # The router necks tracks down between the connector's pads; keep every track at the fab's floor or wider.
+    for t in board.GetTracks():
+        if t.GetClass() in ("PCB_TRACK", "PCB_ARC") and t.GetWidth() < pcbnew.FromMM(0.15):
+            t.SetWidth(pcbnew.FromMM(0.15))
     filler = pcbnew.ZONE_FILLER(board)
     filler.Fill(board.Zones())
     board.Save(PCB)
