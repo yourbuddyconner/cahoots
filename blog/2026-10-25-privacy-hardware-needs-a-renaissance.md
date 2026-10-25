@@ -11,6 +11,8 @@ learn:
 - What the real dependency is: the first secret, not the encryption
 - Which tools you can already run yourself once you have shared randomness
 - What Cahoots does, and which parts of your life it is for
+- Why Signal, Tailscale and a security key don't make this redundant
+- How a pad made in a room holds up if quantum computers break public-key cryptography
 - Why privacy has to become a core competency for people and businesses
 description: The certificate system is just the canary. The tools for private infrastructure already exist. What is missing is the first secret, made by the people who will use it and nobody else.
 ---
@@ -43,7 +45,7 @@ I don't think those institutions are villains. I think they're ordinary people l
 
 ## The tools already exist
 
-Here's what I keep coming back to. The technology for private infrastructure is already built, and setting aside any spectres of the quantum singularity they are already open, and already good. VPNs. Mutual TLS. Plain old private networking. Encrypted files. Group chat. None of it is exotic. You can run all of it yourself, on your own machines, for your own people.
+Here's what I keep coming back to. The technology for private infrastructure is already built, already open, and already good. (The quantum question deserves its own section, and it gets one below.) VPNs. Mutual TLS. Plain old private networking. Encrypted files. Group chat. None of it is exotic. You can run all of it yourself, on your own machines, for your own people.
 
 Before any of those tools can protect anything, somebody has to hand out the first secret, and it has to reach the right people and nobody else. Today that somebody is an institution. You apply, it issues, you trust. The dependency was never in the math. It's in the order of operations.
 
@@ -92,6 +94,28 @@ That covers a lot of what people and small organizations actually need from each
     </div>
   </div>
 </div>
+
+## Why not just use Signal
+
+This is the first thing people say, and it's a fair question. Signal is excellent. So is Tailscale, so is a password manager, so is the security key on your keyring. If the claim were that nobody has built good privacy tools, the claim would be wrong.
+
+The claim is about where the first secret comes from. Signal makes keys on your phone and then asks a server to introduce you to your friend's keys. That server is run carefully by people I trust, and it is still a server, in a jurisdiction, behind a company that has bills to pay and mail to answer. The same shape repeats everywhere. Tailscale has a control plane. A password manager has an account. A security key gets enrolled through somebody's website. In each case, the thing that connects you to the people you trust passes through a party you don't know. These tools are honest about that, and they have done the hard work of making the middle as small and as well-behaved as it can be. That is a real achievement. It is also a different goal from having no middle at all.
+
+Cahoots doesn't compete with those tools. It feeds them. A secret made in the room becomes the pre-shared key under a WireGuard tunnel, which is what Tailscale carries. It becomes the seed for an encrypted chat, the key under a file, the credential between two of your machines. The tools stay. What changes is that nobody introduced you. You introduced yourselves.
+
+The cost is plain: you have to be in the same room once. For strangers, that's a dealbreaker, and the tools above exist precisely because strangers need to talk. For the people you'd hand a house key to, it's a Tuesday.
+
+## If the math breaks
+
+I should admit where this idea actually came from, because it wasn't the certificate story. It was a thought experiment about a worse world.
+
+Almost everything private on the internet rests on public-key cryptography. Two strangers can agree on a secret across an open wire because certain math problems are hard. That assumption has held for fifty years. A large enough quantum computer breaks it. Nobody knows when or whether that machine arrives, and the field is already moving to new math that's expected to survive it. Cahoots uses that new math too, for the one step where devices seal their contributions to each other.
+
+But play the pessimist. Suppose the new math falls as well, or suppose you'd simply rather not bet on it. What's left is the oldest method there is: a secret that was never sent, carried by a person to the people who need it. One-time pads. Couriers. Trusted setups done in a room, by people whose job is to be trusted. In that world, key material moves the way it did before the internet, by hand, and the people who run those rooms are the trust infrastructure.
+
+Cahoots is built so that it works in that world without changing. A pad made at a ceremony doesn't depend on any hard problem to stay secret, because it was never on a wire. Everything it keys is at least as strong as the pad, whatever happens to the math. If the pessimist is wrong, you lose nothing. If the pessimist is right, you were already there. And if that's where we end up in ten years, I'd like the courier to be a badge that was already in everyone's pocket.
+
+I think that's the right posture for a privacy tool built now: assume the worst about the math, and design so that the worst changes nothing.
 
 ## Privacy as a core competency
 
