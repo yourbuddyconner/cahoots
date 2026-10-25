@@ -137,9 +137,13 @@ I think that's the right way to build a privacy tool now: assume the worst about
 
 I want to address the elephant in the room directly. Privacy has to become a core competency, for individuals and for businesses. Something you know how to do, the way you know how to lock your door, rather than something you buy once and forget about.
 
-For a person, that means being able to keep things between you and the people you choose, with no company in the loop. For a business, it means running your own connections, your own network, your own trust, so that a stranger's mistake never becomes your outage or your breach.
+Most people treat privacy as a purchase. You pick a VPN, a messaging app, a password manager, and you're done. The buying is fine. The forgetting is the problem. A purchase gives you no idea what the thing protects you from, what it doesn't, and what happens to you when the company behind it has a bad week. The eMudhra story and the Tailscale report landed in the same fortnight, and most of the people affected by either couldn't have told you in advance that they were exposed. That isn't a failure of the tools. It's what happens when you own the subscription but not the understanding.
 
-The tools are there. The knowledge is learnable. What's been missing is the first step, and the habit.
+For a person, competency means you can answer three questions about anything private in your life. Who else can read this? What do they have to do to read it? What do I do if they're compromised? If you can't answer those for your chat, your backups and your home network, you don't have privacy. You have a feeling of privacy that someone else is maintaining on your behalf.
+
+For a business, it means the same three questions, asked about every connection between your machines and every credential your staff carry. Today the honest answer for most companies is that an identity provider, a VPN vendor and a certificate authority hold those answers, and the company holds a contract. Running your own connections, your own network and your own trust isn't about distrusting those vendors. It's about being able to keep operating, and keep your customers' data closed, on the day one of them can't.
+
+None of this requires a cryptographer on staff. The tools are there. The knowledge is learnable. What's been missing is the first step, and the habit.
 
 ## What comes next
 
