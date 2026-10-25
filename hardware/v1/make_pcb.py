@@ -176,9 +176,25 @@ for a, b in [((pc[0]-pw/2, pc[1]+ph/2), (pc[0]+pw/2, pc[1]+ph/2)), ((pc[0]+pw/2,
     seg(a, b, pcbnew.F_SilkS)
 fx, fw = D.PANEL["flex_x"], D.PANEL["flex_w"]
 seg((fx - fw/2, pc[1]-ph/2), (fx - fw/2, pc[1]-ph/2 - 8), pcbnew.F_SilkS); seg((fx + fw/2, pc[1]-ph/2), (fx + fw/2, pc[1]-ph/2 - 8), pcbnew.F_SilkS)
-for text, x, y, layer in [("cahoots V1", 0, -31, pcbnew.F_SilkS), ("A", -14, -29, pcbnew.F_SilkS), ("B", 14, -29, pcbnew.F_SilkS),
-                          ("GND  TX  RX  GND  DET", 0, -36.5, pcbnew.F_SilkS)]:
-    t = pcbnew.PCB_TEXT(board); t.SetText(text); t.SetLayer(layer); t.SetPosition(P(x, y)); t.SetTextSize(MM(1.2, 1.2)); t.SetTextThickness(pcbnew.FromMM(0.2)); board.Add(t)
+# The Cahoots mark, site/assets/mark.svg: three rings and a dot, scaled to an outer radius r.
+def logo(x, y, r, layer):
+    k = r / 22.0
+    for rr, w, filled in ((22, 3, False), (13, 3, False), (4, 0, True)):
+        c = pcbnew.PCB_SHAPE(board); c.SetShape(pcbnew.SHAPE_T_CIRCLE); c.SetLayer(layer)
+        c.SetCenter(P(x, y)); c.SetEnd(P(x + rr * k, y)); c.SetWidth(pcbnew.FromMM(max(w * k, 0.15))); c.SetFilled(filled); board.Add(c)
+
+def silk(text, x, y, layer, size=1.2, bold=False):
+    t = pcbnew.PCB_TEXT(board); t.SetText(text); t.SetLayer(layer); t.SetPosition(P(x, y)); t.SetTextSize(MM(size, size))
+    t.SetTextThickness(pcbnew.FromMM(size * (0.2 if bold else 0.15))); t.SetMirrored(layer == pcbnew.B_SilkS); board.Add(t)
+
+logo(-5.5, -30.5, 3.5, pcbnew.F_SilkS)
+silk("cahoots", 2.5, -30.5, pcbnew.F_SilkS, 1.6, True)
+silk("V1", 9.5, -30.5, pcbnew.F_SilkS, 1.2)
+silk("A", -14, -29, pcbnew.F_SilkS); silk("B", 14, -29, pcbnew.F_SilkS)
+silk("GND  TX  RX  GND  DET", 0, -36.5, pcbnew.F_SilkS)
+# the back has room above the Pico for the mark at full size
+logo(0, 30, 8, pcbnew.B_SilkS)
+silk("cahoots", 0, 19.5, pcbnew.B_SilkS, 2.0, True)
 
 # ---- ground pours on both layers ----
 for layer in (pcbnew.F_Cu, pcbnew.B_Cu):
