@@ -99,11 +99,25 @@ That covers a lot of what people and small organizations actually need from each
 
 This is the first thing people say, and it's a fair question. Signal is excellent. So is Tailscale, so is a password manager, so is the security key on your keyring. If the claim were that nobody has built good privacy tools, the claim would be wrong.
 
-The claim is about where the first secret comes from. Signal makes keys on your phone and then asks a server to introduce you to your friend's keys. That server is run carefully by people I trust, and it is still a server, in a jurisdiction, behind a company that has bills to pay and mail to answer. The same shape repeats everywhere. Tailscale has a control plane. A password manager has an account. A security key gets enrolled through somebody's website. In each case, the thing that connects you to the people you trust passes through a party you don't know. These tools are honest about that, and they have done the hard work of making the middle as small and as well-behaved as it can be. That is a real achievement. It is also a different goal from having no middle at all.
+The claim is about where the first secret comes from. Look at where each of these tools gets it:
+
+- **Signal** makes keys on your phone, then asks a server to introduce you to your friend's keys. That server is run carefully by people I trust, and it is still a server, in a jurisdiction, behind a company with bills to pay and mail to answer.
+- **Tailscale** makes keys on your machine, then a control plane decides which machines get to meet. The tunnel is yours. The introductions are theirs.
+- **A password manager** encrypts on your device, then syncs through an account. Lose the account, or have it taken, and the vault goes with it.
+- **A security key** holds its secret in hardware, then gets enrolled through somebody's website, which decides when it counts.
+
+In each case, the thing that connects you to the people you trust passes through a party you don't know. These tools are honest about that, and they have done the hard work of making the middle as small and as well-behaved as it can be. That is a real achievement. It is also a different goal from having no middle at all.
 
 As I was finishing this post, a [report](https://tailworm.com/) claimed that one compromised machine on a Tailscale network could take root on every other machine it's allowed to reach. Tailscale is [looking into it](https://thehackernews.com/2026/10/unpatched-tailscale-ssh-flaws-could-let.html). I like Tailscale and I'll keep using it. But for a week, a tool I'd trust with every machine I own couldn't tell me whether I was affected, and I couldn't check. Preparing for the worst doesn't mean leaving. It means knowing exactly what you've handed over.
 
-Cahoots doesn't compete with those tools. It feeds them. A secret made in the room becomes the pre-shared key under a WireGuard tunnel, which is what Tailscale carries. It becomes the seed for an encrypted chat, the key under a file, the credential between two of your machines. The tools stay. What changes is that nobody introduced you. You introduced yourselves.
+Cahoots doesn't compete with those tools. It feeds them. A secret made in the room becomes:
+
+- the pre-shared key under a WireGuard tunnel, which is what Tailscale carries;
+- the seed for an encrypted chat;
+- the key under a file;
+- the credential between two of your machines.
+
+The tools stay. What changes is that nobody introduced you. You introduced yourselves.
 
 The cost is plain: you have to be in the same room once. For strangers, that's a dealbreaker, and the tools above exist precisely because strangers need to talk. For the people you'd hand a house key to, it's a Tuesday.
 
