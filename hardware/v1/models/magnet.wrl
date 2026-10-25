@@ -1,0 +1,2 @@
+#VRML V2.0 utf8
+Transform { translation 0 0 0.3937 rotation 1 0 0 1.5708 children [ Shape { appearance Appearance { material Material { diffuseColor 0.35 0.36 0.38 specularColor 0.5 0.5 0.5 shininess 0.8 } } geometry Cylinder { radius 0.9843 height 0.7874 } } ] }

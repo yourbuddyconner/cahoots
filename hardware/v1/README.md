@@ -23,6 +23,8 @@ Drawn and checked, not yet reviewed or ordered. The schematic passes KiCad's ele
 | `schematic.png`, `front.png`, `back.png`, `hero.png` | Renders of the schematic, both sides of the board, and an angled view of both for an article. |
 | `models/panel.wrl` | A box model of the panel, so the 3D view shows the glass and the flex. |
 | `case.py`, `case/` | The tray and lid: STEP, STL for the printer, transparent WRL for the render. |
+| `explode.py`, `assembly.png` | The parts sheet: the badge exploded into lid, panel, board, cell, pins and tray beside the assembled badge, with a numbered list. |
+| `models/` | Box and cylinder models for the parts the libraries lack: panel, magnets, cell, spring pins, standoffs. |
 
 Regenerate everything:
 
