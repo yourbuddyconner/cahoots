@@ -1,0 +1,8 @@
+v1.dsn
+v1.ses
+v1-backups/
+fp-info-cache
+*.kicad_prl
+*.rules
+v1-erc.rpt
+v1-drc.rpt

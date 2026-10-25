@@ -1,0 +1,18 @@
+Comment,Designator,Footprint,LCSC Part #,Note
+CR2032,BT1,BatteryHolder_MYOUNG_BS-07-A1BJ001_CR2032,,MYOUNG BS-07-A1BJ001 (LCSC number to confirm)
+4.7uF 25V,"C3,C4",C_0805_2012Metric,C1779,
+1uF 25V,"C10,C11,C12,C2,C5,C6,C7,C9",C_0603_1608Metric,C15849,
+MBR0530,"D1,D2,D3,D4",D_SOD-123,C77336,
+FPC 24P 0.5mm bottom contact,J1,Hirose_FH12-24S-0.5SH_1x24-1MP_P0.50mm_Horizontal,C2856805,XUNPU FPC-05F-24PH20 (verify contact side against the flex)
+GND,"K1,K5",Pogo_SMD_D2.4mm,C2842924,kinghelm KH-PG204505-DZ 4.5 mm pogo (verify)
+DN_RX,K2,Pogo_SMD_D2.4mm,C2842924,kinghelm KH-PG204505-DZ 4.5 mm pogo (verify)
+DN_TX,K3,Pogo_SMD_D2.4mm,C2842924,kinghelm KH-PG204505-DZ 4.5 mm pogo (verify)
+DN_DET,K4,Pogo_SMD_D2.4mm,C2842924,kinghelm KH-PG204505-DZ 4.5 mm pogo (verify)
+47uH 500mA,L1,L_Changjiang_FNR4030S,,FNR4030S470MT (verify)
+AO3400A,Q1,SOT-23,C20917,"(Si1308EDL in the reference; 30 V, 5.7 A)"
+1M,R1,R_0603_1608Metric,C22935,
+2.2R,R2,R_0603_1608Metric,C23345,(verify)
+power,SW1,SW_SPDT_Shouhan_MSK12C02,C431540,MSK-12C02
+A: next,SW2,SW_Push_1P1T_XKB_TS-1187A,C318884,
+B: confirm,SW3,SW_Push_1P1T_XKB_TS-1187A,C318884,
+"Raspberry Pi Pico 2 (no headers, no W)",U1,RaspberryPi_Pico_SMD,,consigned: solder by hand

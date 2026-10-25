@@ -1,0 +1,146 @@
+"""V1: the first Cahoots badge you can order. The single source for the schematic and the board.
+
+A 54 x 86 mm two-layer board that a Raspberry Pi Pico 2 solders onto. On the front: the raw
+1.54" e-paper (GDEY0154D67) on its 24-pin flex, two tactile switches, five gold pads for the
+card above. On the back: the Pico 2, the coin cell, a power switch, the panel's boost
+circuit, five spring contacts for the card below, and four magnet pockets.
+
+Coordinates are millimetres from the board centre, x to the right, y up, as seen from the
+front. KiCad's y runs down; make_pcb.py flips it. Front parts are on F.Cu, back parts on B.Cu.
+
+Sources: GDEY0154D67 specification 24.10.22 (pinout page 7, drawing page 6, reference circuit
+page 28); Raspberry Pi Pico 2 datasheet (pinout figure 2, SMT footprint figure 5).
+"""
+
+BOARD_W, BOARD_H, CORNER_R = 54.0, 86.0, 3.0
+SLOT_W, SLOT_H, SLOT_Y = 12.0, 3.0, 40.0          # lanyard slot, top end
+MAGNETS = [(-21, 39), (21, 39), (-21, -39), (21, -39)]  # 5 x 2 mm discs, glued into 5.1 mm holes
+CONTACT_XS = [-12, -6, 0, 6, 12]                   # five contacts at the bottom end
+CONTACT_Y = -40.0
+
+# Pico 2 pin number -> name, from the datasheet's figure 2.
+PICO_PINS = {
+    1: "GP0", 2: "GP1", 3: "GND", 4: "GP2", 5: "GP3", 6: "GP4", 7: "GP5", 8: "GND", 9: "GP6",
+    10: "GP7", 11: "GP8", 12: "GP9", 13: "GND", 14: "GP10", 15: "GP11", 16: "GP12", 17: "GP13",
+    18: "GND", 19: "GP14", 20: "GP15", 21: "GP16", 22: "GP17", 23: "GND", 24: "GP18", 25: "GP19",
+    26: "GP20", 27: "GP21", 28: "GND", 29: "GP22", 30: "RUN", 31: "GP26", 32: "GP27", 33: "AGND",
+    34: "GP28", 35: "ADC_VREF", 36: "3V3", 37: "3V3_EN", 38: "GND", 39: "VSYS", 40: "VBUS",
+}
+
+# Which Pico GPIO does what. The firmware's pin map must match this table.
+GPIO = {
+    "EPD_SCK": "GP18", "EPD_MOSI": "GP19", "EPD_CS": "GP17", "EPD_DC": "GP16",
+    "EPD_RST": "GP20", "EPD_BUSY": "GP21",
+    "BTN_A": "GP14", "BTN_B": "GP15",
+    "UP_TX": "GP0", "UP_RX": "GP1", "UP_DET": "GP2",       # the card above, through the face pads
+    "DN_TX": "GP4", "DN_RX": "GP5", "DN_DET": "GP3",       # the card below, through the spring contacts
+}
+
+def pico_pin(name):
+    return next(n for n, v in PICO_PINS.items() if v == name)
+
+# Panel flex pins, GDEY0154D67 page 7.
+EPD_PINS = {
+    1: "NC", 2: "GDR", 3: "RESE", 4: "NC", 5: "VSH2", 6: "TSCL", 7: "TSDA", 8: "BS1", 9: "BUSY",
+    10: "RES", 11: "DC", 12: "CS", 13: "SCL", 14: "SDA", 15: "VDDIO", 16: "VCI", 17: "VSS",
+    18: "VDD", 19: "VPP", 20: "VSH1", 21: "VGH", 22: "VSL", 23: "VGL", 24: "VCOM",
+}
+
+# ref: (symbol "Lib:Name", footprint "Lib:Name", value, LCSC or note, side, (x, y), rotation, {pad: net})
+# Pads are the footprint's pad numbers. Nets are plain names; GND and 3V3 are the power nets.
+PARTS = {}
+
+def part(ref, symbol, footprint, value, lcsc, side, at, rot, pins):
+    PARTS[ref] = dict(symbol=symbol, footprint=footprint, value=value, lcsc=lcsc, side=side, at=at, rot=rot, pins=pins)
+
+# ---- the Pico 2, on the back, crosswise, USB overhanging the right edge ----
+pico_nets = {str(n): v for n, v in PICO_PINS.items() if v in ("GND",)}
+pico_nets.update({"33": "GND"})
+for signal, gp in GPIO.items():
+    pico_nets[str(pico_pin(gp))] = signal
+pico_nets[str(pico_pin("3V3"))] = "3V3"
+pico_nets[str(pico_pin("VSYS"))] = "VSYS"
+part("U1", "cahoots:Pico2", "Module:RaspberryPi_Pico_SMD", "Raspberry Pi Pico 2 (no headers, no W)",
+     "consigned: solder by hand", "back", (0.6, 10.0), 90, pico_nets)
+
+# ---- the panel and its flex connector, on the front ----
+epd_nets = {
+    "2": "GDR", "3": "RESE", "5": "VSH2", "8": "GND", "9": "EPD_BUSY", "10": "EPD_RST",
+    "11": "EPD_DC", "12": "EPD_CS", "13": "EPD_SCK", "14": "EPD_MOSI", "15": "3V3", "16": "3V3",
+    "17": "GND", "18": "VDD", "20": "VSH1", "21": "VGH", "22": "VSL", "23": "VGL", "24": "VCOM",
+    "MP": "GND",
+}
+part("J1", "Connector_Generic:Conn_01x24", "Connector_FFC-FPC:Hirose_FH12-24S-0.5SH_1x24-1MP_P0.50mm_Horizontal",
+     "FPC 24P 0.5mm bottom contact", "C2856805 XUNPU FPC-05F-24PH20 (verify contact side against the flex)",
+     "front", (-7.4, -12.0), 0, epd_nets)
+
+# ---- the boost circuit, GDEY0154D67 page 28, on the back under the panel ----
+part("L1", "Device:L", "Inductor_SMD:L_Changjiang_FNR4030S", "47uH 500mA", "FNR4030S470MT (verify)", "back", (-21.0, -6.0), 0, {"1": "3V3", "2": "SW"})
+part("C4", "Device:C", "Capacitor_SMD:C_0805_2012Metric", "4.7uF 25V", "C1779", "back", (-21.0, -11.0), 0, {"1": "3V3", "2": "GND"})
+part("Q1", "Transistor_FET:AO3400A", "Package_TO_SOT_SMD:SOT-23", "AO3400A", "C20917 (Si1308EDL in the reference; 30 V, 5.7 A)", "back", (-15.0, -6.0), 0, {"1": "GDR", "2": "RESE", "3": "SW"})
+part("R1", "Device:R", "Resistor_SMD:R_0603_1608Metric", "1M", "C22935", "back", (-16.5, -10.0), 0, {"1": "GDR", "2": "GND"})
+part("R2", "Device:R", "Resistor_SMD:R_0603_1608Metric", "2.2R", "C23345 (verify)", "back", (-13.0, -10.0), 0, {"1": "RESE", "2": "GND"})
+part("D3", "Device:D_Schottky", "Diode_SMD:D_SOD-123", "MBR0530", "C77336", "back", (-9.5, -6.0), 0, {"1": "VGH", "2": "SW"})
+part("C3", "Device:C", "Capacitor_SMD:C_0805_2012Metric", "4.7uF 25V", "C1779", "back", (-9.5, -10.0), 0, {"1": "SW", "2": "N2"})
+part("D1", "Device:D_Schottky", "Diode_SMD:D_SOD-123", "MBR0530", "C77336", "back", (-4.5, -10.0), 0, {"1": "GND", "2": "N2"})
+part("D2", "Device:D_Schottky", "Diode_SMD:D_SOD-123", "MBR0530", "C77336", "back", (-4.5, -6.0), 0, {"1": "N2", "2": "VGL"})
+part("C5", "Device:C", "Capacitor_SMD:C_0603_1608Metric", "1uF 25V", "C15849", "back", (-9.5, -13.5), 0, {"1": "VGH", "2": "GND"})
+part("C11", "Device:C", "Capacitor_SMD:C_0603_1608Metric", "1uF 25V", "C15849", "back", (-4.5, -13.5), 0, {"1": "VGL", "2": "GND"})
+# the panel's own rails, each a capacitor to ground next to the connector
+for ref, net, x in (("C2", "VSH2", -24.0), ("C6", "3V3", -21.0), ("C7", "VDD", -18.0), ("C9", "VSH1", -15.0), ("C10", "VSL", -12.0), ("C12", "VCOM", -9.0)):
+    part(ref, "Device:C", "Capacitor_SMD:C_0603_1608Metric", "1uF 25V", "C15849", "back", (x, -17.5), 90, {"1": net, "2": "GND"})
+
+# ---- buttons, front ----
+part("SW2", "Switch:SW_Push", "Button_Switch_SMD:SW_Push_1P1T_XKB_TS-1187A", "A: next", "C318884", "front", (-14.0, -24.0), 0, {"1": "BTN_A", "2": "GND"})
+part("SW3", "Switch:SW_Push", "Button_Switch_SMD:SW_Push_1P1T_XKB_TS-1187A", "B: confirm", "C318884", "front", (14.0, -24.0), 0, {"1": "BTN_B", "2": "GND"})
+
+# ---- power: coin cell -> switch -> Schottky -> VSYS, on the back ----
+part("BT1", "Device:Battery_Cell", "Battery:BatteryHolder_MYOUNG_BS-07-A1BJ001_CR2032", "CR2032", "MYOUNG BS-07-A1BJ001 (LCSC number to confirm)", "back", (12.0, -22.0), 0, {"1": "BAT+", "2": "GND"})
+part("SW1", "Switch:SW_SPDT", "Button_Switch_SMD:SW_SPDT_Shouhan_MSK12C02", "power", "C431540 MSK-12C02", "back", (-20.0, -30.0), 90, {"1": "BAT+", "2": "BAT_SW"})
+part("D4", "Device:D_Schottky", "Diode_SMD:D_SOD-123", "MBR0530", "C77336", "back", (-14.0, -30.0), 0, {"1": "VSYS", "2": "BAT_SW"})
+
+# ---- the pile contacts: face pads (front) meet the spring contacts (back) of the card above ----
+# Pads, left to right on the face: GND, UP_TX, UP_RX, GND, UP_DET.
+# Fingers, left to right on the back:  GND, DN_RX, DN_TX, DN_DET, GND.
+# Stacked the same way up, finger i lands on pad i: grounds meet, TX meets RX, each card's
+# detect input meets the other card's ground.
+PAD_NETS = ["GND", "UP_TX", "UP_RX", "GND", "UP_DET"]
+FINGER_NETS = ["GND", "DN_RX", "DN_TX", "DN_DET", "GND"]
+for i, x in enumerate(CONTACT_XS):
+    part(f"P{i+1}", "Connector:Conn_01x01_Pin", "cahoots:Pad_D3.5mm", PAD_NETS[i], "gold pad on the board", "front", (x, CONTACT_Y), 0, {"1": PAD_NETS[i]})
+    part(f"K{i+1}", "Connector:Conn_01x01_Pin", "cahoots:Pogo_SMD_D2.4mm", FINGER_NETS[i], "C2842924 kinghelm KH-PG204505-DZ 4.5 mm pogo (verify)", "back", (x, CONTACT_Y), 0, {"1": FINGER_NETS[i]})
+
+# ---- magnet pockets: holes, no copper ----
+for i, (x, y) in enumerate(MAGNETS):
+    part(f"M{i+1}", None, "cahoots:Magnet_NPTH_D5.1mm", "5x2 mm disc", "mechanical", "front", (x, y), 0, {})
+
+# Panel outline on the front, for the silkscreen and the courtyard: 31.8 wide, 37.32 tall,
+# flex leaving the bottom edge 8.5 mm from the panel's left edge (drawing page 6).
+PANEL = dict(center=(0.0, 17.0), w=31.8, h=37.32, flex_x=-15.9 + 8.5, flex_w=9.6)
+
+def nets():
+    out = {}
+    for ref, p in PARTS.items():
+        for pad, net in p["pins"].items():
+            out.setdefault(net, []).append((ref, pad))
+    return out
+
+if __name__ == "__main__":
+    for net, pins in sorted(nets().items()):
+        print(f"{net:10s} {' '.join(f'{r}.{p}' for r, p in pins)}")
+    print(len(PARTS), "parts,", len(nets()), "nets")
+
+# Routes drawn by hand before the autorouter runs, for the nets it keeps leaving out: the three
+# panel signals from the Pico's bottom row to the flex connector, and the down-link RX to its
+# spring contact. Each step is a pad, a via (layer change), or a point on a layer; consecutive
+# points on the same layer are joined by a track. Coordinates as everywhere else in this file.
+MANUAL = {
+    # From the Pico's bottom row: drop on the back to a level of its own, run left past the
+    # connector to a via, climb on the front to a second level, run right to above the pad, drop
+    # in. Levels and via positions chosen so no two of the three cross on either layer.
+    "EPD_CS":   [("pad", "U1", "22"), ("pt", "B", None, -4.5), ("via", -13.0, -4.5), ("pt", "F", -13.0, -7.8), ("pt", "F", ("J1", "12"), -7.8), ("pad", "J1", "12")],
+    "EPD_SCK":  [("pad", "U1", "24"), ("pt", "B", None, -3.5), ("via", -12.0, -3.5), ("pt", "F", -12.0, -7.3), ("pt", "F", ("J1", "13"), -7.3), ("pad", "J1", "13")],
+    "EPD_MOSI": [("pad", "U1", "25"), ("pt", "B", None, -2.5), ("via", -11.0, -2.5), ("pt", "F", -11.0, -6.8), ("pt", "F", ("J1", "14"), -6.8), ("pad", "J1", "14")],
+    # From the Pico's top row, over to the front, down the board's middle, back to the contact.
+    "DN_RX":    [("pad", "U1", "7"), ("via", None, 22.0), ("pt", "F", 4.0, 22.0), ("pt", "F", 4.0, -36.0), ("via", -4.0, -37.5), ("pad", "K2", "1")],
+}
