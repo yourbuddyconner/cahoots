@@ -38,11 +38,12 @@
 .post-layout { display: grid; grid-template-columns: minmax(0, 8fr) minmax(0, 3fr); gap: 48px; align-items: start; }
 @media (max-width: 960px) { .post-layout { grid-template-columns: 1fr; } .toc { display: none; } }
 .post-main { min-width: 0; }
+.post-main img { max-width: 100%; height: auto; }
 .back { display: inline-flex; align-items: center; gap: 6px; color: var(--amber); font-size: 14px; font-weight: 500; text-decoration: none; margin-bottom: 18px; }
 .back:hover { opacity: .8; }
 .post-main h1 { font-size: clamp(38px, 5.4vw, 72px); letter-spacing: -0.04em; line-height: 1.05; margin: 0 0 20px; max-width: 18ch; }
 .post-main .details { margin-bottom: 32px; }
-.phero { display: block; width: 100%; height: auto; aspect-ratio: 2; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); margin-bottom: 20px; }
+.phero { display: block; width: 100%; max-width: 100%; height: auto; aspect-ratio: 2; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); margin-bottom: 20px; }
 .actions { display: flex; gap: 12px; margin-bottom: 28px; }
 
 /* About box */

@@ -98,6 +98,9 @@ def e(s):
     return html.escape(s, quote=True)
 
 
+CSS_V = ""  # set in main() to a hash of blog.css, so browsers never keep a stale copy
+
+
 def head(title, description, url, image, article=None):
     out = [
         '<!doctype html>', '<html lang="en">', "<head>", '<meta charset="utf-8">',
@@ -129,7 +132,7 @@ def head(title, description, url, image, article=None):
         '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>',
         f'<link href="{FONTS}" rel="stylesheet">',
         '<link rel="stylesheet" href="/style.css">',
-        '<link rel="stylesheet" href="/blog/blog.css">',
+        f'<link rel="stylesheet" href="/blog/blog.css?v={CSS_V}">',
         "</head>",
     ]
     return "\n".join(out)
@@ -441,6 +444,9 @@ def main():
     (out / "og").mkdir(exist_ok=True)
     (out / "assets").mkdir(exist_ok=True)
     css = ROOT / "site" / "blog" / "blog.css"
+    global CSS_V
+    import hashlib
+    CSS_V = hashlib.sha256(css.read_bytes()).hexdigest()[:10]
     if css.resolve() != (blog / "blog.css").resolve():
         shutil.copy(css, blog / "blog.css")
     og_css = ROOT / "site" / "og" / "og.css"
