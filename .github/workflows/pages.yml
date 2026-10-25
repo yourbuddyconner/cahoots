@@ -50,6 +50,10 @@ jobs:
           cp -r web/app/. "$out/app/"
           rm -f "$out/app/pkg/.gitignore"
           touch "$out/.nojekyll"
+      - name: Render the blog and its Open Graph cards
+        run: |
+          pip install markdown
+          python3 scripts/build-blog.py --out _site
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

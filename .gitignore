@@ -12,3 +12,10 @@ Cargo.lock.bak
 # video
 node_modules/
 out/
+
+# blog output, rendered by scripts/build-blog.py
+/site/blog/index.html
+/site/blog/feed.xml
+/site/blog/*/
+/site/og/blog*.html
+/site/assets/og-blog*.png
