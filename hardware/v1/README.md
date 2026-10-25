@@ -1,6 +1,6 @@
 # V1: the first badge you can order
 
-A 54 × 86 mm two-layer board that a Raspberry Pi Pico 2 solders onto. Front: the raw 1.54" e-paper (Good Display GDEY0154D67) on its 24-pin flex, two tactile switches, five gold pads for the card above, a lanyard slot. Back: the Pico 2 crosswise with its USB at the right edge, a CR2032 holder, a power switch, the panel's boost circuit, five spring contacts for the card below, four pockets for 5 × 2 mm magnets. About 6 mm thick with the panel on.
+A 54 × 86 mm two-layer board that a Raspberry Pi Pico 2 solders onto. Front: the raw 1.54" e-paper (Good Display GDEY0154D67) on its 24-pin flex, two tactile switches, two JST-SH ports at the bottom edge for the badges above and below, a lanyard slot. Back: the Pico 2 crosswise with its USB at the right edge, a CR2032 holder, a power switch, the panel's boost circuit, four pockets for 5 × 2 mm magnets.
 
 The plan it belongs to is [docs/manufacturing.md](../../docs/manufacturing.md). The hand-built version that comes first, a Pico 2 and the Waveshare module on a proto board, uses the same pin map; the table is at the bottom.
 
@@ -24,6 +24,7 @@ Drawn and checked, not yet reviewed or ordered. The schematic passes KiCad's ele
 | `models/panel.wrl` | A box model of the panel, so the 3D view shows the glass and the flex. |
 | `case.py`, `case/` | The tray and lid: STEP, STL for the printer, transparent WRL for the render. |
 | `explode.py`, `assembly.png` | The parts sheet: the badge exploded into lid, panel, board, cell, pins and tray beside the assembled badge, with a numbered list. |
+| `parts.py`, `parts.png` | Each piece alone, front and back: lid, panel, board, tray. |
 | `models/` | Box and cylinder models for the parts the libraries lack: panel, magnets, cell, spring pins, standoffs. |
 
 Regenerate everything:
@@ -52,7 +53,7 @@ Edit `design.py`, never the generated files: the next run overwrites them.
 
 **Buttons.** A is next, B is confirm, each to ground on the chip's pull-ups.
 
-**Pile contacts.** Five on the face, left to right: GND, TX, RX, GND, DET. Five spring contacts on the back at the same places: GND, RX, TX, DET, GND. Stack two the same way up and contact i meets contact i: grounds meet, each TX meets the other's RX, and each card's detect input lands on the other card's ground, so both know the other is there. Up is UART0, down is UART1.
+**Pile ports.** Two JST-SH 4-pin sockets at the bottom edge, UP and DN. A straight cable from one badge's UP to the next one's DN makes a line; TX and RX are crossed between the two sockets so the same cable works everywhere. Pin 1 is ground, pin 2 unused, pins 3 and 4 the UART. There is no detect wire: a connected peer's TX holds our RX high, and the firmware keeps a pull-down on each RX, so an idle-high line means someone is there. UP is UART0, DN is UART1. The magnetic pogo pair for stacking without cables is the case experiment, and it plugs into the same two sockets.
 
 ## Pin map
 
@@ -66,14 +67,12 @@ Edit `design.py`, never the generated files: the next run overwrites them.
 | EPD_BUSY | GP21 | 27 | BUSY |
 | BTN_A | GP14 | 19 | switch A to GND |
 | BTN_B | GP15 | 20 | switch B to GND |
-| UP_TX | GP0 | 1 | pad 2 |
-| UP_RX | GP1 | 2 | pad 3 |
-| UP_DET | GP2 | 4 | pad 5 |
-| DN_RX | GP5 | 7 | finger 2 |
-| DN_TX | GP4 | 6 | finger 3 |
-| DN_DET | GP3 | 5 | finger 4 |
+| UP_TX | GP0 | 1 | UP socket pin 3 |
+| UP_RX | GP1 | 2 | UP socket pin 4, pull-down, high means a peer |
+| DN_RX | GP5 | 7 | DN socket pin 3, pull-down, high means a peer |
+| DN_TX | GP4 | 6 | DN socket pin 4 |
 | 3V3 | 3V3 | 36 | module VCC |
-| GND | GND | 3, 8, 13, 18, 23, 28, 38 | module GND, switches, pads 1 and 4 |
+| GND | GND | 3, 8, 13, 18, 23, 28, 38 | module GND, switches, both sockets' pin 1 |
 | VSYS | VSYS | 39 | CR2032 + through the switch and a Schottky |
 
 The Pico 2 firmware must use this table. For the hand build the Waveshare module replaces the panel, the connector and the whole boost circuit, since it carries them on its own board.
@@ -82,13 +81,13 @@ The Pico 2 firmware must use this table. For the hand build the Waveshare module
 
 Two printed parts that click together, drawn by `case.py` from the same table (`CASE` in `design.py`), in `case/`: `tray.step`/`.stl` and `lid.step`/`.stl`, plus `.wrl` copies KiCad shows in the 3D view, transparent like the acrylic version will be.
 
-- **Tray.** The board drops in face up onto a ledge. The floor sits 5.6 mm under the board, past the Pico and the cell in its holder, with a notch for the USB socket, five holes for the spring pins, four magnet pockets and the lanyard slot.
-- **Lid.** A 2 mm plate on a 4 mm skirt that wraps outside the tray's wall. The panel glues into a 1 mm rabbet in the plate so its glass is flush with the top; the flex drops behind it to the connector. Two 7 mm holes over the switch stems, five funnels over the pads, four magnet pockets, the lanyard slot. Four ribs press the board onto the tray's ledge.
+- **Tray.** The board drops in face up onto a ledge. The floor sits 5.6 mm under the board, past the Pico and the cell in its holder, with a notch for the USB socket, two openings in the end wall for the port cables, four magnet pockets and the lanyard slot.
+- **Lid.** A 2 mm plate on a 4 mm skirt that wraps outside the tray's wall. The panel glues into a 1 mm rabbet in the plate so its glass is flush with the top; the flex drops behind it to the connector. Two 7 mm holes over the switch stems, four magnet pockets, the lanyard slot, and the two cable openings continued through its skirt. Four ribs press the board onto the tray's ledge.
 - **The click.** Four wedge bumps on the inside of the skirt, on short slit tabs so they flex, drop into four windows through the tray's wall. PETG flexes better than PLA for this; if a tab cracks, make `snap` smaller or `skirt_t` thinner in the table. Screws are the fallback and need no redesign: the corner pockets become holes.
 - **Printing.** Tray floor down, lid plate down, no supports needed except the USB notch bridge. Clear PETG shows the board; resin or cut acrylic later from the same STEP.
 - **Sizes.** Tray 57.8 × 89.8 mm; the badge in its case 60.4 × 92.4 × 15 mm.
 
-The open mechanical question is the pile contacts. Two badges in their cases sit lid on floor, so a spring pin on the upper board has to reach down through its own tray floor and the lower badge's lid plate to a pad 6 mm below that plate: about 15 mm from board to pad. That is too long for a spring pin. The plan is to raise the pads instead: a 5 mm brass standoff soldered to each pad brings the contact to 1 mm under the lid's surface, and the pins only need to reach a little past the tray floor, about 12 mm through-hole pins. The pads are sized for that. It gets measured on the first printed set.
+Stacking without cables is the experiment: a magnetic pogo connector pair, the kind smartwatch chargers use, one half flush in the lid's top and the other in the tray's floor, with pigtails into the UP and DN sockets. The pair carries its own magnets and alignment. When a part is chosen its pockets get cut into the case from the table.
 
 Regenerate: `python3 case.py` with CadQuery installed (`python3 -m venv cq && cq/bin/pip install cadquery && cq/bin/python case.py`), then `make.sh` picks the models up.
 
@@ -98,7 +97,7 @@ Regenerate: `python3 case.py` with CadQuery installed (`python3 -m venv cq && cq
 2. **Connector orientation.** Pin 1 of the connector must meet pin 1 of the flex, which is the panel's left pin in its drawing. Confirm in the 3D view with the flex overlaid.
 3. **Part numbers.** Every "verify" in `bom.csv`: the inductor, the sense resistor, the battery holder, the pogo pins, the slide switch. Confirm stock and footprint against the datasheet in the assembler's library before upload.
 4. **Battery holder footprint.** Drawn as MYOUNG BS-07; if the stocked holder is another family, the footprint changes.
-5. **Pogo pins.** The footprint is a 2.4 mm round pad. Confirm the pin's base diameter and that its free height clears the tray; the pad on the face of the card below is 3.5 mm, enough for the magnets' alignment tolerance.
+5. **Ports.** The JST-SH sockets face the board's bottom edge so cables leave through the case; check the case openings line up with the socket mouths in the 3D view.
 6. **Thickness and the tray.** Panel 1 mm plus the connector's 2 mm on the front; Pico 1 mm plus its parts and the holder on the back. The tray design is not here yet.
 7. **Look at it.** Open `v1.kicad_pro`, press Alt-3 for the 3D view, and print the front at 1:1.
 

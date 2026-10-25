@@ -43,9 +43,9 @@ ledge = 1.2
 tray = tray.cut(rrect(BW - 2 * ledge, BH - 2 * ledge, max(R - ledge, 0.5), z_floor_top, z_board_bottom + 0.01))
 # the board's pocket and the cavity above it, up to the wall top
 tray = tray.cut(rrect(BW + 2 * C["gap"], BH + 2 * C["gap"], R + C["gap"], z_board_bottom, z_wall_top + 1))
-# five holes in the floor for the spring pins of this badge to reach the badge below
-for x in D.CONTACT_XS:
-    tray = tray.cut(cq.Workplane("XY").workplane(offset=z_floor_bottom - 1).center(x, D.CONTACT_Y).circle(C["pad_hole"] / 2).extrude(C["floor"] + 2))
+# two openings in the end wall for the port cables, from the board's face up through the wall top
+for x in D.PORTS.values():
+    tray = tray.cut(cq.Workplane("XY").workplane(offset=-0.2).center(x, -TH / 2 + C["wall"] / 2).rect(C["port_w"], C["wall"] + 1).extrude(z_wall_top + 1))
 # magnet pockets in the floor's outer face
 for (x, y) in D.MAGNETS:
     tray = tray.cut(cq.Workplane("XY").workplane(offset=z_floor_bottom - 0.01).center(x, y).circle(C["magnet_d"] / 2).extrude(C["magnet_t"]))
@@ -76,10 +76,9 @@ lid = lid.cut(cq.Workplane("XY").workplane(offset=z_wall_top - 1).center(fx, pc[
 for ref in ("SW2", "SW3"):
     x, y = D.PARTS[ref]["at"]
     lid = lid.cut(cq.Workplane("XY").workplane(offset=z_wall_top - 1).center(x, y).circle(C["button_hole"] / 2).extrude(C["lid_t"] + 2))
-# funnels over the pads so the badge above finds them
-for x in D.CONTACT_XS:
-    lid = lid.cut(cq.Workplane("XY").workplane(offset=z_wall_top - 1).center(x, D.CONTACT_Y).circle(C["pad_hole"] / 2).extrude(C["lid_t"] + 2))
-    lid = lid.cut(cq.Workplane("XY").workplane(offset=z_lid_top - 0.8).center(x, D.CONTACT_Y).circle(C["pad_funnel"] / 2).workplane(offset=0.8).circle(C["pad_hole"] / 2).loft())
+# the same two openings continue through the lid's skirt
+for x in D.PORTS.values():
+    lid = lid.cut(cq.Workplane("XY").workplane(offset=-0.2).center(x, -LH / 2 + C["skirt_t"] / 2).rect(C["port_w"], C["skirt_t"] + 1).extrude(C["port_h"] + 0.2))
 # magnet pockets in the lid top
 for (x, y) in D.MAGNETS:
     lid = lid.cut(cq.Workplane("XY").workplane(offset=z_lid_top - C["magnet_t"]).center(x, y).circle(C["magnet_d"] / 2).extrude(C["magnet_t"] + 0.01))
@@ -116,4 +115,4 @@ def export(shape, name, rgb, alpha):
 export(tray, "tray", "0.88 0.92 0.97", 0.72)
 export(lid, "lid", "0.88 0.92 0.97", 0.72)
 print(f"tray {TW:.1f} x {TH:.1f} x {z_wall_top - z_floor_bottom:.1f} mm, lid {LW:.1f} x {LH:.1f}, badge {LW:.1f} x {LH:.1f} x {z_lid_top - z_floor_bottom:.1f} mm")
-print("pins must reach from the board to", round(-z_floor_bottom + (z_lid_top - 0.0), 1), "mm below it to touch a pad on the badge below: the pads need raising, or the pins are long (see README)")
+print("ports: cables leave the bottom end; a magnetic pogo pair can be added to the lid top and tray floor as the stacking experiment")

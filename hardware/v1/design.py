@@ -15,8 +15,10 @@ page 28); Raspberry Pi Pico 2 datasheet (pinout figure 2, SMT footprint figure 5
 BOARD_W, BOARD_H, CORNER_R = 54.0, 86.0, 3.0
 SLOT_W, SLOT_H, SLOT_Y = 12.0, 3.0, 40.0          # lanyard slot, top end
 MAGNETS = [(-21, 39), (21, 39), (-21, -39), (21, -39)]  # 5 x 2 mm discs, glued into 5.1 mm holes
-CONTACT_XS = [-12, -6, 0, 6, 12]                   # five contacts at the bottom end
-CONTACT_Y = -40.0
+# Pile links leave the board at the bottom end as two JST-SH sockets: UP to the badge above,
+# DN to the badge below. A straight 4-wire cable joins one badge's UP to the next one's DN.
+PORT_Y = -39.5
+PORTS = {"UP": 13.0, "DN": -13.0}                    # x of each socket
 
 # Pico 2 pin number -> name, from the datasheet's figure 2.
 PICO_PINS = {
@@ -32,8 +34,8 @@ GPIO = {
     "EPD_SCK": "GP18", "EPD_MOSI": "GP19", "EPD_CS": "GP17", "EPD_DC": "GP16",
     "EPD_RST": "GP20", "EPD_BUSY": "GP21",
     "BTN_A": "GP14", "BTN_B": "GP15",
-    "UP_TX": "GP0", "UP_RX": "GP1", "UP_DET": "GP2",       # the card above, through the face pads
-    "DN_TX": "GP4", "DN_RX": "GP5", "DN_DET": "GP3",       # the card below, through the spring contacts
+    "UP_TX": "GP0", "UP_RX": "GP1",     # UART0, the badge above. A peer is present while its TX holds our RX high.
+    "DN_TX": "GP4", "DN_RX": "GP5",     # UART1, the badge below. Same rule: the RX pins carry pull-downs in firmware.
 }
 
 def pico_pin(name):
@@ -99,16 +101,11 @@ part("BT1", "Device:Battery_Cell", "Battery:BatteryHolder_MYOUNG_BS-07-A1BJ001_C
 part("SW1", "Switch:SW_SPDT", "Button_Switch_SMD:SW_SPDT_Shouhan_MSK12C02", "power", "C431540 MSK-12C02", "back", (-20.0, -30.0), 90, {"1": "BAT+", "2": "BAT_SW"})
 part("D4", "Device:D_Schottky", "Diode_SMD:D_SOD-123", "MBR0530", "C77336", "back", (-14.0, -30.0), 0, {"1": "VSYS", "2": "BAT_SW"})
 
-# ---- the pile contacts: face pads (front) meet the spring contacts (back) of the card above ----
-# Pads, left to right on the face: GND, UP_TX, UP_RX, GND, UP_DET.
-# Fingers, left to right on the back:  GND, DN_RX, DN_TX, DN_DET, GND.
-# Stacked the same way up, finger i lands on pad i: grounds meet, TX meets RX, each card's
-# detect input meets the other card's ground.
-PAD_NETS = ["GND", "UP_TX", "UP_RX", "GND", "UP_DET"]
-FINGER_NETS = ["GND", "DN_RX", "DN_TX", "DN_DET", "GND"]
-for i, x in enumerate(CONTACT_XS):
-    part(f"P{i+1}", "Connector:Conn_01x01_Pin", "cahoots:Pad_D3.5mm", PAD_NETS[i], "gold pad on the board", "front", (x, CONTACT_Y), 0, {"1": PAD_NETS[i]})
-    part(f"K{i+1}", "Connector:Conn_01x01_Pin", "cahoots:Pogo_SMD_D2.4mm", FINGER_NETS[i], "C2842924 kinghelm KH-PG204505-DZ 4.5 mm pogo (verify)", "back", (x, CONTACT_Y), 0, {"1": FINGER_NETS[i]})
+# ---- the pile ports: two JST-SH sockets at the bottom edge, cables out of the end ----
+# Pin 1 GND, pin 2 unused, pins 3 and 4 TX and RX, crossed between UP and DN so a straight cable
+# joins TX to RX. Presence is the idle-high UART line, so no detect wire is needed.
+part("J2", "Connector_Generic:Conn_01x04", "Connector_JST:JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal", "UP port, JST-SH 4", "C160404 JST SM04B-SRSS-TB", "front", (PORTS["UP"], PORT_Y), 180, {"1": "GND", "3": "UP_TX", "4": "UP_RX", "MP": "GND"})
+part("J3", "Connector_Generic:Conn_01x04", "Connector_JST:JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal", "DN port, JST-SH 4", "C160404 JST SM04B-SRSS-TB", "front", (PORTS["DN"], PORT_Y), 180, {"1": "GND", "3": "DN_RX", "4": "DN_TX", "MP": "GND"})
 
 # ---- magnet pockets: holes, no copper ----
 for i, (x, y) in enumerate(MAGNETS):
@@ -141,8 +138,6 @@ MANUAL = {
     "EPD_CS":   [("pad", "U1", "22"), ("pt", "B", None, -4.5), ("via", -13.0, -4.5), ("pt", "F", -13.0, -7.8), ("pt", "F", ("J1", "12"), -7.8), ("pad", "J1", "12")],
     "EPD_SCK":  [("pad", "U1", "24"), ("pt", "B", None, -3.5), ("via", -12.0, -3.5), ("pt", "F", -12.0, -7.3), ("pt", "F", ("J1", "13"), -7.3), ("pad", "J1", "13")],
     "EPD_MOSI": [("pad", "U1", "25"), ("pt", "B", None, -2.5), ("via", -11.0, -2.5), ("pt", "F", -11.0, -6.8), ("pt", "F", ("J1", "14"), -6.8), ("pad", "J1", "14")],
-    # From the Pico's top row, over to the front, down the board's middle, back to the contact.
-    "DN_RX":    [("pad", "U1", "7"), ("via", None, 22.0), ("pt", "F", 4.0, 22.0), ("pt", "F", 4.0, -36.0), ("via", -4.0, -37.5), ("pad", "K2", "1")],
 }
 
 # ---- the case: a tray the board drops into face up, and a lid that clicks over it ----
@@ -157,7 +152,7 @@ CASE = dict(
     above=4.0,                        # cavity over the board, for connector and switch bodies
     skirt=4.0, skirt_t=1.2, skirt_gap=0.15,  # the lid's skirt overlaps the tray's wall outside
     snap=0.45, snap_w=8.0,            # bump height and width; four of them, two per long side
-    button_hole=7.0, pad_hole=4.6, pad_funnel=6.0,
+    button_hole=7.0, port_w=8.0, port_h=4.6,   # cable openings in the end wall over each socket
     usb=(27.0, 10.0, 12.0, 6.5),      # x of the edge, y centre, width, height of the USB notch in the tray wall
     magnet_d=5.2, magnet_t=2.2,       # pockets in the lid top and the tray floor at MAGNETS
     corner_r=3.0,

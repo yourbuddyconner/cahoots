@@ -32,9 +32,6 @@ for i in range(1, 5):
     add_model(f"M{i}", "magnet.wrl", z_floor)                       # in the tray's floor pocket
 # back-side footprints are flipped: their models' z runs into the board's back, so offsets are from the back face
 add_model("BT1", "cell.wrl", 2.2)                                   # the cell sits 2.2 mm off the back face in its holder
-for i in range(1, 6):
-    add_model(f"K{i}", "pin.wrl", 0.0)
-    add_model(f"P{i}", "standoff.wrl", 0.0)
 
 CAMERA = {"assembled": ("-30,0,28", "0.72", True), "exploded": ("-30,0,28", "0.33", True), "exploded-side": ("-82,0,12", "0.50", False)}
 
@@ -67,9 +64,9 @@ for fp in board.GetFootprints():
 
 assembled = variant("assembled", {})
 # world-space lifts, up positive; parts under the board go down
-LIFT = {"lid": 84, "magnet_lid": 104, "panel": 44, "standoff": 12, "cell": -26, "pin": -44, "magnet_tray": -88, "tray": -64}
+LIFT = {"lid": 84, "magnet_lid": 104, "panel": 44, "cell": -26, "magnet_tray": -88, "tray": -64}
 exploded = variant("exploded", LIFT)
-side = variant("exploded-side", {"lid": 58, "magnet_lid": 72, "panel": 32, "standoff": 10, "cell": -18, "pin": -32, "magnet_tray": -62, "tray": -46})
+side = variant("exploded-side", {"lid": 58, "magnet_lid": 72, "panel": 32, "cell": -18, "magnet_tray": -62, "tray": -46})
 
 html = f'''<!doctype html><meta charset="utf-8">
 <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
@@ -88,18 +85,18 @@ ol li{{margin:0 0 12px;break-inside:avoid}} ol b{{color:#fff;font-weight:500}}
 </style>
 <div class="sheet">
 <h1>Cahoots badge V1: parts and assembly</h1>
-<div class="sub">54 × 86 mm board; clear case 60 × 92 × 15 mm. Two badges stack lid on floor; the pins of the upper one meet the pads of the lower one.</div>
+<div class="sub">54 × 86 mm board; clear case 60 × 92 × 15 mm. Badges link in a line with a short cable from one's UP port to the next one's DN port.</div>
 <img class="ex" src="{exploded}"><div class="cap" style="left:260px">Exploded, from above</div>
 <img class="side" src="{side}"><div class="cap" style="left:1060px">Exploded, from the side</div>
 <img class="as" src="{assembled}"><div class="cap" style="left:1880px">Assembled</div>
 <ol>
-<li><b>Lid</b>, clear. Window for the panel, two button holes, five pad funnels, lanyard slot. Snaps onto the tray.</li>
+<li><b>Lid</b>, clear. Window for the panel, two button holes, lanyard slot. Snaps onto the tray.</li>
 <li><b>Magnets</b>, 5 × 2 mm, four in the lid and four in the tray floor.</li>
 <li><b>E-paper panel</b>, 1.54", glued into the lid's window, glass flush with the top. Its flex drops to the connector.</li>
-<li><b>Board</b>: flex connector, two switches, five gold pads with brass standoffs; on the back the Raspberry Pi Pico 2, the boost circuit, the coin cell holder.</li>
+<li><b>Board</b>: flex connector, two switches, the UP and DN ports at the bottom edge; on the back the Raspberry Pi Pico 2, the boost circuit, the coin cell holder.</li>
 <li><b>CR2032 cell</b> in its holder on the back.</li>
-<li><b>Spring pins</b>, five, through the tray floor to the badge below.</li>
-<li><b>Tray</b>, clear. The board sits on its ledge; notch for the USB; five pin holes; four magnet pockets.</li>
+<li><b>Port cable</b>, JST-SH 4-pin, from one badge's UP to the next one's DN.</li>
+<li><b>Tray</b>, clear. The board sits on its ledge; notches for the USB and the two cables; four magnet pockets.</li>
 </ol>
 </div>'''
 page = os.path.join(tempfile.gettempdir(), "cahoots-assembly.html")

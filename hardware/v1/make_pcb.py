@@ -88,6 +88,13 @@ for ref, p in D.PARTS.items():
         fp.Move(VECTOR2I(P(x, y).x - c.x, P(x, y).y - c.y))
     # references on the fab layer: the silkscreen stays clean
     fp.Reference().SetLayer(pcbnew.F_Fab if p["side"] == "front" else pcbnew.B_Fab)
+    if ref == "BT1":
+        # the BS-07 footprint names a model the library does not ship; the Keystone 3034 is the same shape of holder
+        fp.Models().clear()
+        m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KICAD10_3DMODEL_DIR}/Battery.3dshapes/BatteryHolder_Keystone_3034_1x20mm.step"; fp.Models().push_back(m)
+    if ref in ("SW2", "SW3"):
+        # the XKB footprint ships without a 3D model; borrow the 6 x 6 x 5 switch's for the renders
+        m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KICAD10_3DMODEL_DIR}/Button_Switch_SMD.3dshapes/SW_Push_1TS009xxxx-xxxx-xxxx_6x6x5mm.step"; fp.Models().push_back(m)
     pads = {pad.GetNumber(): pad for pad in fp.Pads()}
     for num, net in p["pins"].items():
         if num not in pads:
@@ -204,7 +211,7 @@ logo(-5.5, -30.5, 3.5, pcbnew.F_SilkS)
 silk("cahoots", 2.5, -30.5, pcbnew.F_SilkS, 1.6, True)
 silk("V1", 9.5, -30.5, pcbnew.F_SilkS, 1.2)
 silk("A", -14, -29, pcbnew.F_SilkS); silk("B", 14, -29, pcbnew.F_SilkS)
-silk("GND  TX  RX  GND  DET", 0, -36.5, pcbnew.F_SilkS)
+silk("UP", D.PORTS["UP"], -33.5, pcbnew.F_SilkS, 1.4, True); silk("DN", D.PORTS["DN"], -33.5, pcbnew.F_SilkS, 1.4, True)
 # the back has room above the Pico for the mark at full size
 logo(0, 30, 8, pcbnew.B_SilkS)
 silk("cahoots", 0, 19.5, pcbnew.B_SilkS, 2.0, True)
