@@ -17,12 +17,12 @@ C = D.CASE
 
 board = pcbnew.LoadBoard(os.path.join(HERE, "v1.kicad_pcb"))
 
-def add_model(ref, path, z=0.0, scale=1.0):   # models/ are written in KiCad's 0.1 inch units already
+def add_model(ref, path, z=0.0, scale=1.0, x=0.0):   # models/ are written in KiCad's 0.1 inch units already
     for fp in board.GetFootprints():
         if fp.GetReference() == ref:
             m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KIPRJMOD}/models/" + path
             m.m_Scale.x = m.m_Scale.y = m.m_Scale.z = scale
-            m.m_Offset.z = z
+            m.m_Offset.z = z; m.m_Offset.x = x
             fp.Models().push_back(m)
             return
 
@@ -33,7 +33,7 @@ for i in range(1, 5):
     add_model(f"M{i}", "magnet.wrl", z_lid_top - C["magnet_t"])    # in the lid's top pocket
     add_model(f"M{i}", "magnet.wrl", z_floor)                       # in the tray's floor pocket
 # back-side footprints are flipped: their models' z runs into the board's back, so offsets are from the back face
-add_model("BT1", "cell.wrl", 2.2)                                   # the cell sits 2.2 mm off the back face in its holder
+add_model("BT1", "cell.wrl", 2.2, x=12.4)                           # 2.2 mm off the back face in its holder, whose cell centre is 12.4 mm from the footprint's pin 1
 
 # rotate, zoom, perspective, pivot (cm from the board centre), image size
 CAMERA = {"assembled": ("-30,0,28", "0.72", True, None, (1800, 2600), "top"), "exploded": ("-30,0,28", "0.33", True, None, (1800, 2600), "top"),
