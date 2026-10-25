@@ -144,3 +144,21 @@ MANUAL = {
     # From the Pico's top row, over to the front, down the board's middle, back to the contact.
     "DN_RX":    [("pad", "U1", "7"), ("via", None, 22.0), ("pt", "F", 4.0, 22.0), ("pt", "F", 4.0, -36.0), ("via", -4.0, -37.5), ("pad", "K2", "1")],
 }
+
+# ---- the case: a tray the board drops into face up, and a lid that clicks over it ----
+# Heights are from the board's top face (z = 0). The board is 1.6 thick. Everything the case must
+# clear: on the front the panel (1.0, glued into the lid's window so its glass is flush), the flex
+# connector (2.0), the switches (about 5.0 with their stems, which reach up into holes in the lid);
+# on the back the Pico 2 (about 4.0 with its USB socket) and the coin cell in its holder (5.4).
+CASE = dict(
+    board_t=1.6, gap=0.3,             # clearance around the board's edge
+    wall=1.6, floor=2.0, lid_t=2.0,   # tray wall, tray floor, lid plate
+    below=5.6,                        # cavity under the board, for the cell and the Pico
+    above=4.0,                        # cavity over the board, for connector and switch bodies
+    skirt=4.0, skirt_t=1.2, skirt_gap=0.15,  # the lid's skirt overlaps the tray's wall outside
+    snap=0.45, snap_w=8.0,            # bump height and width; four of them, two per long side
+    button_hole=7.0, pad_hole=4.6, pad_funnel=6.0,
+    usb=(27.0, 10.0, 12.0, 6.5),      # x of the edge, y centre, width, height of the USB notch in the tray wall
+    magnet_d=5.2, magnet_t=2.2,       # pockets in the lid top and the tray floor at MAGNETS
+    corner_r=3.0,
+)

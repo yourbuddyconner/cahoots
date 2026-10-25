@@ -22,6 +22,7 @@ Drawn and checked, not yet reviewed or ordered. The schematic passes KiCad's ele
 | `v1.kicad_pro`, `v1.kicad_sch`, `v1.kicad_pcb`, `bom.csv` | The generated project. Open `v1.kicad_pro` in KiCad to look. |
 | `schematic.png`, `front.png`, `back.png`, `hero.png` | Renders of the schematic, both sides of the board, and an angled view of both for an article. |
 | `models/panel.wrl` | A box model of the panel, so the 3D view shows the glass and the flex. |
+| `case.py`, `case/` | The tray and lid: STEP, STL for the printer, transparent WRL for the render. |
 
 Regenerate everything:
 
@@ -74,6 +75,20 @@ Edit `design.py`, never the generated files: the next run overwrites them.
 | VSYS | VSYS | 39 | CR2032 + through the switch and a Schottky |
 
 The Pico 2 firmware must use this table. For the hand build the Waveshare module replaces the panel, the connector and the whole boost circuit, since it carries them on its own board.
+
+## The case
+
+Two printed parts that click together, drawn by `case.py` from the same table (`CASE` in `design.py`), in `case/`: `tray.step`/`.stl` and `lid.step`/`.stl`, plus `.wrl` copies KiCad shows in the 3D view, transparent like the acrylic version will be.
+
+- **Tray.** The board drops in face up onto a ledge. The floor sits 5.6 mm under the board, past the Pico and the cell in its holder, with a notch for the USB socket, five holes for the spring pins, four magnet pockets and the lanyard slot.
+- **Lid.** A 2 mm plate on a 4 mm skirt that wraps outside the tray's wall. The panel glues into a 1 mm rabbet in the plate so its glass is flush with the top; the flex drops behind it to the connector. Two 7 mm holes over the switch stems, five funnels over the pads, four magnet pockets, the lanyard slot. Four ribs press the board onto the tray's ledge.
+- **The click.** Four wedge bumps on the inside of the skirt, on short slit tabs so they flex, drop into four windows through the tray's wall. PETG flexes better than PLA for this; if a tab cracks, make `snap` smaller or `skirt_t` thinner in the table. Screws are the fallback and need no redesign: the corner pockets become holes.
+- **Printing.** Tray floor down, lid plate down, no supports needed except the USB notch bridge. Clear PETG shows the board; resin or cut acrylic later from the same STEP.
+- **Sizes.** Tray 57.8 × 89.8 mm; the badge in its case 60.4 × 92.4 × 15 mm.
+
+The open mechanical question is the pile contacts. Two badges in their cases sit lid on floor, so a spring pin on the upper board has to reach down through its own tray floor and the lower badge's lid plate to a pad 6 mm below that plate: about 15 mm from board to pad. That is too long for a spring pin. The plan is to raise the pads instead: a 5 mm brass standoff soldered to each pad brings the contact to 1 mm under the lid's surface, and the pins only need to reach a little past the tray floor, about 12 mm through-hole pins. The pads are sized for that. It gets measured on the first printed set.
+
+Regenerate: `python3 case.py` with CadQuery installed (`python3 -m venv cq && cq/bin/pip install cadquery && cq/bin/python case.py`), then `make.sh` picks the models up.
 
 ## Review before ordering
 

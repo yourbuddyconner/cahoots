@@ -166,8 +166,21 @@ arc((sx + sw / 2 - r, sy), (sx + sw / 2 - r, sy + r), 180); arc((sx - sw / 2 + r
 # ---- the panel as a part with no pads, so the 3D view shows it ----
 panel = pcbnew.FOOTPRINT(board); panel.SetFPID(pcbnew.LIB_ID("cahoots", "Panel_GDEY0154D67")); panel.SetReference("DS1"); panel.SetValue("GDEY0154D67")
 panel.Reference().SetLayer(pcbnew.F_Fab); panel.Value().SetLayer(pcbnew.F_Fab)
-m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KIPRJMOD}/models/panel.wrl"; panel.Models().push_back(m)
+m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KIPRJMOD}/models/panel.wrl"
+m.m_Offset.z = D.CASE["above"] + D.CASE["lid_t"] - 1.0   # glued into the lid's window, glass flush with the top
+panel.Models().push_back(m)
 board.Add(panel); panel.SetPosition(P(*D.PANEL["center"]))
+
+# ---- the case, when case.py has made it: two transparent models so the 3D view shows the badge whole ----
+case_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "case")
+if os.path.exists(os.path.join(case_dir, "lid.wrl")):
+    case = pcbnew.FOOTPRINT(board); case.SetFPID(pcbnew.LIB_ID("cahoots", "Case")); case.SetReference("CASE1"); case.SetValue("tray and lid")
+    case.Reference().SetLayer(pcbnew.F_Fab); case.Value().SetLayer(pcbnew.F_Fab)
+    for name in ("tray", "lid"):
+        m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KIPRJMOD}/case/" + name + ".wrl"
+        m.m_Scale.x = m.m_Scale.y = m.m_Scale.z = 1 / 2.54   # case.py writes millimetres; KiCad reads VRML as 0.1 inch
+        case.Models().push_back(m)
+    board.Add(case); case.SetPosition(P(0, 0))
 
 # ---- panel outline and flex on the front silkscreen ----
 pc = D.PANEL["center"]; pw, ph = D.PANEL["w"], D.PANEL["h"]
