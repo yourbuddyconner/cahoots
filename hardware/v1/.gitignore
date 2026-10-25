@@ -6,3 +6,5 @@ fp-info-cache
 *.rules
 v1-erc.rpt
 v1-drc.rpt
+__pycache__/
+*.kicad-save-*
