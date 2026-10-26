@@ -42,7 +42,7 @@ pub trait Board {
     fn delay_ms(&mut self, ms: u32);
     /// The two links, `(down, up)`. Returns owned links, constructed fresh on each call
     /// (a board that builds its links once must hand them out from an `Option`, and the
-    /// badge calls this once per ceremony).
+    /// badge calls this once per ceremony and once when it enters the idle menu).
     fn links(&mut self) -> (Self::Link, Self::Link);
     fn load_circle(&self) -> Option<Circle>;
     fn save_circle(&mut self, c: &Circle) -> Result<(), BoardError>;

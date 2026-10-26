@@ -1,4 +1,4 @@
-//! [`Badge`]: the boot screen, the pile and the ceremony, and later the idle menu.
+//! [`Badge`]: the boot screen, the pile and the ceremony, and the idle menu.
 
 use crate::board::{Board, Circle};
 use alloc::boxed::Box;
@@ -8,10 +8,17 @@ use alloc::vec;
 use alloc::vec::Vec;
 use cahoots_core::ceremony::CeremonyResult;
 use cahoots_core::checkwords::check_words;
+use cahoots_core::frame::{self, Frame, FrameError};
+use cahoots_core::pad::Pad;
 use cahoots_core::params::CircleParams;
+use cahoots_custodian::wire::{ErrorCode, Request, Response, KIND_REQUEST, KIND_RESPONSE};
+use cahoots_custodian::{serve, Consent, Custodian, PSK_LEN};
+use cahoots_hal::ledger::PersistentLedger;
 use cahoots_hal::pile::{Pile, PileError};
 use cahoots_hal::ring::{RingCeremony, Step as RingStep};
+use cahoots_hal::store::StorePad;
 use cahoots_hal::{Display, Entropy, Link, PadStore};
+use zeroize::Zeroizing;
 
 /// What one [`Badge::step`] did, or where the pass stands after it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,10 +65,76 @@ enum State<L: Link> {
     },
 }
 
+/// The custodian a badge serves: its stored pad and its ledger.
+type Custody<B> = Pad<StorePad<<B as Board>::Pad>, PersistentLedger<<B as Board>::Records>>;
+
+/// The menu items, in the order A cycles through them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Item {
+    Words,
+    KeyAsCode,
+    Serve,
+}
+
+impl Item {
+    fn next(self) -> Item {
+        match self {
+            Item::Words => Item::KeyAsCode,
+            Item::KeyAsCode => Item::Serve,
+            Item::Serve => Item::Words,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Item::Words => "words",
+            Item::KeyAsCode => "key as code . B",
+            Item::Serve => "serve . B",
+        }
+    }
+}
+
+/// A spending request waiting for B or A.
+struct Pending {
+    seq: u32,
+    request: Vec<u8>,
+}
+
+/// The idle menu, built once when it is entered and kept for the idle loop's life.
+struct Menu<B: Board> {
+    pad: Custody<B>,
+    down: B::Link,
+    rx: Vec<u8>,
+    words: [&'static str; 6],
+    item: Item,
+    /// B was pressed on the serve item: requests on the down link are answered.
+    serving: bool,
+    pending: Option<Pending>,
+}
+
+enum Idle<B: Board> {
+    /// Not entered yet.
+    Off,
+    /// The pad or the ledger would not open. Shown once.
+    Broken,
+    /// Boxed: the menu holds the custodian and the link, and lives beside the pass state.
+    On(Box<Menu<B>>),
+}
+
+/// The answer the holder gave with a button, handed to `serve`.
+struct Answer(bool);
+
+impl Consent for Answer {
+    fn allow(&mut self, _: &Request) -> bool {
+        self.0
+    }
+}
+
 pub struct Badge<B: Board> {
     board: B,
     circle: Option<Circle>,
     state: State<B::Link>,
+    idle: Idle<B>,
 }
 
 impl<B: Board> Badge<B> {
@@ -70,6 +143,7 @@ impl<B: Board> Badge<B> {
             board,
             circle: None,
             state: State::Idle,
+            idle: Idle::Off,
         }
     }
 
@@ -319,6 +393,7 @@ impl<B: Board> Badge<B> {
                         .display()
                         .show_status("saved. read the words aloud");
                     self.circle = Some(circle);
+                    self.idle = Idle::Off;
                     return Ok((State::Idle, Step::Kept));
                 }
                 if self.board.a_pressed() {
@@ -331,4 +406,181 @@ impl<B: Board> Badge<B> {
             }
         }
     }
+
+    /// One poll of the idle menu, for a badge with a stored circle. Call it in a loop. A moves
+    /// to the next item, B chooses it: the words, a 32-byte key shown as a code, or serving
+    /// custodian requests from the down link, each spend allowed by B or refused by A. Ends
+    /// with a 1 ms delay. Does nothing until a circle is stored.
+    pub fn idle_step(&mut self) {
+        let Some(circle) = self.circle.clone() else {
+            return;
+        };
+        if matches!(self.idle, Idle::Off) {
+            self.idle = self.enter_menu(&circle);
+        }
+        if let Idle::On(menu) = &mut self.idle {
+            Self::menu_step(&mut self.board, &circle, menu);
+        }
+        self.board.delay_ms(1);
+    }
+
+    fn enter_menu(&mut self, c: &Circle) -> Idle<B> {
+        let len = c.params.pad_len;
+        let store = self.board.open_pad(len);
+        let mut whole = Zeroizing::new(vec![0u8; len as usize]);
+        store.read(0, &mut whole);
+        let words = check_words(&c.params, &whole);
+        drop(whole);
+        let pad = self
+            .board
+            .records(false)
+            .map_err(|_| String::from("flash: ledger read failed"))
+            .and_then(|records| {
+                PersistentLedger::open(records, c.params.slices())
+                    .map_err(|e| format!("ledger: {e:?}"))
+            })
+            .and_then(|ledger| {
+                Pad::with_circle_id(
+                    c.params.clone(),
+                    c.seat,
+                    c.circle_id,
+                    StorePad::new(store),
+                    ledger,
+                )
+                .map_err(|e| format!("pad: {e:?}"))
+            });
+        match pad {
+            Ok(pad) => {
+                let (down, _up) = self.board.links();
+                self.board.display().show_status(Item::Words.label());
+                Idle::On(Box::new(Menu {
+                    pad,
+                    down,
+                    rx: Vec::new(),
+                    words,
+                    item: Item::Words,
+                    serving: false,
+                    pending: None,
+                }))
+            }
+            Err(e) => {
+                self.board.log(&e);
+                self.board.display().show_status(&e);
+                Idle::Broken
+            }
+        }
+    }
+
+    fn menu_step(board: &mut B, c: &Circle, m: &mut Menu<B>) {
+        let mut buf = [0u8; 256];
+        loop {
+            let n = m.down.recv(&mut buf);
+            if n == 0 {
+                break;
+            }
+            m.rx.extend_from_slice(&buf[..n]);
+        }
+        loop {
+            let (kind, seq, payload, used) = match frame::decode(&m.rx) {
+                Ok((f, used)) => (f.kind, f.seq, f.payload.to_vec(), used),
+                Err(FrameError::Incomplete) => break,
+                Err(FrameError::Crc) => {
+                    m.rx.remove(0);
+                    continue;
+                }
+            };
+            m.rx.drain(..used);
+            if kind != KIND_REQUEST {
+                continue;
+            }
+            if !m.serving || m.pending.is_some() {
+                let busy = Response::Error {
+                    code: ErrorCode::Busy,
+                };
+                respond(&mut m.down, seq, &busy.encode());
+                continue;
+            }
+            match Request::decode(&payload).ok().as_ref().and_then(spends) {
+                Some(n) => {
+                    board
+                        .display()
+                        .show_status(&format!("spend {n} for {}? B yes . A no", c.params.name));
+                    m.pending = Some(Pending {
+                        seq,
+                        request: payload,
+                    });
+                }
+                // Identify, Remaining and anything malformed: answered now, never asked.
+                None => {
+                    let resp = serve(&mut m.pad, &mut Answer(false), &payload);
+                    respond(&mut m.down, seq, &resp);
+                }
+            }
+        }
+
+        if let Some(p) = &m.pending {
+            let answer = if board.b_pressed() {
+                Some(true)
+            } else if board.a_pressed() {
+                Some(false)
+            } else {
+                None
+            };
+            if let Some(yes) = answer {
+                let resp = serve(&mut m.pad, &mut Answer(yes), &p.request);
+                respond(&mut m.down, p.seq, &resp);
+                m.pending = None;
+                board.log(if yes {
+                    "spend allowed"
+                } else {
+                    "spend refused"
+                });
+                board.display().show_status(if yes {
+                    "sent. A for menu"
+                } else {
+                    "refused. A for menu"
+                });
+            }
+            return;
+        }
+
+        if board.a_pressed() {
+            m.item = m.item.next();
+            m.serving = false;
+            board.display().show_status(m.item.label());
+        } else if board.b_pressed() {
+            match m.item {
+                Item::Words => board.display().show_words(&m.words),
+                Item::KeyAsCode => match m.pad.spend(&c.circle_id, PSK_LEN) {
+                    Ok((_, bytes)) => {
+                        board.display().show_qr(&bytes);
+                        board.display().show_status("shown. A for menu");
+                    }
+                    Err(e) => board.display().show_status(&format!("key: {e:?}")),
+                },
+                Item::Serve => {
+                    m.serving = true;
+                    board.display().show_status("serving. A for menu");
+                }
+            }
+        }
+    }
+}
+
+/// The bytes a request would spend, or `None` if it spends nothing.
+fn spends(req: &Request) -> Option<u32> {
+    match req {
+        Request::Identify | Request::Remaining { .. } => None,
+        Request::Psk { .. } | Request::PskFor { .. } => Some(PSK_LEN),
+        Request::Spend { len, .. } | Request::SpendFor { len, .. } => Some(*len),
+    }
+}
+
+/// Send `response` back as a response frame echoing the request's `seq`.
+fn respond<L: Link>(link: &mut L, seq: u32, response: &[u8]) {
+    link.send(&frame::encode(&Frame {
+        kind: KIND_RESPONSE,
+        seq,
+        payload: response,
+    }));
 }
