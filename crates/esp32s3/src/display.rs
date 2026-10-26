@@ -37,8 +37,6 @@ pub struct Epd {
     delay: Delay,
     pub circle: String,
     pub label: &'static str,
-    /// Quick partial refreshes since the last full one; see `band`.
-    partials: u32,
 }
 
 impl Epd {
@@ -63,7 +61,6 @@ impl Epd {
             delay,
             circle: String::new(),
             label,
-            partials: 0,
         })
     }
 
@@ -83,24 +80,14 @@ impl Epd {
         let _ = self.epd.display_frame(&mut self.spi, &mut self.delay);
     }
 
-    /// A quick partial refresh of the rows `y0..y1`. Quick refreshes leave ghosts of the
-    /// previous text, so every third one is replaced by a full refresh of the whole frame,
-    /// which is slower and flashes but wipes the panel clean.
-    fn band(&mut self, y0: u32, y1: u32) {
-        crate::store::trace("display: band refresh");
-        self.partials += 1;
-        if self.partials % 3 == 0 {
-            self.full();
-            return;
-        }
-        let _ = self
-            .epd
-            .set_lut(&mut self.spi, &mut self.delay, Some(RefreshLut::Quick));
-        let buf = &self.fb.buffer()[y0 as usize * ROW_BYTES..y1 as usize * ROW_BYTES];
-        let _ =
-            self.epd
-                .update_partial_frame(&mut self.spi, &mut self.delay, buf, 0, y0, W, y1 - y0);
-        let _ = self.epd.display_frame(&mut self.spi, &mut self.delay);
+    /// Refresh after a change to the rows `y0..y1`. This panel keeps two images and a
+    /// quick partial refresh shows the previous one outside the rows it rewrites, and the
+    /// driver cannot write that previous image, so every refresh is a full one for now:
+    /// slower and it flashes, but the screen only ever shows what the badge drew. A driver
+    /// that writes both images would bring quick partial refreshes back.
+    fn band(&mut self, _y0: u32, _y1: u32) {
+        crate::store::trace("display: band refresh (full)");
+        self.full();
     }
 
     fn text(&mut self, x: i32, y: i32, s: &str, font: &MonoFont<'static>, align: Alignment) {
