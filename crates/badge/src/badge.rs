@@ -1,6 +1,6 @@
 //! [`Badge`]: the boot screen, the pile and the ceremony, and the idle menu.
 
-use crate::board::{Board, Circle};
+use crate::board::{Board, Circle, Press};
 use crate::screens::{self, Screen};
 use alloc::boxed::Box;
 use alloc::format;
@@ -33,7 +33,8 @@ pub enum Step {
     InPile,
     /// The ceremony is running.
     InCeremony,
-    /// The ceremony is done and the badge asks: B keeps the circle, A discards it.
+    /// The ceremony is done and the badge asks: Both keeps the circle, Left or Right
+    /// discards it.
     Prompt,
     /// The circle is saved. The pass is over.
     Kept,
@@ -124,33 +125,49 @@ impl<C: Custodian> Custodian for Tiered<C> {
     }
 }
 
-/// The menu items, in the order A cycles through them.
+/// How long the self-test screen stays unless Both is pressed, and how often boot polls.
+const SELF_TEST_MS: u32 = 2500;
+const POLL_MS: u32 = 10;
+
+/// The menu's pages, a ring: Right goes to the next, Left to the previous, and the last
+/// page's next is the first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Item {
+enum Page {
     Words,
-    KeyAsCode,
+    Key,
     Serve,
 }
 
-impl Item {
-    fn next(self) -> Item {
+impl Page {
+    const ALL: [Page; 3] = [Page::Words, Page::Key, Page::Serve];
+
+    /// The page's place in the ring, from 0.
+    fn index(self) -> usize {
         match self {
-            Item::Words => Item::KeyAsCode,
-            Item::KeyAsCode => Item::Serve,
-            Item::Serve => Item::Words,
+            Page::Words => 0,
+            Page::Key => 1,
+            Page::Serve => 2,
         }
     }
 
-    fn label(self) -> &'static str {
+    fn next(self) -> Page {
+        Page::ALL[(self.index() + 1) % Page::ALL.len()]
+    }
+
+    fn previous(self) -> Page {
+        Page::ALL[(self.index() + Page::ALL.len() - 1) % Page::ALL.len()]
+    }
+
+    fn title(self) -> &'static str {
         match self {
-            Item::Words => "words",
-            Item::KeyAsCode => "key as code . B",
-            Item::Serve => "serve . B",
+            Page::Words => "words",
+            Page::Key => "key as code",
+            Page::Serve => "serve a laptop",
         }
     }
 }
 
-/// A spending request waiting for B or A.
+/// A spending request waiting for an answer: Both allows, Left or Right refuses.
 struct Pending {
     seq: u32,
     request: Vec<u8>,
@@ -161,12 +178,14 @@ struct Menu<B: Board> {
     pad: Custody<B>,
     down: B::Link,
     rx: Vec<u8>,
-    item: Item,
-    /// B was pressed on the serve item: requests on the down link are answered.
+    page: Page,
+    /// Both was pressed on the Serve page: requests on the down link are answered.
     serving: bool,
     pending: Option<Pending>,
     /// Whether the down link reported a peer on the last step, so a change is logged once.
     peer_seen: bool,
+    /// Another screen (the code, or an error) covers the page; any gesture goes back to it.
+    covered: bool,
 }
 
 enum Idle<B: Board> {
@@ -178,7 +197,7 @@ enum Idle<B: Board> {
     On(Box<Menu<B>>),
 }
 
-/// The answer the holder gave with a button, handed to `serve`.
+/// The answer the holder gave with the buttons, handed to `serve`.
 struct Answer(bool);
 
 impl Consent for Answer {
@@ -212,7 +231,8 @@ impl<B: Board> Badge<B> {
         self.circle.as_ref()
     }
 
-    /// The self-test screen, the A-held wipe, and the words of a stored circle.
+    /// The self-test screen for 2.5 s or until Both, the A-held wipe, and the words of a
+    /// stored circle.
     pub fn boot(&mut self) {
         let mut lines: Vec<String> = Vec::new();
         let mut sample = vec![0u8; 4096];
@@ -233,7 +253,12 @@ impl<B: Board> Badge<B> {
             self.board.log(l);
         }
         show(&mut self.board, screens::self_test(&lines));
-        self.board.delay_ms(2500);
+        for _ in 0..SELF_TEST_MS / POLL_MS {
+            if self.board.press() == Press::Both {
+                break;
+            }
+            self.board.delay_ms(POLL_MS);
+        }
 
         // A held through the self-test forgets the circle: record, ledger and pad.
         self.circle = if circle.is_some() && self.board.a_down() {
@@ -262,7 +287,6 @@ impl<B: Board> Badge<B> {
         if let Some(c) = &self.circle {
             let words = c.check_words();
             show_words(&mut self.board, c, &words);
-            show_status(&mut self.board, "A for menu");
             self.board
                 .log(&format!("words from the record: {}", words.join(" ")));
         }
@@ -333,23 +357,20 @@ impl<B: Board> Badge<B> {
                     shown = pile.seat();
                     if let Some(s) = shown {
                         self.board.log(&format!("seat {s}"));
-                        show_status(
-                            &mut self.board,
-                            &format!("seat {s}. B when the pile is whole"),
-                        );
+                        show(&mut self.board, screens::pile(Some(s)));
                     }
                 }
-                if self.board.b_pressed() {
+                // Both on the top card starts the count. Left and Right do nothing here.
+                if self.board.press() == Press::Both {
                     match pile.start() {
                         Ok(()) => {
-                            self.board.log("B: counting the pile");
+                            self.board.log("Both: counting the pile");
                             show_status(&mut self.board, "counting the pile...");
                         }
                         Err(PileError::NoSeat) => show_status(&mut self.board, "nothing below yet"),
                         Err(e) => self.board.log(&format!("start: {e:?}")),
                     }
                 }
-                let _ = self.board.a_pressed();
                 Ok((State::Pile { pile, shown }, Step::InPile))
             }
             State::Ceremony {
@@ -358,6 +379,9 @@ impl<B: Board> Badge<B> {
                 params,
                 seat,
             } => {
+                // No gesture means anything during the ceremony; drop them so none is
+                // taken as an answer to the keep prompt.
+                let _ = self.board.press();
                 let step = ring.poll().map_err(|e| {
                     show_status(&mut self.board, "ceremony: ABORTED");
                     format!("ceremony: {e:?}")
@@ -394,6 +418,7 @@ impl<B: Board> Badge<B> {
                 // Our neighbours may still need the frames we forwarded last. Keep reading
                 // (and dropping: the ceremony is over) while we flush, so a neighbour that
                 // is also flushing toward us is never blocked.
+                let _ = self.board.press();
                 let mut done = true;
                 let mut buf = [0u8; 256];
                 for link in links.iter_mut() {
@@ -411,17 +436,16 @@ impl<B: Board> Badge<B> {
                     return Ok((state, Step::InCeremony));
                 }
                 drop(links);
-                let tier = tier_label(self.board.tier());
-                let name = &result.params.name;
-                let words = screens::words(name, &tier, &result.check_words, "say them aloud");
-                show(&mut self.board, words);
+                show(&mut self.board, screens::keep_prompt(&result.check_words));
                 self.board
                     .log(&format!("words: {}", result.check_words.join(" ")));
-                show_status(&mut self.board, "B keep this circle . A discard");
+                // A gesture seen on the call that drew the prompt is not an answer to it.
+                let _ = self.board.press();
                 Ok((State::Prompt { result, seat }, Step::Prompt))
             }
             State::Prompt { result, seat } => {
-                if self.board.b_pressed() {
+                let gesture = self.board.press();
+                if gesture == Press::Both {
                     show_status(&mut self.board, "saving...");
                     self.board
                         .write_pad(&result.pad)
@@ -447,7 +471,7 @@ impl<B: Board> Badge<B> {
                     self.idle = Idle::Off;
                     return Ok((State::Idle, Step::Kept));
                 }
-                if self.board.a_pressed() {
+                if matches!(gesture, Press::Left | Press::Right) {
                     drop(result);
                     self.board.log("discarded");
                     show_status(&mut self.board, "discarded");
@@ -458,10 +482,11 @@ impl<B: Board> Badge<B> {
         }
     }
 
-    /// One poll of the idle menu, for a badge with a stored circle. Call it in a loop. A moves
-    /// to the next item, B chooses it: the words, a 32-byte key shown as a code, or serving
-    /// custodian requests from the down link, each spend allowed by B or refused by A. Ends
-    /// with a 1 ms delay. Does nothing until a circle is stored.
+    /// One poll of the idle menu, for a badge with a stored circle. Call it in a loop. The
+    /// menu is a ring of pages, Words, Key and Serve: Left and Right turn the page, Both
+    /// selects. Both on Key spends 32 bytes and shows them as a code; Both on Serve answers
+    /// custodian requests from the down link, each spend allowed by Both or refused by Left
+    /// or Right. Ends with a 1 ms delay. Does nothing until a circle is stored.
     pub fn idle_step(&mut self) {
         let Some(circle) = self.circle.clone() else {
             return;
@@ -501,16 +526,18 @@ impl<B: Board> Badge<B> {
         match pad {
             Ok(pad) => {
                 let (down, _up) = self.board.links();
-                show_status(&mut self.board, Item::Words.label());
-                Idle::On(Box::new(Menu {
+                let menu = Menu {
                     pad,
                     down,
                     rx: Vec::new(),
-                    item: Item::Words,
+                    page: Page::Words,
                     serving: false,
                     pending: None,
                     peer_seen: false,
-                }))
+                    covered: false,
+                };
+                show_page(&mut self.board, c, &menu);
+                Idle::On(Box::new(menu))
             }
             Err(e) => {
                 self.board.log(&e);
@@ -523,6 +550,7 @@ impl<B: Board> Badge<B> {
     fn menu_step(board: &mut B, c: &Circle, m: &mut Menu<B>) {
         let asked = m.pending.is_some();
         let present = m.down.peer_present();
+        let mut redraw = false;
         if present != m.peer_seen {
             m.peer_seen = present;
             board.log(if present {
@@ -530,6 +558,7 @@ impl<B: Board> Badge<B> {
             } else {
                 "down link: nothing plugged in"
             });
+            redraw = m.page == Page::Serve;
         }
         // Read a chunk and decode after each, so `rx` never holds more than one request
         // frame and one chunk, whatever arrives.
@@ -543,66 +572,73 @@ impl<B: Board> Badge<B> {
             Self::menu_decode(board, c, m);
         }
 
-        // A press made before the prompt was on the screen is not an answer to it: on the
-        // Nano the prompt's refresh blocks for hundreds of milliseconds. Drop both edges and
-        // count only presses seen on a later call.
+        // A gesture made before the prompt was on the screen is not an answer to it: on the
+        // Nano the prompt's refresh blocks for hundreds of milliseconds. Drop the gesture
+        // seen on this call and count only gestures seen on a later call.
         if !asked && m.pending.is_some() {
-            let _ = board.a_pressed();
-            let _ = board.b_pressed();
+            let _ = board.press();
             return;
         }
 
+        let gesture = board.press();
         if let Some(p) = &m.pending {
-            let answer = if board.b_pressed() {
-                Some(true)
-            } else if board.a_pressed() {
-                Some(false)
-            } else {
-                None
+            let yes = match gesture {
+                Press::None => return,
+                Press::Both => true,
+                Press::Left | Press::Right => false,
             };
-            if let Some(yes) = answer {
-                let resp = serve(&mut m.pad, &mut Answer(yes), &p.request);
-                respond(&mut m.down, p.seq, &resp);
-                m.pending = None;
-                board.log(if yes {
-                    "spend allowed"
-                } else {
-                    "spend refused"
-                });
-                show_status(
-                    board,
-                    if yes {
-                        "sent. A for menu"
-                    } else {
-                        "refused. A for menu"
-                    },
-                );
+            let resp = serve(&mut m.pad, &mut Answer(yes), &p.request);
+            respond(&mut m.down, p.seq, &resp);
+            m.pending = None;
+            board.log(if yes {
+                "spend allowed"
+            } else {
+                "spend refused"
+            });
+            // The prompt replaced whatever was on the screen; the page is back now.
+            m.covered = false;
+            show_page(board, c, m);
+            return;
+        }
+
+        if m.covered {
+            if gesture != Press::None {
+                m.covered = false;
+                show_page(board, c, m);
             }
             return;
         }
 
-        if board.a_pressed() {
-            m.item = m.item.next();
-            m.serving = false;
-            show_status(board, m.item.label());
-        } else if board.b_pressed() {
-            match m.item {
-                Item::Words => {
-                    show_words(board, c, &c.check_words());
-                    show_status(board, "words . A for menu");
-                }
-                Item::KeyAsCode => match m.pad.spend(&c.circle_id, PSK_LEN) {
-                    Ok((_, bytes)) => {
-                        show(board, screens::code(&bytes));
-                        show_status(board, "shown. A for menu");
-                    }
-                    Err(e) => show_status(board, &format!("key: {e:?}")),
-                },
-                Item::Serve => {
-                    m.serving = true;
-                    show_status(board, "serving. A for menu");
+        match gesture {
+            Press::None => {
+                if redraw {
+                    show_page(board, c, m);
                 }
             }
+            Press::Left | Press::Right => {
+                m.page = if gesture == Press::Left {
+                    m.page.previous()
+                } else {
+                    m.page.next()
+                };
+                m.serving = false;
+                show_page(board, c, m);
+            }
+            Press::Both => match m.page {
+                Page::Words => show_page(board, c, m),
+                Page::Key => {
+                    match m.pad.spend(&c.circle_id, PSK_LEN) {
+                        Ok((_, bytes)) => show(board, screens::code(&bytes)),
+                        Err(e) => show_status(board, &format!("key: {e:?}")),
+                    }
+                    m.covered = true;
+                }
+                Page::Serve => {
+                    m.serving = true;
+                    board.log("serving the down link");
+                    show_page(board, c, m);
+                }
+            },
         }
     }
 
@@ -642,10 +678,7 @@ impl<B: Board> Badge<B> {
             }
             match Request::decode(&payload).ok().as_ref().and_then(spends) {
                 Some(n) => {
-                    show_status(
-                        board,
-                        &format!("spend {n} for {}? B yes . A no", c.params.name),
-                    );
+                    show(board, screens::consent(n, &c.params.name));
                     m.pending = Some(Pending {
                         seq,
                         request: payload,
@@ -688,6 +721,42 @@ fn show<B: Board>(board: &mut B, screen: Screen) {
 /// A status screen of one line.
 fn show_status<B: Board>(board: &mut B, s: &str) {
     show(board, screens::status(&[s]));
+}
+
+/// The menu's current page for the stored circle `c`.
+fn show_page<B: Board>(board: &mut B, c: &Circle, m: &Menu<B>) {
+    let words = c.check_words();
+    let rows: Vec<String>;
+    let body: Vec<&str> = match m.page {
+        Page::Words => {
+            rows = words.chunks(2).map(|p| p.join(" ")).collect();
+            rows.iter().map(String::as_str).collect()
+        }
+        Page::Key => vec!["Both to spend 32 bytes"],
+        Page::Serve => {
+            let mut body = vec![if m.serving {
+                "serving"
+            } else {
+                "Both to start serving"
+            }];
+            if m.peer_seen {
+                body.push("a laptop is listening");
+            }
+            body
+        }
+    };
+    let tier = tier_label(board.tier());
+    let page = screens::menu_page(
+        &c.params.name,
+        &tier,
+        m.page.index() + 1,
+        Page::ALL.len(),
+        m.page.title(),
+        &body,
+        true,
+        true,
+    );
+    show(board, page);
 }
 
 /// The words of the stored circle `c`, under its header.

@@ -2,8 +2,8 @@
 
 mod common;
 
-use cahoots_badge::{Badge, Board, Step};
-use common::{cable, Button, FakeBoard, FakeLink};
+use cahoots_badge::{Badge, Board, Press, Step};
+use common::{cable, FakeBoard, FakeLink};
 
 /// Card 1 at the bottom, card 2 on top: card 1's up is card 2's down.
 fn pile_of_two() -> (Badge<FakeBoard>, Badge<FakeBoard>) {
@@ -15,11 +15,11 @@ fn pile_of_two() -> (Badge<FakeBoard>, Badge<FakeBoard>) {
     (Badge::new(b1), Badge::new(b2))
 }
 
+/// The pile screen with a seat on it has been drawn.
 fn has_seat(b: &mut Badge<FakeBoard>) -> bool {
-    b.board()
-        .statuses()
-        .iter()
-        .any(|s| s.starts_with("seat ") && s.ends_with("B when the pile is whole"))
+    b.board().screens.iter().any(|l| {
+        l.iter().any(|x| x == "stack the cards") && l.iter().any(|x| x.starts_with("seat "))
+    })
 }
 
 /// Step both badges in turn until `done` holds, or panic. Returns the last steps.
@@ -40,13 +40,27 @@ fn drive(
     panic!("the badges did not get there");
 }
 
-/// Seat both cards, press B on top, and run to the keep prompt on both.
+/// Seat both cards, press Both on top, and run to the keep prompt on both.
 fn to_the_prompt() -> (Badge<FakeBoard>, Badge<FakeBoard>) {
+    to_the_prompt_with(|_, _| {})
+}
+
+/// As [`to_the_prompt`], calling `then` once both cards are in the ceremony.
+fn to_the_prompt_with(
+    mut then: impl FnMut(&mut Badge<FakeBoard>, &mut Badge<FakeBoard>),
+) -> (Badge<FakeBoard>, Badge<FakeBoard>) {
     let (mut b1, mut b2) = pile_of_two();
     drive(&mut b1, &mut b2, |b1, b2, _, _| {
         has_seat(b1) && has_seat(b2)
     });
-    b2.board().buttons.push_back(Button::B);
+    b2.board().presses.push_back(Press::Both);
+    let mut on = (false, false);
+    drive(&mut b1, &mut b2, |_, _, s1, s2| {
+        on.0 |= *s1 == Step::InCeremony;
+        on.1 |= *s2 == Step::InCeremony;
+        on.0 && on.1
+    });
+    then(&mut b1, &mut b2);
     // Each card stops at the prompt; keep stepping the other until it gets there too.
     let mut at = (false, false);
     drive(&mut b1, &mut b2, |_, _, s1, s2| {
@@ -54,18 +68,16 @@ fn to_the_prompt() -> (Badge<FakeBoard>, Badge<FakeBoard>) {
         at.1 |= *s2 == Step::Prompt;
         at.0 && at.1
     });
-    assert_eq!(
-        b1.board().statuses().last().unwrap(),
-        "B keep this circle . A discard"
-    );
+    assert!(b1.board().shows("keep this circle?"));
+    assert!(b2.board().shows("keep this circle?"));
     (b1, b2)
 }
 
 #[test]
 fn two_fake_cards_complete_a_ceremony_and_keep_it() {
     let (mut b1, mut b2) = to_the_prompt();
-    b1.board().buttons.push_back(Button::B);
-    b2.board().buttons.push_back(Button::B);
+    b1.board().presses.push_back(Press::Both);
+    b2.board().presses.push_back(Press::Both);
     let mut kept = (false, false);
     drive(&mut b1, &mut b2, |_, _, s1, s2| {
         kept.0 |= *s1 == Step::Kept;
@@ -93,31 +105,43 @@ fn two_fake_cards_complete_a_ceremony_and_keep_it() {
 }
 
 #[test]
-fn a_at_the_prompt_discards() {
-    let (mut b1, mut b2) = to_the_prompt();
-    b1.board().buttons.push_back(Button::A);
-    b2.board().buttons.push_back(Button::B);
-    let mut out = (false, false);
-    drive(&mut b1, &mut b2, |_, _, s1, s2| {
-        out.0 |= *s1 == Step::Discarded;
-        out.1 |= *s2 == Step::Kept;
-        out.0 && out.1
-    });
+fn both_keeps_the_circle_and_a_single_press_discards() {
+    for single in [Press::Left, Press::Right] {
+        let (mut b1, mut b2) = to_the_prompt();
+        b1.board().presses.push_back(single);
+        b2.board().presses.push_back(Press::Both);
+        let mut out = (false, false);
+        drive(&mut b1, &mut b2, |_, _, s1, s2| {
+            out.0 |= *s1 == Step::Discarded;
+            out.1 |= *s2 == Step::Kept;
+            out.0 && out.1
+        });
+        assert!(b1.circle().is_none(), "{single:?}");
+        assert!(b1.board().load_circle().is_none());
+        assert!(b1.board().pad.is_empty());
+        assert_eq!(b1.board().statuses().last().unwrap(), "discarded");
+        assert!(b2.circle().is_some());
+        assert_eq!(b2.board().load_circle().as_ref(), b2.circle());
+    }
+}
+
+#[test]
+fn a_gesture_during_the_ceremony_is_not_an_answer() {
+    let (mut b1, _b2) = to_the_prompt_with(|b1, _| b1.board().presses.push_back(Press::Both));
+    for _ in 0..10 {
+        assert_eq!(b1.step(), Step::Prompt);
+    }
     assert!(b1.circle().is_none());
-    assert!(b1.board().load_circle().is_none());
-    assert!(b1.board().pad.is_empty());
-    assert_eq!(b1.board().statuses().last().unwrap(), "discarded");
-    assert!(b2.circle().is_some());
 }
 
 #[test]
 fn run_once_returns_after_the_prompt() {
     // Both cards wait at the prompt, so each one's run_once can finish its pass alone.
     let (mut b1, mut b2) = to_the_prompt();
-    b1.board().buttons.push_back(Button::A);
+    b1.board().presses.push_back(Press::Left);
     assert_eq!(b1.run_once(), Ok(()));
     assert_eq!(b1.board().statuses().last().unwrap(), "discarded");
-    b2.board().buttons.push_back(Button::B);
+    b2.board().presses.push_back(Press::Both);
     assert_eq!(b2.run_once(), Ok(()));
     assert!(b2.circle().is_some());
 }

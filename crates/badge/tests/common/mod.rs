@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use cahoots_badge::{word_indices, Board, BoardError, Circle};
+use cahoots_badge::{word_indices, Board, BoardError, Circle, Press};
 use cahoots_core::checkwords::{check_words, WORDLIST};
 use cahoots_core::circle_id::circle_id;
 use cahoots_core::params::CircleParams;
@@ -10,12 +10,6 @@ use cahoots_hal::{Display, Entropy, EraseError, Frame, HealthError, Link, PadSto
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::Rc;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Button {
-    A,
-    B,
-}
 
 pub struct Xorshift(pub u64);
 impl Entropy for Xorshift {
@@ -163,11 +157,13 @@ pub struct FakeBoard {
     pub pad: Vec<u8>,
     pub records: Vec<u8>,
     pub circle: Option<Circle>,
-    pub buttons: VecDeque<Button>,
+    /// The gestures `press()` hands out, one per call, then `Press::None`.
+    pub presses: VecDeque<Press>,
     pub a_down: bool,
-    /// A is released after this many `delay_ms` calls.
-    pub release_after: u32,
-    pub delays: u32,
+    /// A is released once this many milliseconds have passed in `delay_ms`.
+    pub release_at_ms: u32,
+    /// The milliseconds passed in `delay_ms` so far.
+    pub elapsed_ms: u32,
     pub log: Vec<String>,
     pub selftest_lines: Vec<String>,
     /// The `(down, up)` links handed out by the next `links()` call; open ends when `None`.
@@ -186,10 +182,10 @@ impl FakeBoard {
             pad: Vec::new(),
             records: vec![0xFF; 4096],
             circle: None,
-            buttons: VecDeque::new(),
+            presses: VecDeque::new(),
             a_down: false,
-            release_after: 3,
-            delays: 0,
+            release_at_ms: 3000,
+            elapsed_ms: 0,
             log: Vec::new(),
             selftest_lines: vec!["fake: ok".into()],
             links: None,
@@ -210,6 +206,16 @@ impl FakeBoard {
             .filter(|l| as_words(l).is_none() && as_code(l).is_none())
             .map(|l| l.join("\n"))
             .collect()
+    }
+
+    /// The lines of the last screen noted.
+    pub fn last(&self) -> &[String] {
+        self.screens.last().map_or(&[], Vec::as_slice)
+    }
+
+    /// True if the last screen noted has a line equal to `line`.
+    pub fn shows(&self, line: &str) -> bool {
+        self.last().iter().any(|l| l == line)
     }
 
     /// The word screens.
@@ -251,28 +257,15 @@ impl Board for FakeBoard {
     fn display(&mut self) -> &mut FakeDisplay {
         &mut self.display
     }
-    fn a_pressed(&mut self) -> bool {
-        if self.buttons.front() == Some(&Button::A) {
-            self.buttons.pop_front();
-            true
-        } else {
-            false
-        }
-    }
-    fn b_pressed(&mut self) -> bool {
-        if self.buttons.front() == Some(&Button::B) {
-            self.buttons.pop_front();
-            true
-        } else {
-            false
-        }
+    fn press(&mut self) -> Press {
+        self.presses.pop_front().unwrap_or(Press::None)
     }
     fn a_down(&self) -> bool {
         self.a_down
     }
-    fn delay_ms(&mut self, _ms: u32) {
-        self.delays += 1;
-        if self.delays >= self.release_after {
+    fn delay_ms(&mut self, ms: u32) {
+        self.elapsed_ms += ms;
+        if self.elapsed_ms >= self.release_at_ms {
             self.a_down = false;
         }
     }

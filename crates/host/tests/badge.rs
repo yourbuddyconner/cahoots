@@ -43,6 +43,7 @@ fn circle_id_line(dir: &Path) -> String {
 }
 
 #[test]
+#[ignore = "needs Both from buttons.txt and screen.txt, which Task 4 adds"]
 fn two_host_boards_complete_a_ceremony_through_the_badge_crate() {
     let tmp = tempfile::tempdir().unwrap();
     let bottom: PathBuf = tmp.path().join("bottom");

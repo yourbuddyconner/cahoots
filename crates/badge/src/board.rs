@@ -15,6 +15,21 @@ pub enum BoardError {
     Link,
 }
 
+/// One gesture on the two buttons. The board debounces the buttons and detects the chord:
+/// a Left or Right is held back for the chord window, so that pressing both buttons is
+/// reported as `Both` and never also as a single press.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Press {
+    /// No gesture since the last call.
+    None,
+    /// The left button (A): the previous page, or refuse on a prompt.
+    Left,
+    /// The right button (B): the next page, or refuse on a prompt.
+    Right,
+    /// Both buttons together: select, keep or allow.
+    Both,
+}
+
 /// The circle a badge belongs to: its parameters, this card's seat, the circle id and the
 /// six check words the ceremony produced.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,11 +70,9 @@ pub trait Board {
     /// The random source. The board wraps it in `cahoots_hal::health::Tested`.
     fn entropy(&mut self) -> &mut Self::Entropy;
     fn display(&mut self) -> &mut Self::Display;
-    /// Button A went down since the last call (edge, consumed).
-    fn a_pressed(&mut self) -> bool;
-    /// Button B went down since the last call (edge, consumed).
-    fn b_pressed(&mut self) -> bool;
-    /// Button A is held right now (level).
+    /// The next gesture since the last call, consumed, or `Press::None`.
+    fn press(&mut self) -> Press;
+    /// Button A (left) is held right now (level). Used for the wipe at boot.
     fn a_down(&self) -> bool;
     fn delay_ms(&mut self, ms: u32);
     /// The two links, `(down, up)`. The badge calls this once per ceremony and again when

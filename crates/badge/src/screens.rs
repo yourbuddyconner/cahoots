@@ -51,7 +51,7 @@ pub fn pile(seat: Option<u8>) -> Screen {
     if let Some(seat) = seat {
         s.inverted_centered(&FONT_10X20, 80, &format!("seat {seat}"));
     }
-    s.centered(&FONT_8X13, 140, "B on top starts");
+    s.centered(&FONT_8X13, 140, "Both on top starts");
     s.done()
 }
 

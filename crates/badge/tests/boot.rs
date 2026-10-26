@@ -1,6 +1,6 @@
 mod common;
 
-use cahoots_badge::{Badge, Board};
+use cahoots_badge::{Badge, Board, Press};
 use cahoots_core::checkwords::check_words;
 use common::FakeBoard;
 
@@ -64,4 +64,29 @@ fn boot_shows_the_recorded_words_after_bytes_are_spent() {
         badge.board().words()[0],
         check_words(&params, &pad).map(String::from)
     );
+}
+
+#[test]
+fn the_self_test_stays_for_two_and_a_half_seconds() {
+    let mut badge = Badge::new(FakeBoard::new());
+    badge.boot();
+    assert!(badge.board().elapsed_ms >= 2500);
+}
+
+#[test]
+fn both_ends_the_self_test_early_and_one_button_does_not() {
+    let mut board = FakeBoard::new();
+    board
+        .presses
+        .extend([Press::Left, Press::Right, Press::Both]);
+    let mut badge = Badge::new(board);
+    badge.boot();
+    let b = badge.board();
+    assert!(b.presses.is_empty(), "every gesture was read");
+    assert!(
+        b.elapsed_ms < 2500,
+        "Both continued after {} ms",
+        b.elapsed_ms
+    );
+    assert!(b.elapsed_ms > 0, "Left and Right did not");
 }

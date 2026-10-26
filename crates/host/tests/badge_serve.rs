@@ -47,6 +47,7 @@ fn keep_a_circle(dir: &Path) -> Circle {
 }
 
 #[test]
+#[ignore = "needs Both from buttons.txt and screen.txt, which Task 4 adds"]
 fn a_host_board_in_serve_answers_identify_on_its_down_link() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("card");

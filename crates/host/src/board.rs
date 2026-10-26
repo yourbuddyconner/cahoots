@@ -15,7 +15,7 @@
 use crate::display::PngDisplay;
 use crate::link::{Absent, SocketLink};
 use crate::store::{FilePadStore, FileRecordStore};
-use cahoots_badge::{word_indices, Board, BoardError, Circle};
+use cahoots_badge::{word_indices, Board, BoardError, Circle, Press};
 use cahoots_core::checkwords::WORDLIST;
 use cahoots_core::params::CircleParams;
 use cahoots_hal::health::{HealthTests, Tested};
@@ -204,15 +204,6 @@ impl HostBoard {
             }
         }
     }
-
-    fn take(&mut self, b: Button) -> bool {
-        if self.buttons.front() == Some(&b) {
-            self.buttons.pop_front();
-            true
-        } else {
-            false
-        }
-    }
 }
 
 /// Plug in `(down, up)`: accept the card below on `listen` and connect to `next`. Binds
@@ -262,12 +253,14 @@ impl Board for HostBoard {
         &mut self.display
     }
 
-    fn a_pressed(&mut self) -> bool {
-        self.take(Button::A)
-    }
-
-    fn b_pressed(&mut self) -> bool {
-        self.take(Button::B)
+    /// The next queued press: `A` is Left and `B` is Right. There is no way to write Both
+    /// yet.
+    fn press(&mut self) -> Press {
+        match self.buttons.pop_front() {
+            Some(Button::A) => Press::Left,
+            Some(Button::B) => Press::Right,
+            None => Press::None,
+        }
     }
 
     fn a_down(&self) -> bool {
