@@ -6,6 +6,7 @@ const DOCS = [
   { id: "readme", title: "Overview", file: "readme.md", lede: "What Cahoots is and how the pieces fit." },
   { id: "use-cases", title: "What it is for", file: "use-cases.md", lede: "Concrete uses, from group chat to bootstrapping a network." },
   { id: "gatherings", title: "Cards for every gathering", file: "gatherings.md", lede: "What happens when everyone carries one: storage, messages from old circles, a web of trust, and a social network with no accounts." },
+  { id: "attested-data", title: "Attested readings", file: "attested-data.md", lede: "A survey of what a network of signed sensor readings could be for, and what has to be decided before designing it." },
   { id: "ceremony-guide", title: "Ceremony guide", file: "ceremony-guide.md", lede: "How to run a ceremony with a group." },
   { id: "tiers", title: "Device tiers", file: "tiers.md", lede: "What each kind of device protects, from a phone to inspected silicon." },
   { id: "diy-badge", title: "Build a badge", file: "diy-badge.md", lede: "Three boards: the DIY Arduino build, V1 on a Pico 2, and V2 on the Baochip. E-paper, two buttons, a wire, USB to the phone." },
