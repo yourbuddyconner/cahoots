@@ -1,9 +1,10 @@
 """V1: the first Cahoots badge you can order. The single source for the schematic and the board.
 
 A 54 x 86 mm two-layer board that a Raspberry Pi Pico 2 solders onto. On the front: the raw
-1.54" e-paper (GDEY0154D67) on its 24-pin flex, two tactile switches, five gold pads for the
-card above. On the back: the Pico 2, the coin cell, a power switch, the panel's boost
-circuit, five spring contacts for the card below, and four magnet pockets.
+1.54" e-paper (GDEY0154D67) on its 24-pin flex, two tactile switches, the pin half of a
+magnetic pogo pair for the card above, two JST-SH pile sockets and a Qwiic socket at the
+bottom edge. On the back: the Pico 2, the coin cell, a power switch, the panel's boost
+circuit, a 2x5 header of spare GPIO, and four magnet pockets.
 
 Coordinates are millimetres from the board centre, x to the right, y up, as seen from the
 front. KiCad's y runs down; make_pcb.py flips it. Front parts are on F.Cu, back parts on B.Cu.
@@ -23,7 +24,7 @@ MAGNETS = [(-21, 39), (21, 39), (-21, -39), (21, -39)]  # 5 x 2 mm discs, glued 
 POGO_Y = 40.0                                        # the pin row, where the lanyard slot was
 POGO = dict(w=20.08, d=4.2, tall=4.0, pitch=2.54, pin_to_back=1.75)   # body width, depth, height; pins 1.75 from the back face
 PORT_Y = -39.5
-PORTS = {"UP": 13.0, "DN": -13.0}                    # x of each JST socket
+PORTS = {"UP": 13.0, "DN": -13.0, "QW": -23.0}       # x of each JST socket; QW is the Qwiic socket
 
 # Pico 2 pin number -> name, from the datasheet's figure 2.
 PICO_PINS = {
@@ -41,7 +42,10 @@ GPIO = {
     "BTN_A": "GP14", "BTN_B": "GP15",
     "UP_TX": "GP0", "UP_RX": "GP1",     # UART0, the badge above. A peer is present while its TX holds our RX high.
     "DN_TX": "GP4", "DN_RX": "GP5",     # UART1, the badge below. Same rule: the RX pins carry pull-downs in firmware.
+    "I2C_SDA": "GP8", "I2C_SCL": "GP9", # I2C0, the Qwiic socket J5.
 }
+# The spare-GPIO header J6, pin 1 to 10. Nothing else on the board uses these pins.
+HEADER = ["3V3", "GND", "GP6", "GP7", "GP10", "GP11", "GP12", "GP13", "GP22", "GP26"]
 
 def pico_pin(name):
     return next(n for n, v in PICO_PINS.items() if v == name)
@@ -67,6 +71,9 @@ for signal, gp in GPIO.items():
     pico_nets[str(pico_pin(gp))] = signal
 pico_nets[str(pico_pin("3V3"))] = "3V3"
 pico_nets[str(pico_pin("VSYS"))] = "VSYS"
+for gp in HEADER:
+    if gp.startswith("GP"):
+        pico_nets[str(pico_pin(gp))] = gp
 part("U1", "cahoots:Pico2", "Module:RaspberryPi_Pico_SMD", "Raspberry Pi Pico 2 (no headers, no W)",
      "consigned: solder by hand", "back", (0.6, 10.0), 90, pico_nets)
 
@@ -112,6 +119,12 @@ part("D4", "Device:D_Schottky", "Diode_SMD:D_SOD-123", "MBR0530", "C77336", "bac
 part("J2", "Connector_Generic:Conn_01x04", "Connector_JST:JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal", "UP port, JST-SH 4", "C160404 JST SM04B-SRSS-TB", "front", (PORTS["UP"], PORT_Y), 180, {"1": "GND", "3": "UP_TX", "4": "UP_RX", "MP": "GND"})
 part("J3", "Connector_Generic:Conn_01x04", "Connector_JST:JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal", "DN port, JST-SH 4", "C160404 JST SM04B-SRSS-TB", "front", (PORTS["DN"], PORT_Y), 180, {"1": "GND", "3": "DN_RX", "4": "DN_TX", "MP": "GND"})
 
+# ---- the Qwiic / STEMMA QT socket: the maker world's I2C connector, so any Qwiic board plugs in ----
+part("J5", "Connector_Generic:Conn_01x04", "Connector_JST:JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal", "Qwiic / STEMMA QT, JST-SH 4", "C160404 JST SM04B-SRSS-TB", "front", (PORTS["QW"], PORT_Y), 180, {"1": "GND", "2": "3V3", "3": "I2C_SDA", "4": "I2C_SCL", "MP": "GND"})
+
+# ---- the spare-GPIO header, on the back between the power switch and the cell ----
+part("J6", "Connector_Generic:Conn_02x05_Odd_Even", "Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical", "spare GPIO, 2x5", "any 2x5 2.54 mm header", "back", (-4.0, -36.0), 0, {str(i + 1): net for i, net in enumerate(HEADER)})
+
 # ---- the magnetic pogo pair: the pin half on the board, the pad half loose in the tray floor ----
 # Pins 1 and 5 ground, 2 and 4 the UART, 3 spare. Face to face, pin k meets pin k and the magnets
 # attract. The pad half's pigtail: its pin 1 to J3 pin 1 (GND), pin 2 to J3 pin 3 (DN_RX), pin 4 to
@@ -137,6 +150,12 @@ def nets():
 if __name__ == "__main__":
     for net, pins in sorted(nets().items()):
         print(f"{net:10s} {' '.join(f'{r}.{p}' for r, p in pins)}")
+    pins_in_use = list(GPIO.values()) + [n for n in HEADER if n.startswith("GP")]
+    assert len(pins_in_use) == len(set(pins_in_use)), "a Pico pin is used twice"
+    assert GPIO["I2C_SDA"] == "GP8" and GPIO["I2C_SCL"] == "GP9"
+    assert PARTS["J5"]["pins"] == {"1": "GND", "2": "3V3", "3": "I2C_SDA", "4": "I2C_SCL", "MP": "GND"}
+    assert [PARTS["J6"]["pins"][str(i)] for i in range(1, 11)] == HEADER
+    assert "3" not in PARTS["J4"]["pins"], "pogo pin 3 stays spare"
     print(len(PARTS), "parts,", len(nets()), "nets")
 
 # Routes drawn by hand before the autorouter runs, for the nets it keeps leaving out: the three
