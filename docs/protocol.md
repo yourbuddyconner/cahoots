@@ -38,12 +38,13 @@ The ceremony is commit-then-reveal. Without the commit step, the last member to 
 ![The ceremony in five steps](diagrams/ceremony.svg)
 
 1. **Setup.** The leader chooses the parameters. They are sent to every device. Phones show them for confirmation; on devices, a Params frame that does not match aborts the ceremony.
-2. **Commit.** Each device generates `R_i` and a KEM keypair `(dk_i, pk_i)` from 32 more random bytes, and computes `C_i = SHA-256("cahoots/commit/v1" || params || i || pk_i || R_i)`. Every device sends `(C_i, pk_i)` to every other device. Both are public. A device MUST NOT reveal until it holds all `n` commitments.
-3. **Reveal.** Each device sends its sealed reveal (section 3.2): `R_i` encrypted to every other member. Each received reveal is opened and the contribution checked against `C_j`, using the `pk_j` held with the commitment, in constant time. A reveal that fails to open is refused and nothing changes. A reveal that opens but does not match aborts the ceremony on that device. A device that holds no commitment for `j` yet MAY take a sealed reveal from `j` as both: the commitment is derived from the opened contribution and the key in the blob. That is safe because the device's own contribution was fixed before it sent anything.
+2. **Commit.** Each device generates `R_i`, a KEM keypair `(dk_i, pk_i)` from 32 more random bytes, and a seat key (section 3.4) from 32 more. It computes `C_i = SHA-256("cahoots/commit/v2" || params || i || pk_i || seat_pk_i || tier_i || R_i)`, in that order. `seat_pk_i` is the 33-byte compressed seat public key and `tier_i` is one byte, the declared device tier, 0 to 4, as on the [tiers](tiers.md) page. Every device sends `(C_i, pk_i, seat_pk_i, tier_i)` to every other device. All four are public. The seat key and the tier are in the commitment, so nobody can change either after committing. A device MUST NOT reveal until it holds all `n` commitments.
+3. **Reveal.** Each device sends its sealed reveal (section 3.2): `R_i` encrypted to every other member. Each received reveal is opened and the contribution checked against `C_j`, using the `pk_j` held with the commitment, in constant time. A reveal that fails to open is refused and nothing changes. A reveal that opens but does not match aborts the ceremony on that device. A device that holds no commitment for `j` yet MAY take a sealed reveal from `j` as both: the commitment is derived from the opened contribution and the keys and tier in the blob. That is safe because the device's own contribution was fixed before it sent anything.
 4. **Combine.** `PAD = XOR of all R_j`. A device MAY XOR a second independent source into its own `R_i` before committing. That source MUST NOT replace the device's own TRNG output.
 5. **Check words.** `check = SHA-256("cahoots/check/v1" || params || PAD)`. The first 66 bits are read as six 11-bit big-endian indices into the BIP-39 English wordlist. Every device shows the six words. Members read them aloud. A mismatch means the ceremony restarts.
 6. **Erase.** Each device erases every `R_j` and keeps only `PAD`.
 7. **Circle ID.** `circle_id = SHA-256("cahoots/circle-id/v1" || PAD)[0..16]`.
+8. **Attest.** Every member signs the manifest (sections 3.4 and 3.5). The ceremony is complete when every seat has signed.
 
 Implementation: `crates/core/src/ceremony.rs`, `commit.rs`, `reveal.rs`, `combine.rs`, `checkwords.rs`, `circle_id.rs`.
 
@@ -53,7 +54,7 @@ Implementation: `crates/core/src/ceremony.rs`, `commit.rs`, `reveal.rs`, `combin
 frame = type (u8) | seq (u32) | len (u32) | payload | CRC-32
 ```
 
-The CRC is IEEE 802.3 (the same polynomial as zlib) over every byte before it. It catches transmission errors only. Commitments and check words provide integrity. Each device has one touch link per neighbour: two in a pile (down and up, the hardware design), two in a closed ring (previous and next), or one in a pair. The link carries four frame kinds: Params, Commit, Reveal, and Abort. A device forwards every frame it sees for the first time on every link except the one it arrived on, deduplicated by kind and member index, until all devices hold all `n` commitments and reveals. The touch link MUST NOT use any radio.
+The CRC is IEEE 802.3 (the same polynomial as zlib) over every byte before it. It catches transmission errors only. Commitments and check words provide integrity. Each device has one touch link per neighbour: two in a pile (down and up, the hardware design), two in a closed ring (previous and next), or one in a pair. The link carries five frame kinds: Params (1), Commit (2), Reveal (3), Abort (4), and Attest (5). A device forwards every frame it sees for the first time on every link except the one it arrived on, deduplicated by kind and member index, until all devices hold all `n` commitments, reveals, and attestations. The touch link MUST NOT use any radio.
 
 Implementation: `crates/core/src/frame.rs`.
 
@@ -66,15 +67,17 @@ The KEM is X-Wing (draft 06). `pk_i` is the 1216-byte encapsulation key derived 
 A sealed reveal from member `i` to the other members is:
 
 ```
-version (u8 = 1) | i (u8) | pk_i (1216) | k (u8)
+version (u8 = 2) | i (u8) | pk_i (1216) | seat_pk_i (33) | tier_i (u8) | k (u8)
 k × [ j (u8) | ct_j (1120) | wrap_j (48) ]
-body = ChaCha20-Poly1305(K_i, nonce 0, aad = "cahoots/reveal/v1" || params || i || pk_i, R_i)
+body = ChaCha20-Poly1305(K_i, nonce 0, aad = "cahoots/reveal/v1" || params || i || pk_i || seat_pk_i || tier_i, R_i)
 ```
 
 - `K_i` is a fresh 32-byte content key.
 - For each other member `j`, in ascending order: `(ct_j, ss_j) = XWing.Encaps(pk_j)` with 64 bytes of randomness, `wrap_key_j = HKDF-SHA256(salt = "cahoots/reveal-wrap/v1", ikm = ss_j, info = params || i || j)`, and `wrap_j = ChaCha20-Poly1305(wrap_key_j, nonce 0, aad = i || j, K_i)`.
 - Every key is used once, so every nonce is zero.
 - Randomness is drawn in this order: `K_i`, then 64 bytes per recipient. `randomness_len(n) = 32 + 64 (n - 1)`.
+
+The header carries the seat key and the tier, and the body AAD covers them, so a blob whose header was altered fails to open. The AAD keeps the domain string `cahoots/reveal/v1`. The wrap AAD is unchanged. A reveal whose version is not 2 is refused.
 
 Member `j` opens it by finding its entry, decapsulating `ct_j` with `dk_j`, unwrapping `K_i`, and decrypting the body. A failure anywhere is `corrupted`: nothing is learned and nothing changes. The opened `R_i` is then checked against `C_i`.
 
@@ -104,6 +107,43 @@ words(speaker, counter) = WORDLIST[v & 0x7ff], WORDLIST[(v >> 11) & 0x7ff]
 One member says their pair, the other answers with theirs. A listener who records one side's words cannot answer as the other side, and either side moving the counter on makes everything recorded so far useless. The counter is not sent anywhere; both members move it, and the apps show its number so they can resynchronise by saying it. The words are a function of the key, so there is nothing to rotate but the counter: a key only changes when the circle is made again.
 
 Implementation: `crates/core/src/pairwise.rs`. Vectors: `pair_keys` and `hello_words` in `ceremony.json`.
+
+### 3.4 Attest
+
+When the last reveal is in, the ceremony builds the manifest (section 3.5) from what it holds. Every device builds the same bytes. The phase is now Attest, and no member has finished yet.
+
+**Seat keys.** A seat key is a P-256 key pair. Its 32-byte seed is the secret scalar, and a seed that is zero or not below the curve order is refused and drawn again. Signatures are deterministic ECDSA (RFC 6979) over SHA-256 of the message, as raw `r || s`, 64 bytes. The key is made at the ceremony, one per circle, and never reused across circles. The ring driver draws the seat seed from the entropy source after the KEM seed.
+
+**Attestation.** Each member signs the manifest bytes once. The attestation is a detached COSE_Sign1 (section 8.1) with the manifest as payload, kid `[seat]` (the one byte of the seat index), and external AAD `cahoots/manifest/v1`. Each device checks every attestation it receives against the sender's seat key from the manifest and the kid. A bad signature is refused and does not abort. A second, different, valid attestation for a seat already held is refused as a conflict. The ceremony is complete when all `n` attestations are held.
+
+**Attest frame.** `Attest` (5) carries `index u8 | COSE_Sign1 bytes`, at most 256 bytes after the index. A device sends its own as soon as the phase is Attest. It forwards and deduplicates attestations as it does reveals, and holds one that arrives before its phase is Attest.
+
+**Phone.** The app carries the attestation as a third animated code after the reveal: pack kind 3, text form `cahoots-attest:<index>:<base64url>`.
+
+Implementation: `crates/core/src/seat.rs`, `cose.rs`, `ceremony.rs`; `crates/hal/src/ring.rs`.
+
+### 3.5 The manifest
+
+The manifest is the circle's root document: the roster of seat keys and tiers, the circle's parameters, and the floor. It is one canonical CBOR map (section 8.1 defines canonical). An outside system registers a circle by registering its signed manifest.
+
+| Key | Name | Value |
+|---|---|---|
+| 0 | version | 1 |
+| 1 | circle_id | bstr, 16 bytes |
+| 2 | params | bstr, the parameters encoding of section 2.1 |
+| 3 | seats | array of seat maps, in seat order |
+| 4 | floor | array of floor entries, in purpose order |
+| 5 | genesis | uint, the log position of the ceremony, 0 |
+
+A seat map is `{0: seat u8, 1: key bstr 33, 2: tier u8, 3: evidence bstr}`. `evidence` is empty in this version. It will hold a chip's proof that the key lives in it.
+
+A floor entry is `{0: purpose u8, 1: requirement u8, 2: budget u32}`. The purpose is a control-message purpose (section 4.3). The requirement is `0` never served, `1` a grant suffices, or `2` the owner must be present. The default floor has one entry for each of the six purposes, 0 to 5, at requirement `2` with a budget of one slice, `slice_len()` bytes.
+
+The manifest ID is the SHA-256 of the canonical bytes. A decoder MUST refuse anything that is not the canonical encoding: it re-encodes what it read and compares.
+
+**Sealed form.** A sealed manifest is the CBOR array `[body, [attestation, ...]]`: the body bytes and one attestation per seat. It verifies when it holds exactly `n` attestations, each a COSE_Sign1 with the body as detached payload, external AAD `cahoots/manifest/v1`, kid `[seat]`, signed by that seat's key, with every seat present once. Each device keeps the sealed manifest with the circle, next to the pad and its own seat key.
+
+Implementation: `crates/core/src/manifest.rs`.
 
 ## 4. Messages
 
@@ -195,4 +235,116 @@ A custodian MUST accept only the canonical encoding of a message. It answers `Ma
 
 ## 7. Test vectors
 
-`crates/vectors/*.json` are generated from `cahoots-core` by `cargo run -p cahoots-vectors`, except `chat.json`, written by `crates/chat/tests/vectors.rs`, and `psk.json`, written by `crates/provider/tests/psk_vectors.rs`. They cover the ceremony (KEM seeds, public keys, sealing randomness, sealed reveals, a mismatch abort, and a garbled reveal), pair keys and hello words (`pair_keys` and `hello_words` in `ceremony.json`), control messages, check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. Every client MUST reproduce them.
+`crates/vectors/*.json` are generated from `cahoots-core` and `cahoots-objects` by `cargo run -p cahoots-vectors`, except `chat.json`, written by `crates/chat/tests/vectors.rs`, and `psk.json`, written by `crates/provider/tests/psk_vectors.rs`. They cover the ceremony (KEM seeds, public keys, sealing randomness, seat seeds and public keys, tiers, version 2 commitments and sealed reveals, each member's attestation, the manifest body and ID, the sealed manifest, a mismatch abort, and a garbled reveal), pair keys and hello words (`pair_keys` and `hello_words` in `ceremony.json`), control messages, check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. `objects.json` holds the four signed objects of section 8: a root grant and a delegated grant, an approval, a fact, and a receipt, each with its inputs, canonical payload, COSE_Sign1, and JSON projection, against a three-seat manifest. Every client MUST reproduce them.
+
+## 8. Signed objects
+
+A seat emits four kinds of signed object: a grant, an approval, a fact, and a receipt. Each is a canonical CBOR map signed as a COSE_Sign1. A signed object is a byte string. Anyone who holds the circle's signed manifest can verify one.
+
+### 8.1 COSE profile
+
+Every signature in Cahoots is a COSE_Sign1 (RFC 9052), so any COSE library verifies it.
+
+- The structure is the untagged CBOR array `[protected, unprotected, payload, signature]`. `protected` is a byte string, `unprotected` is the empty map, `payload` is a byte string or nil (detached), and `signature` is 64 bytes.
+- The protected header is the canonical map `{1: -7, 4: kid}`. Label `1` is `alg` and `-7` is ES256. Label `4` is `kid`, a byte string the signer chooses. A protected header with any other content is refused.
+- For a seat, the kid is the one byte of the seat index. For a grantee key, it is the SHA-256 of the key's 33 bytes.
+- The signature covers `Sig_structure = ["Signature1", protected, external_aad, payload]`, encoded canonically, with the seat key's deterministic ECDSA (section 3.4).
+- Canonical CBOR is RFC 8949 section 4.2.1: definite lengths, shortest integers, map keys in ascending order of their encoding. Every map here has integer keys in ascending order. A decoder MUST refuse a non-canonical encoding.
+- The external AAD is the object's domain string. A signature made for one kind of object does not verify as another.
+
+Implementation: `crates/core/src/cose.rs`. A test cross-checks a vector against the `coset` crate in both directions.
+
+### 8.2 Assurance
+
+Every approval carries an assurance level, how sure a verifier can be that the owner meant it.
+
+| Level | Name | Meaning |
+|---|---|---|
+| 0 | claimed | Nothing was checked. |
+| 1 | key | A signature from a key under a grant. |
+| 2 | present | Both buttons pressed on a badge. |
+| 3 | present with PIN | Both buttons pressed after a PIN. |
+
+Higher includes lower. The device tier travels separately, in the manifest. See [tiers](tiers.md#assurance).
+
+### 8.3 Grant
+
+Domain `cahoots/grant/v1`. A seat lets a key spend pad on some purposes, up to a budget and a log position, and lets that key delegate a narrower grant.
+
+| Key | Value |
+|---|---|
+| 0 | version, 1 |
+| 1 | circle_id, bstr 16 |
+| 2 | grantor: uint seat, or bstr 33 key for a delegated grant |
+| 3 | grantee key, bstr 33 |
+| 4 | purposes: array of uint, ascending, no repeats |
+| 5 | budget, uint, bytes |
+| 6 | not_after, uint, a log position |
+| 7 | depth, uint, the delegations still allowed below this grant |
+| 8 | parent: bstr 32, the SHA-256 of the parent's signed bytes, or nil for a root grant |
+| 9 | nonce, bstr 16 |
+
+A root grant is signed by a seat key with kid `[seat]`. A delegated grant is signed by the parent's grantee key with kid the SHA-256 of that key. A chain is checked root first. The root's signer is a seat in the manifest, it names that seat as grantor, and it has no parent. Each later link names the previous grantee as grantor and is signed by it. Its `parent` is the SHA-256 of the previous link's exact signed bytes. Its purposes are a subset. Its budget and `not_after` are no greater. Its depth is exactly one less than the previous depth, and the previous depth was not zero. Every link is in the manifest's circle. The result is the leaf grant.
+
+### 8.4 Approval
+
+Domain `cahoots/approval/v1`. A seat's verdict on a request. The fields are the lines the badge rendered, so the evidence says what the person saw.
+
+| Key | Value |
+|---|---|
+| 0 | version, 1 |
+| 1 | circle_id, bstr 16 |
+| 2 | seat, uint |
+| 3 | profile, tstr, the operation's profile name |
+| 4 | fields: array of `[label tstr, value tstr]` pairs, in the order shown |
+| 5 | request_digest, bstr 32 |
+| 6 | policy_id, bstr |
+| 7 | verdict, bool |
+| 8 | assurance, uint, 0 to 3 |
+| 9 | log, uint |
+| 10 | nonce, bstr 16 |
+
+Signed by the seat with kid `[seat]`.
+
+### 8.5 Fact
+
+Domain `cahoots/fact/v1`. A reading a seat took from a module, tied to a log position by its nonce.
+
+| Key | Value |
+|---|---|
+| 0 | version, 1 |
+| 1 | circle_id, bstr 16 |
+| 2 | seat, uint |
+| 3 | module, tstr, the catalogue entry that explains the reading |
+| 4 | reading, bstr |
+| 5 | counter, uint |
+| 6 | nonce, bstr 32 |
+| 7 | log, uint |
+| 8 | attested, bool |
+| 9 | evidence, bstr, the chip's attested-read response, empty when `attested` is false |
+
+The nonce is `SHA-256("cahoots/fact-nonce/v1" || circle_id || log as 8 bytes, little-endian)`. A verifier recomputes it, so a reading cannot be moved to another position or circle. Signed by the seat with kid `[seat]`. See [attested readings](attested-data.md).
+
+### 8.6 Receipt
+
+Domain `cahoots/receipt/v1`. A record that a seat spent a range of the pad. This version defines the clear form. Sealing receipts to the circle comes later.
+
+| Key | Value |
+|---|---|
+| 0 | version, 1 |
+| 1 | circle_id, bstr 16 |
+| 2 | seat, uint |
+| 3 | slice, uint |
+| 4 | offset, uint |
+| 5 | len, uint |
+| 6 | purpose, uint |
+| 7 | grant, bstr 32, the SHA-256 of the signed grant it spent under, or nil |
+| 8 | log, uint |
+
+Signed by the seat with kid `[seat]`.
+
+### 8.7 JSON projection
+
+With the `std` feature, each object has a JSON form. It is informative: nothing verifies it, and the signed CBOR is the object. A grant becomes `{"authorization_details": [{"type": "cahoots/purpose", "purpose", "circle", "budget"}], "cnf": {"jwk": ...}, "exp_log", "depth", "parent"}`, with one authorization detail per purpose and the grantee key as a P-256 JWK. An approval, a fact, and a receipt become flat objects with the field names of the tables, byte strings as lowercase hex, and `seat` and `circle` fields.
+
+Implementation: `crates/objects`.

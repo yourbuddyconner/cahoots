@@ -34,6 +34,7 @@ Every Rust crate lives under `crates/`. The PWA lives under `web/app`.
 |---|---|---|---|
 | `crates/core` | `cahoots-core` | The protocol: parameters, commit-then-reveal ceremony, XOR combine, check words, circle ID, message codec with one-time Poly1305, spent-range ledger, spend ordering, touch-link framing. `no_std` + `alloc`. | done (M1) |
 | `crates/vectors` | `cahoots-vectors` | JSON test vectors generated from core. Every client must reproduce them. | done (M1) |
+| `crates/objects` | `cahoots-objects` | The four objects a seat signs, as canonical CBOR in COSE_Sign1: grants, approvals, facts and receipts, each verified against the circle's signed manifest, with a JSON projection and vectors. `no_std`. | done (M1c) |
 | `crates/custodian` | `cahoots-custodian` | The `Custodian` trait (`psk`, `spend`, `remaining`), the CBOR request and response messages, and `serve`, which answers a request only when the device consents. `no_std`. | done (M4e) |
 | `crates/provider` | `cahoots-provider` | The memory and encrypted-file custodians, the HKDF session-key derivation, and the old `PadProvider` name for `Custodian`. | done (S1) |
 | `crates/hpke` | `cahoots-hpke` | HPKE `mode_psk` adapter (X25519 and X-Wing suites). | done (S1) |

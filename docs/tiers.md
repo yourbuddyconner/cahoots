@@ -25,9 +25,22 @@ Our badge targets T3 at launch and T4 for anyone willing to look.
 ## What each tier changes in the software
 
 - **The ceremony screen** (planned) shows each member's tier and the resulting circle tier, next to the randomness label and the agent-seat warning. Members confirm all three.
-- **The manifest** (planned) records each principal's declared tier. It is a claim, like the sender index. T3 and T4 devices can back the claim with a boot attestation posted as a control message (planned); T0 to T2 cannot.
+- **The manifest** records each seat's declared tier, and the commitment binds it, so it cannot change after the ceremony. It is a claim, like the sender index. T3 and T4 devices can back the claim with a boot attestation posted as a control message (planned); T0 to T2 cannot.
 - **The UI claim** follows the circle tier. A T0 circle says "erasure is best effort". A T2 or higher circle may say "a stolen device does not expose the pad without the PIN". No tier changes the confidentiality claim, which comes from the randomness label.
 - **The burn procedure** (`docs/use-cases.md`) applies to every tier. Higher tiers make it needed less often.
+
+## Assurance
+
+A tier says what a device protects. Assurance says how sure a verifier can be that the owner meant one act. Every approval carries one of four levels.
+
+| Level | Name | Meaning |
+|---|---|---|
+| 0 | claimed | Nothing was checked. |
+| 1 | key | A signature from a key under a grant. |
+| 2 | present | Both buttons pressed on a badge. |
+| 3 | present with PIN | Both buttons pressed after a PIN. |
+
+Higher includes lower: a level 3 approval satisfies a policy that asks for level 2. The device tier travels separately, in the manifest, so a verifier can ask for both. A policy elsewhere compares levels and never methods. It says "level 2 or more", and it does not name buttons or PINs. The objects are in [protocol](protocol.md#8-signed-objects).
 
 ## Building your own
 

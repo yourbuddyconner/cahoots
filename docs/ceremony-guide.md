@@ -38,7 +38,7 @@ If someone is still scanning at step 2 after you moved on, your reveal is one ta
 
 ## After
 
-- Each device keeps only the shared secret. The random bytes each person contributed are erased.
+- Each device keeps the shared secret, its own signing key for this circle, and the signed list of seats. The random bytes each person contributed are erased.
 - Each device shows a label next to the name. The label is per device: **TRNG** on a phone that mixed in hardware randomness, **CSPRNG** on one that used only its own. It says where that device's randomness came from. It is not a warning.
 - The group can now send messages and chat. Nothing about the ceremony has to happen again until the secret runs low, and the app warns you when it does.
 
@@ -52,4 +52,4 @@ If someone is still scanning at step 2 after you moved on, your reveal is one ta
 
 ## Badges
 
-The hardware badge replaces scanning with stacking. Put the cards in a pile: magnets line each one up on the one below, and the pile passes the codes through the pads. The bottom card names the circle. The top card's screen says "stack the cards" and shows its seat. Press both buttons together on the top card to start. Each card's screen shows the commits and reveals as they arrive. When the words appear, each card asks "keep this circle?". Press both buttons to keep it, or either button alone to discard it. Then lift your card off and read the six words from its screen. The steps and the words are the same as on a phone; the seats come from the pile, so nobody says a number out loud. This section will grow once the first ceremonies have run on real badges.
+The hardware badge replaces scanning with stacking. Put the cards in a pile: magnets line each one up on the one below, and the pile passes the codes through the pads. The bottom card names the circle. The top card's screen says "stack the cards" and shows its seat. Press both buttons together on the top card to start. Each card's screen shows the commits, reveals and signatures as they arrive. When the words appear, each card asks "keep this circle?". Press both buttons to keep it, or either button alone to discard it. Then lift your card off and read the six words from its screen. The steps and the words are the same as on a phone; the seats come from the pile, so nobody says a number out loud. This section will grow once the first ceremonies have run on real badges.
