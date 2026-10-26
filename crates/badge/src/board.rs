@@ -62,9 +62,9 @@ pub trait Board {
     /// Button A is held right now (level).
     fn a_down(&self) -> bool;
     fn delay_ms(&mut self, ms: u32);
-    /// The two links, `(down, up)`. Returns owned links, constructed fresh on each call
-    /// (a board that builds its links once must hand them out from an `Option`, and the
-    /// badge calls this once per ceremony and once when it enters the idle menu).
+    /// The two links, `(down, up)`. The badge calls this once per ceremony and again when
+    /// it enters the idle menu, so every call must return usable links to the same two
+    /// connectors: shared handles to links built once, or fresh unit links.
     fn links(&mut self) -> (Self::Link, Self::Link);
     fn load_circle(&self) -> Option<Circle>;
     fn save_circle(&mut self, c: &Circle) -> Result<(), BoardError>;

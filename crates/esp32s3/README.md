@@ -1,8 +1,8 @@
 # ESP32-S3 badge firmware
 
-The Cahoots badge on an Arduino Nano ESP32: the ESP32-S3 with 16 MB of flash, the Waveshare 1.54" V2 e-paper, two tactile switches, and the USB-C port as the link to a laptop. It runs the same `cahoots-hal` pile and ceremony code as the desktop simulator; only the four trait implementations are this board's. The design is in [docs/superpowers/specs/2026-10-23-esp32s3-firmware-design.md](../../docs/superpowers/specs/2026-10-23-esp32s3-firmware-design.md).
+The Cahoots badge on an Arduino Nano ESP32: the ESP32-S3 with 16 MB of flash, the Waveshare 1.54" V2 e-paper, two tactile switches, and the USB-C port as the link to a laptop. It runs the same `cahoots-badge` code as the desktop simulator; this crate is `NanoBoard`, the `Board` under it (`src/board.rs`), and the peripheral setup in `main.rs`. The design is in [docs/superpowers/specs/2026-10-23-esp32s3-firmware-design.md](../../docs/superpowers/specs/2026-10-23-esp32s3-firmware-design.md).
 
-This is the first firmware board because it is the one on the bench. V1, the Pico 2 board in [Build a badge](../../docs/diy-badge.md), comes next as a port of `display.rs`, `link.rs`, `store.rs` and `entropy.rs`.
+This is the first firmware board because it is the one on the bench. V1, the Pico 2 board in [Build a badge](../../docs/diy-badge.md), comes next as a port of `board.rs` and the drivers under it.
 
 ## Wiring
 
@@ -18,9 +18,10 @@ The same as the bring-up sketch in [hardware/nano-esp32-epaper](../../hardware/n
 ## What the board does
 
 1. **Self-test** on the screen and in the log: the random source through the SP 800-90B health tests, a flash sector erased, programmed and read back, the buttons, and whether a circle is stored. Holding A through the self-test forgets the stored circle.
-2. **If a circle is stored**, it recomputes the six words from the pad on flash and shows them.
+2. **If a circle is stored**, it shows the six words from the circle record and goes to the menu (step 5).
 3. **Pile.** The board waits for a pile below it on the USB link. A laptop running `cahoots-host pile --serial` stands in for the other cards. The board is the top card: when its seat appears on the status line, press B and it counts the pile.
-4. **Ceremony.** The status line shows commits and reveals arriving; the six words appear. B keeps the circle, writing the pad to flash with the ledger and the circle record; A discards it.
+4. **Ceremony.** The status line shows commits and reveals arriving; the six words appear. B keeps the circle, writing the pad to flash with the ledger and the circle record (params, seat, circle id and the six words); A discards it.
+5. **Menu**, once a circle is stored. A moves to the next item and B chooses it: `words` shows the six words again; `key as code` spends 32 bytes of pad as a key and shows them as a code; `serve` answers custodian requests from the laptop on the USB link, and each request that spends pad asks first, B to allow and A to refuse.
 
 ## Build
 
@@ -68,7 +69,9 @@ A USB port has no detect line, so `peer_present` on the board is "a frame arrive
 |---|---|---|---|
 | pad | 0x300000 | 1 MiB | the pad, written once onto erased sectors; spent ranges are programmed to zero in place |
 | ledger | 0x400000 | 64 KiB | `hal::ledger` records, 16 bytes each, appended onto erased flash |
-| circle | 0x410000 | 4 KiB | params, seat and circle id |
+| circle | 0x410000 | 4 KiB | params, seat, circle id and the six check words |
+
+A circle record written by firmware from before the words were stored loads as no circle, so the board goes to the pile; keeping a new circle overwrites the old record, pad and ledger.
 
 The pad is plaintext on flash. Flash encryption and secure boot are one-way eFuse operations and wait for Conner's sign-off, so the board is tier 1: a hardware random source with health tests, no radio during a ceremony because no radio code is linked, and a pad that a reader with physical access can copy.
 
@@ -78,4 +81,4 @@ The ESP32-S3's RNG is a true random source only while an entropy source feeds it
 
 ## Not yet
 
-A UART link to a second board, PIN entry, the QR screen (drawn as text until something calls it), PSRAM, the second button's long-press menu.
+A UART link to a second board, PIN entry, the QR screen (`key as code` draws the bytes as text for now), PSRAM.

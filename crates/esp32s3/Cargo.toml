@@ -9,6 +9,8 @@ publish = false
 [dependencies]
 cahoots-core = { path = "../core", default-features = false }
 cahoots-hal = { path = "../hal" }
+cahoots-badge = { path = "../badge", default-features = false }
+cahoots-custodian = { path = "../custodian", default-features = false }
 critical-section = "1.2.0"
 embedded-graphics = "0.8.2"
 embedded-hal = "1.0.0"
