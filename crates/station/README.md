@@ -33,7 +33,7 @@ docker run -p 8080:8080 -v station-data:/data cahoots-station
 
 | Method and path | Body or query | Returns |
 |---|---|---|
-| `POST /v1/circles/{circle_id}/messages` | raw message bytes, at most 64 KiB | `201 {"seq", "hash"}`; `409 {"error":"reuse","prior_seq"}`; `400 {"error":"malformed"}` |
+| `POST /v1/circles/{circle_id}/messages` | raw message bytes, at most 64 KiB | `201 {"seq", "hash"}`; `409 {"error":"reuse","prior_seq"}`; `400 {"error":"malformed"}`; `413 {"error":"too_large"}` for a body over 64 KiB; `400 {"error":"circle_id"}` for a path id that is not 32 hex chars. Error responses also carry a `detail` field |
 | `GET /v1/circles/{circle_id}/messages` | `after=<seq>`, `wait=<ms>` (long-poll, max 30000) | `{"entries":[...], "head_seq"}` |
 | `GET /v1/circles/{circle_id}/head` | | `{"seq", "hash"}` for that circle's latest entry |
 | `GET /v1/head` | | global `{"seq", "hash"}`; `seq` is `null` when empty |

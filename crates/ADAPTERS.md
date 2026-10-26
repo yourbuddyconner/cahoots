@@ -1,6 +1,6 @@
 # Adapters
 
-These are thin crates that feed `cahoots-provider` output into standard pre-shared-key slots. Adapters never read the pad. They call `psk` / `psk_for` and derive a protocol-specific key with the `wireguard`, `hpke`, or `age` context, so a PSK released for one protocol can't be reused in another.
+These are thin crates that feed `cahoots-provider` output into standard pre-shared-key slots. Adapters never read the pad. They call `psk` / `psk_for`. WireGuard and age then derive a protocol-specific key with `derive_session_key` and a per-protocol context, so a PSK released for one protocol can't be reused in another. HPKE passes the 32 pad bytes to the key schedule as the PSK and binds the handle through `psk_id`.
 
 | Crate | Slot | Status |
 |---|---|---|
@@ -23,4 +23,4 @@ age -r age1cahoots1... -o secret.age secret.txt
 age -d -i identity.txt secret.age
 ```
 
-Each encryption spends 32 pad bytes on the sender. Each decryption spends the same 32 bytes on the reader, so a file can be decrypted once per member.
+Each encryption spends 32 pad bytes on the sender. Each decryption spends the same 32 bytes on the reader, so a file can be decrypted once by each other member. The sender cannot decrypt its own file and keeps the plaintext.

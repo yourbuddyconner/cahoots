@@ -62,7 +62,7 @@ cargo build -p cahoots-core --target wasm32-unknown-unknown
 cargo run -p cahoots-vectors -- --check     # committed vectors are current
 ```
 
-The pinned toolchain is in `rust-toolchain.toml`. CI runs the same commands.
+The pinned toolchain is in `rust-toolchain.toml`. CI runs these commands, with `--all-features` on clippy and test, and also builds `cahoots-hal` and `cahoots-chat` for `thumbv7em-none-eabi`.
 
 ## Security limits
 
@@ -76,7 +76,7 @@ See `docs/threat-model.md` for the full list.
 
 ## What it is for
 
-`docs/tiers.md` defines the device tiers, from a phone (T0) to inspected silicon (T4), and the rule that a circle is only as protected as its least protected member. `docs/use-cases.md` lists concrete uses: group chat, and bootstrapping WireGuard and physical mesh networks from a ceremony. `docs/gatherings.md` is the concept of a card for every gathering: storage, messages from old circles, the web of trust a card accumulates, and a social network with no accounts. `docs/diy-badge.md` is how to build a badge, in either hardware family. `docs/plan.md` is the roadmap. `docs/glossary.md` defines the terms.
+`docs/tiers.md` defines the device tiers, from a phone (T0) to inspected silicon (T4), and the rule that a circle is only as protected as its least protected member. `docs/use-cases.md` lists concrete uses: group chat, and bootstrapping WireGuard and physical mesh networks from a ceremony. `docs/gatherings.md` is the concept of a card for every gathering: storage, messages from old circles, the web of trust a card accumulates, and a social network with no accounts. `docs/diy-badge.md` is how to build a badge, in any of the three hardware families. `docs/plan.md` is the roadmap. `docs/glossary.md` defines the terms.
 
 ## Working rules
 

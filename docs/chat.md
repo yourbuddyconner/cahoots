@@ -24,7 +24,7 @@ There is no separate rotation message. Every chat message carries its `epoch_id`
 2. spends and erases the range;
 3. derives `epoch_key` and the sender chains below.
 
-A member SHOULD start a new epoch after `ROTATE_AFTER = 1000` of its own messages in the current epoch, or after 24 hours, whichever comes first. Members SHOULD switch to the newest epoch they have seen. Two epochs MAY be live at once while members switch. A receiver keeps at most `MAX_EPOCHS = 4` epoch states and drops the oldest.
+A member SHOULD start a new epoch after `ROTATE_AFTER = 1000` of its own messages in the current epoch, or after 24 hours, whichever comes first. The time rule is not implemented; `cahoots-chat` rotates on count only. Members SHOULD switch to the newest epoch they have seen. Two epochs MAY be live at once while members switch. A receiver keeps at most `MAX_EPOCHS = 4` epoch states and drops the oldest.
 
 ## 2. Sender chains
 

@@ -70,7 +70,7 @@ A USB port has no detect line, so `peer_present` on the board is "a frame arrive
 | ledger | 0x400000 | 64 KiB | `hal::ledger` records, 16 bytes each, appended onto erased flash |
 | circle | 0x410000 | 4 KiB | params, seat and circle id |
 
-The pad is plaintext on flash. Flash encryption and secure boot are one-way eFuse operations and wait for Conner's sign-off, so the board is tier 2: a hardware random source with health tests, no radio during a ceremony because no radio code is linked, and a pad that a reader with physical access can copy.
+The pad is plaintext on flash. Flash encryption and secure boot are one-way eFuse operations and wait for Conner's sign-off, so the board is tier 1: a hardware random source with health tests, no radio during a ceremony because no radio code is linked, and a pad that a reader with physical access can copy.
 
 ## Randomness
 

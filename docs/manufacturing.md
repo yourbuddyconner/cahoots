@@ -4,7 +4,7 @@
 
 ## Where we are
 
-A dev board and a display module on jumper wires, with firmware that is about to run its first ceremony. That is a prototype of the electronics, not of the product. Nothing here is on a board we designed, nothing holds together without a breadboard, and the parts are sized for convenience rather than for a card.
+A dev board and a display module on jumper wires, with firmware that is about to run its first ceremony. That is a prototype of the electronics, not of the product. Nothing that runs today is on a board we designed, nothing holds together without a breadboard, and the parts are sized for convenience rather than for a card. The first board we designed, V1 in [hardware/v1](../hardware/v1/README.md), is drawn and passes KiCad's checks. It is not reviewed or ordered yet.
 
 Yes, we design a PCB, and we design two: V1 soon, a simple board to learn the process on and to have something that works at a meetup, and V2, the card, once two questions below are answered.
 
@@ -29,20 +29,20 @@ Yes, we design a PCB, and we design two: V1 soon, a simple board to learn the pr
 
 ## V1
 
-The first badge we can order: a complete badge, designed now with low risk, even if it is not a thin one. 54 × 86 mm, two copper layers, about 6 mm thick with the panel on top.
+The first badge we can order: a complete badge, designed now with low risk, even if it is not a thin one. 54 × 86 mm, two copper layers. The badge is 13.4 mm thick, and 15 mm in its case.
 
-The chip is the RP2350, as the roadmap decided for the tinkering family, and it arrives on V1 as a whole Raspberry Pi Pico 2 soldered flat onto our board through its castellated edges. That keeps every chip-level question off V1: the Pico 2 brings its own crystal, flash, regulator, USB-C and ROM bootloader, Raspberry Pi has done the layout, and the part costs five dollars from anyone. Our board is then a connector board: the panel, the buttons, the battery, the pile contacts, and a footprint for the Pico 2. If the bare RP2350 is in the assembler's stock when V2 comes, that is when it goes on a board directly.
+The chip is the RP2350, as the roadmap decided for the tinkering family, and it arrives on V1 as a whole Raspberry Pi Pico 2 soldered flat onto our board through its castellated edges. That keeps every chip-level question off V1: the Pico 2 brings its own crystal, flash, regulator, micro-USB and ROM bootloader, Raspberry Pi has done the layout, and the part costs five dollars from anyone. Our board is then a connector board: the panel, the buttons, the battery, the pile contacts, and a footprint for the Pico 2. If the bare RP2350 is in the assembler's stock when V2 comes, that is when it goes on a board directly.
 
 Why the RP2350 and not the ESP32-S3 the firmware runs on today: it has no radio, so "no radio during the ceremony" is a fact about the silicon; it has a hardware random source, signed boot, one-time-programmable key storage and glitch detectors; it draws about half the current under load and sleeps in microamps; and Rust targets it upstream, with drag-and-drop flashing over USB. The port is the four board modules, since the display driver and the pile and ceremony code are shared. The ESP32-S3 boards stay as the second family in the pile.
 
 - A Pico 2, the plain one without headers and without the wireless chip, soldered down.
-- The raw 1.54" panel, the GDEH0154D67 from Good Display, on its 24-pin flex connector, with the boost circuit from the open reference schematics. The same panel as the Waveshare module, five to seven dollars.
-- Two tactile switches, a CR2032 holder for the prototype. The Pico's USB-C is the flashing and dock port.
-- Four gold pads on the face at the contacts end, four spring contacts underneath, four magnet pockets in the tray: the pile mechanics, so they get tested on real cards before the thin one is designed.
-- A lanyard slot, and a clear tray printed in resin.
-- Open: whether an Infineon Trust M goes on V1 for a wrapping key that never leaves a chip, as the DIY guide's Pico kit has it. The same decision as flash encryption on the ESP32, settled before V1 is laid out.
+- The raw 1.54" panel, the GDEY0154D67 from Good Display, on its 24-pin flex connector, with the boost circuit from the open reference schematics. The same panel as the Waveshare module, five to seven dollars.
+- Two tactile switches, a CR2032 holder for the prototype. The Pico's micro-USB is the flashing port. The dock is not in V1.
+- A five-pin magnetic pogo pair (Adafruit 5413) for the pile: the pin half stands on the board at the top end with its pins up through the lid, and the pad half sits in the tray floor, wired to the board with a short pigtail. Two JST-SH UART sockets at the bottom edge take a cable instead. Four magnet pockets in the tray. The pile mechanics get tested on real badges before the thin card is designed.
+- A clear PETG tray with a snap-fit lid, printed. Resin or cut acrylic later from the same STEP.
+- Decided: no secure element and no flash encryption on V1. Those are V2's questions once the power measurement is in.
 
-Cost for ten: about $35 to $50 a badge, plus the mechanical prototypes. Time: a week to design, three weeks per spin, two spins. I draft the schematic, the bill of materials and a first layout in KiCad; you review, order and build the first one on the bench. What it buys: a meetup with ten real badges, the pile ritual tested with magnets and pads, and the whole process learned on something forgiving.
+Cost for ten: about $35 to $50 a badge, plus the mechanical prototypes. Time: a week to design, three weeks per spin, two spins. The schematic, the bill of materials and the layout are drawn in KiCad and pass its checks (hardware/v1). Next, you review, order and build the first one on the bench. What it buys: a meetup with ten real badges, the pile ritual tested with magnets and pads, and the whole process learned on something forgiving.
 
 ## V2: the card
 
@@ -62,7 +62,7 @@ What the unit costs at five hundred: a bill of materials around $25 to $35, so a
 1. Finish the firmware on the Nano and run the first ceremony with the laptop as the pile. In progress.
 2. Order a Pico 2 and port the four board modules to it: the USB link, the flash store, the random source, the pins. A week.
 3. Measure power during a ceremony and a refresh, on both chips. One afternoon. That decides the battery and the thickness.
-4. Design and order V1 around the Pico 2 footprint. Ten units for the first meetup, the pile mechanics tested for real.
+4. Review and order V1 around the Pico 2 footprint. The design is drawn and checked. Ten units for the first meetup, the pile mechanics tested for real.
 5. December: Dabao boards arrive. Port the firmware; measure the Baochip's power and height.
 6. Brief a hardware engineer for V2 with the measurements, the V1 lessons and the benchmark from the DIY guide. Three spins.
 7. Crowd Supply for the first run.

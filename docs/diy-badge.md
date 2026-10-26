@@ -1,18 +1,18 @@
 # Build a badge
 
-Cahoots runs on any board that can do four things: make random numbers, store the pad and erase parts of it for real, show six words, and talk to the next badge over a wire. Those four are the HAL (`crates/hal`). A board that implements them and passes the device test suite is a Cahoots badge, and its README says which [tier](tiers.md) it reaches and why.
+Cahoots runs on any board that can do four things: make random numbers, store the pad and erase parts of it for real, show six words, and talk to the next badge over a wire. Those four are the HAL (`crates/hal`). A board that implements them and completes a ceremony is a Cahoots badge, and its README says which [tier](tiers.md) it reaches and why.
 
 Two hardware families come first, and more can follow.
 
 | Family | Board | What it is for | Tier | When |
 |---|---|---|---|---|
 | **Baochip** (native, fully supported) | Dabao evaluation board, Baochip-1x | The badge we stand behind. RISC-V, a hardware key store, on-chip RRAM, silicon you can inspect. No radio. | T3; T4 for anyone who inspects the chip | Boards ship 15 December 2026 |
-| **ESP32-S3** (tinkering, first firmware) | Arduino Nano ESP32 | The board on the bench, so the firmware runs here first: `crates/esp32s3`, with the 1.54" module and two tactile switches wired as in [hardware/nano-esp32-epaper](../hardware/nano-esp32-epaper/README.md). Radio present, off by firmware; pad plaintext on flash until flash encryption is turned on. | T2 | Now |
+| **ESP32-S3** (tinkering, first firmware) | Arduino Nano ESP32 | The board on the bench, so the firmware runs here first: `crates/esp32s3`, with the 1.54" module and two tactile switches wired as in [hardware/nano-esp32-epaper](../hardware/nano-esp32-epaper/README.md). Radio present, off by firmware; pad plaintext on flash until flash encryption is turned on. | T1 | Now |
 | **Raspberry Pi Pico** (tinkering) | Pico 2 or Pico 2 W, RP2350 | Buy it today anywhere. Wi-Fi on the W for tinkering, a huge ecosystem, WebUSB to the phone. Needs a $5 secure element to be honest about its tier. | T2 | Now |
 
 Both run the same Rust core and the same ceremony. Both are USB devices, so the browser app can drive either one. The RP2350 can boot its RISC-V cores instead of its Arm cores, so the firmware can be RISC-V on both.
 
-**Status: neither is built yet.** This page is the plan we are building to. We will build both ourselves and replace this line with what we learned.
+**Status: the ESP32-S3 badge runs the pile and the ceremony on the Nano (`crates/esp32s3`). The Baochip and Pico badges are not built yet.** This page is the plan we are building to. We will build them ourselves and replace this line with what we learned.
 
 ## The shape both families share
 
@@ -40,7 +40,7 @@ The DIY families below are as thick as their boards and modules make them. The b
 
 The tallest column is the battery's, and with adhesive and tolerance the card comes out at 2.9 to 3.2 mm: four credit cards. A pile of eight is 25 mm.
 
-**Cards stack instead of lining up.** Four magnets in the floor line a card up on the one below and hold it a fraction of a millimetre above it, with opposite poles so it only snaps on one way round. Four gold pads on the face at the contacts end meet four spring fingers under the card above. A pile is a line of links, so each card has one link up and one down. The firmware for it is in `crates/hal`: the ceremony driver floods each new frame on every link except the one it came from, which its dedupe makes correct on a line, a ring, or a pair. The pile layer (`hal::pile`) gives each card its seat from the card below it, with the bottom card naming the circle, and sends the count down from the top card when its button is pressed. Nobody says a seat number out loud. The ritual: press B on the top card, wait for the buzz, lift, read the words.
+**Cards stack instead of lining up.** Four magnets in the floor line a card up on the one below and hold it a fraction of a millimetre above it, with opposite poles so it only snaps on one way round. Four gold pads on the face at the contacts end meet four spring fingers under the card above. A pile is a line of links, so each card has one link up and one down. The firmware for it is in `crates/hal`: the ceremony driver floods each new frame on every link except the one it came from, which its dedupe makes correct on a line, a ring, or a pair. The pile layer (`hal::pile`) gives each card its seat from the card below it, with the bottom card naming the circle, and sends the count down from the top card when its button is pressed. Nobody says a seat number out loud. The ritual: press B on the top card, wait for the six words to appear on each screen, then press B to keep the circle or A to discard it.
 
 **What 3 mm costs.** No USB-C: the receptacle alone needs about 3.2 mm of device, so the phone link runs through the same pads over a small dock with a USB-C socket on it. A coin cell instead of a charger: e-paper draws only when it changes, a ceremony is a few seconds of compute, and sleep is microamps, so a CR2016 runs the badge for a year or more and is replaceable anywhere. Glass in the card: the e-paper is glass, so it hangs on a lanyard and should not ride in a back pocket.
 
@@ -55,7 +55,7 @@ The board has no screen, no buttons, no battery, and no radio. You add:
 | Part | Price | Notes |
 |---|---|---|
 | Dabao | $12 | Plus $10 shipping in the US |
-| Waveshare 1.54" e-paper module, 200 × 200, SPI, 8-pin cable | $10 to $18 | The same panel as the manufactured badge, so the display driver is shared. The `epd-waveshare` Rust crate covers this panel class; the exact revision needs checking. |
+| Waveshare 1.54" e-paper module, 200 × 200, SPI, 8-pin cable | $10 to $18 | The same panel as the manufactured badge, so the display driver is shared. The `epd-waveshare` Rust crate drives it; the ESP32-S3 crate uses its `epd1in54_v2` driver. |
 | Two tactile buttons | under $1 | Any 6 mm tactile switch |
 | A UART cable to the next badge | under $1 | Three wires: TX, RX, ground |
 | Optional: a 3.7 V LiPo and a charger board | $8 to $12 | For a badge that runs unplugged. The Dabao has no charger on board. |
@@ -109,7 +109,7 @@ A Pico 2 W has Wi-Fi and Bluetooth on board. For tinkering that is useful: flash
 
 ## Firmware and first boot
 
-The firmware is not published for either family yet. When it is: for the Pico, hold BOOTSEL while plugging in and drag the `.uf2` file onto the drive that appears. For the Dabao, `cargo xtask dabao` produces the images and the board's bootloader takes them over USB. The first screen on either shows the firmware hash so the group can compare it, then asks for a PIN.
+The firmware runs on the ESP32-S3 family today (`crates/esp32s3`). It is not published for the Pico or the Dabao yet. When it is: for the Pico, hold BOOTSEL while plugging in and drag the `.uf2` file onto the drive that appears. For the Dabao, `cargo xtask dabao` produces the images and the board's bootloader takes them over USB. The first screen on either shows the firmware hash so the group can compare it, then asks for a PIN.
 
 What the firmware checks on first boot, and shows on the screen: the random sources pass the health tests; the screen and both buttons work; the pad region erases and reads back clean; on the Pico, the secure element answers on I2C.
 
@@ -124,7 +124,7 @@ Every member holds the whole pad, and the pad is too big for any secure element.
 
 ## Adding a family
 
-Implement the four HAL traits (`Entropy`, `PadStore`, `Display`, `Link`) in a crate for the board. Run the device suite against the host simulator: a board passes by completing a ring ceremony with simulated peers and producing the right six words. Write the crate's README with the tier the board earns and why, judged by what its storage and boot chain can do, not by what the crate claims. The ESP32-S3 crate is the first of these to run on real hardware; its four implementations are the template for the Pico's.
+Implement the four HAL traits (`Entropy`, `PadStore`, `Display`, `Link`) in a crate for the board. The `host` and `hal` crates have in-process tests that run a ring ceremony with simulated peers. A device suite that runs those against a real board is planned. A board passes by completing a ring ceremony and producing the right six words. Write the crate's README with the tier the board earns and why, judged by what its storage and boot chain can do, not by what the crate claims. The ESP32-S3 crate is the first of these to run on real hardware; its four implementations are the template for the Pico's.
 
 ## Open questions
 

@@ -4,9 +4,9 @@ The words these documents use, in plain terms. Where a term has a precise defini
 
 **Cahoot, circle.** A group of people who made one secret together at a ceremony. The code says circle. The app says cahoot.
 
-**Ceremony.** The in-person meeting where a group makes its secret. Five steps: set up, draw, touch, mix, say the words. See the [ceremony guide](ceremony-guide.md).
+**Ceremony.** The in-person meeting where a group makes its secret. Five steps: set up, draw, swap, mix, say the words. In the app, set up is the New ceremony and Join screens, draw and swap happen on the Commit and Reveal screens, and mix and say the words are the Check screen. See the [ceremony guide](ceremony-guide.md).
 
-**Pad.** The secret itself: a file of random bytes, usually 256 KiB, that every member holds in full. Also called a one-time pad. Each byte is used once and then erased.
+**Pad.** The secret itself: a file of random bytes, 16 KiB to 256 KiB in the app, that every member holds in full. Also called a one-time pad. Each byte is used once and then erased.
 
 **Contribution.** The random bytes one device brings to the ceremony. The pad is all contributions combined, so one honest device is enough to make it random.
 
@@ -30,7 +30,7 @@ The words these documents use, in plain terms. Where a term has a precise defini
 
 **Ledger.** Each device's record of which pad bytes have been used. It is how a device recognizes a replayed message.
 
-**Pure-pad mode.** Encrypting a short message with one pad byte per message byte, plus 32 bytes for the seal. Nothing can break it, now or later, without the pad.
+**Pure-pad mode.** Encrypting a short message with one pad byte per message byte, plus 32 bytes for the one-time key that makes the 16-byte seal. Nothing can break it, now or later, without the pad.
 
 **PSK mode, hedged.** Spending 32 pad bytes to seed a normal key exchange, such as WireGuard or TLS. An attacker then has to break the math and have the pad. PSK stands for pre-shared key.
 

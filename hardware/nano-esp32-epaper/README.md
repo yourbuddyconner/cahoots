@@ -108,4 +108,4 @@ If both of those are fine and the panel is still blank, check the eight wires by
 
 ## What this does not test
 
-One board tests one screen. The touch link needs a second board, or a laptop standing in as a peer over USB serial once the host crate has a serial link. The ceremony, the pad store on flash, and the entropy health tests need the ESP32-S3 crate, which does not exist yet: see [crates/esp32s3](../../crates/esp32s3/README.md).
+One board tests one screen. The touch link needs a second board, or a laptop standing in as a peer over USB serial once the host crate has a serial link. The ceremony, the pad store on flash, and the entropy health tests need the ESP32-S3 crate: see [crates/esp32s3](../../crates/esp32s3/README.md).

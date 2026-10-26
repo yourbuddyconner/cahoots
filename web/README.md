@@ -6,7 +6,7 @@ A PWA. `cahoots-core` and `cahoots-chat` run as WebAssembly. There are no CDN sc
 
 One job per screen: a top bar (back, title, a menu for secondary options), one stage element, and one primary action pinned at the bottom. On phones the ceremony's commit and reveal steps have a Show / Scan toggle; on screens wider than 960 px both panels sit side by side. Secondary paths (paste, copy, download, load a file, leave) live in the menu sheet so the main screen never needs scrolling.
 
-A commitment code carries the circle parameters, so a joiner scans any member who has already committed. A member that has not yet revealed accepts a late reveal as both commitment and reveal (`Ceremony.commitment_for`), which lets a member who joined late catch up without the others going back a step. The check-words screen keeps your own reveal available from its menu for anyone still collecting.
+A commitment code carries the circle parameters, so a joiner scans any member who has already committed. A member that has not yet revealed accepts a late reveal as both commitment and reveal (`Ceremony.add_reveal`), which lets a member who joined late catch up without the others going back a step. The check-words screen keeps your own reveal available from its menu for anyone still collecting.
 
 ## Layout
 
@@ -30,7 +30,7 @@ python3 -m http.server 8765 --bind 127.0.0.1
 # open http://127.0.0.1:8765/
 ```
 
-The service worker fetches from the network first and falls back to its cache, so a load with a connection always gets the current app and the app still opens with no connection. For installs on a phone, serve over HTTPS (any static host) and use "Add to Home Screen". The deployed app lives at https://cahoots.network/app/. The wasm binary is about 690 KB; the QR decoder and fountain coder are built at `opt-level = 3` for speed.
+The service worker fetches from the network first and falls back to its cache, so a load with a connection always gets the current app and the app still opens with no connection. For installs on a phone, serve over HTTPS (any static host) and use "Add to Home Screen". The deployed app lives at https://cahoots.network/app/. The wasm binary is about 770 KB; the QR decoder and fountain coder are built at `opt-level = 3` for speed.
 
 ## How a ceremony flows
 
@@ -55,7 +55,7 @@ The words come from the pair keys made during the sealed reveal step, so a cahoo
 - **Relay.** The chat needs a running Numbers Station (`cargo run -p cahoots-station -- --listen 127.0.0.1:8080 --log station.jsonl`). There is no default: until a relay address is set for the circle (the empty state's button, or **Relay address** in the menu), the chat screen explains what a relay is and shows nothing else. The address is stored per circle in IndexedDB. The screen long-polls `GET /v1/circles/{id}/messages?after=<seq>&wait=25000` while open and posts sealed messages as raw bytes.
 - **Epochs.** The first send spends 32 pad bytes to start an epoch. **Start a new epoch** in the menu spends 32 more. Peers switch to the newest epoch they see; the subtitle under the circle name shows the current one. Rotation also happens on its own after 1000 of your own messages in an epoch.
 - **Padding.** Plaintext is padded to 64, 256, 1024, or 4096 bytes before encryption.
-- **Rejections** show inline and muted: `rejected: replay`, `rejected: tag`, `rejected: reuse`, and so on. Your own messages coming back from the relay are skipped by sender index.
+- **Rejections** show inline and muted as `rejected · <reason> · seq N`, where the reason is the friendly text for the error (see `friendly()` in `app.js`). Your own messages coming back from the relay are skipped by sender index.
 - **Persistence.** Chat keys, the epoch state, and the last relay sequence number are exported with the circle, so a reload resumes where it left off without re-reading the feed. Plaintext history is stored on the device.
 - **CORS.** The station allows any origin, so the app on cahoots.network can talk to a relay on any host.
 - The service worker never caches `/v1/` responses.
@@ -89,7 +89,7 @@ Driven in Chrome with two tabs on two origins (`127.0.0.1` and `localhost`, so e
 Chat, verified the same day with two tabs on two origins behind a proxy that forwarded `/v1/` to one `cahoots-station` process:
 
 - After a 2-member ceremony, member 0 opened chat, sent a message, and it appeared on member 1 under "member 0 · epoch 0:0". Member 1 replied in the same epoch, and member 0 received it.
-- Member 0 pressed **Rotate epoch** (spent 32 bytes, chip changed to `0:32`) and sent again. Member 1 decrypted it and its own chip switched to `0:32`.
+- Member 0 pressed **Rotate epoch** (the button is now named **Start a new epoch**; spent 32 bytes, chip changed to `0:32`) and sent again. Member 1 decrypted it and its own chip switched to `0:32`.
 - A copy of that message with one ciphertext byte flipped was posted straight to the relay as a new entry. Member 1 showed `rejected: replay`, because the copy reused an already-consumed counter, which is checked before the tag. The tag-failure path is covered by the Rust tests.
 - Member 1 reloaded the page. It came back on epoch `0:32` with the full history, "Last seq 3", no re-decrypted or duplicated entries, and received the next message from member 0.
 - No console errors in either tab.

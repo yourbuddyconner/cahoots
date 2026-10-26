@@ -21,7 +21,7 @@ The two chips in [Build a badge](diy-badge.md) have 4 MiB of non-volatile memory
 Three conclusions.
 
 - **Size the pad at the ceremony.** The card should ask how long the group will last. A dinner gets 4 KiB, which is still a few dozen unbreakable messages per person, or 32 fresh session keys. A team that will chat for a year gets 256 KiB. The app already offers three sizes; the card should ask the same question.
-- **A card for every gathering wants an external flash chip.** That is a line item, and the design stays the same. The badge already stores pads encrypted under a key that never leaves the secure element, so more flash is more ciphertext. The circle IDs, the ledgers and the pair keys stay on-chip. They are a few hundred bytes per circle.
+- **A card for every gathering wants an external flash chip.** That is a line item, and the design stays the same. The Pico plus Trust M badge is planned to store pads encrypted under a key that never leaves the secure element, so more flash is more ciphertext. The ESP32-S3 firmware today writes the pad to flash in the clear. The circle IDs, the ledgers and the pair keys stay on-chip. They are a few hundred bytes per circle.
 - **Old pads need refreshing.** Flash keeps data for ten to twenty years. A pad that must still work in 2040 has to be rewritten in between. The firmware should rewrite stored pads every few years as a background job. Boring, and real.
 
 ## 3. A message from years ago

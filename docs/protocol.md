@@ -16,7 +16,7 @@ This is the normative description of what `cahoots-core` implements. The words M
 | Name | Default | Notes |
 |---|---|---|
 | `n` | 2 to 8 members | |
-| `L` | 256 KiB | On devices the maximum depends on free non-volatile memory. |
+| `L` | 16, 64, or 256 KiB; the app defaults to 64 KiB | On devices the maximum depends on free non-volatile memory. |
 | Slices | `n`, plus 1 if the circle seats an agent | Equal sizes. Slice `k` starts at `k * floor(L / slices)`. |
 
 Every slice MUST hold at least 32 bytes.
@@ -37,7 +37,7 @@ The ceremony is commit-then-reveal. Without the commit step, the last member to 
 
 ![The ceremony in five steps](diagrams/ceremony.svg)
 
-1. **Setup.** The leader chooses the parameters. They are sent to every device and shown for confirmation.
+1. **Setup.** The leader chooses the parameters. They are sent to every device. Phones show them for confirmation; on devices, a Params frame that does not match aborts the ceremony.
 2. **Commit.** Each device generates `R_i` and a KEM keypair `(dk_i, pk_i)` from 32 more random bytes, and computes `C_i = SHA-256("cahoots/commit/v1" || params || i || pk_i || R_i)`. Every device sends `(C_i, pk_i)` to every other device. Both are public. A device MUST NOT reveal until it holds all `n` commitments.
 3. **Reveal.** Each device sends its sealed reveal (section 3.2): `R_i` encrypted to every other member. Each received reveal is opened and the contribution checked against `C_j`, using the `pk_j` held with the commitment, in constant time. A reveal that fails to open is refused and nothing changes. A reveal that opens but does not match aborts the ceremony on that device. A device that holds no commitment for `j` yet MAY take a sealed reveal from `j` as both: the commitment is derived from the opened contribution and the key in the blob. That is safe because the device's own contribution was fixed before it sent anything.
 4. **Combine.** `PAD = XOR of all R_j`. A device MAY XOR a second independent source into its own `R_i` before committing. That source MUST NOT replace the device's own TRNG output.
@@ -53,7 +53,7 @@ Implementation: `crates/core/src/ceremony.rs`, `commit.rs`, `reveal.rs`, `combin
 frame = type (u8) | seq (u32) | len (u32) | payload | CRC-32
 ```
 
-The CRC is IEEE 802.3 (the same polynomial as zlib) over every byte before it. It catches transmission errors only. Commitments and check words provide integrity. Devices form a ring and forward every commitment and reveal they receive until all devices hold all `n` of each. The touch link MUST NOT use any radio.
+The CRC is IEEE 802.3 (the same polynomial as zlib) over every byte before it. It catches transmission errors only. Commitments and check words provide integrity. Each device has one touch link per neighbour: two in a pile (down and up, the hardware design), two in a closed ring (previous and next), or one in a pair. The link carries four frame kinds: Params, Commit, Reveal, and Abort. A device forwards every frame it sees for the first time on every link except the one it arrived on, deduplicated by kind and member index, until all devices hold all `n` commitments and reveals. The touch link MUST NOT use any radio.
 
 Implementation: `crates/core/src/frame.rs`.
 
@@ -153,7 +153,7 @@ A `control` message (type `3`) bootstraps a network. Its plaintext is one subtyp
 | Subtype | Name | Payload |
 |---|---|---|
 | `0` | `peer` | `proto (u8) \| pubkey_len (u8) \| pubkey \| endpoint_len (u8) \| endpoint (UTF-8) \| allowed_len (u8) \| allowed_ips (UTF-8)`. `proto`: `0` WireGuard, `1` Reticulum, `2` Yggdrasil, `3` Meshtastic. |
-| `1` | `psk` | `purpose (u8) \| peer_a (u8) \| peer_b (u8) \| offset (u32)`. The issuer's slice is the message's own slice; `peer_a` MUST equal it. `purpose`: `0` WireGuard, `1` TLS, `2` MLS, `3` Wi-Fi, `4` Meshtastic, `5` other. |
+| `1` | `psk` | `purpose (u8) \| peer_a (u8) \| peer_b (u8) \| offset (u32)`. The issuer's slice is the message's own slice; `peer_a` MUST equal it. The core decoder does not check this; the consumer MUST (`crates/wireguard` does). `purpose`: `0` WireGuard, `1` TLS, `2` MLS, `3` Wi-Fi, `4` Meshtastic, `5` other. |
 | `2` | `rotate` | `purpose (u8) \| peer_a (u8) \| peer_b (u8) \| not_after (u64 Unix seconds)` |
 | `3` | `slice-transfer` | `member (u8)`. The member's slice now lives on a node, not a badge. |
 
@@ -172,4 +172,4 @@ Implementation: `crates/core/src/control.rs`; the WireGuard use is `crates/wireg
 
 ## 6. Test vectors
 
-`crates/vectors/*.json` are generated from `cahoots-core` by `cargo run -p cahoots-vectors`. They cover the ceremony (KEM seeds, public keys, sealing randomness, sealed reveals, a mismatch abort, and a garbled reveal), control messages, check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. Every client MUST reproduce them.
+`crates/vectors/*.json` are generated from `cahoots-core` by `cargo run -p cahoots-vectors`, except `chat.json`, written by `crates/chat/tests/vectors.rs`, and `psk.json`, written by `crates/provider/tests/psk_vectors.rs`. They cover the ceremony (KEM seeds, public keys, sealing randomness, sealed reveals, a mismatch abort, and a garbled reveal), pair keys and hello words (`pair_keys` and `hello_words` in `ceremony.json`), control messages, check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. Every client MUST reproduce them.

@@ -24,11 +24,11 @@ This is the meetup demo. Members post encrypted messages to the public feed (the
 
 ### 2.2 Approvals that do not depend on public-key crypto
 
-An `approve` message carries the hash of an action, such as a transaction. A verifier that holds the pad checks the seal. A policy engine can require one of these next to a passkey or a signature. If signatures are ever broken, the approval still stands, because it never relied on one.
+An `approve` message carries the hash of an action, such as a transaction. The message type exists; the verifier is a design. A verifier that holds the pad checks the seal. A policy engine can require one of these next to a passkey or a signature. If signatures are ever broken, the approval still stands, because it never relied on one.
 
 ### 2.3 Encrypting files to a circle
 
-`age -r cahoots:<circle>` wraps the file key with 32 pad bytes. Two laptops that share a circle can exchange gigabytes after one ceremony. Each file spends fresh bytes, so a leaked file key reveals nothing about other files.
+`age -r age1cahoots1...` wraps the file key with 32 pad bytes. Two laptops that share a circle can exchange gigabytes after one ceremony. Each file spends fresh bytes, so a leaked file key reveals nothing about other files.
 
 ### 2.4 Hedging ordinary tunnels: WireGuard, TLS, MLS
 
@@ -38,7 +38,7 @@ WireGuard's `PresharedKey` is the clearest case. The WireGuard paper describes i
 
 ### 2.5 Recovery circles
 
-At the ceremony, one device splits a recovery secret into shares (Shamir's scheme) and hands each member one over the touch link. To recover, enough of those people meet again, or send their shares as pure-pad messages. It is social recovery, where the people are the ones you met in person.
+This is a design, not built. At the ceremony, one device splits a recovery secret into shares (Shamir's scheme) and hands each member one over the touch link. To recover, enough of those people meet again, or send their shares as pure-pad messages. It is social recovery, where the people are the ones you met in person.
 
 ### 2.6 Bootstrapping networks
 
@@ -59,10 +59,10 @@ This is built: `cahoots-wg announce`, `peers`, `issue --relay`, and `accept --re
 Three message types do the whole job. They are circle messages, so they can be posted anywhere, including the Numbers Station, and only circle members can read or forge them.
 
 1. **Peer announcement** (`control` message, subtype `peer`). A member posts its WireGuard public key, its endpoint, and its allowed IPs. Every member now knows every peer. The announcement is authenticated by the pad, so a swapped public key is detected.
-2. **PSK issue** (`control`, subtype `psk`). To set up or rotate the tunnel to peer B, member A spends 32 bytes from its slice and posts the handle `(circle_id, slice, offset)` and the pair it is for. B calls `psk_for(handle)` and spends the same bytes. Both sides now hold the same `PresharedKey`. The handle only says where the bytes are, so it can travel in the clear.
-3. **Rotation** is a new PSK issue on a schedule. `cahoots-wg` renders the `[Peer]` block or runs `wg set` itself with `--apply`. Order matters: the acceptor installs first, then the issuer, because WireGuard holds one key per peer and switches at the next handshake.
+2. **PSK issue** (`control`, subtype `psk`). To set up or rotate the tunnel to peer B, member A spends 32 bytes from its slice and posts the offset and the pair it is for. The message's own slice and circle complete the handle `(circle_id, slice, offset)`. B calls `psk_for(handle)` and spends the same bytes. Both sides now hold the same `PresharedKey`. The handle only says where the bytes are, so it can travel in the clear.
+3. **Rotation** is a new PSK issue on a schedule. `cahoots-wg` renders the `[Peer]` block or runs `wg set` itself with `--apply`. The issuer installs the key when it issues and the acceptor installs it when it accepts. WireGuard holds one key per peer and switches at the next handshake.
 
-Addresses need no server either: the circle ID picks a `10.x.y.0/24`, and seat k is `.k+1` (`cahoots-wg address`). A full mesh is every host installing every other host's announcement, with one pre-shared key per pair, lower seat issuing to higher.
+Addresses need no server either: the circle ID picks a `10.x.y.0/24`, and seat k is `.k+1` (`cahoots-wg address`). A full mesh would be every host installing every other host's announcement, with one pre-shared key per pair, lower seat issuing to higher.
 
 The first tunnel needs no network at all: the announcements and the first PSK issues can be exchanged over the touch link at the ceremony itself. After that, rotation handles travel inside the existing tunnel.
 
@@ -74,7 +74,7 @@ The first tunnel needs no network at all: the announcements and the first PSK is
 | 8 nodes | 28 | daily | 10,220 | 320 KiB |
 | 8 nodes | 28 | weekly | 1,456 | 46 KiB |
 
-A 256 KiB pad lasts years at weekly rotation. On an ESP32-S3 with 8 MB of flash the pad can be several MiB. The warning fires at 10% remaining, and the fix is a new ceremony.
+A 256 KiB pad lasts years at weekly rotation. On the ESP32-S3 the pad partition holds up to 1 MiB today, and the 8 MB of flash has room for more. The warning fires at 10% remaining, and the fix is a new ceremony.
 
 ### 3.4 What a member can and cannot do
 
