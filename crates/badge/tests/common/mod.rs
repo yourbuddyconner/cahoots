@@ -41,23 +41,29 @@ impl Display for FakeDisplay {
     }
 }
 
-/// A noted screen that is six words from the word list.
+/// A noted screen that shows six words from the word list in a row: the first run of six
+/// word-list words among its lines' words.
 fn as_words(lines: &[String]) -> Option<[String; 6]> {
-    let words: [String; 6] = lines.to_vec().try_into().ok()?;
-    words
-        .iter()
-        .all(|w| WORDLIST.contains(&w.as_str()))
-        .then_some(words)
+    let tokens: Vec<&str> = lines.iter().flat_map(|l| l.split_whitespace()).collect();
+    tokens
+        .windows(6)
+        .find(|w| w.iter().all(|t| WORDLIST.contains(t)))
+        .map(|w| core::array::from_fn(|i| w[i].to_string()))
 }
 
-/// A noted screen that is one line of 32 bytes in hex: a key shown as a code.
+/// A noted screen titled "code" whose other lines are 32 bytes in hex: a key shown as a code.
 fn as_code(lines: &[String]) -> Option<Vec<u8>> {
-    match lines {
-        [l] if l.len() == 64 && l.bytes().all(|b| b.is_ascii_hexdigit()) => (0..32)
-            .map(|i| u8::from_str_radix(&l[2 * i..2 * i + 2], 16).ok())
-            .collect(),
-        _ => None,
+    let (title, rows) = lines.split_first()?;
+    if title != "code" {
+        return None;
     }
+    let hex: String = rows.iter().flat_map(|l| l.split_whitespace()).collect();
+    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    (0..32)
+        .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).ok())
+        .collect()
 }
 
 /// A snapshot of the pad.

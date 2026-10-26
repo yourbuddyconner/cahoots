@@ -1,6 +1,7 @@
 //! [`Badge`]: the boot screen, the pile and the ceremony, and the idle menu.
 
 use crate::board::{Board, Circle};
+use crate::screens::{self, Screen};
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
@@ -231,7 +232,7 @@ impl<B: Board> Badge<B> {
         for l in &lines {
             self.board.log(l);
         }
-        show_status(&mut self.board, &lines.join("\n"));
+        show(&mut self.board, screens::self_test(&lines));
         self.board.delay_ms(2500);
 
         // A held through the self-test forgets the circle: record, ledger and pad.
@@ -240,7 +241,10 @@ impl<B: Board> Badge<B> {
             match self.board.wipe(pad_len) {
                 Ok(()) => {
                     self.board.log("A held at boot: circle forgotten");
-                    show_status(&mut self.board, "circle forgotten\nrelease A");
+                    show(
+                        &mut self.board,
+                        screens::status(&["circle forgotten", "release A"]),
+                    );
                     while self.board.a_down() {
                         self.board.delay_ms(10);
                     }
@@ -257,7 +261,7 @@ impl<B: Board> Badge<B> {
 
         if let Some(c) = &self.circle {
             let words = c.check_words();
-            show_words(&mut self.board, &words);
+            show_words(&mut self.board, c, &words);
             show_status(&mut self.board, "A for menu");
             self.board
                 .log(&format!("words from the record: {}", words.join(" ")));
@@ -291,7 +295,7 @@ impl<B: Board> Badge<B> {
     fn advance(&mut self, state: State<B::Link>) -> Result<(State<B::Link>, Step), String> {
         match state {
             State::Idle => {
-                show_status(&mut self.board, "plug into a pile. B on top starts");
+                show(&mut self.board, screens::pile(None));
                 let (down, up) = self.board.links();
                 let (name, pad_len) = self.board.proposal();
                 let pile = Pile::new(down, up, &name, pad_len, false);
@@ -361,13 +365,7 @@ impl<B: Board> Badge<B> {
                 let now = (ring.commitments_held(), ring.reveals_held());
                 if now != last {
                     last = now;
-                    show_status(
-                        &mut self.board,
-                        &format!(
-                            "commits {}/{}  reveals {}/{}",
-                            now.0, params.n, now.1, params.n
-                        ),
-                    );
+                    show(&mut self.board, screens::ceremony(now.0, now.1, params.n));
                 }
                 if step != RingStep::Complete {
                     let state = State::Ceremony {
@@ -413,7 +411,10 @@ impl<B: Board> Badge<B> {
                     return Ok((state, Step::InCeremony));
                 }
                 drop(links);
-                show_words(&mut self.board, &result.check_words);
+                let tier = tier_label(self.board.tier());
+                let name = &result.params.name;
+                let words = screens::words(name, &tier, &result.check_words, "say them aloud");
+                show(&mut self.board, words);
                 self.board
                     .log(&format!("words: {}", result.check_words.join(" ")));
                 show_status(&mut self.board, "B keep this circle . A discard");
@@ -587,12 +588,12 @@ impl<B: Board> Badge<B> {
         } else if board.b_pressed() {
             match m.item {
                 Item::Words => {
-                    show_words(board, &c.check_words());
+                    show_words(board, c, &c.check_words());
                     show_status(board, "words . A for menu");
                 }
                 Item::KeyAsCode => match m.pad.spend(&c.circle_id, PSK_LEN) {
                     Ok((_, bytes)) => {
-                        show_code(board, &bytes);
+                        show(board, screens::code(&bytes));
                         show_status(board, "shown. A for menu");
                     }
                     Err(e) => show_status(board, &format!("key: {e:?}")),
@@ -678,40 +679,27 @@ fn respond<L: Link>(link: &mut L, seq: u32, response: &[u8]) {
     }));
 }
 
-// The screens below are temporary: each one notes its lines on the board and draws a
-// placeholder frame. The rendered screens replace them.
+/// Note `screen`'s lines on the board, then draw its frame.
+fn show<B: Board>(board: &mut B, screen: Screen) {
+    board.note_screen(&screen.lines);
+    board.display().draw(&screen.frame);
+}
 
+/// A status screen of one line.
 fn show_status<B: Board>(board: &mut B, s: &str) {
-    let lines: Vec<&str> = s.split('\n').collect();
-    show_lines(board, &lines);
+    show(board, screens::status(&[s]));
 }
 
-fn show_words<B: Board>(board: &mut B, words: &[&str; 6]) {
-    show_lines(board, words);
+/// The words of the stored circle `c`, under its header.
+fn show_words<B: Board>(board: &mut B, c: &Circle, words: &[&str; 6]) {
+    let tier = tier_label(board.tier());
+    show(
+        board,
+        screens::words(&c.params.name, &tier, words, "say them aloud"),
+    );
 }
 
-fn show_code<B: Board>(board: &mut B, bytes: &[u8]) {
-    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    show_lines(board, &[&hex]);
-}
-
-fn show_lines<B: Board>(board: &mut B, lines: &[&str]) {
-    let owned: Vec<String> = lines.iter().map(|l| String::from(*l)).collect();
-    board.note_screen(&owned);
-    board.display().draw(&text_frame(lines));
-}
-
-/// A placeholder frame: one short bar per line, as long as the line, so a screen is not
-/// blank. It draws no letters.
-fn text_frame(lines: &[&str]) -> cahoots_hal::Frame {
-    let mut f = cahoots_hal::Frame::blank();
-    for (i, line) in lines.iter().enumerate() {
-        let y = 4 + 12 * i;
-        let len = (line.chars().count() * 6).min(cahoots_hal::Frame::WIDTH - 8);
-        for x in 4..4 + len {
-            f.set(x, y, true);
-            f.set(x, y + 1, true);
-        }
-    }
-    f
+/// The header's label for a board's tier.
+fn tier_label(tier: u8) -> String {
+    format!("tier {tier}")
 }
