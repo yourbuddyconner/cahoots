@@ -7,6 +7,8 @@ use cahoots_core::circle_id::CircleId;
 use cahoots_core::params::CircleParams;
 use cahoots_hal::ledger::RecordStore;
 use cahoots_hal::{Display, Entropy, Link, PadStore};
+use core::fmt;
+use zeroize::Zeroize;
 
 /// A board-level storage or link failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,9 +32,13 @@ pub enum Press {
     Both,
 }
 
-/// The circle a badge belongs to: its parameters, this card's seat, the circle id and the
-/// six check words the ceremony produced.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// The circle a badge belongs to: its parameters, this card's seat, the circle id, the six
+/// check words the ceremony produced, this seat's signing key, the tier it declared and the
+/// sealed manifest every seat signed.
+///
+/// The seat key is a secret. `Debug` leaves it out, and the record zeroizes it on drop.
+/// A board stores it as it stores the pad: in plaintext on a tier 0 or tier 1 board.
+#[derive(Clone, PartialEq, Eq)]
 pub struct Circle {
     pub params: CircleParams,
     pub seat: u8,
@@ -40,6 +46,31 @@ pub struct Circle {
     /// The check words as indices into `WORDLIST`. Stored at keep time, because spending
     /// erases pad bytes and words worked out from the pad later would differ.
     pub words: [u16; 6],
+    /// This seat's signing key, the seed `cahoots_core::seat::SeatKey::from_seed` reads.
+    pub seat_key: [u8; 32],
+    /// The tier this badge declared in the ceremony.
+    pub tier: u8,
+    /// The encoded `cahoots_core::manifest::SealedManifest`.
+    pub manifest: Vec<u8>,
+}
+
+impl fmt::Debug for Circle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Circle")
+            .field("params", &self.params)
+            .field("seat", &self.seat)
+            .field("circle_id", &self.circle_id)
+            .field("words", &self.words)
+            .field("tier", &self.tier)
+            .field("manifest", &self.manifest)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Drop for Circle {
+    fn drop(&mut self) {
+        self.seat_key.zeroize();
+    }
 }
 
 impl Circle {

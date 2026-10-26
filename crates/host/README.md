@@ -71,7 +71,11 @@ echo B > /tmp/b0/buttons.txt     # at "keep this circle?" on each card: Both kee
 echo B > /tmp/b1/buttons.txt
 ```
 
-The state directory holds the files `Device` keeps (`pad.bin`, `ledger.bin`, `circle.txt`), so `status`, `send` and `recv` work on it. It also holds:
+The state directory holds the files `Device` keeps (`pad.bin`, `ledger.bin`, `circle.txt`), so `status`, `send` and `recv` work on it.
+
+`circle.txt` has one `key=value` per line: `params`, `index`, `circle_id`, `words` and `label`, then `seat_key` (this seat's signing key, in hex), `tier` (the tier the card declared, 0 on a laptop) and `manifest` (the sealed manifest every seat signed, in hex). The seat key sits in the file in plaintext, as the pad sits in `pad.bin`; a laptop is a tier 0 device and promises no more. A `circle.txt` from before seat keys has none of the last three lines: `Device::open` still opens it, with no seat key and no manifest, and a `HostBoard` treats it as no circle.
+
+The state directory also holds:
 
 | File | What it does |
 |---|---|

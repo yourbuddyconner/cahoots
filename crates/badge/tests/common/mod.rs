@@ -242,6 +242,10 @@ impl FakeBoard {
             seat: 1,
             circle_id: circle_id(&pad),
             words: word_indices(&check_words(&params, &pad)).unwrap(),
+            seat_key: [7; 32],
+            tier: FAKE_TIER,
+            // The menu never reads the manifest; a kept circle's is checked in ceremony.rs.
+            manifest: Vec::new(),
         });
         (b, params, pad)
     }

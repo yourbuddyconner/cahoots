@@ -16,6 +16,7 @@ png = "0.17"
 base64 = "0.22"
 getrandom = "0.3"
 serialport = { version = "4", default-features = false }
+zeroize = { workspace = true, features = ["alloc"] }
 
 [dev-dependencies]
 tempfile = "3"

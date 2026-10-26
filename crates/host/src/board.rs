@@ -26,6 +26,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use zeroize::Zeroizing;
 
 /// The ledger region's size, as `Device` uses.
 const LEDGER_BYTES: u32 = 64 * 1024;
@@ -280,7 +281,7 @@ impl Board for HostBoard {
     }
 
     fn load_circle(&self) -> Option<Circle> {
-        let txt = std::fs::read_to_string(self.dir.join("circle.txt")).ok()?;
+        let txt = Zeroizing::new(std::fs::read_to_string(self.dir.join("circle.txt")).ok()?);
         let field = |k: &str| {
             txt.lines()
                 .find_map(|l| l.strip_prefix(k)?.strip_prefix('='))
@@ -290,29 +291,41 @@ impl Board for HostBoard {
         let circle_id = unhex(field("circle_id")?)?.try_into().ok()?;
         let words: Vec<&str> = field("words")?.split(' ').collect();
         let words = word_indices(&words.try_into().ok()?)?;
+        // A circle file from before seat keys has no `seat_key=` line: no circle.
+        let seat_key =
+            <[u8; 32]>::try_from(&Zeroizing::new(unhex(field("seat_key")?)?)[..]).ok()?;
+        let tier = field("tier")?.parse().ok()?;
+        let manifest = unhex(field("manifest")?)?;
         Some(Circle {
             params,
             seat,
             circle_id,
             words,
+            seat_key,
+            tier,
+            manifest,
         })
     }
 
-    /// Writes `circle.txt` in the format `Device::from_result` writes.
+    /// Writes `circle.txt` in the format `Device::from_result` writes. The seat key goes in
+    /// as plaintext hex, as the pad sits in `pad.bin`: a simulated badge is tier 0.
     fn save_circle(&mut self, c: &Circle) -> Result<(), BoardError> {
         let words: Vec<&str> = c
             .words
             .iter()
             .map(|&i| WORDLIST[usize::from(i) % WORDLIST.len()])
             .collect();
-        let txt = format!(
-            "params={}\nindex={}\ncircle_id={}\nwords={}\nlabel=CSPRNG\n",
+        let txt = Zeroizing::new(format!(
+            "params={}\nindex={}\ncircle_id={}\nwords={}\nlabel=CSPRNG\nseat_key={}\ntier={}\nmanifest={}\n",
             hex(&c.params.encode()),
             c.seat,
             hex(&c.circle_id),
-            words.join(" ")
-        );
-        std::fs::write(self.dir.join("circle.txt"), txt).map_err(|_| BoardError::Storage)
+            words.join(" "),
+            *Zeroizing::new(hex(&c.seat_key)),
+            c.tier,
+            hex(&c.manifest)
+        ));
+        std::fs::write(self.dir.join("circle.txt"), txt.as_bytes()).map_err(|_| BoardError::Storage)
     }
 
     fn wipe(&mut self, pad_len: u32) -> Result<(), BoardError> {

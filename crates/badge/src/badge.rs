@@ -54,7 +54,8 @@ enum State<L: Link> {
     Ceremony {
         /// Boxed: the ceremony is a few kilobytes, and the state moves on every step.
         ring: Box<RingCeremony<L>>,
-        last: (u8, u8),
+        /// Commitments, reveals and attestations held when the screen was last drawn.
+        last: (u8, u8, u8),
         params: CircleParams,
         seat: u8,
     },
@@ -347,15 +348,15 @@ impl<B: Board> Badge<B> {
                         &mut self.board,
                         &format!("seat {seat} of {}: {}", params.n, params.name),
                     );
+                    let tier = self.board.tier();
                     let mut ring = pile
-                        // Tier 0 until the board declares its own.
-                        .into_ceremony(ready, self.board.entropy(), 0)
+                        .into_ceremony(ready, self.board.entropy(), tier)
                         .map_err(|e| format!("ceremony: {e:?}"))?;
                     show_status(&mut self.board, "ceremony: waiting for the others");
                     ring.start();
                     let state = State::Ceremony {
                         ring: Box::new(ring),
-                        last: (0, 0),
+                        last: (0, 0, 0),
                         params,
                         seat,
                     };
@@ -394,10 +395,17 @@ impl<B: Board> Badge<B> {
                     show_status(&mut self.board, "ceremony: ABORTED");
                     format!("ceremony: {e:?}")
                 })?;
-                let now = (ring.commitments_held(), ring.reveals_held());
+                let now = (
+                    ring.commitments_held(),
+                    ring.reveals_held(),
+                    ring.attestations_held(),
+                );
                 if now != last {
                     last = now;
-                    show(&mut self.board, screens::ceremony(now.0, now.1, params.n));
+                    show(
+                        &mut self.board,
+                        screens::ceremony(now.0, now.1, now.2, params.n),
+                    );
                 }
                 if step != RingStep::Complete {
                     let state = State::Ceremony {
@@ -468,6 +476,9 @@ impl<B: Board> Badge<B> {
                         seat,
                         circle_id: result.circle_id,
                         words,
+                        seat_key: *result.seat_key.to_bytes(),
+                        tier: result.tier,
+                        manifest: result.manifest.encode(),
                     };
                     self.board
                         .save_circle(&circle)

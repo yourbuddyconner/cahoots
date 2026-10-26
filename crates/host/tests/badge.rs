@@ -93,8 +93,34 @@ fn two_host_boards_complete_a_ceremony_through_the_badge_crate() {
     assert_eq!(d_bottom.circle_id(), c_bottom.circle_id);
     assert_eq!(d_bottom.recompute_words(), d_bottom.check_words());
 
+    // Each circle file carries this card's seat key and the sealed manifest; the two
+    // manifests are the same one, and each lists its card's key at the host's tier, 0.
+    let m_bottom = d_bottom.manifest().unwrap().verify().unwrap();
+    let m_top = d_top.manifest().unwrap().verify().unwrap();
+    assert_eq!(m_bottom.id(), m_top.id());
+    assert_eq!(m_bottom.circle_id, c_bottom.circle_id);
+    for (d, m, c) in [(&d_bottom, &m_bottom, &c_bottom), (&d_top, &m_top, &c_top)] {
+        let key = d.seat_key().unwrap();
+        assert_eq!(m.seat_key(c.seat), Some(&key.public()));
+        assert_eq!(*key.to_bytes(), c.seat_key);
+        assert_eq!(d.tier(), Some(0));
+        assert_eq!(c.tier, 0);
+        assert_eq!(m.seats[usize::from(c.seat)].tier, 0);
+    }
+
     // A fresh HostBoard on the same directory loads the circle it kept.
     use cahoots_badge::Board;
     let again = HostBoard::new(&bottom, "-", "-", "bench", PAD_LEN, Some(1));
     assert_eq!(again.load_circle(), Some(c_bottom));
+
+    // A circle file from before seat keys is no circle to a HostBoard.
+    let path = bottom.join("circle.txt");
+    let old: String = std::fs::read_to_string(&path)
+        .unwrap()
+        .lines()
+        .filter(|l| !l.starts_with("seat_key="))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(&path, old).unwrap();
+    assert_eq!(again.load_circle(), None);
 }

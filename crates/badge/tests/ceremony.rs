@@ -3,7 +3,9 @@
 mod common;
 
 use cahoots_badge::{Badge, Board, Press, Step};
-use common::{cable, FakeBoard, FakeLink};
+use cahoots_core::manifest::SealedManifest;
+use cahoots_core::seat::SeatKey;
+use common::{cable, FakeBoard, FakeLink, FAKE_TIER};
 
 /// Card 1 at the bottom, card 2 on top: card 1's up is card 2's down.
 fn pile_of_two() -> (Badge<FakeBoard>, Badge<FakeBoard>) {
@@ -161,4 +163,71 @@ fn run_once_returns_after_the_prompt() {
     b2.board().presses.push_back(Press::Both);
     assert_eq!(b2.run_once(), Ok(()));
     assert!(b2.circle().is_some());
+}
+
+/// Run two cards to the prompt and keep the circle on both.
+fn kept_pair() -> (Badge<FakeBoard>, Badge<FakeBoard>) {
+    let (mut b1, mut b2) = to_the_prompt();
+    b1.board().presses.push_back(Press::Both);
+    b2.board().presses.push_back(Press::Both);
+    let mut kept = (false, false);
+    drive(&mut b1, &mut b2, |_, _, s1, s2| {
+        kept.0 |= *s1 == Step::Kept;
+        kept.1 |= *s2 == Step::Kept;
+        kept.0 && kept.1
+    });
+    (b1, b2)
+}
+
+#[test]
+fn keeping_the_circle_stores_the_seat_key_and_a_manifest_that_verifies() {
+    let (mut b1, mut b2) = kept_pair();
+    let mut ids = Vec::new();
+    for b in [&mut b1, &mut b2] {
+        let c = b.circle().unwrap().clone();
+        assert_eq!(b.board().load_circle().as_ref(), Some(&c));
+        let manifest = SealedManifest::decode(&c.manifest)
+            .unwrap()
+            .verify()
+            .unwrap();
+        assert_eq!(manifest.circle_id, c.circle_id);
+        assert_eq!(manifest.params, c.params);
+        let key = SeatKey::from_seed(&c.seat_key).unwrap();
+        assert_eq!(manifest.seat_key(c.seat), Some(&key.public()));
+        // The seat key never reaches the log or a noted screen.
+        let seed: String = c.seat_key.iter().map(|x| format!("{x:02x}")).collect();
+        let board = b.board();
+        assert!(!board.log.iter().any(|l| l.contains(&seed)));
+        assert!(!board.screens.iter().flatten().any(|l| l.contains(&seed)));
+        ids.push(manifest.id());
+    }
+    assert_eq!(ids[0], ids[1]);
+    assert_ne!(b1.circle().unwrap().seat_key, b2.circle().unwrap().seat_key);
+}
+
+#[test]
+fn the_manifest_lists_this_badge_at_its_tier() {
+    let (b1, b2) = kept_pair();
+    for b in [&b1, &b2] {
+        let c = b.circle().unwrap();
+        assert_eq!(c.tier, FAKE_TIER);
+        let manifest = SealedManifest::decode(&c.manifest)
+            .unwrap()
+            .verify()
+            .unwrap();
+        assert_eq!(manifest.seats.len(), 2);
+        let seat = &manifest.seats[usize::from(c.seat)];
+        assert_eq!(seat.seat, c.seat);
+        assert_eq!(seat.tier, FAKE_TIER);
+    }
+}
+
+#[test]
+fn the_ceremony_screen_counts_attestations() {
+    let (mut b1, _b2) = kept_pair();
+    assert!(b1
+        .board()
+        .screens
+        .iter()
+        .any(|l| l.iter().any(|x| x == "attestations 2/2")));
 }

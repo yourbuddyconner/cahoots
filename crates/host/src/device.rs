@@ -1,20 +1,28 @@
 //! One simulated badge. Its state directory holds `pad.bin`, `ledger.bin`, `circle.txt`,
 //! and `display.png`.
+//!
+//! `circle.txt` holds one `key=value` per line: `params`, `index`, `circle_id`, `words`,
+//! `label`, and from the signed manifest on, `seat_key`, `tier` and `manifest`. The seat key
+//! is the seat's signing key in plaintext hex, as the pad is plaintext in `pad.bin`: that is
+//! all a tier 0 device (or a tier 1 board) promises. Never print it or log it.
 
 use crate::display::PngDisplay;
 use crate::store::{FilePadStore, FileRecordStore};
 use cahoots_core::checkwords::{check_words, WORDLIST};
 use cahoots_core::circle_id::CircleId;
 use cahoots_core::ledger::SpentLedger;
+use cahoots_core::manifest::SealedManifest;
 use cahoots_core::message::{Header, MessageType};
 use cahoots_core::pad::{Pad, PadError};
 use cahoots_core::params::CircleParams;
+use cahoots_core::seat::SeatKey;
 use cahoots_hal::ledger::PersistentLedger;
 use cahoots_hal::ring::{RingCeremony, RingError};
 use cahoots_hal::store::StorePad;
 use cahoots_hal::{Entropy, Link};
 use std::fmt;
 use std::path::{Path, PathBuf};
+use zeroize::Zeroizing;
 
 const LEDGER_BYTES: u32 = 64 * 1024;
 
@@ -52,6 +60,16 @@ pub struct Device {
     dir: PathBuf,
     pad: Pad<StorePad<FilePadStore>, PersistentLedger<FileRecordStore>>,
     words: [&'static str; 6],
+    /// The seat key's seed, the tier and the encoded sealed manifest. `None` for a circle
+    /// file written before seat keys.
+    seat: Option<Seat>,
+}
+
+/// What `circle.txt` keeps of a seat's place in the signed manifest.
+struct Seat {
+    key: Zeroizing<[u8; 32]>,
+    tier: u8,
+    manifest: Vec<u8>,
 }
 
 /// Show the check words at the end of a ceremony, as the ring driver used to.
@@ -98,14 +116,22 @@ impl Device {
         let records = FileRecordStore::create(&dir.join("ledger.bin"), LEDGER_BYTES)?;
         let ledger = PersistentLedger::open(records, params.slices())
             .map_err(|e| DeviceError::State(format!("ledger: {e:?}")))?;
-        let circle_txt = format!(
-            "params={}\nindex={}\ncircle_id={}\nwords={}\nlabel=CSPRNG\n",
+        let seat = Seat {
+            key: result.seat_key.to_bytes(),
+            tier: result.tier,
+            manifest: result.manifest.encode(),
+        };
+        let circle_txt = Zeroizing::new(format!(
+            "params={}\nindex={}\ncircle_id={}\nwords={}\nlabel=CSPRNG\nseat_key={}\ntier={}\nmanifest={}\n",
             hex(&params.encode()),
             index,
             hex(&result.circle_id),
-            result.check_words.join(" ")
-        );
-        std::fs::write(dir.join("circle.txt"), circle_txt)?;
+            result.check_words.join(" "),
+            *Zeroizing::new(hex(&*seat.key)),
+            seat.tier,
+            hex(&seat.manifest)
+        ));
+        std::fs::write(dir.join("circle.txt"), circle_txt.as_bytes())?;
         let pad = Pad::with_circle_id(
             params,
             index,
@@ -117,12 +143,13 @@ impl Device {
             dir: dir.to_path_buf(),
             pad,
             words: result.check_words,
+            seat: Some(seat),
         })
     }
 
     /// Reopen a device from its state directory. The ledger is replayed from disk.
     pub fn open(dir: &Path) -> Result<Self, DeviceError> {
-        let txt = std::fs::read_to_string(dir.join("circle.txt"))?;
+        let txt = Zeroizing::new(std::fs::read_to_string(dir.join("circle.txt"))?);
         let field = |k: &str| -> Result<String, DeviceError> {
             txt.lines()
                 .find_map(|l| l.strip_prefix(&format!("{k}=")))
@@ -155,11 +182,34 @@ impl Device {
                 .find(|&x| x == w)
                 .ok_or_else(|| DeviceError::State(format!("unknown word {w}")))?;
         }
+        // A circle file from before seat keys has none of the three lines; one with only some
+        // of them is broken.
+        let seat = match field("seat_key") {
+            Err(_) if field("tier").is_err() && field("manifest").is_err() => None,
+            key => {
+                let hex_key = Zeroizing::new(key?);
+                let bytes = Zeroizing::new(unhex(&hex_key)?);
+                let mut key = Zeroizing::new([0u8; 32]);
+                if bytes.len() != 32 {
+                    return Err(DeviceError::State("seat_key".into()));
+                }
+                key.copy_from_slice(&bytes);
+                let tier = field("tier")?
+                    .parse()
+                    .map_err(|_| DeviceError::State("tier".into()))?;
+                Some(Seat {
+                    key,
+                    tier,
+                    manifest: unhex(&field("manifest")?)?,
+                })
+            }
+        };
         let pad = Pad::with_circle_id(params, index, circle_id, StorePad::new(store), ledger)?;
         Ok(Device {
             dir: dir.to_path_buf(),
             pad,
             words,
+            seat,
         })
     }
 
@@ -174,6 +224,21 @@ impl Device {
     }
     pub fn params(&self) -> &CircleParams {
         self.pad.params()
+    }
+    /// This seat's signing key, or `None` for a circle kept before seat keys (or a stored
+    /// seed that is not a valid key).
+    pub fn seat_key(&self) -> Option<SeatKey> {
+        SeatKey::from_seed(&self.seat.as_ref()?.key).ok()
+    }
+    /// The tier this seat declared in the ceremony, or `None` for a circle kept before seat
+    /// keys.
+    pub fn tier(&self) -> Option<u8> {
+        Some(self.seat.as_ref()?.tier)
+    }
+    /// The sealed manifest every seat signed, or `None` for a circle kept before seat keys
+    /// (or a stored manifest that does not decode). Call `verify` on it before trusting it.
+    pub fn manifest(&self) -> Option<SealedManifest> {
+        SealedManifest::decode(&self.seat.as_ref()?.manifest).ok()
     }
     pub fn remaining(&self) -> u32 {
         self.pad.remaining()

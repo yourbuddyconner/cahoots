@@ -1,6 +1,7 @@
 //! A pile of simulated cards on sockets: the top card presses B, everyone agrees.
 
 use cahoots_core::message::MessageType;
+use cahoots_host::device::Device;
 use cahoots_host::pile::run_pile;
 
 #[test]
@@ -20,6 +21,48 @@ fn three_simulated_cards_in_a_pile_make_one_circle() {
     let wire = devices[2].send(MessageType::Text, b"from the top").unwrap();
     let (_, pt) = devices[0].receive(&wire).unwrap();
     assert_eq!(pt, b"from the top");
+}
+
+#[test]
+fn each_circle_file_keeps_its_seat_key_and_the_one_manifest() {
+    let tmp = tempfile::tempdir().unwrap();
+    let devices = run_pile(3, None, "bench", 16 * 1024, tmp.path(), Some(78)).unwrap();
+    let mut ids = Vec::new();
+    for (seat, d) in devices.iter().enumerate() {
+        // Read back from disk, not from the device the ceremony returned.
+        let d = Device::open(d.dir()).unwrap();
+        let m = d.manifest().unwrap().verify().unwrap();
+        let key = d.seat_key().unwrap();
+        assert_eq!(m.seat_key(seat as u8), Some(&key.public()));
+        assert_eq!(m.seats[seat].tier, 0);
+        assert_eq!(d.tier(), Some(0));
+        ids.push(m.id());
+    }
+    assert!(ids.windows(2).all(|w| w[0] == w[1]));
+}
+
+#[test]
+fn a_circle_file_from_before_seat_keys_still_opens() {
+    let tmp = tempfile::tempdir().unwrap();
+    let devices = run_pile(2, None, "bench", 16 * 1024, tmp.path(), Some(79)).unwrap();
+    let dir = devices[0].dir().to_path_buf();
+    drop(devices);
+    let path = dir.join("circle.txt");
+    let old: String = std::fs::read_to_string(&path)
+        .unwrap()
+        .lines()
+        .filter(|l| {
+            !["seat_key=", "tier=", "manifest="]
+                .iter()
+                .any(|k| l.starts_with(k))
+        })
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(&path, old).unwrap();
+    let d = Device::open(&dir).unwrap();
+    assert!(d.seat_key().is_none());
+    assert!(d.manifest().is_none());
+    assert_eq!(d.tier(), None);
 }
 
 #[test]

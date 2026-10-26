@@ -59,12 +59,17 @@ pub fn pile(seat: Option<u8>) -> Screen {
     s.done()
 }
 
-/// The ceremony's counter: commitments and reveals held, out of `n`.
-pub fn ceremony(commits: u8, reveals: u8, n: u8) -> Screen {
+/// The ceremony's counter: commitments, reveals and attestations held, out of `n`.
+pub fn ceremony(commits: u8, reveals: u8, attestations: u8, n: u8) -> Screen {
     let mut s = Draw::new();
     s.inverted_centered(&FONT_10X20, 30, "ceremony");
     s.centered(&FONT_10X20, 80, &format!("commits {commits}/{n}"));
     s.centered(&FONT_10X20, 110, &format!("reveals {reveals}/{n}"));
+    s.centered(
+        &FONT_10X20,
+        140,
+        &format!("attestations {attestations}/{n}"),
+    );
     s.done()
 }
 

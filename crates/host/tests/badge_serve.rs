@@ -39,6 +39,10 @@ fn keep_a_circle(dir: &Path) -> Circle {
         seat: 1,
         circle_id: circle_id(&pad),
         words: word_indices(&check_words(&params, &pad)).unwrap(),
+        seat_key: [7; 32],
+        tier: 0,
+        // Serving never reads the manifest; tests/badge.rs checks a kept one.
+        manifest: Vec::new(),
     };
     let mut board = HostBoard::new(dir, "-", "-", "bench", PAD_LEN, Some(5));
     board.write_pad(&pad).unwrap();
