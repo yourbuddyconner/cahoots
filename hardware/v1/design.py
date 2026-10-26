@@ -24,7 +24,7 @@ MAGNETS = [(-21, 39), (21, 39), (-21, -39), (21, -39)]  # 5 x 2 mm discs, glued 
 POGO_Y = 40.0                                        # the pin row, where the lanyard slot was
 POGO = dict(w=20.08, d=4.2, tall=4.0, pitch=2.54, pin_to_back=1.75)   # body width, depth, height; pins 1.75 from the back face
 PORT_Y = -39.5
-PORTS = {"UP": 13.0, "DN": -13.0, "QW": -23.0}       # x of each JST socket; QW is the Qwiic socket
+PORTS = {"UP": 13.0, "DN": -13.0, "QW": 0.0}         # x of each JST socket; QW is the Qwiic socket, between the pile ports
 
 # Pico 2 pin number -> name, from the datasheet's figure 2.
 PICO_PINS = {
@@ -123,7 +123,7 @@ part("J3", "Connector_Generic:Conn_01x04", "Connector_JST:JST_SH_SM04B-SRSS-TB_1
 part("J5", "Connector_Generic:Conn_01x04", "Connector_JST:JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal", "Qwiic / STEMMA QT, JST-SH 4", "C160404 JST SM04B-SRSS-TB", "front", (PORTS["QW"], PORT_Y), 180, {"1": "GND", "2": "3V3", "3": "I2C_SDA", "4": "I2C_SCL", "MP": "GND"})
 
 # ---- the spare-GPIO header, on the back between the power switch and the cell ----
-part("J6", "Connector_Generic:Conn_02x05_Odd_Even", "Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical", "spare GPIO, 2x5", "any 2x5 2.54 mm header", "back", (-4.0, -36.0), 0, {str(i + 1): net for i, net in enumerate(HEADER)})
+part("J6", "Connector_Generic:Conn_02x05_Odd_Even", "Connector_PinHeader_2.54mm:PinHeader_2x05_P2.54mm_Vertical", "spare GPIO, 2x5", "any 2x5 2.54 mm header", "back", (-5.0, -30.0), 0, {str(i + 1): net for i, net in enumerate(HEADER)})
 
 # ---- the magnetic pogo pair: the pin half on the board, the pad half loose in the tray floor ----
 # Pins 1 and 5 ground, 2 and 4 the UART, 3 spare. Face to face, pin k meets pin k and the magnets
