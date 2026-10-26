@@ -13,6 +13,7 @@ pub mod control;
 pub mod cose;
 pub mod frame;
 pub mod ledger;
+pub mod manifest;
 pub mod message;
 pub mod pad;
 pub mod pairwise;

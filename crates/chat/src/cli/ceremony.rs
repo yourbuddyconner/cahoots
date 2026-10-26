@@ -36,7 +36,7 @@ pub fn local_ceremony(
         getrandom::getrandom(seat_seed.as_mut()).map_err(|e| StoreError::Io(e.to_string()))?;
         devs.push(
             // Tier 0: these simulated members are software only. No task in the seats plan
-            // changes this; Task 3 drives the attest phase here.
+            // changes this.
             Ceremony::new(params.clone(), i, r.to_vec(), *seed, *seat_seed, 0)
                 .map_err(|e| StoreError::Format(std::format!("ceremony: {e:?}")))?,
         );
@@ -62,6 +62,16 @@ pub fn local_ceremony(
         for (j, r) in reveals.iter().enumerate() {
             d.add_reveal(j as u8, r)
                 .map_err(|e| StoreError::Format(std::format!("reveal: {e:?}")))?;
+        }
+    }
+    let attestations: Vec<Vec<u8>> = devs
+        .iter()
+        .map(|d| d.my_attestation().expect("attest phase"))
+        .collect();
+    for d in devs.iter_mut() {
+        for (j, a) in attestations.iter().enumerate() {
+            d.add_attestation(j as u8, a)
+                .map_err(|e| StoreError::Format(std::format!("attest: {e:?}")))?;
         }
     }
     let mut member_dirs = Vec::new();

@@ -77,3 +77,41 @@ proptest! {
         prop_assert_eq!(bucket_unpad(&p).unwrap(), pt.as_slice());
     }
 }
+
+proptest! {
+    #[test]
+    fn manifest_decode_never_panics(bytes in proptest::collection::vec(any::<u8>(), 0..600)) {
+        let _ = cahoots_core::manifest::Manifest::decode(&bytes);
+        let _ = cahoots_core::manifest::SealedManifest::decode(&bytes);
+    }
+
+    #[test]
+    fn manifest_roundtrip(
+        n in 2u8..9,
+        circle_id in any::<[u8; 16]>(),
+        genesis in any::<u64>(),
+        tiers in proptest::collection::vec(0u8..5, 8),
+        evidence in proptest::collection::vec(any::<u8>(), 0..40),
+    ) {
+        use cahoots_core::manifest::{Manifest, Seat};
+        use cahoots_core::params::CircleParams;
+        use cahoots_core::seat::SeatKey;
+        let params = CircleParams::new(n, 4096, "p", false).unwrap();
+        let m = Manifest {
+            circle_id,
+            seats: (0..n)
+                .map(|i| Seat {
+                    seat: i,
+                    key: SeatKey::from_seed(&[i + 1; 32]).unwrap().public(),
+                    tier: tiers[usize::from(i)],
+                    evidence: evidence.clone(),
+                })
+                .collect(),
+            floor: Manifest::default_floor(&params),
+            params,
+            genesis,
+        };
+        let bytes = m.encode();
+        prop_assert_eq!(Manifest::decode(&bytes).unwrap(), m);
+    }
+}

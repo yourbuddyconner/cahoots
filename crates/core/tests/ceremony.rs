@@ -1,6 +1,8 @@
 use cahoots_core::ceremony::{Ceremony, CeremonyError, Phase};
 use cahoots_core::checkwords::check_words;
 use cahoots_core::circle_id::circle_id;
+use cahoots_core::cose;
+use cahoots_core::manifest::{Manifest, MANIFEST_AAD};
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal;
 use cahoots_core::seat::{SeatKey, SeatPublic};
@@ -82,6 +84,32 @@ fn seal_all(devs: &mut [Ceremony]) -> Vec<Vec<u8>> {
         .collect()
 }
 
+/// Every member's attestation, handed to every member.
+fn exchange_attestations(devs: &mut [Ceremony]) {
+    let atts: Vec<_> = devs
+        .iter()
+        .map(|d| (d.index(), d.my_attestation().unwrap()))
+        .collect();
+    for d in devs.iter_mut() {
+        for (j, a) in &atts {
+            d.add_attestation(*j, a).unwrap();
+        }
+    }
+}
+
+/// Commitments and reveals exchanged: every member is in `Attest`.
+fn to_attest() -> Vec<Ceremony> {
+    let mut devs: Vec<Ceremony> = (0..3).map(new).collect();
+    exchange_commitments(&mut devs);
+    let reveals = seal_all(&mut devs);
+    for d in devs.iter_mut() {
+        for (j, r) in reveals.iter().enumerate() {
+            d.add_reveal(j as u8, r).unwrap();
+        }
+    }
+    devs
+}
+
 #[test]
 fn three_devices_agree_on_pad_words_and_id() {
     let mut devs: Vec<Ceremony> = (0..3).map(new).collect();
@@ -98,8 +126,9 @@ fn three_devices_agree_on_pad_words_and_id() {
         for (j, r) in reveals.iter().enumerate() {
             d.add_reveal(j as u8, r).unwrap();
         }
-        assert_eq!(d.phase(), Phase::Complete);
+        assert_eq!(d.phase(), Phase::Attest);
     }
+    exchange_attestations(&mut devs);
     let results: Vec<_> = devs.into_iter().map(|d| d.finish().unwrap()).collect();
     let mut expected = vec![0u8; 512];
     for i in 0..3u8 {
@@ -260,10 +289,10 @@ fn late_reveal_stands_in_for_its_commitment() {
     assert_eq!(devs[0].missing_commitments(), vec![2]);
     assert_eq!(devs[0].public_key_of(1), Some(devs[1].my_public_key()));
     devs[0].add_reveal(2, &r2).unwrap();
-    assert_eq!(devs[0].phase(), Phase::Complete);
+    assert_eq!(devs[0].phase(), Phase::Attest);
     // The stand-in commitments equal the real ones.
     assert_eq!(devs[0].missing_commitments(), Vec::<u8>::new());
-    devs.remove(0).finish().unwrap();
+    assert!(devs[0].manifest().is_some());
 }
 
 #[test]
@@ -284,6 +313,7 @@ fn late_path_still_lets_the_others_finish() {
     devs[1].add_reveal(2, &r2).unwrap();
     devs[2].add_reveal(0, &r0).unwrap();
     devs[2].add_reveal(1, &r1).unwrap();
+    exchange_attestations(&mut devs);
     let ids: Vec<_> = devs
         .into_iter()
         .map(|d| d.finish().unwrap().circle_id)
@@ -402,6 +432,7 @@ fn every_pair_shares_a_key_nobody_else_has() {
             d.add_reveal(j as u8, r).unwrap();
         }
     }
+    exchange_attestations(&mut devs);
     let results: Vec<_> = devs.into_iter().map(|d| d.finish().unwrap()).collect();
     for r in &results {
         assert_eq!(r.pair_keys.len(), 3);
@@ -448,6 +479,7 @@ fn late_path_still_yields_pair_keys() {
     devs[1].add_reveal(2, &r2).unwrap();
     devs[2].add_reveal(0, &r0).unwrap();
     devs[2].add_reveal(1, &r1).unwrap();
+    exchange_attestations(&mut devs);
     let results: Vec<_> = devs.into_iter().map(|d| d.finish().unwrap()).collect();
     assert_eq!(
         *results[0].pair_keys[1].as_ref().unwrap(),
@@ -568,4 +600,235 @@ fn tier_above_4_is_refused() {
         .unwrap_err(),
         CeremonyError::BadTier
     );
+}
+
+#[test]
+fn a_stand_in_reveal_then_a_commitment_with_another_seat_key_or_tier_conflicts() {
+    let mut devs: Vec<Ceremony> = (0..3).map(new).collect();
+    let c0 = (devs[0].my_commitment(), *devs[0].my_public_key());
+    for d in devs[1..].iter_mut() {
+        d.add_commitment(0, c0.0, &c0.1, &seat(0).0, tier(0))
+            .unwrap();
+    }
+    exchange_commitments(&mut devs[1..]);
+    let r2 = devs[2].my_reveal(&mut filler(2)).unwrap().to_vec();
+    devs[0].add_reveal(2, &r2).unwrap();
+    let (c2, pk2) = (devs[2].my_commitment(), *devs[2].my_public_key());
+    assert_eq!(
+        devs[0]
+            .add_commitment(2, c2, &pk2, &seat(9).0, tier(2))
+            .unwrap_err(),
+        CeremonyError::ConflictingCommit(2),
+        "another seat key than the stand-in"
+    );
+    assert_eq!(
+        devs[0]
+            .add_commitment(2, c2, &pk2, &seat(2).0, tier(2) + 1)
+            .unwrap_err(),
+        CeremonyError::ConflictingCommit(2),
+        "another tier than the stand-in"
+    );
+}
+
+#[test]
+fn three_members_build_identical_manifest_bytes() {
+    let devs = to_attest();
+    let body = devs[0].manifest().unwrap().to_vec();
+    for d in &devs {
+        assert_eq!(d.manifest().unwrap(), body.as_slice());
+    }
+    let m = Manifest::decode(&body).unwrap();
+    assert_eq!(m.params, params());
+    assert_eq!(m.genesis, 0);
+    assert_eq!(m.floor, Manifest::default_floor(&params()));
+    assert_eq!(m.seats.len(), 3);
+    for (i, s) in m.seats.iter().enumerate() {
+        let i = i as u8;
+        assert_eq!(s.seat, i);
+        assert_eq!(s.key, seat(i));
+        assert_eq!(s.tier, tier(i));
+        assert!(s.evidence.is_empty());
+    }
+    let mut expected = vec![0u8; 512];
+    for i in 0..3u8 {
+        for (e, r) in expected.iter_mut().zip(contribution(i)) {
+            *e ^= r;
+        }
+    }
+    assert_eq!(m.circle_id, circle_id(&expected));
+}
+
+#[test]
+fn the_phase_is_attest_after_the_last_reveal_and_complete_after_the_last_attestation() {
+    let mut devs: Vec<Ceremony> = (0..3).map(new).collect();
+    exchange_commitments(&mut devs);
+    let reveals = seal_all(&mut devs);
+    devs[0].add_reveal(1, &reveals[1]).unwrap();
+    assert_eq!(devs[0].phase(), Phase::Reveal);
+    assert!(devs[0].manifest().is_none());
+    assert!(devs[0].my_attestation().is_none());
+    devs[0].add_reveal(2, &reveals[2]).unwrap();
+    assert_eq!(devs[0].phase(), Phase::Attest);
+    assert_eq!(devs[0].missing_attestations(), vec![1, 2]);
+    for d in devs[1..].iter_mut() {
+        for (j, r) in reveals.iter().enumerate() {
+            d.add_reveal(j as u8, r).unwrap();
+        }
+    }
+    let a1 = devs[1].my_attestation().unwrap();
+    let a2 = devs[2].my_attestation().unwrap();
+    // Built once: the same bytes every call.
+    assert_eq!(devs[1].my_attestation().unwrap(), a1);
+    devs[0].add_attestation(1, &a1).unwrap();
+    assert_eq!(devs[0].phase(), Phase::Attest);
+    assert_eq!(devs[0].missing_attestations(), vec![2]);
+    devs[0].add_attestation(2, &a2).unwrap();
+    assert_eq!(devs[0].phase(), Phase::Complete);
+    assert!(devs[0].missing_attestations().is_empty());
+    // A re-forward after completion is accepted.
+    devs[0].add_attestation(2, &a2).unwrap();
+    // A re-forwarded reveal after Attest is still verified and changes nothing.
+    devs[0].add_reveal(1, &reveals[1]).unwrap();
+    assert_eq!(devs[0].phase(), Phase::Complete);
+}
+
+#[test]
+fn an_attestation_before_attest_is_wrong_phase() {
+    let mut devs: Vec<Ceremony> = (0..3).map(new).collect();
+    assert!(devs[0].manifest().is_none());
+    assert_eq!(
+        devs[0].add_attestation(1, &[0u8; 4]).unwrap_err(),
+        CeremonyError::WrongPhase
+    );
+    exchange_commitments(&mut devs);
+    assert_eq!(
+        devs[0].add_attestation(1, &[0u8; 4]).unwrap_err(),
+        CeremonyError::WrongPhase
+    );
+    let finished = to_attest();
+    let a1 = finished[1].my_attestation().unwrap();
+    assert_eq!(
+        devs[0].add_attestation(1, &a1).unwrap_err(),
+        CeremonyError::WrongPhase
+    );
+    assert_eq!(
+        devs.remove(0).finish().unwrap_err(),
+        CeremonyError::WrongPhase
+    );
+}
+
+#[test]
+fn a_bad_attestation_is_reported_and_does_not_abort() {
+    let mut devs = to_attest();
+    let body = devs[0].manifest().unwrap().to_vec();
+    let a1 = devs[1].my_attestation().unwrap();
+    // Garbled signature.
+    let mut bad = a1.clone();
+    let last = bad.len() - 1;
+    bad[last] ^= 0x01;
+    assert_eq!(
+        devs[0].add_attestation(1, &bad).unwrap_err(),
+        CeremonyError::BadAttestation(1)
+    );
+    // Seat 2's attestation presented as seat 1's: wrong kid and wrong key.
+    let a2 = devs[2].my_attestation().unwrap();
+    assert_eq!(
+        devs[0].add_attestation(1, &a2).unwrap_err(),
+        CeremonyError::BadAttestation(1)
+    );
+    // Seat 1's key over other bytes.
+    let k1 = SeatKey::from_seed(&seat_seed(1)).unwrap();
+    let mut other = body.clone();
+    other.push(0);
+    let wrong_body = cose::sign1(&k1, &[1], &other, MANIFEST_AAD, true);
+    assert_eq!(
+        devs[0].add_attestation(1, &wrong_body).unwrap_err(),
+        CeremonyError::BadAttestation(1)
+    );
+    // Right key and bytes, but another kid.
+    let wrong_kid = cose::sign1(&k1, &[2], &body, MANIFEST_AAD, true);
+    assert_eq!(
+        devs[0].add_attestation(1, &wrong_kid).unwrap_err(),
+        CeremonyError::BadAttestation(1)
+    );
+    assert_eq!(
+        devs[0].add_attestation(1, &[1, 2, 3]).unwrap_err(),
+        CeremonyError::BadAttestation(1)
+    );
+    assert_eq!(
+        devs[0].add_attestation(3, &a1).unwrap_err(),
+        CeremonyError::BadIndex(3)
+    );
+    assert_eq!(devs[0].phase(), Phase::Attest, "nothing changed");
+    assert_eq!(devs[0].missing_attestations(), vec![1, 2]);
+    // Our own index: ours is a no-op, anything else conflicts.
+    let mine = devs[0].my_attestation().unwrap();
+    devs[0].add_attestation(0, &mine).unwrap();
+    assert_eq!(
+        devs[0].add_attestation(0, &a1).unwrap_err(),
+        CeremonyError::ConflictingAttestation(0)
+    );
+    devs[0].add_attestation(1, &a1).unwrap();
+    // An embedded payload instead of a detached one is not an attestation.
+    let embedded = cose::sign1(&k1, &[1], &body, MANIFEST_AAD, false);
+    assert_eq!(
+        devs[0].add_attestation(1, &embedded).unwrap_err(),
+        CeremonyError::BadAttestation(1)
+    );
+    // A different, valid attestation from seat 1: the same signature with s negated.
+    assert_eq!(
+        devs[0].add_attestation(1, &high_s(&a1)).unwrap_err(),
+        CeremonyError::ConflictingAttestation(1)
+    );
+    devs[0].add_attestation(2, &a2).unwrap();
+    assert_eq!(devs[0].phase(), Phase::Complete);
+}
+
+/// The other valid ECDSA signature over the same message: `s` replaced by `order - s`. The
+/// signature is the last 64 bytes of a COSE_Sign1.
+fn high_s(cose: &[u8]) -> Vec<u8> {
+    const ORDER: [u8; 32] = [
+        0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xBC, 0xE6, 0xFA, 0xAD, 0xA7, 0x17, 0x9E, 0x84, 0xF3, 0xB9, 0xCA, 0xC2, 0xFC, 0x63,
+        0x25, 0x51,
+    ];
+    let mut out = cose.to_vec();
+    let at = out.len() - 32;
+    let mut borrow = 0i16;
+    for k in (0..32).rev() {
+        let v = i16::from(ORDER[k]) - i16::from(out[at + k]) - borrow;
+        borrow = i16::from(v < 0);
+        out[at + k] = v.rem_euclid(256) as u8;
+    }
+    out
+}
+
+#[test]
+fn finish_returns_the_sealed_manifest_that_verifies() {
+    let mut devs = to_attest();
+    let body = devs[0].manifest().unwrap().to_vec();
+    exchange_attestations(&mut devs);
+    let atts: Vec<_> = devs.iter().map(|d| d.my_attestation().unwrap()).collect();
+    for d in devs {
+        let r = d.finish().unwrap();
+        assert_eq!(r.manifest.body, body);
+        assert_eq!(r.manifest.attestations, atts, "in seat order");
+        let m = r.manifest.verify().unwrap();
+        assert_eq!(m.circle_id, r.circle_id);
+        assert_eq!(m.params, r.params);
+    }
+}
+
+#[test]
+fn the_result_carries_the_seat_key_whose_public_is_in_the_roster() {
+    let mut devs = to_attest();
+    exchange_attestations(&mut devs);
+    for d in devs {
+        let i = d.index();
+        let r = d.finish().unwrap();
+        assert_eq!(r.tier, tier(i));
+        let m = r.manifest.verify().unwrap();
+        assert_eq!(m.seat_key(i), Some(&r.seat_key.public()));
+        assert_eq!(r.seat_key.public(), seat(i));
+    }
 }

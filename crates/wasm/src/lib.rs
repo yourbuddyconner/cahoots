@@ -121,6 +121,8 @@ fn ceremony_err(e: CeremonyError) -> String {
         CeremonyError::BadTier => "bad-tier".into(),
         CeremonyError::Corrupted(i) => format!("corrupted:{i}"),
         CeremonyError::CommitMismatch(i) => format!("commit-mismatch:{i}"),
+        CeremonyError::BadAttestation(i) => format!("bad-attestation:{i}"),
+        CeremonyError::ConflictingAttestation(i) => format!("conflicting-attestation:{i}"),
         CeremonyError::Aborted => "aborted".into(),
     }
 }
@@ -198,6 +200,7 @@ impl WasmCeremony {
         match self.inner.phase() {
             Phase::Commit => "commit",
             Phase::Reveal => "reveal",
+            Phase::Attest => "attest",
             Phase::Complete => "complete",
             Phase::Aborted => "aborted",
         }
@@ -264,6 +267,22 @@ impl WasmCeremony {
 
     pub fn missing_reveals(&self) -> Vec<u8> {
         self.inner.missing_reveals()
+    }
+
+    /// Our seat's signature over the manifest. `None` until every reveal is in.
+    pub fn attestation(&self) -> Option<Vec<u8>> {
+        self.inner.my_attestation()
+    }
+
+    /// Member `from`'s signature over the manifest, as its `attestation()` returned it.
+    pub fn add_attestation(&mut self, from: u8, attestation: &[u8]) -> Result<(), String> {
+        self.inner
+            .add_attestation(from, attestation)
+            .map_err(ceremony_err)
+    }
+
+    pub fn missing_attestations(&self) -> Vec<u8> {
+        self.inner.missing_attestations()
     }
 
     /// Erase contributions and produce the circle. `label` is `"TRNG"` or `"CSPRNG"`.

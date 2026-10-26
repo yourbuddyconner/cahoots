@@ -5,11 +5,16 @@
 //! declared device tier. Reveals are sealed to
 //! every other member (see [`crate::reveal`]), so the link never carries a contribution in
 //! the clear. The pad is the XOR of the contributions and never depends on the key exchange.
+//!
+//! Once every reveal is in, every member builds the same manifest (see [`crate::manifest`])
+//! and signs it with its seat key; the ceremony is complete when all `n` attestations are held.
 
 use crate::checkwords::check_words;
 use crate::circle_id::{circle_id, CircleId};
 use crate::combine::combine_into;
 use crate::commit::{commit, verify_commit, Commitment};
+use crate::cose;
+use crate::manifest::{Manifest, SealedManifest, Seat, MANIFEST_AAD};
 use crate::pairwise::pair_key;
 use crate::params::CircleParams;
 use crate::reveal::{self, RevealError, KEM_SEED_LEN, PUBLIC_KEY_LEN};
@@ -25,7 +30,9 @@ pub enum Phase {
     Commit,
     /// All commitments held. Collecting reveals.
     Reveal,
-    /// All reveals verified. Call `finish`.
+    /// All reveals verified; the manifest is built. Collecting attestations.
+    Attest,
+    /// Every seat's attestation verified. Call `finish`.
     Complete,
     Aborted,
 }
@@ -48,6 +55,12 @@ pub enum CeremonyError {
     Corrupted(u8),
     /// A reveal did not match its commitment. The ceremony is aborted.
     CommitMismatch(u8),
+    /// An attestation that does not verify against the member's seat key, our manifest
+    /// bytes, and its key id. Nothing changed; receive it again.
+    BadAttestation(u8),
+    /// A second, different, valid attestation for a member already held, or one for our own
+    /// index that is not ours.
+    ConflictingAttestation(u8),
     Aborted,
 }
 
@@ -60,6 +73,12 @@ pub struct CeremonyResult {
     /// One key per other member, derived from the two X-Wing secrets exchanged with it.
     /// `None` for our own index. See `crate::pairwise`.
     pub pair_keys: Vec<Option<Zeroizing<[u8; 32]>>>,
+    /// Our seat's signing key for this circle. Zeroized on drop.
+    pub seat_key: SeatKey,
+    /// Our declared device tier.
+    pub tier: u8,
+    /// The manifest body and every seat's attestation, in seat order.
+    pub manifest: SealedManifest,
 }
 
 #[derive(Debug)]
@@ -86,6 +105,11 @@ pub struct Ceremony {
     /// Shared secrets: what we encapsulated to each member, and what each encapsulated to us.
     sent: Vec<Option<Zeroizing<[u8; 32]>>>,
     received: Vec<Option<Zeroizing<[u8; 32]>>>,
+    /// Set when the phase becomes `Attest`: the circle ID and the canonical manifest bytes.
+    circle_id: Option<CircleId>,
+    manifest: Option<Vec<u8>>,
+    /// Verified attestations, per member; ours is made when the manifest is built.
+    attestations: Vec<Option<Vec<u8>>>,
     phase: Phase,
 }
 
@@ -143,6 +167,9 @@ impl Ceremony {
             sealed: None,
             sent: vec![None; n],
             received: vec![None; n],
+            circle_id: None,
+            manifest: None,
+            attestations: vec![None; n],
             phase: Phase::Commit,
         })
     }
@@ -194,7 +221,7 @@ impl Ceremony {
     /// Our contribution sealed to every other member. `None` until every commitment is held.
     /// Built once; later calls return the same bytes and do not call `fill`.
     pub fn my_reveal(&mut self, fill: &mut dyn FnMut(&mut [u8])) -> Option<&[u8]> {
-        if !matches!(self.phase, Phase::Reveal | Phase::Complete) {
+        if !matches!(self.phase, Phase::Reveal | Phase::Attest | Phase::Complete) {
             return None;
         }
         if self.sealed.is_none() {
@@ -329,9 +356,101 @@ impl Ceremony {
             combine_into(&mut self.pad, r).expect("verified reveal has pad length");
             self.revealed[usize::from(from)] = true;
         }
-        if self.revealed.iter().all(|&v| v) {
+        if self.phase == Phase::Reveal && self.revealed.iter().all(|&v| v) {
+            self.enter_attest();
+        }
+    }
+
+    /// Every reveal is in: build the manifest, sign it, and collect the others' signatures.
+    fn enter_attest(&mut self) {
+        let id = circle_id(&self.pad);
+        let seats = (0..self.params.n)
+            .map(|j| Seat {
+                seat: j,
+                key: self.seat_publics[usize::from(j)].expect("all commitments held"),
+                tier: self.tiers[usize::from(j)].expect("all commitments held"),
+                evidence: Vec::new(),
+            })
+            .collect();
+        let body = Manifest {
+            circle_id: id,
+            params: self.params.clone(),
+            seats,
+            floor: Manifest::default_floor(&self.params),
+            genesis: 0,
+        }
+        .encode();
+        let mine = cose::sign1(&self.seat_key, &[self.index], &body, MANIFEST_AAD, true);
+        self.attestations[usize::from(self.index)] = Some(mine);
+        self.circle_id = Some(id);
+        self.manifest = Some(body);
+        self.phase = Phase::Attest;
+        self.complete_if_all_attested();
+    }
+
+    fn complete_if_all_attested(&mut self) {
+        if self.phase == Phase::Attest && self.attestations.iter().all(Option::is_some) {
             self.phase = Phase::Complete;
         }
+    }
+
+    /// The canonical manifest bytes every member signs. `None` before `Attest`.
+    pub fn manifest(&self) -> Option<&[u8]> {
+        self.manifest.as_deref()
+    }
+
+    /// Our seat's detached COSE_Sign1 over the manifest, key id `[index]`, external AAD
+    /// `cahoots/manifest/v1`. `None` before `Attest`. Built once, with the manifest.
+    pub fn my_attestation(&self) -> Option<Vec<u8>> {
+        if self.phase == Phase::Aborted {
+            return None;
+        }
+        self.attestations[usize::from(self.index)].clone()
+    }
+
+    /// Members whose attestation is not yet held. All of them before `Attest`.
+    pub fn missing_attestations(&self) -> Vec<u8> {
+        (0..self.params.n)
+            .filter(|&i| self.attestations[usize::from(i)].is_none())
+            .collect()
+    }
+
+    /// A member's attestation of the manifest. Verified with its seat key against our
+    /// manifest bytes; a bad one is `BadAttestation` and changes nothing. An identical
+    /// re-forward is accepted; a different valid one is `ConflictingAttestation`.
+    pub fn add_attestation(&mut self, from: u8, bytes: &[u8]) -> Result<(), CeremonyError> {
+        if self.phase == Phase::Aborted {
+            return Err(CeremonyError::Aborted);
+        }
+        if from >= self.params.n {
+            return Err(CeremonyError::BadIndex(from));
+        }
+        let Some(body) = self.manifest.as_deref() else {
+            return Err(CeremonyError::WrongPhase);
+        };
+        let i = usize::from(from);
+        if from == self.index {
+            return if self.attestations[i].as_deref() == Some(bytes) {
+                Ok(())
+            } else {
+                Err(CeremonyError::ConflictingAttestation(from))
+            };
+        }
+        let bad = CeremonyError::BadAttestation(from);
+        if cose::kid1(bytes).map_err(|_| bad)? != [from] {
+            return Err(bad);
+        }
+        let key = self.seat_publics[i].as_ref().expect("all commitments held");
+        cose::verify1(key, bytes, Some(body), MANIFEST_AAD).map_err(|_| bad)?;
+        match &self.attestations[i] {
+            Some(held) if held.as_slice() != bytes => {
+                return Err(CeremonyError::ConflictingAttestation(from));
+            }
+            Some(_) => {}
+            None => self.attestations[i] = Some(bytes.to_vec()),
+        }
+        self.complete_if_all_attested();
+        Ok(())
     }
 
     fn abort(&mut self) {
@@ -413,13 +532,14 @@ impl Ceremony {
         Ok(())
     }
 
-    /// Erase the contribution and hand over the pad, check words, and circle ID.
+    /// Erase the contribution and hand over the pad, check words, circle ID, seat key, and
+    /// the sealed manifest.
     pub fn finish(self) -> Result<CeremonyResult, CeremonyError> {
         if self.phase != Phase::Complete {
             return Err(CeremonyError::WrongPhase);
         }
         let words = check_words(&self.params, &self.pad);
-        let id = circle_id(&self.pad);
+        let id = self.circle_id.expect("set when the phase became Attest");
         let pair_keys = (0..self.params.n)
             .map(|j| {
                 if j == self.index {
@@ -436,12 +556,23 @@ impl Ceremony {
                 ))
             })
             .collect();
+        let manifest = SealedManifest {
+            body: self.manifest.expect("set when the phase became Attest"),
+            attestations: self
+                .attestations
+                .into_iter()
+                .map(|a| a.expect("all attestations held when complete"))
+                .collect(),
+        };
         Ok(CeremonyResult {
             check_words: words,
             circle_id: id,
             pad: self.pad,
             params: self.params,
             pair_keys,
+            seat_key: self.seat_key,
+            tier: self.tier,
+            manifest,
         })
         // `self.contribution` and `self.dk` are wiped on drop here.
     }

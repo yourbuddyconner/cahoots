@@ -129,8 +129,9 @@ fn run_flushes_the_link_before_finishing() {
             self.queued.extend_from_slice(frame);
         }
         fn recv(&mut self, buf: &mut [u8]) -> usize {
-            // Like a real driver, move a little toward the wire on every call.
-            let n = self.queued.len().min(100);
+            // Like a real driver, move a little toward the wire on every call. A few bytes
+            // only, so that our attestation is still queued when the ceremony completes.
+            let n = self.queued.len().min(8);
             let chunk: Vec<u8> = self.queued.drain(..n).collect();
             self.inner.send(&chunk);
             self.inner.recv(buf)
@@ -140,8 +141,8 @@ fn run_flushes_the_link_before_finishing() {
         }
         fn flush(&mut self) -> bool {
             self.flushes += 1;
-            // Hand over 100 bytes per call to force several rounds.
-            let n = self.queued.len().min(100);
+            // Hand over 16 bytes per call to force several rounds.
+            let n = self.queued.len().min(16);
             let chunk: Vec<u8> = self.queued.drain(..n).collect();
             self.inner.send(&chunk);
             self.queued.is_empty()

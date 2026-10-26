@@ -44,6 +44,9 @@ fn pair() -> (Circle, Circle) {
     );
     a.add_reveal(1, &rb).unwrap();
     b.add_reveal(0, &ra).unwrap();
+    let (aa, ab) = (a.attestation().unwrap(), b.attestation().unwrap());
+    a.add_attestation(1, &ab).unwrap();
+    b.add_attestation(0, &aa).unwrap();
     (
         a.finish("CSPRNG").unwrap().into_circle(),
         b.finish("CSPRNG").unwrap().into_circle(),

@@ -84,6 +84,13 @@ fn ceremony_vectors() -> Value {
         for (j, r) in reveals.iter().enumerate() {
             d.add_reveal(j as u8, r).unwrap();
         }
+        assert_eq!(d.phase(), Phase::Attest);
+    }
+    let attestations: Vec<Vec<u8>> = devs.iter().map(|d| d.my_attestation().unwrap()).collect();
+    for d in devs.iter_mut() {
+        for (j, a) in attestations.iter().enumerate() {
+            d.add_attestation(j as u8, a).unwrap();
+        }
         assert_eq!(d.phase(), Phase::Complete);
     }
     let results: Vec<_> = devs.into_iter().map(|d| d.finish().unwrap()).collect();

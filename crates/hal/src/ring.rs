@@ -17,6 +17,7 @@
 //! | `Params` | `index u8 \| CircleParams::encode()` |
 //! | `Commit` | `index u8 \| commitment (32 B) \| KEM public key (1216 B) \| seat public key (33 B) \| tier u8` |
 //! | `Reveal` | `index u8 \| sealed reveal (see `cahoots_core::reveal`)` |
+//! | `Attest` | `index u8 \| COSE_Sign1 over the manifest (see `cahoots_core::manifest`)` |
 //!
 //! Reveals are sealed to every member, so the wire never carries a contribution in the clear.
 //! | `Abort`  | `index u8 \| reason u8` |
@@ -38,6 +39,9 @@ pub enum Frame {
     Commit = 2,
     Reveal = 3,
     Abort = 4,
+    /// Minimal attest round for now; Task 6 adds the tier argument, the status line, and the
+    /// ring tests for it.
+    Attest = 5,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,6 +87,10 @@ pub struct RingCeremony<L: Link> {
     seen_commit: [bool; MAX_MEMBERS],
     seen_reveal: [bool; MAX_MEMBERS],
     pending_reveals: Vec<(u8, Zeroizing<Vec<u8>>)>,
+    seen_attest: [bool; MAX_MEMBERS],
+    /// Attestations that arrived before our phase was `Attest`, or not yet applied.
+    pending_attestations: Vec<(u8, Vec<u8>)>,
+    attested_self: bool,
     /// Randomness for sealing our reveal, drawn up front so no entropy source is held.
     reveal_rand: Zeroizing<Vec<u8>>,
     revealed_self: bool,
@@ -150,6 +158,9 @@ impl<L: Link> RingCeremony<L> {
             seen_commit: [false; MAX_MEMBERS],
             seen_reveal: [false; MAX_MEMBERS],
             pending_reveals: Vec::new(),
+            seen_attest: [false; MAX_MEMBERS],
+            pending_attestations: Vec::new(),
+            attested_self: false,
             reveal_rand,
             revealed_self: false,
             aborted: None,
@@ -263,6 +274,7 @@ impl<L: Link> RingCeremony<L> {
             }
         }
         self.maybe_reveal()?;
+        self.maybe_attest()?;
         Ok(if self.ceremony.phase() == Phase::Complete {
             Step::Complete
         } else {
@@ -318,6 +330,13 @@ impl<L: Link> RingCeremony<L> {
                     self.pending_reveals.push((index, Zeroizing::new(body)));
                 }
             }
+            k if k == Frame::Attest as u8 => {
+                if !self.seen_attest[i] {
+                    self.seen_attest[i] = true;
+                    self.send_except(kind, index, &body, Some(from));
+                    self.pending_attestations.push((index, body));
+                }
+            }
             k if k == Frame::Abort as u8 => {
                 return Err(self.abort(RingError::PeerAborted(index)));
             }
@@ -354,6 +373,33 @@ impl<L: Link> RingCeremony<L> {
                 // A garbled frame on a wire is a CRC failure before it gets here; a sealed
                 // reveal that still fails to open is not addressed to us. Drop it and keep going.
                 Err(CeremonyError::Corrupted(_)) => {}
+                Err(e) => return Err(self.abort(RingError::Ceremony(e))),
+            }
+        }
+        Ok(())
+    }
+
+    /// Once every reveal is in, send our attestation of the manifest and apply any buffered
+    /// attestations.
+    fn maybe_attest(&mut self) -> Result<(), RingError> {
+        if !matches!(self.ceremony.phase(), Phase::Attest | Phase::Complete) {
+            return Ok(());
+        }
+        if !self.attested_self {
+            self.attested_self = true;
+            self.seen_attest[usize::from(self.index)] = true;
+            let a = self
+                .ceremony
+                .my_attestation()
+                .expect("in Attest phase or later");
+            self.send(Frame::Attest, self.index, &a);
+        }
+        let pending = core::mem::take(&mut self.pending_attestations);
+        for (idx, a) in pending {
+            match self.ceremony.add_attestation(idx, &a) {
+                Ok(()) => {}
+                // Like a reveal that fails to open: drop it and keep going.
+                Err(CeremonyError::BadAttestation(_)) => {}
                 Err(e) => return Err(self.abort(RingError::Ceremony(e))),
             }
         }

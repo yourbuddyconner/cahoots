@@ -66,6 +66,16 @@ fn two_member_ceremony_through_bindings_agrees() {
     assert_eq!(a.phase(), "reveal");
     a.add_reveal(1, &rb).unwrap();
     b.add_reveal(0, &ra).unwrap();
+    assert_eq!(a.phase(), "attest");
+    assert_eq!(a.missing_attestations(), vec![1]);
+    let (aa, ab) = (a.attestation().unwrap(), b.attestation().unwrap());
+    let mut bad = ab.clone();
+    let last = bad.len() - 1;
+    bad[last] ^= 1;
+    assert_eq!(a.add_attestation(1, &bad).unwrap_err(), "bad-attestation:1");
+    a.add_attestation(1, &ab).unwrap();
+    b.add_attestation(0, &aa).unwrap();
+    assert!(a.missing_attestations().is_empty());
     assert_eq!(a.phase(), "complete");
     let ra = a.finish("CSPRNG").unwrap();
     let rb = b.finish("TRNG").unwrap();
@@ -145,6 +155,9 @@ fn circle_state_roundtrips_with_ledger() {
     );
     a.add_reveal(1, &rb).unwrap();
     b.add_reveal(0, &ra).unwrap();
+    let (aa, ab) = (a.attestation().unwrap(), b.attestation().unwrap());
+    a.add_attestation(1, &ab).unwrap();
+    b.add_attestation(0, &aa).unwrap();
     let mut ca = a.finish("TRNG").unwrap().into_circle();
     let mut cb = b.finish("TRNG").unwrap().into_circle();
     let w1 = ca.send(0, b"one").unwrap();
@@ -225,15 +238,19 @@ fn late_reveal_can_stand_in_for_its_commitment() {
     let mut a = WasmCeremony::new(2, 1024, "late", false, 0, &contrib(0), None, &seed(0)).unwrap();
     let mut b = WasmCeremony::new(2, 1024, "late", false, 1, &contrib(1), None, &seed(1)).unwrap();
     // B scanned A's commitment and is already sealing. A never saw B's commitment code:
-    // B's sealed reveal stands in for it, and A completes in one step.
+    // B's sealed reveal stands in for it, and A has every reveal in one step.
     b.add_commitment(0, &a.commitment()).unwrap();
     let rb = b.reveal(&rand(&b, 1)).unwrap().unwrap();
     assert_eq!(a.phase(), "commit");
     a.add_reveal(1, &rb).unwrap();
-    assert_eq!(a.phase(), "complete");
+    assert_eq!(a.phase(), "attest");
     // A's own reveal still goes to B, sealed to B's key, which A learned from the late reveal.
     let ra = a.reveal(&rand(&a, 0)).unwrap().unwrap();
     b.add_reveal(0, &ra).unwrap();
+    assert_eq!(b.phase(), "attest");
+    let (aa, ab) = (a.attestation().unwrap(), b.attestation().unwrap());
+    a.add_attestation(1, &ab).unwrap();
+    b.add_attestation(0, &aa).unwrap();
     assert_eq!(b.phase(), "complete");
     assert_eq!(
         a.finish("CSPRNG").unwrap().words(),
@@ -266,6 +283,14 @@ fn hello_words_are_pairwise_and_move_with_the_counter() {
         for (j, r) in reveals.iter().enumerate() {
             if i != j {
                 d.add_reveal(j as u8, r).unwrap();
+            }
+        }
+    }
+    let atts: Vec<_> = devs.iter().map(|d| d.attestation().unwrap()).collect();
+    for (i, d) in devs.iter_mut().enumerate() {
+        for (j, a) in atts.iter().enumerate() {
+            if i != j {
+                d.add_attestation(j as u8, a).unwrap();
             }
         }
     }
