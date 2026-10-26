@@ -1,6 +1,6 @@
 # What Cahoots is for
 
-The ceremony produces one thing: a pile of random bytes that a small group shares and that nobody else has seen. This document lists what that pile is good for, from the obvious to the ambitious. The second half is a draft design for the most ambitious one: setting up a network, WireGuard first and then physical mesh networks, with no server and no certificate authority involved.
+The ceremony produces one thing: a pile of random bytes that a small group shares and that nobody else has seen. This document lists what that pile is good for, from the obvious to the ambitious. The second half is a draft design for the most ambitious one: setting up a network, WireGuard first and then mesh networks, with no server and no certificate authority involved.
 
 ## 1. The two modes, restated
 
@@ -85,15 +85,9 @@ Everyone in a circle holds the whole pad. That has two consequences for networks
 
 Both are fine when one operator runs every node. Call this the **fleet profile**: a person's home lab, a company's edge boxes, a research group's sensors. When the nodes belong to different people who do not fully trust each other, both are a problem, and that needs the **federation profile** in section 5.
 
-## 4. Bootstrapping physical mesh networks
+## 4. Bootstrapping mesh networks
 
-The shape of it, decided on 2026-10-21: LoRa carries the control plane and a faster radio carries the data plane. The messages that set a network up, `peer` and `psk`, are about a hundred bytes each, which is one LoRa packet. So a node with only a LoRa radio can receive its peers and its keys over the air from kilometres away, bring up its Wi-Fi mesh or WireGuard interface already keyed, and from then on the real traffic rides the fast link. The pad-encrypted feed over LoRa is what makes the first contact possible with no uplink at all, and none of the stacks below can do that for themselves.
-
-| Over LoRa | What it gives you | What Cahoots fills | Status |
-|---|---|---|---|
-| Meshtastic | Flood-routed text, positions, telemetry, on cheap boards | The channel key, with rotation (`cahoots-mesh`) | built |
-| Reticulum | Addresses, routing, encrypted links, file transfer: the closest thing to a network at LoRa speeds | The interface access key that gates who can join, and the link keys | next |
-| An IP mesh on a faster radio (802.11s, Wi-Fi HaLow) with WireGuard pairs | Real IP: SSH, HTTP, a LAN | Exactly the WireGuard bootstrap in section 3, with the announcements and keys arriving over LoRa | after the LoRa link exists |
+This is a design, not built. An IP mesh (802.11s, Wi-Fi HaLow) with WireGuard pairs is the WireGuard bootstrap in section 3 with more nodes, and the messages that set it up, `peer` and `psk`, are about a hundred bytes each.
 
 ### 4.1 Why mesh networks are the right target
 
@@ -110,22 +104,14 @@ Each mesh stack has a slot that a circle can fill. The slot decides the mode.
 | WireGuard overlay (wg-mesh, hand-rolled, or as the transport under batman-adv) | `PresharedKey` per peer pair | PSK | Section 3 applies unchanged. |
 | 802.11s Wi-Fi mesh with SAE | Mesh password | PSK, via HKDF | One password per mesh. Rotation requires a coordinated restart, so rotate rarely. |
 | batman-adv over WPA3 links | WPA3 passphrase per link | PSK | Same as above, per adjacent pair. |
-| Meshtastic / LoRa | Channel key (AES-128/256) | PSK | The channel key is the whole security of a Meshtastic channel. Today it is shared by QR code or URL. A pad PSK plus rotation is a strict improvement. |
-| Reticulum | Link identity and pre-shared link key | PSK | Identities announced as peer messages; link PSKs issued per pair. |
 | Yggdrasil, cjdns | Peer password / allowed public keys | PSK and announcements | The circle distributes the allowed-keys list. |
-| LoRa point-to-point, APRS-style text | Message payload | **Pure pad** | Short payloads and no PKI: the pure-pad mode fits LoRa exactly. See 4.4. |
 
 ### 4.3 The mesh-specific gaps
 
-Three things make mesh bootstrap harder than WireGuard between two servers.
+Two things make mesh bootstrap harder than WireGuard between two servers.
 
 1. **Nodes have no screen and no operator at join time.** A node mounted on a roof cannot read check words. The badge does the ceremony; the node receives its slice afterwards over USB or the touch link. That transfer is a pad-to-node provisioning step that the protocol needs to name. Draft: the node's part of the pad is written to the node's storage and the badge erases its copy, the same move as handing over a recovery share.
-2. **Links are lossy.** Circle messages over LoRa need the fountain-coded framing the phone client uses for QR. The `raptorq` packets are already sized for that.
-3. **Nodes join after the ceremony.** Adding a member without a new ceremony is out of scope for v1. The practical answer today is to run the ceremony with a spare slice held by the operator's badge and hand that slice to the new node. The spare is a member planned at the ceremony, so the pad is not extended.
-
-### 4.4 The Numbers Station over LoRa
-
-A Cahoots badge with a LoRa radio is a numbers station in the literal sense. It broadcasts pad-encrypted text that anyone can hear and only the circle can read. Pure-pad messages are small, carry their own integrity, and need no handshake. This is the most on-brand demo the project can do. It is listed as a later milestone because the touch link and the device policy are no-radio during the ceremony, and a LoRa radio on the badge must be verifiably off while contributions are generated.
+2. **Nodes join after the ceremony.** Adding a member without a new ceremony is out of scope for v1. The practical answer today is to run the ceremony with a spare slice held by the operator's badge and hand that slice to the new node. The spare is a member planned at the ceremony, so the pad is not extended.
 
 ## 5. Spec additions
 

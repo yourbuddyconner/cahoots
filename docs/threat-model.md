@@ -30,5 +30,5 @@
 
 - Each device MUST generate its contribution from its hardware TRNG and run the NIST SP 800-90B continuous health tests (Repetition Count Test and Adaptive Proportion Test) on the raw output. A failed test aborts the ceremony.
 - The ESP32-S3 hardware RNG is true random only while an entropy source runs. Firmware MUST enable the ADC noise source and keep the radio off.
-- A YubiKey is never the only source. Its output is XORed with the device or platform source. The 2019 YubiKey FIPS series 4 reduced-randomness advisory (YSA-2019-02) is the reason.
+- An external hardware source is never the only source. Its output is XORed with the device or platform source. Hardware tokens have shipped with reduced randomness before (Yubico advisory YSA-2019-02), and that is the reason.
 - Dice rolls MAY be hashed and shown as an audit string. They MUST NOT be described as pad entropy.

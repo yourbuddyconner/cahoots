@@ -23,21 +23,21 @@
 <rect x="560.0" y="46" width="116.4" height="28" rx="14" fill="#e5a33a" stroke="#e5a33a" stroke-width="1"/>
 <text x="572.0" y="64" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="500" fill="#17191b" text-anchor="start">M4a</text>
 <text x="599.6" y="64" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#17191b" text-anchor="start">Simulator</text>
-<rect x="684.4" y="46" width="116.4" height="28" rx="14" fill="#151518" stroke="#a1a1aa" stroke-width="1"/>
+<rect x="684.4" y="46" width="109.2" height="28" rx="14" fill="#151518" stroke="#a1a1aa" stroke-width="1"/>
 <text x="696.4" y="64" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="500" fill="#f4f4f5" text-anchor="start">M4b</text>
-<text x="724.0" y="64" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#f4f4f5" text-anchor="start">DIY badge</text>
+<text x="724.0" y="64" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#f4f4f5" text-anchor="start">V1 board</text>
 <rect x="120" y="82" width="152.4" height="28" rx="14" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
 <text x="132" y="100" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="500" fill="#6b6b74" text-anchor="start">M4d</text>
 <text x="159.6" y="100" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#6b6b74" text-anchor="start">Badge over USB</text>
 <rect x="280.4" y="82" width="123.60000000000001" height="28" rx="14" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
 <text x="292.4" y="100" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="500" fill="#6b6b74" text-anchor="start">M3</text>
 <text x="312.79999999999995" y="100" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#6b6b74" text-anchor="start">Hosted seat</text>
-<rect x="412.0" y="82" width="109.2" height="28" rx="14" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<rect x="412.0" y="82" width="94.8" height="28" rx="14" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
 <text x="424.0" y="100" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="500" fill="#6b6b74" text-anchor="start">M5</text>
-<text x="444.4" y="100" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#6b6b74" text-anchor="start">Our badge</text>
-<rect x="529.2" y="82" width="116.4" height="28" rx="14" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
-<text x="541.2" y="100" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="500" fill="#6b6b74" text-anchor="start">M7</text>
-<text x="561.6" y="100" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#6b6b74" text-anchor="start">Meetup kit</text>
+<text x="444.4" y="100" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#6b6b74" text-anchor="start">V2 card</text>
+<rect x="514.8" y="82" width="116.4" height="28" rx="14" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<text x="526.8" y="100" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="500" fill="#6b6b74" text-anchor="start">M7</text>
+<text x="547.1999999999999" y="100" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#6b6b74" text-anchor="start">Meetup kit</text>
 <text x="20" y="158" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f4f4f5" text-anchor="start">Toolkit</text>
 <line x1="110" y1="153" x2="940" y2="153" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
 <rect x="120" y="140" width="188.4" height="28" rx="14" fill="#e5a33a" stroke="#e5a33a" stroke-width="1"/>
@@ -66,15 +66,9 @@
 <rect x="404.79999999999995" y="198" width="145.2" height="28" rx="14" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
 <text x="416.79999999999995" y="216" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="500" fill="#6b6b74" text-anchor="start">N3</text>
 <text x="437.19999999999993" y="216" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#6b6b74" text-anchor="start">Headless nodes</text>
-<rect x="558.0" y="198" width="123.60000000000001" height="28" rx="14" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
-<text x="570.0" y="216" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="500" fill="#6b6b74" text-anchor="start">N4</text>
-<text x="590.4" y="216" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#6b6b74" text-anchor="start">Mesh radios</text>
-<rect x="689.6" y="198" width="116.4" height="28" rx="14" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
-<text x="701.6" y="216" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="500" fill="#6b6b74" text-anchor="start">N5</text>
-<text x="722.0" y="216" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#6b6b74" text-anchor="start">Federation</text>
-<rect x="814.0" y="198" width="109.2" height="28" rx="14" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
-<text x="826.0" y="216" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="500" fill="#6b6b74" text-anchor="start">N6</text>
-<text x="846.4" y="216" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#6b6b74" text-anchor="start">LoRa feed</text>
+<rect x="558.0" y="198" width="116.4" height="28" rx="14" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<text x="570.0" y="216" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="500" fill="#6b6b74" text-anchor="start">N5</text>
+<text x="590.4" y="216" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#6b6b74" text-anchor="start">Federation</text>
 <text x="20" y="274" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f4f4f5" text-anchor="start">Chat</text>
 <line x1="110" y1="269" x2="940" y2="269" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
 <rect x="120" y="256" width="116.4" height="28" rx="14" fill="#e5a33a" stroke="#e5a33a" stroke-width="1"/>

@@ -355,9 +355,9 @@ def tiers():
 # 6. Roadmap ------------------------------------------------------------------
 def roadmap():
     tracks = [
-        ("Hardware", [("M0", "Repo", "done"), ("M1", "Core", "done"), ("M1b", "Sealed reveals", "done"), ("M2", "Phone app", "done"), ("M4a", "Simulator", "done"), ("M4b", "DIY badge", "next"), ("M4d", "Badge over USB", "later"), ("M3", "Hosted seat", "later"), ("M5", "Our badge", "later"), ("M7", "Meetup kit", "later")]),
+        ("Hardware", [("M0", "Repo", "done"), ("M1", "Core", "done"), ("M1b", "Sealed reveals", "done"), ("M2", "Phone app", "done"), ("M4a", "Simulator", "done"), ("M4b", "V1 board", "next"), ("M4d", "Badge over USB", "later"), ("M3", "Hosted seat", "later"), ("M5", "V2 card", "later"), ("M7", "Meetup kit", "later")]),
         ("Toolkit", [("S1", "File and tunnel keys", "done"), ("S4", "More tunnels", "part"), ("S2", "Approvals", "later"), ("S3", "Recovery", "later"), ("S5", "Hosted keys", "later")]),
-        ("Networks", [("N1", "WireGuard", "done"), ("N2", "Control messages", "done"), ("N3", "Headless nodes", "later"), ("N4", "Mesh radios", "later"), ("N5", "Federation", "later"), ("N6", "LoRa feed", "later")]),
+        ("Networks", [("N1", "WireGuard", "done"), ("N2", "Control messages", "done"), ("N3", "Headless nodes", "later"), ("N5", "Federation", "later")]),
         ("Chat", [("C1", "Chat crate", "done"), ("C2", "The feed", "done"), ("C3", "CLI demo", "done"), ("C4", "Chat in the app", "done"), ("C5", "Hosted feed", "later")]),
         ("Apps", [("A1", "Property demos", "later"), ("A2", "App distribution", "later"), ("A3", "Runtime", "later"), ("A4", "Protocol v2", "later")]),
     ]
@@ -392,91 +392,6 @@ def roadmap():
     s.save("roadmap.svg")
 
 
-# 7. DIY badge wiring -------------------------------------------------------------
-PICO_LEFT = ["GP0", "GP1", "GND", "GP2", "GP3", "GP4", "GP5", "GND", "GP6", "GP7", "GP8", "GP9", "GND", "GP10", "GP11", "GP12", "GP13", "GND", "GP14", "GP15"]
-PICO_RIGHT = ["VBUS", "VSYS", "GND", "3V3_EN", "3V3", "ADC_VREF", "GP28", "GND", "GP27", "GP26", "RUN", "GP22", "GND", "GP21", "GP20", "GP19", "GP18", "GND", "GP17", "GP16"]
-WIRES = [  # (side, index from the USB end, label on the breakout, colour, Qwiic wire colour name)
-    ("right", 2, "GND", "#8a8f96", "black"),
-    ("right", 4, "3V3", "#e06c5c", "red"),
-    ("left", 5, "SDA", "#5c9ee0", "blue"),
-    ("left", 6, "SCL", "#e5c75c", "yellow"),
-]
-
-
-def wiring():
-    s = Svg(960, 700, "Wiring the secure element to the Pico: four wires into the header beside the Pico's pins")
-    bx, by, bw, bh = 250, 50, 180, 440
-    s.rect(bx, by, bw, bh, fill="#1b4d3e", stroke=LINE, r=10)
-    s.rect(bx + bw / 2 - 26, by - 10, 52, 28, fill="#9aa0a6", stroke="none", r=4)
-    s.text(bx + bw / 2, by + 8, "USB", size=10, fill=INK, anchor="middle", mono=True)
-    s.text(bx + bw / 2, by + bh / 2, "Pico 2", size=16, fill=FG, anchor="middle", weight=600)
-    s.text(bx + bw / 2, by + bh / 2 + 18, "USB at the top", size=10.5, fill="#bcd", anchor="middle")
-    pitch = (bh - 50) / 19
-    pin_y = lambda i: by + 32 + i * pitch
-    for i in range(20):
-        y = pin_y(i)
-        for side, names, x, anchor, lx in (("left", PICO_LEFT, bx, "end", bx - 12), ("right", PICO_RIGHT, bx + bw, "start", bx + bw + 12)):
-            used = next((w for w in WIRES if w[0] == side and w[1] == i), None)
-            s.circle(x, y, 4.5, fill=used[3] if used else "#d4af37", stroke="none")
-            s.text(lx, y + 4, names[i], size=10.5, fill=used[3] if used else FG3, anchor=anchor, mono=True, weight=600 if used else 400)
-            s.text(bx + (16 if side == "left" else bw - 16), y + 3.5, str(i + 1 if side == "left" else 40 - i), size=8, fill="#8fb", anchor="middle", mono=True)
-    # Breakout below the Pico, where it sits in the stack
-    kw, kh = 170, 90
-    kx, ky = bx + bw / 2 - kw / 2, by + bh + 70
-    s.rect(kx, ky, kw, kh, fill="#1f2a44", stroke=LINE, r=8)
-    s.text(kx + kw / 2, ky + 54, "Trust M breakout", size=12, fill=FG, anchor="middle", weight=600)
-    s.text(kx + kw / 2, ky + 72, "Qwiic / STEMMA QT port on top", size=10, fill=FG2, anchor="middle")
-    port_x0 = kx + kw / 2 - 24
-    s.rect(port_x0 - 6, ky - 4, 60, 22, fill="#333", stroke=LINE, r=3)
-    # Wires leave the port in its pin order and run up the outside of each side's labels
-    for n, (side, i, label, colour, cname) in enumerate(WIRES):
-        px = port_x0 + n * 16
-        y = pin_y(i)
-        x_end = bx - 52 if side == "left" else bx + bw + 52   # just outside the pin label, which is drawn in the wire's colour
-        x_out = bx - 95 if side == "left" else bx + bw + 95
-        d = f"M{px} {ky - 4} L{px} {ky - 30 - n * 6} C {px} {ky - 60 - n * 6}, {x_out} {ky - 60 - n * 6}, {x_out} {ky - 80} L{x_out} {y + 14} Q {x_out} {y}, {x_out + (12 if side == 'left' else -12)} {y} L{x_end} {y}"
-        s.path(d, stroke=colour, sw=3)
-    s.text(port_x0 + 24, ky + 34, "black · red · blue · yellow", size=9, fill=FG3, anchor="middle", mono=True)
-    s.text(560, 90, "Four wires, in the order the port gives them.", size=14, fill=FG, weight=600)
-    s.lines(560, 116, [
-        "Count pins from the USB end. Each wire goes into the",
-        "hat's female header right beside the Pico pin, so it",
-        "shares the pin without soldering.",
-        "",
-        "GND  → right side, 3rd pin (pin 38)",
-        "3V3  → right side, 5th pin (pin 36). Never the 4th:",
-        "        that is 3V3_EN and holds the board in reset.",
-        "SDA  → left side, 6th pin (pin 6, GP4, I2C0 SDA)",
-        "SCL  → left side, 7th pin (pin 7, GP5, I2C0 SCL)",
-        "",
-        "Trust the order of the wires in the plug, not their",
-        "colours. Cables from different makers differ.",
-        "",
-        "The e-paper hat uses SPI1 (GP8 to GP13). The two",
-        "Qwiic buttons chain from the breakout's second",
-        "port, on the same bus. Nothing collides.",
-    ], size=12, fill=FG2, lh=19)
-    s.save("diy-wiring.svg")
-
-
-def stack():
-    s = Svg(960, 300, "The stack: e-paper on top, buttons and secure element between, the board below")
-    cx = 330
-    layers = [("E-paper screen", 60, "#2a2f3a", "1.54\" 200 × 200 on the Baochip; a 2.13\" hat on the Pico"),
-              ("Two buttons · secure element (Pico only)", 118, "#1f2a44", "Pico: one Qwiic chain. Baochip: buttons only"),
-              ("The board: Dabao or Pico 2", 176, "#1b4d3e", "USB-C to the phone; a wire to the next badge")]
-    for name, y, fill, note in layers:
-        s.rect(cx - 220, y, 440, 40, fill=fill, stroke=LINE, r=8)
-        s.text(cx, y + 25, name, size=13, fill=FG, anchor="middle", weight=600)
-        s.text(cx + 250, y + 25, note, size=12, fill=FG2)
-    for x in (cx - 190, cx + 190):
-        s.line(x, 100, x, 176, color="#d4af37", sw=2)
-    s.text(cx - 200, 148, "header", size=10, fill="#d4af37", anchor="end", mono=True)
-    s.rect(cx - 240, 40, 480, 196, fill="none", stroke=LINE_SOFT, r=14, dash="6 6")
-    s.text(cx, 262, "Same shape in both families. The Pico build snaps together; the Dabao build needs a header.", size=12, fill=FG3, anchor="middle")
-    s.save("diy-stack.svg")
-
-
 if __name__ == "__main__":
     ceremony()
     pad()
@@ -484,5 +399,3 @@ if __name__ == "__main__":
     station()
     tiers()
     roadmap()
-    wiring()
-    stack()

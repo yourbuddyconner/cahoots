@@ -1,6 +1,6 @@
 // End-to-end check of the browser app: two isolated browser contexts run a full ceremony through the
 // paste fallbacks (headless Chrome has no camera), then exchange a one-time-pad message.
-//   node web/e2e.mjs            (needs the wasm build in web/app/pkg and playwright in video/node_modules)
+//   node web/e2e.mjs            (needs the wasm build in web/app/pkg and `npm install` in web/)
 // Screenshots land in web/e2e-out/.
 import { createRequire } from "node:module";
 import { createServer } from "node:http";
@@ -9,7 +9,7 @@ import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = resolve(fileURLToPath(import.meta.url), "..");
-const { chromium } = createRequire(join(here, "../video/package.json"))("playwright");
+const { chromium } = createRequire(join(here, "package.json"))("playwright");
 const appDir = join(here, "app");
 const out = join(here, "e2e-out");
 mkdirSync(out, { recursive: true });

@@ -39,14 +39,12 @@ Every Rust crate lives under `crates/`. The PWA lives under `web/app`.
 | `crates/age-plugin-cahoots` | `age-plugin-cahoots` | age plugin: recipient `cahoots:<circle>`. | done (S1), untested against the `age` CLI |
 | `crates/wireguard` | `cahoots-wireguard` | WireGuard `PresharedKey` helper and the `cahoots-wg` CLI: announce, peers, issue, accept over the feed or by paste; `--apply` runs `wg set`. | done (S1, N1); `scripts/wg-demo.sh` runs a two-host tunnel in CI |
 | `crates/relay` | `cahoots-relay` | Numbers Station client shared by the CLIs. | done |
-| `crates/meshtastic` | `cahoots-meshtastic` | Meshtastic channel keys from the pad, over the feed or by paste; prints the channel URL and CLI command. `cahoots-mesh`. | done (N4, Meshtastic part) |
-| `crates/yk` | `cahoots-yk` | YubiKey OpenPGP `GET CHALLENGE` entropy source and CLI. | done (M2), throughput not yet measured |
 | `crates/wasm` | `cahoots-wasm` | Browser bindings: ceremony, circle, fountain-coded animated QR, QR rendering. | done (M2) |
 | `web/app` | | Offline PWA phone and laptop client, including hello words for calls. | done (M2), camera scanning untested |
 | `crates/hal` | `cahoots-hal` | HAL traits, the ceremony driver over any set of touch links (a pile, a ring, a pair), pile discovery (seat and count from the stack), SP 800-90B health tests, persistent ledger. `no_std`. | done (M4a) |
 | `crates/host` | `cahoots-host` | Desktop simulator: socket Link, file PadStore, PNG Display. Four processes, each with a socket to both neighbours, run a ceremony. | done (M4a) |
 | `crates/esp32s3` | `cahoots-esp32s3` | `esp-hal` firmware for the Arduino Nano ESP32 with the 1.54" e-paper and two buttons: the four HAL traits on real hardware, the pile over USB with the laptop as the other cards. Built with the esp toolchain, outside the workspace. | in progress (M4b, first board) |
-| `crates/dabao` | | Xous app for the Baochip-1x Dabao, the native badge family. | placeholder (M4c, M5) |
+| `crates/dabao` | | Xous app for the Baochip-1x Dabao, the V2 card. | placeholder (M4c, M5) |
 | `crates/chat` | `cahoots-chat` | Pad-seeded end-to-end chat: epoch keys, sender ratchets, ChaCha20-Poly1305, plus the `cahoots-chat` CLI demo. | done (C1, C3) |
 | `crates/station` | `cahoots-station` | The Numbers Station relay: hash-chained log, reuse refusal, long-poll feed, display page, Dockerfile. | done (C2); [TVC](https://docs.turnkey.com/features/verifiable-cloud/overview) deploy pending |
 | `crates/fuzz` | | `cargo-fuzz` targets for every parser. Not a workspace member. | done |
@@ -76,7 +74,7 @@ See `docs/threat-model.md` for the full list.
 
 ## What it is for
 
-`docs/tiers.md` defines the device tiers, from a phone (T0) to inspected silicon (T4), and the rule that a circle is only as protected as its least protected member. `docs/use-cases.md` lists concrete uses: group chat, and bootstrapping WireGuard and physical mesh networks from a ceremony. `docs/gatherings.md` is the concept of a card for every gathering: storage, messages from old circles, the web of trust a card accumulates, and a social network with no accounts. `docs/diy-badge.md` is how to build a badge, in any of the three hardware families. `docs/plan.md` is the roadmap. `docs/glossary.md` defines the terms.
+`docs/tiers.md` defines the device tiers, from a phone (T0) to inspected silicon (T4), and the rule that a circle is only as protected as its least protected member. `docs/use-cases.md` lists concrete uses: group chat, and bootstrapping WireGuard and mesh networks from a ceremony. `docs/gatherings.md` is the concept of a card for every gathering: storage, messages from old circles, the web of trust a card accumulates, and a social network with no accounts. `docs/diy-badge.md` is how to build a badge, in any of the three hardware families. `docs/plan.md` is the roadmap. `docs/glossary.md` defines the terms.
 
 ## Working rules
 

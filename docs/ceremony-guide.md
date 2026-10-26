@@ -20,7 +20,7 @@ The host opens **Start a ceremony** and fills in three things:
 
 Leave **Advanced** alone unless you know you want it. It holds one option, a hosted software member. That means a program running in a secure enclave joins as one of the members and gets its own copy of the secret. Use it only if the group has decided to work with such a program. Everyone's screen shows that it is on before they confirm.
 
-If someone wants to add randomness from a YubiKey, they do that on their own device at the next step, from **Add hardware randomness**. It is optional.
+If someone has a file of hardware randomness to mix in, they add it on their own device at the next step, from **Add hardware randomness**. It is optional.
 
 ## During
 

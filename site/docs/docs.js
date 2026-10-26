@@ -8,7 +8,7 @@ const DOCS = [
   { id: "gatherings", title: "Cards for every gathering", file: "gatherings.md", lede: "What happens when everyone carries one: storage, messages from old circles, a web of trust, and a social network with no accounts." },
   { id: "ceremony-guide", title: "Ceremony guide", file: "ceremony-guide.md", lede: "How to run a ceremony with a group." },
   { id: "tiers", title: "Device tiers", file: "tiers.md", lede: "What each kind of device protects, from a phone to inspected silicon." },
-  { id: "diy-badge", title: "Build a badge", file: "diy-badge.md", lede: "Two hardware families: the Baochip badge and the Pico badge. E-paper, two buttons, a wire, USB to the phone." },
+  { id: "diy-badge", title: "Build a badge", file: "diy-badge.md", lede: "Three boards: the DIY Arduino build, V1 on a Pico 2, and V2 on the Baochip. E-paper, two buttons, a wire, USB to the phone." },
   { id: "glossary", title: "Glossary", file: "glossary.md", lede: "The words these pages use, in plain terms." },
   { group: "Specification" },
   { id: "protocol", title: "Protocol v1", file: "protocol.md", lede: "The normative description of the ceremony, messages, and storage.", spec: true },
@@ -21,7 +21,6 @@ const DOCS = [
   { id: "station", title: "The feed", file: "station.md", lede: "Running the relay." },
   { id: "chat-cli", title: "Chat CLI", file: "chat-cli.md", lede: "A terminal chat client for trying the protocol." },
   { id: "host", title: "Simulator", file: "host.md", lede: "A desktop stand-in for the badge." },
-  { id: "yk", title: "YubiKey entropy", file: "yk.md", lede: "Randomness from a YubiKey." },
   { id: "adapters", title: "Adapters", file: "adapters.md", lede: "HPKE, age, and WireGuard." },
 ];
 const PAGES = DOCS.filter((d) => d.id);

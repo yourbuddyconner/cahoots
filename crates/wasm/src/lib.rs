@@ -135,7 +135,7 @@ pub struct WasmCeremony {
 #[wasm_bindgen(js_class = Ceremony)]
 impl WasmCeremony {
     /// `contribution` is `L` bytes from `crypto.getRandomValues`. `extra` (optional) is a
-    /// hardware contribution of the same length, for example from `cahoots-yk`; it is XORed in.
+    /// hardware contribution of the same length; it is XORed in.
     /// `kem_seed` is 32 more random bytes; it derives the key other members seal reveals to.
     #[wasm_bindgen(constructor)]
     #[allow(clippy::too_many_arguments)] // a JavaScript-facing constructor; the arguments are the ceremony's inputs

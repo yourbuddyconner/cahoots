@@ -6,7 +6,6 @@ members = [
     "crates/provider",
     "crates/hal",
     "crates/host",
-    "crates/yk",
     "crates/wasm",
     "crates/hpke",
     "crates/wireguard",
@@ -14,7 +13,6 @@ members = [
     "crates/chat",
     "crates/station",
     "crates/relay",
-    "crates/meshtastic",
 ]
 exclude = ["crates/fuzz", "crates/esp32s3", "crates/dabao"]
 # Not workspace members: crates/esp32s3 (needs the esp toolchain), crates/dabao (built with

@@ -423,9 +423,9 @@ function screenPick(params) {
     const r = fountainReceiver((bytes) => { extra = bytes; src = 'qr'; srcLine.textContent = `Randomness: this device mixed with ${kib(bytes.length)} by camera. Labelled TRNG.`; close(); }, 'Point at the laptop\'s animation');
     return h('div', { class: 'stack' },
       h('h2', {}, 'Add hardware randomness'),
-      h('p', { class: 'muted' }, `Optional. A ${kib(params.pad_len)} file from cahoots-yk (a YubiKey) is mixed in with this device's own randomness, never used alone. It earns the cahoot the TRNG label.`),
+      h('p', { class: 'muted' }, `Optional. A ${kib(params.pad_len)} file of random bytes from a hardware source is mixed in with this device's own randomness, never used alone. It earns this device the TRNG label.`),
       file, btn('Load a file', () => file.click()),
-      h('p', { class: 'muted' }, 'Or scan the animation cahoots-yk shows on a laptop:'), r.el,
+      h('p', { class: 'muted' }, 'Or scan an animation of the bytes shown on another screen:'), r.el,
       extra ? btn('Remove hardware randomness', () => { extra = null; src = 'csprng'; srcLine.textContent = 'Randomness: this device. The cahoot is labelled CSPRNG.'; close(); }, 'danger') : null);
   });
   screen({

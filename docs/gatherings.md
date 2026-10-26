@@ -10,7 +10,7 @@ Two facts make the rest of this page possible. Each circle is a channel that onl
 
 ## 2. Does a card have room?
 
-The two chips in [Build a badge](diy-badge.md) have 4 MiB of non-volatile memory on board, with the firmware in part of it. Call it 3 MiB for pads.
+The Baochip-1x in V2 has 4 MiB of RRAM on chip, and the Pico 2 on V1 has 4 MB of flash ([Build a badge](diy-badge.md)), with the firmware in part of it. Call it 3 MiB for pads.
 
 | Pad size per gathering | Pads in 3 MiB on-chip | Pads in a $1 16 MiB flash chip | Pads in a $4 128 MiB flash chip |
 |---|---|---|---|
@@ -21,7 +21,7 @@ The two chips in [Build a badge](diy-badge.md) have 4 MiB of non-volatile memory
 Three conclusions.
 
 - **Size the pad at the ceremony.** The card should ask how long the group will last. A dinner gets 4 KiB, which is still a few dozen unbreakable messages per person, or 32 fresh session keys. A team that will chat for a year gets 256 KiB. The app already offers three sizes; the card should ask the same question.
-- **A card for every gathering wants an external flash chip.** That is a line item, and the design stays the same. The Pico plus Trust M badge is planned to store pads encrypted under a key that never leaves the secure element, so more flash is more ciphertext. The ESP32-S3 firmware today writes the pad to flash in the clear. The circle IDs, the ledgers and the pair keys stay on-chip. They are a few hundred bytes per circle.
+- **A card for every gathering wants an external flash chip.** That is a line item, and the design stays the same. V2 on the Baochip-1x is planned to store pads encrypted under a key that never leaves the chip's key store, so more flash is more ciphertext. The ESP32-S3 firmware today writes the pad to flash in the clear, and V1 on the Pico 2 will do the same. The circle IDs, the ledgers and the pair keys stay on-chip. They are a few hundred bytes per circle.
 - **Old pads need refreshing.** Flash keeps data for ten to twenty years. A pad that must still work in 2040 has to be rewritten in between. The firmware should rewrite stored pads every few years as a background job. Boring, and real.
 
 ## 3. A message from years ago
