@@ -37,6 +37,7 @@ Why the RP2350 and not the ESP32-S3 the firmware runs on today: it has no radio,
 
 - A Pico 2, the plain one without headers and without the wireless chip, soldered down.
 - The raw 1.54" panel, the GDEY0154D67 from Good Display, on its 24-pin flex connector, with the boost circuit from the open reference schematics. The same panel as the Waveshare module, five to seven dollars.
+- A Qwiic (STEMMA QT) socket on I2C0 at the bottom centre, so any Qwiic board plugs in without soldering, and a 2x5 header on the back with 3V3, GND and eight spare GPIO for firmware forks.
 - Two tactile switches, a CR2032 holder for the prototype. The Pico's micro-USB is the flashing port. The dock is not in V1.
 - A five-pin magnetic pogo pair (Adafruit 5413) for the pile: the pin half stands on the board at the top end with its pins up through the lid, and the pad half sits in the tray floor, wired to the board with a short pigtail. Two JST-SH UART sockets at the bottom edge take a cable instead. Four magnet pockets in the tray. The pile mechanics get tested on real badges before the thin card is designed.
 - A clear PETG tray with a snap-fit lid, printed. Resin or cut acrylic later from the same STEP.

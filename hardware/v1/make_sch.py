@@ -316,6 +316,12 @@ text("J2 and J3: JST-SH sockets, UP and DN. Pin 1 GND, pins 3 and 4 TX and RX, c
 for i, ref in enumerate(("J4", "J2", "J3")):
     labelled_block(ref, CX + i * 40.64, CY + 5.08, ref_at=(4, -9), val_at=(4, 9))
 
+# Peripherals: the Qwiic socket on I2C0, and a 2x5 header of the Pico's spare GPIO.
+EX, EY = 190.5, 205.74
+text("Peripherals. J5: Qwiic / STEMMA QT, pin 1 GND, 2 3V3, 3 SDA, 4 SCL, on I2C0. J6: spare GPIO, 3V3 and GND for whatever a firmware fork needs.", EX - 10.16, EY - 13.97, 1.3)
+labelled_block("J5", EX, EY + 5.08, ref_at=(4, -9), val_at=(4, 9))
+labelled_block("J6", EX + 40.64, EY + 5.08, ref_at=(4, -14), val_at=(4, 14))
+
 text("Cahoots badge V1: a board a Raspberry Pi Pico 2 solders onto. 54 x 86 mm, two layers. Labels with the same name are one net.", 25.4, 228.6, 1.5)
 text("design.py is the source; make_sch.py and make_pcb.py draw it; check.py confirms the schematic, the table and the board agree.", 25.4, 233, 1.5)
 

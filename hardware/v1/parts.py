@@ -1,6 +1,6 @@
 """parts.png: each piece on its own, front and back. KiCad renders boards, so a piece is isolated by
 moving it 40 cm sideways and panning the camera to it; the rest of the badge stays out of frame.
-Run with KiCad's Python; needs video/ node_modules."""
+Run with KiCad's Python; needs web/ node_modules (npm install in web/)."""
 import os
 import subprocess
 import sys
@@ -75,5 +75,5 @@ const { chromium } = require("playwright");
 (async () => { const b = await chromium.launch({ channel: "chrome" }); const p = await b.newPage({ viewport: { width: 2400, height: 1200 } });
   await p.goto("file://" + process.argv[1]); await p.waitForTimeout(1500); await p.evaluate(() => document.fonts.ready);
   await p.screenshot({ path: process.argv[2], fullPage: true }); await b.close(); })();''', page, out],
-               cwd=os.path.join(HERE, "..", "..", "video"), check=True)
+               cwd=os.path.join(HERE, "..", "..", "web"), check=True)
 print("wrote", out)
