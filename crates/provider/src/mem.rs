@@ -1,9 +1,10 @@
 use crate::circle::Circle;
-use crate::{CircleId, PadError, PadProvider, PskHandle, PSK_LEN};
+use crate::{CircleId, CircleInfo, PadError, PadProvider, PskHandle, PSK_LEN};
 use cahoots_core::circle_id::circle_id;
 use cahoots_core::ledger::MemLedger;
 use cahoots_core::pad::MemPadStorage;
 use cahoots_core::params::CircleParams;
+use cahoots_custodian::to_psk;
 use std::collections::HashMap;
 use zeroize::Zeroizing;
 
@@ -47,13 +48,11 @@ impl MemProvider {
     }
 }
 
-pub(crate) fn to_psk(bytes: Zeroizing<Vec<u8>>) -> Zeroizing<[u8; 32]> {
-    let mut out = Zeroizing::new([0u8; 32]);
-    out.copy_from_slice(&bytes);
-    out
-}
-
 impl PadProvider for MemProvider {
+    fn circles(&self) -> Vec<CircleInfo> {
+        self.circles.values().map(|c| c.info()).collect()
+    }
+
     fn psk(
         &mut self,
         circle: &CircleId,

@@ -15,12 +15,12 @@
 //! casual disk reads and backups, not against an attacker with the same account.
 
 use crate::circle::Circle;
-use crate::mem::to_psk;
-use crate::{CircleId, PadError, PadProvider, PskHandle, PSK_LEN};
+use crate::{CircleId, CircleInfo, PadError, PadProvider, PskHandle, PSK_LEN};
 use cahoots_core::circle_id::circle_id;
 use cahoots_core::ledger::{LedgerError, MemLedger, SpentLedger};
 use cahoots_core::pad::{PadStorage, StorageError};
 use cahoots_core::params::CircleParams;
+use cahoots_custodian::to_psk;
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use std::collections::HashMap;
@@ -301,6 +301,10 @@ impl FileProvider {
 }
 
 impl PadProvider for FileProvider {
+    fn circles(&self) -> Vec<CircleInfo> {
+        self.circles.values().map(|c| c.info()).collect()
+    }
+
     fn psk(
         &mut self,
         circle: &CircleId,

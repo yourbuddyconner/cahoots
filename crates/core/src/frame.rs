@@ -6,6 +6,11 @@ use crc::{Crc, CRC_32_ISO_HDLC};
 
 pub const HEADER_LEN: usize = 1 + 4 + 4;
 pub const CRC_LEN: usize = 4;
+/// The longest payload [`decode`] accepts: 2 MiB. The largest real frame is a ceremony
+/// reveal, which carries the whole pad sealed to every other member: the pad plus about
+/// 10 KiB for eight members. The ESP32-S3's pad partition is 1 MiB and the app's largest pad
+/// is 256 KiB, so every real reveal fits. A header that claims more is not a frame.
+pub const MAX_PAYLOAD: usize = 2 * 1024 * 1024;
 const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,6 +24,8 @@ pub struct Frame<'a> {
 pub enum FrameError {
     /// More bytes are needed before the frame can be decoded.
     Incomplete,
+    /// The bytes at the front are not a frame: the CRC does not match, or the header claims
+    /// a payload longer than the limit. Drop one byte and decode again to resynchronise.
     Crc,
 }
 
@@ -35,11 +42,26 @@ pub fn encode(f: &Frame<'_>) -> Vec<u8> {
 
 /// Decode one frame from the front of `buf`. Returns the frame and the bytes consumed.
 pub fn decode(buf: &[u8]) -> Result<(Frame<'_>, usize), FrameError> {
+    decode_max(buf, MAX_PAYLOAD)
+}
+
+/// [`decode`] with a smaller payload limit, for a reader that expects only short frames.
+/// A header claiming more than `max_payload` (or more than [`MAX_PAYLOAD`]) is
+/// [`FrameError::Crc`], so the reader drops a byte at once instead of waiting for bytes
+/// that will never come.
+pub fn decode_max(buf: &[u8], max_payload: usize) -> Result<(Frame<'_>, usize), FrameError> {
     if buf.len() < HEADER_LEN {
         return Err(FrameError::Incomplete);
     }
-    let len = u32::from_le_bytes([buf[5], buf[6], buf[7], buf[8]]) as usize;
-    let total = HEADER_LEN + len + CRC_LEN;
+    let len = usize::try_from(u32::from_le_bytes([buf[5], buf[6], buf[7], buf[8]]))
+        .map_err(|_| FrameError::Crc)?;
+    if len > max_payload.min(MAX_PAYLOAD) {
+        return Err(FrameError::Crc);
+    }
+    let total = HEADER_LEN
+        .checked_add(len)
+        .and_then(|t| t.checked_add(CRC_LEN))
+        .ok_or(FrameError::Crc)?;
     if buf.len() < total {
         return Err(FrameError::Incomplete);
     }

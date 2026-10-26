@@ -25,7 +25,7 @@ jobs:
       - run: cargo clippy --workspace --all-features --all-targets -- -D warnings
       - run: cargo test --workspace --all-features
       - name: core builds no_std (thumbv7em)
-        run: cargo build -p cahoots-core -p cahoots-hal -p cahoots-chat --no-default-features --target thumbv7em-none-eabi
+        run: cargo build -p cahoots-core -p cahoots-hal -p cahoots-chat -p cahoots-custodian -p cahoots-badge --no-default-features --target thumbv7em-none-eabi
       - name: core and wasm bindings build for wasm32
         run: cargo build -p cahoots-core -p cahoots-wasm --target wasm32-unknown-unknown
       - name: vectors are up to date

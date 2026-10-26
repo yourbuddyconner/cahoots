@@ -7,16 +7,25 @@
 //! cahoots-host recv --state /tmp/dev3 --message <base64url>
 //! cahoots-host status --state /tmp/dev0
 //! cahoots-host pile --cards 3 --state /tmp/pile [--serial /dev/cu.usbmodem...] [--name sf] [--pad-len 16384]
+//! cahoots-host badge --state /tmp/b0 --listen - --next /tmp/b1.sock --name sf --pad-len 16384 [--seed 1]
 //! ```
 //!
 //! `pile` runs a stack of cards on this machine, bottom first, over Unix sockets. With
 //! `--serial`, the top card is a real board on that port and `--cards` counts it.
+//!
+//! `badge` runs one card through the badge crate on a [`HostBoard`]: boot, then a pile pass
+//! while it has no circle, then the idle menu. `--listen` is the down link and `--next` the
+//! up link; `-` means nothing is plugged in on that side. Press buttons by writing `A` or `B`
+//! lines to `buttons.txt` in the state directory.
 
 use base64::Engine;
+use cahoots_badge::{Badge, Board};
 use cahoots_core::message::MessageType;
 use cahoots_core::params::CircleParams;
 use cahoots_hal::health::{HealthTests, Tested};
+use cahoots_hal::Display;
 use cahoots_hal::{Entropy, HealthError};
+use cahoots_host::board::HostBoard;
 use cahoots_host::device::Device;
 use cahoots_host::link::SocketLink;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -86,7 +95,7 @@ fn connect_ring(listen: &str, next: &str) -> std::io::Result<(SocketLink, Socket
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let Some(cmd) = argv.first().cloned() else {
-        eprintln!("usage: cahoots-host <ceremony|pile|send|recv|status> ...");
+        eprintln!("usage: cahoots-host <ceremony|pile|badge|send|recv|status> ...");
         std::process::exit(2);
     };
     let args = Args(argv[1..].to_vec());
@@ -180,6 +189,32 @@ fn main() {
                     }
                 })
                 .map_err(|e| e.to_string())
+        }
+        "badge" => {
+            let state = PathBuf::from(args.req("--state"));
+            let pad_len: u32 = args.req("--pad-len").parse().expect("--pad-len");
+            let seed = args.get("--seed").map(|s| s.parse().expect("--seed"));
+            let board = HostBoard::new(
+                &state,
+                &args.req("--listen"),
+                &args.req("--next"),
+                &args.req("--name"),
+                pad_len,
+                seed,
+            );
+            let mut badge = Badge::new(board);
+            badge.boot();
+            loop {
+                if badge.circle().is_none() {
+                    if let Err(e) = badge.run_once() {
+                        badge.board().log(&e);
+                        badge.board().display().show_status(&e);
+                        badge.board().delay_ms(1500);
+                    }
+                } else {
+                    badge.idle_step();
+                }
+            }
         }
         "status" => {
             let state = PathBuf::from(args.req("--state"));

@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 cahoots-core = { workspace = true, features = ["std"] }
+cahoots-custodian = { workspace = true, features = ["std"] }
 zeroize = { version = "1.8", features = ["std", "derive"] }
 hkdf = "0.12"
 sha2 = "0.10"

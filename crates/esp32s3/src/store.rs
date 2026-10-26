@@ -6,13 +6,15 @@
 //! programs zeros over it, word by word with read-modify-write at the edges: the trait's
 //! "reads back as zero" at byte granularity, with no sector ever re-erased under a live pad.
 //! The ledger's 16-byte records program onto `0xFF` as the ledger appends. The circle record
-//! is small and rewritten whole.
+//! is small and rewritten whole, and carries the check words.
 //!
 //! One `FlashStorage` exists per chip, so the stores share it through an `Rc<RefCell>`.
 
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
+use cahoots_badge::Circle;
+use cahoots_core::checkwords::WORDLIST;
 use cahoots_core::circle_id::CircleId;
 use cahoots_core::params::CircleParams;
 use cahoots_hal::ledger::RecordStore;
@@ -173,6 +175,10 @@ impl FlashRecordStore {
         Ok(FlashRecordStore { flash })
     }
 
+    /// The region as it is, for the circle already stored.
+    pub fn open(flash: SharedFlash) -> Self {
+        FlashRecordStore { flash }
+    }
 }
 
 impl RecordStore for FlashRecordStore {
@@ -196,29 +202,34 @@ impl RecordStore for FlashRecordStore {
     }
 }
 
-/// What the board remembers about its circle.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Circle {
-    pub params: CircleParams,
-    pub seat: u8,
-    pub circle_id: CircleId,
-}
+/// The six check words, as `u16` word indices, little-endian.
+const WORDS_LEN: usize = 12;
 
-/// `CAH1 | len u16 LE | params | seat | circle id`, rewritten whole in its own sector.
+/// `CAH1 | len u16 LE | params | seat | circle id | words`, rewritten whole in its own
+/// sector. `len` counts everything after itself; `words` is the six `u16` indices into
+/// `WORDLIST`, little-endian.
 pub fn save_circle(flash: &SharedFlash, c: &Circle) -> Result<(), ()> {
     let params = c.params.encode();
-    let mut body = Vec::with_capacity(6 + params.len() + 1 + c.circle_id.len());
+    let len = params.len() + 1 + c.circle_id.len() + WORDS_LEN;
+    let mut body = Vec::with_capacity(6 + len);
     body.extend_from_slice(CIRCLE_MAGIC);
-    let len = (params.len() + 1 + c.circle_id.len()) as u16;
-    body.extend_from_slice(&len.to_le_bytes());
+    body.extend_from_slice(&(len as u16).to_le_bytes());
     body.extend_from_slice(&params);
     body.push(c.seat);
     body.extend_from_slice(&c.circle_id);
+    for w in c.words {
+        body.extend_from_slice(&w.to_le_bytes());
+    }
     let mut f = flash.borrow_mut();
     erase_sectors(&mut f, CIRCLE_BASE, SECTOR)?;
     program_any(&mut f, CIRCLE_BASE, &body)
 }
 
+/// The stored circle, or `None` if there is none or the record does not parse.
+///
+/// A record from before the words were stored ends at the circle id, so its `len` is 12
+/// bytes short and it loads as `None`: the holder runs the ceremony again. The words cannot
+/// be worked out from the pad instead, because spending erases pad bytes.
 pub fn load_circle(flash: &SharedFlash) -> Option<Circle> {
     let mut head = [0u8; 6];
     let mut f = flash.borrow_mut();
@@ -228,19 +239,32 @@ pub fn load_circle(flash: &SharedFlash) -> Option<Circle> {
     }
     let len = u16::from_le_bytes([head[4], head[5]]) as usize;
     let id_len = core::mem::size_of::<CircleId>();
-    if len < 1 + id_len || len > 1024 {
+    if len < 8 + 1 + id_len + WORDS_LEN || len > 1024 {
         return None;
     }
     let mut body = vec![0u8; len];
     read_any(&mut f, CIRCLE_BASE + 6, &mut body).ok()?;
-    let params_len = len - 1 - id_len;
+    // The params encoding is 8 bytes then the name, its length in byte 7.
+    let params_len = 8 + body[7] as usize;
+    if len != params_len + 1 + id_len + WORDS_LEN {
+        return None;
+    }
     let params = CircleParams::decode(&body[..params_len]).ok()?;
     let seat = body[params_len];
-    let circle_id: CircleId = body[params_len + 1..].try_into().ok()?;
+    let id_end = params_len + 1 + id_len;
+    let circle_id: CircleId = body[params_len + 1..id_end].try_into().ok()?;
+    let mut words = [0u16; 6];
+    for (w, b) in words.iter_mut().zip(body[id_end..].chunks_exact(2)) {
+        *w = u16::from_le_bytes([b[0], b[1]]);
+        if usize::from(*w) >= WORDLIST.len() {
+            return None;
+        }
+    }
     Some(Circle {
         params,
         seat,
         circle_id,
+        words,
     })
 }
 
@@ -249,5 +273,6 @@ pub fn wipe(flash: &SharedFlash, pad_len: u32) -> Result<(), ()> {
     let mut f = flash.borrow_mut();
     erase_sectors(&mut f, CIRCLE_BASE, SECTOR)?;
     erase_sectors(&mut f, PAD_BASE, pad_len.max(SECTOR))?;
-    f.erase(LEDGER_BASE, LEDGER_BASE + LEDGER_CAP).map_err(|_| ())
+    f.erase(LEDGER_BASE, LEDGER_BASE + LEDGER_CAP)
+        .map_err(|_| ())
 }

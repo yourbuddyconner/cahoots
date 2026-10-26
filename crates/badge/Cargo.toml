@@ -1,0 +1,20 @@
+[package]
+name = "cahoots-badge"
+description = "The badge's behaviour, written once against a Board trait. no_std + alloc."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = []
+std = ["cahoots-core/std", "cahoots-hal/std", "cahoots-custodian/std"]
+
+[dependencies]
+cahoots-core = { workspace = true }
+cahoots-hal = { workspace = true }
+cahoots-custodian = { workspace = true }
+zeroize = { workspace = true, features = ["alloc"] }
+
+[dev-dependencies]
+cahoots-core = { workspace = true, features = ["std"] }

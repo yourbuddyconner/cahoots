@@ -1,0 +1,666 @@
+//! [`Badge`]: the boot screen, the pile and the ceremony, and the idle menu.
+
+use crate::board::{Board, Circle};
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
+use cahoots_core::ceremony::CeremonyResult;
+use cahoots_core::frame::{self, Frame, FrameError};
+use cahoots_core::pad::Pad;
+use cahoots_core::params::CircleParams;
+use cahoots_custodian::wire::{
+    ErrorCode, Request, Response, KIND_REQUEST, KIND_RESPONSE, MAX_REQUEST_LEN,
+};
+use cahoots_custodian::{
+    serve, CircleId, CircleInfo, Consent, Custodian, PadError, PskHandle, PSK_LEN,
+};
+use cahoots_hal::ledger::PersistentLedger;
+use cahoots_hal::pile::{Pile, PileError};
+use cahoots_hal::ring::{RingCeremony, Step as RingStep};
+use cahoots_hal::store::StorePad;
+use cahoots_hal::{Display, Entropy, Link};
+use zeroize::Zeroizing;
+
+/// What one [`Badge::step`] did, or where the pass stands after it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Step {
+    /// No pass is under way.
+    Idle,
+    /// In the pile, waiting for a seat and the count.
+    InPile,
+    /// The ceremony is running.
+    InCeremony,
+    /// The ceremony is done and the badge asks: B keeps the circle, A discards it.
+    Prompt,
+    /// The circle is saved. The pass is over.
+    Kept,
+    /// The result is dropped. The pass is over.
+    Discarded,
+    /// The pass failed with this message. The next step starts a new pass.
+    Failed(String),
+}
+
+/// Where the pass is between two calls to [`Badge::step`].
+enum State<L: Link> {
+    Idle,
+    Pile {
+        pile: Pile<L>,
+        shown: Option<u8>,
+    },
+    Ceremony {
+        /// Boxed: the ceremony is a few kilobytes, and the state moves on every step.
+        ring: Box<RingCeremony<L>>,
+        last: (u8, u8),
+        params: CircleParams,
+        seat: u8,
+    },
+    /// The ceremony is complete. Push the last forwarded frames out before the prompt.
+    Flush {
+        links: Vec<L>,
+        result: CeremonyResult,
+        seat: u8,
+    },
+    Prompt {
+        result: CeremonyResult,
+        seat: u8,
+    },
+}
+
+/// The custodian a badge serves: its stored pad and its ledger, reporting the board's tier.
+type Custody<B> = Tiered<Pad<StorePad<<B as Board>::Pad>, PersistentLedger<<B as Board>::Records>>>;
+
+/// A custodian that reports `tier` for every circle it holds. Everything else is `inner`'s.
+struct Tiered<C> {
+    inner: C,
+    tier: u8,
+}
+
+impl<C: Custodian> Custodian for Tiered<C> {
+    fn circles(&self) -> Vec<CircleInfo> {
+        let mut circles = self.inner.circles();
+        for c in &mut circles {
+            c.tier = self.tier;
+        }
+        circles
+    }
+
+    fn psk(
+        &mut self,
+        circle: &CircleId,
+        context: &[u8],
+    ) -> Result<(PskHandle, Zeroizing<[u8; 32]>), PadError> {
+        self.inner.psk(circle, context)
+    }
+
+    fn psk_for(
+        &mut self,
+        handle: &PskHandle,
+        context: &[u8],
+    ) -> Result<Zeroizing<[u8; 32]>, PadError> {
+        self.inner.psk_for(handle, context)
+    }
+
+    fn spend(
+        &mut self,
+        circle: &CircleId,
+        len: u32,
+    ) -> Result<(PskHandle, Zeroizing<Vec<u8>>), PadError> {
+        self.inner.spend(circle, len)
+    }
+
+    fn spend_for(&mut self, handle: &PskHandle, len: u32) -> Result<Zeroizing<Vec<u8>>, PadError> {
+        self.inner.spend_for(handle, len)
+    }
+
+    fn remaining(&self, circle: &CircleId) -> u64 {
+        self.inner.remaining(circle)
+    }
+
+    fn low_pad(&self, circle: &CircleId) -> bool {
+        self.inner.low_pad(circle)
+    }
+}
+
+/// The menu items, in the order A cycles through them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Item {
+    Words,
+    KeyAsCode,
+    Serve,
+}
+
+impl Item {
+    fn next(self) -> Item {
+        match self {
+            Item::Words => Item::KeyAsCode,
+            Item::KeyAsCode => Item::Serve,
+            Item::Serve => Item::Words,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Item::Words => "words",
+            Item::KeyAsCode => "key as code . B",
+            Item::Serve => "serve . B",
+        }
+    }
+}
+
+/// A spending request waiting for B or A.
+struct Pending {
+    seq: u32,
+    request: Vec<u8>,
+}
+
+/// The idle menu, built once when it is entered and kept for the idle loop's life.
+struct Menu<B: Board> {
+    pad: Custody<B>,
+    down: B::Link,
+    rx: Vec<u8>,
+    item: Item,
+    /// B was pressed on the serve item: requests on the down link are answered.
+    serving: bool,
+    pending: Option<Pending>,
+}
+
+enum Idle<B: Board> {
+    /// Not entered yet.
+    Off,
+    /// The pad or the ledger would not open. Shown once.
+    Broken,
+    /// Boxed: the menu holds the custodian and the link, and lives beside the pass state.
+    On(Box<Menu<B>>),
+}
+
+/// The answer the holder gave with a button, handed to `serve`.
+struct Answer(bool);
+
+impl Consent for Answer {
+    fn allow(&mut self, _: &Request) -> bool {
+        self.0
+    }
+}
+
+pub struct Badge<B: Board> {
+    board: B,
+    circle: Option<Circle>,
+    state: State<B::Link>,
+    idle: Idle<B>,
+}
+
+impl<B: Board> Badge<B> {
+    pub fn new(board: B) -> Self {
+        Self {
+            board,
+            circle: None,
+            state: State::Idle,
+            idle: Idle::Off,
+        }
+    }
+
+    pub fn board(&mut self) -> &mut B {
+        &mut self.board
+    }
+
+    pub fn circle(&self) -> Option<&Circle> {
+        self.circle.as_ref()
+    }
+
+    /// The self-test screen, the A-held wipe, and the words of a stored circle.
+    pub fn boot(&mut self) {
+        let mut lines: Vec<String> = Vec::new();
+        let mut sample = vec![0u8; 4096];
+        lines.push(match self.board.entropy().fill(&mut sample) {
+            Ok(()) => "trng: health tests pass".into(),
+            Err(e) => format!("trng: FAILED {e:?}"),
+        });
+        lines.extend(self.board.selftest());
+        let circle = self.board.load_circle();
+        lines.push(match &circle {
+            Some(c) => format!(
+                "circle: {} seat {} of {}",
+                c.params.name, c.seat, c.params.n
+            ),
+            None => "circle: none yet".into(),
+        });
+        for l in &lines {
+            self.board.log(l);
+        }
+        self.board.display().show_status(&lines.join("\n"));
+        self.board.delay_ms(2500);
+
+        // A held through the self-test forgets the circle: record, ledger and pad.
+        self.circle = if circle.is_some() && self.board.a_down() {
+            let pad_len = circle.as_ref().map_or(0, |c| c.params.pad_len);
+            match self.board.wipe(pad_len) {
+                Ok(()) => {
+                    self.board.log("A held at boot: circle forgotten");
+                    self.board
+                        .display()
+                        .show_status("circle forgotten\nrelease A");
+                    while self.board.a_down() {
+                        self.board.delay_ms(10);
+                    }
+                    None
+                }
+                Err(_) => {
+                    self.board.log("wipe failed");
+                    circle
+                }
+            }
+        } else {
+            circle
+        };
+
+        if let Some(c) = &self.circle {
+            let words = c.check_words();
+            self.board.display().show_words(&words);
+            self.board
+                .log(&format!("words from the record: {}", words.join(" ")));
+        }
+    }
+
+    /// One pass: find the pile, run the ceremony, keep or discard the result. Steps until
+    /// the pass ends, with a 1 ms delay between steps.
+    pub fn run_once(&mut self) -> Result<(), String> {
+        loop {
+            match self.step() {
+                Step::Kept | Step::Discarded => return Ok(()),
+                Step::Failed(e) => return Err(e),
+                _ => self.board.delay_ms(1),
+            }
+        }
+    }
+
+    /// Advance the pass by one poll. Never blocks, so two badges can run on one thread.
+    pub fn step(&mut self) -> Step {
+        let state = core::mem::replace(&mut self.state, State::Idle);
+        match self.advance(state) {
+            Ok((next, step)) => {
+                self.state = next;
+                step
+            }
+            Err(e) => Step::Failed(e),
+        }
+    }
+
+    fn advance(&mut self, state: State<B::Link>) -> Result<(State<B::Link>, Step), String> {
+        match state {
+            State::Idle => {
+                self.board
+                    .display()
+                    .show_status("plug into a pile. B on top starts");
+                let (down, up) = self.board.links();
+                let (name, pad_len) = self.board.proposal();
+                let pile = Pile::new(down, up, &name, pad_len, false);
+                Ok((State::Pile { pile, shown: None }, Step::InPile))
+            }
+            State::Pile {
+                mut pile,
+                mut shown,
+            } => {
+                if let Some(ready) = pile.poll().map_err(|e| format!("pile: {e:?}"))? {
+                    let params = ready.params.clone();
+                    let seat = ready.seat;
+                    self.board.log(&format!(
+                        "pile counted: seat {seat} of {}, circle {}",
+                        params.n, params.name
+                    ));
+                    self.board
+                        .display()
+                        .show_status(&format!("seat {seat} of {}: {}", params.n, params.name));
+                    let mut ring = pile
+                        .into_ceremony(ready, self.board.entropy())
+                        .map_err(|e| format!("ceremony: {e:?}"))?;
+                    self.board
+                        .display()
+                        .show_status("ceremony: waiting for the others");
+                    ring.start();
+                    let state = State::Ceremony {
+                        ring: Box::new(ring),
+                        last: (0, 0),
+                        params,
+                        seat,
+                    };
+                    return Ok((state, Step::InCeremony));
+                }
+                if pile.seat() != shown {
+                    shown = pile.seat();
+                    if let Some(s) = shown {
+                        self.board.log(&format!("seat {s}"));
+                        self.board
+                            .display()
+                            .show_status(&format!("seat {s}. B when the pile is whole"));
+                    }
+                }
+                if self.board.b_pressed() {
+                    match pile.start() {
+                        Ok(()) => {
+                            self.board.log("B: counting the pile");
+                            self.board.display().show_status("counting the pile...");
+                        }
+                        Err(PileError::NoSeat) => {
+                            self.board.display().show_status("nothing below yet")
+                        }
+                        Err(e) => self.board.log(&format!("start: {e:?}")),
+                    }
+                }
+                let _ = self.board.a_pressed();
+                Ok((State::Pile { pile, shown }, Step::InPile))
+            }
+            State::Ceremony {
+                mut ring,
+                mut last,
+                params,
+                seat,
+            } => {
+                let step = ring.poll().map_err(|e| {
+                    self.board.display().show_status("ceremony: ABORTED");
+                    format!("ceremony: {e:?}")
+                })?;
+                let now = (ring.commitments_held(), ring.reveals_held());
+                if now != last {
+                    last = now;
+                    self.board.display().show_status(&format!(
+                        "commits {}/{}  reveals {}/{}",
+                        now.0, params.n, now.1, params.n
+                    ));
+                }
+                if step != RingStep::Complete {
+                    let state = State::Ceremony {
+                        ring,
+                        last,
+                        params,
+                        seat,
+                    };
+                    return Ok((state, Step::InCeremony));
+                }
+                let (result, links) = (*ring).finish().map_err(|e| format!("ceremony: {e:?}"))?;
+                Ok((
+                    State::Flush {
+                        links,
+                        result,
+                        seat,
+                    },
+                    Step::InCeremony,
+                ))
+            }
+            State::Flush {
+                mut links,
+                result,
+                seat,
+            } => {
+                // Our neighbours may still need the frames we forwarded last. Keep reading
+                // (and dropping: the ceremony is over) while we flush, so a neighbour that
+                // is also flushing toward us is never blocked.
+                let mut done = true;
+                let mut buf = [0u8; 256];
+                for link in links.iter_mut() {
+                    if !link.flush() {
+                        done = false;
+                    }
+                    while link.recv(&mut buf) > 0 {}
+                }
+                if !done {
+                    let state = State::Flush {
+                        links,
+                        result,
+                        seat,
+                    };
+                    return Ok((state, Step::InCeremony));
+                }
+                drop(links);
+                self.board.display().show_words(&result.check_words);
+                self.board
+                    .log(&format!("words: {}", result.check_words.join(" ")));
+                self.board
+                    .display()
+                    .show_status("B keep this circle . A discard");
+                Ok((State::Prompt { result, seat }, Step::Prompt))
+            }
+            State::Prompt { result, seat } => {
+                if self.board.b_pressed() {
+                    self.board.display().show_status("saving...");
+                    self.board
+                        .write_pad(&result.pad)
+                        .map_err(|_| "flash: pad write failed")?;
+                    self.board
+                        .records(true)
+                        .map_err(|_| "flash: ledger erase failed")?;
+                    let words = crate::board::word_indices(&result.check_words)
+                        .ok_or("words: not in the word list")?;
+                    let circle = Circle {
+                        params: result.params.clone(),
+                        seat,
+                        circle_id: result.circle_id,
+                        words,
+                    };
+                    self.board
+                        .save_circle(&circle)
+                        .map_err(|_| "flash: circle record failed")?;
+                    self.board
+                        .log(&format!("saved: {} seat {seat}", circle.params.name));
+                    self.board
+                        .display()
+                        .show_status("saved. read the words aloud");
+                    self.circle = Some(circle);
+                    self.idle = Idle::Off;
+                    return Ok((State::Idle, Step::Kept));
+                }
+                if self.board.a_pressed() {
+                    drop(result);
+                    self.board.log("discarded");
+                    self.board.display().show_status("discarded");
+                    return Ok((State::Idle, Step::Discarded));
+                }
+                Ok((State::Prompt { result, seat }, Step::Prompt))
+            }
+        }
+    }
+
+    /// One poll of the idle menu, for a badge with a stored circle. Call it in a loop. A moves
+    /// to the next item, B chooses it: the words, a 32-byte key shown as a code, or serving
+    /// custodian requests from the down link, each spend allowed by B or refused by A. Ends
+    /// with a 1 ms delay. Does nothing until a circle is stored.
+    pub fn idle_step(&mut self) {
+        let Some(circle) = self.circle.clone() else {
+            return;
+        };
+        if matches!(self.idle, Idle::Off) {
+            self.idle = self.enter_menu(&circle);
+        }
+        if let Idle::On(menu) = &mut self.idle {
+            Self::menu_step(&mut self.board, &circle, menu);
+        }
+        self.board.delay_ms(1);
+    }
+
+    fn enter_menu(&mut self, c: &Circle) -> Idle<B> {
+        let len = c.params.pad_len;
+        let tier = self.board.tier();
+        let store = self.board.open_pad(len);
+        let pad = self
+            .board
+            .records(false)
+            .map_err(|_| String::from("flash: ledger read failed"))
+            .and_then(|records| {
+                PersistentLedger::open(records, c.params.slices())
+                    .map_err(|e| format!("ledger: {e:?}"))
+            })
+            .and_then(|ledger| {
+                Pad::with_circle_id(
+                    c.params.clone(),
+                    c.seat,
+                    c.circle_id,
+                    StorePad::new(store),
+                    ledger,
+                )
+                .map(|pad| Tiered { inner: pad, tier })
+                .map_err(|e| format!("pad: {e:?}"))
+            });
+        match pad {
+            Ok(pad) => {
+                let (down, _up) = self.board.links();
+                self.board.display().show_status(Item::Words.label());
+                Idle::On(Box::new(Menu {
+                    pad,
+                    down,
+                    rx: Vec::new(),
+                    item: Item::Words,
+                    serving: false,
+                    pending: None,
+                }))
+            }
+            Err(e) => {
+                self.board.log(&e);
+                self.board.display().show_status(&e);
+                Idle::Broken
+            }
+        }
+    }
+
+    fn menu_step(board: &mut B, c: &Circle, m: &mut Menu<B>) {
+        let asked = m.pending.is_some();
+        // Read a chunk and decode after each, so `rx` never holds more than one request
+        // frame and one chunk, whatever arrives.
+        let mut buf = [0u8; 256];
+        loop {
+            let n = m.down.recv(&mut buf);
+            if n == 0 {
+                break;
+            }
+            m.rx.extend_from_slice(&buf[..n]);
+            Self::menu_decode(board, c, m);
+        }
+
+        // A press made before the prompt was on the screen is not an answer to it: on the
+        // Nano the prompt's refresh blocks for hundreds of milliseconds. Drop both edges and
+        // count only presses seen on a later call.
+        if !asked && m.pending.is_some() {
+            let _ = board.a_pressed();
+            let _ = board.b_pressed();
+            return;
+        }
+
+        if let Some(p) = &m.pending {
+            let answer = if board.b_pressed() {
+                Some(true)
+            } else if board.a_pressed() {
+                Some(false)
+            } else {
+                None
+            };
+            if let Some(yes) = answer {
+                let resp = serve(&mut m.pad, &mut Answer(yes), &p.request);
+                respond(&mut m.down, p.seq, &resp);
+                m.pending = None;
+                board.log(if yes {
+                    "spend allowed"
+                } else {
+                    "spend refused"
+                });
+                board.display().show_status(if yes {
+                    "sent. A for menu"
+                } else {
+                    "refused. A for menu"
+                });
+            }
+            return;
+        }
+
+        if board.a_pressed() {
+            m.item = m.item.next();
+            m.serving = false;
+            board.display().show_status(m.item.label());
+        } else if board.b_pressed() {
+            match m.item {
+                Item::Words => board.display().show_words(&c.check_words()),
+                Item::KeyAsCode => match m.pad.spend(&c.circle_id, PSK_LEN) {
+                    Ok((_, bytes)) => {
+                        board.display().show_qr(&bytes);
+                        board.display().show_status("shown. A for menu");
+                    }
+                    Err(e) => board.display().show_status(&format!("key: {e:?}")),
+                },
+                Item::Serve => {
+                    m.serving = true;
+                    board.display().show_status("serving. A for menu");
+                }
+            }
+        }
+    }
+
+    /// Answer or queue every whole request frame in `rx`. Bytes that are not a frame, or a
+    /// header longer than any request, are dropped one at a time to resync. A partial header
+    /// left by garbage can claim a length that is never filled, so while the front is
+    /// incomplete, a whole frame further on wins and the bytes before it are dropped.
+    fn menu_decode(board: &mut B, c: &Circle, m: &mut Menu<B>) {
+        loop {
+            let (kind, seq, payload, used) = match frame::decode_max(&m.rx, MAX_REQUEST_LEN) {
+                Ok((f, used)) => (f.kind, f.seq, f.payload.to_vec(), used),
+                Err(FrameError::Incomplete) => {
+                    let whole = |i: &usize| frame::decode_max(&m.rx[*i..], MAX_REQUEST_LEN).is_ok();
+                    match (1..m.rx.len()).find(whole) {
+                        Some(skip) => {
+                            m.rx.drain(..skip);
+                            continue;
+                        }
+                        None => break,
+                    }
+                }
+                Err(FrameError::Crc) => {
+                    m.rx.remove(0);
+                    continue;
+                }
+            };
+            m.rx.drain(..used);
+            if kind != KIND_REQUEST {
+                continue;
+            }
+            if !m.serving || m.pending.is_some() {
+                let busy = Response::Error {
+                    code: ErrorCode::Busy,
+                };
+                respond(&mut m.down, seq, &busy.encode());
+                continue;
+            }
+            match Request::decode(&payload).ok().as_ref().and_then(spends) {
+                Some(n) => {
+                    board
+                        .display()
+                        .show_status(&format!("spend {n} for {}? B yes . A no", c.params.name));
+                    m.pending = Some(Pending {
+                        seq,
+                        request: payload,
+                    });
+                }
+                // Identify, Remaining and anything malformed: answered now, never asked.
+                None => {
+                    let resp = serve(&mut m.pad, &mut Answer(false), &payload);
+                    respond(&mut m.down, seq, &resp);
+                }
+            }
+        }
+    }
+}
+
+/// The bytes a request would spend, or `None` if it spends nothing.
+fn spends(req: &Request) -> Option<u32> {
+    match req {
+        Request::Identify | Request::Remaining { .. } => None,
+        Request::Psk { .. } | Request::PskFor { .. } => Some(PSK_LEN),
+        Request::Spend { len, .. } | Request::SpendFor { len, .. } => Some(*len),
+    }
+}
+
+/// Send `response` back as a response frame echoing the request's `seq`.
+fn respond<L: Link>(link: &mut L, seq: u32, response: &[u8]) {
+    link.send(&frame::encode(&Frame {
+        kind: KIND_RESPONSE,
+        seq,
+        payload: response,
+    }));
+}

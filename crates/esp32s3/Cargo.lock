@@ -120,6 +120,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
+name = "cahoots-badge"
+version = "0.1.0"
+dependencies = [
+ "cahoots-core",
+ "cahoots-custodian",
+ "cahoots-hal",
+ "zeroize",
+]
+
+[[package]]
 name = "cahoots-core"
 version = "0.1.0"
 dependencies = [
@@ -135,10 +145,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "cahoots-esp32s3"
+name = "cahoots-custodian"
 version = "0.1.0"
 dependencies = [
  "cahoots-core",
+ "minicbor",
+ "zeroize",
+]
+
+[[package]]
+name = "cahoots-esp32s3"
+version = "0.1.0"
+dependencies = [
+ "cahoots-badge",
+ "cahoots-core",
+ "cahoots-custodian",
  "cahoots-hal",
  "critical-section",
  "embedded-graphics",
@@ -1290,6 +1311,26 @@ name = "micromath"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3c8dda44ff03a2f238717214da50f65d5a53b45cd213a7370424ffdb6fae815"
+
+[[package]]
+name = "minicbor"
+version = "2.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7244eafd1e09e7c4e33043881997aa6ab6dffff3ed2cee3395a278980481d6e"
+dependencies = [
+ "minicbor-derive",
+]
+
+[[package]]
+name = "minicbor-derive"
+version = "0.19.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84f5ad8dfe10176465fe33f19ecfcf08783ba66630fdb40b2e4542547c1046f0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "ml-kem"

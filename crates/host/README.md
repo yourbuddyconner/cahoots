@@ -57,3 +57,27 @@ cargo run -p cahoots-host -- pile --cards 3 --serial /dev/cu.usbmodem* --state /
 ```
 
 `pile` stacks cards on Unix sockets, bottom first, and runs `hal::pile` discovery on each: the bottom card names the circle, the top card presses B. With `--serial`, the top simulated card's up link is that serial port and a real badge is the top card; its button starts the count. `SerialLink` mirrors `SocketLink` and adds what a USB port needs: a `Ping` frame twice a second so the board can tell the laptop is there, and the board's `Log` frames printed here as `[board] ...`.
+
+## The badge crate on the laptop
+
+`badge` runs one card through `cahoots-badge`, the same code a real board runs, on a `HostBoard`: the boot screen, then a pile pass while the card has no circle, then the idle menu. `--listen` is the socket the card below connects to (the down link), and `--next` is the card above's socket (the up link). Use `-` for a side with nothing plugged in.
+
+```sh
+H=target/debug/cahoots-host
+$H badge --state /tmp/b0 --listen - --next /tmp/b1.sock --name sf --pad-len 16384 &   # bottom
+$H badge --state /tmp/b1 --listen /tmp/b1.sock --next - --name sf --pad-len 16384 &   # top
+echo B > /tmp/b1/buttons.txt     # top card, once it shows its seat: count the pile
+echo B > /tmp/b0/buttons.txt     # at "B keep this circle . A discard" on each card: keep
+echo B > /tmp/b1/buttons.txt
+```
+
+The state directory holds the files `Device` keeps (`pad.bin`, `ledger.bin`, `circle.txt`), so `status`, `send` and `recv` work on it. It also holds:
+
+| File | What it does |
+|---|---|
+| `display.png` | The screen |
+| `status.txt` | The latest status line, so a script can follow the card |
+| `buttons.txt` | Each line `A` or `B` is one press. The card reads the file and removes it. |
+| `a_down` | While this file exists, button A is held. Create it before boot to forget the circle. |
+
+`tests/badge.rs` runs two `HostBoard`s in threads over a socket, presses B by writing `buttons.txt`, and checks that both cards keep the same circle and that `Device::open` reads the same check words from each directory.

@@ -1,5 +1,6 @@
 //! The 1.54" e-paper as the badge's `Display`: the words screen in the layout the bring-up
-//! settled on, the status line by partial refresh of the footer band, and a boot screen.
+//! settled on, the status line by partial refresh of the footer band, and a screen of lines
+//! for a status of more than one line (the self-test).
 //!
 //! SPI runs at 1 MHz: the module's level shifter on jumper wires drops a 10 MHz stream.
 //! `show_qr` draws the bytes as text for now; nothing in the ceremony calls it yet.
@@ -78,9 +79,9 @@ impl Epd {
             .epd
             .set_lut(&mut self.spi, &mut self.delay, Some(RefreshLut::Quick));
         let buf = &self.fb.buffer()[y0 as usize * ROW_BYTES..y1 as usize * ROW_BYTES];
-        let _ = self
-            .epd
-            .update_partial_frame(&mut self.spi, &mut self.delay, buf, 0, y0, W, y1 - y0);
+        let _ =
+            self.epd
+                .update_partial_frame(&mut self.spi, &mut self.delay, buf, 0, y0, W, y1 - y0);
         let _ = self.epd.display_frame(&mut self.spi, &mut self.delay);
     }
 
@@ -172,7 +173,14 @@ impl Display for Epd {
         self.full();
     }
 
+    /// One line goes in the footer band. Several lines (the badge's self-test, "circle
+    /// forgotten") fill the screen instead, since the band holds one.
     fn show_status(&mut self, s: &str) {
+        if s.contains('\n') {
+            let lines: Vec<&str> = s.lines().collect();
+            self.screen("cahoots", &lines);
+            return;
+        }
         self.footer(s);
         self.band(BAND_TOP, W);
     }

@@ -34,7 +34,8 @@ Every Rust crate lives under `crates/`. The PWA lives under `web/app`.
 |---|---|---|---|
 | `crates/core` | `cahoots-core` | The protocol: parameters, commit-then-reveal ceremony, XOR combine, check words, circle ID, message codec with one-time Poly1305, spent-range ledger, spend ordering, touch-link framing. `no_std` + `alloc`. | done (M1) |
 | `crates/vectors` | `cahoots-vectors` | JSON test vectors generated from core. Every client must reproduce them. | done (M1) |
-| `crates/provider` | `cahoots-provider` | Pad provider API (`psk`, `spend`) with memory and encrypted-file backends, plus the HKDF session-key derivation. | done (S1) |
+| `crates/custodian` | `cahoots-custodian` | The `Custodian` trait (`psk`, `spend`, `remaining`), the CBOR request and response messages, and `serve`, which answers a request only when the device consents. `no_std`. | done (M4e) |
+| `crates/provider` | `cahoots-provider` | The memory and encrypted-file custodians, the HKDF session-key derivation, and the old `PadProvider` name for `Custodian`. | done (S1) |
 | `crates/hpke` | `cahoots-hpke` | HPKE `mode_psk` adapter (X25519 and X-Wing suites). | done (S1) |
 | `crates/age-plugin-cahoots` | `age-plugin-cahoots` | age plugin: recipient `cahoots:<circle>`. | done (S1), untested against the `age` CLI |
 | `crates/wireguard` | `cahoots-wireguard` | WireGuard `PresharedKey` helper and the `cahoots-wg` CLI: announce, peers, issue, accept over the feed or by paste; `--apply` runs `wg set`. | done (S1, N1); `scripts/wg-demo.sh` runs a two-host tunnel in CI |
@@ -42,6 +43,7 @@ Every Rust crate lives under `crates/`. The PWA lives under `web/app`.
 | `crates/wasm` | `cahoots-wasm` | Browser bindings: ceremony, circle, fountain-coded animated QR, QR rendering. | done (M2) |
 | `web/app` | | Offline PWA phone and laptop client, including hello words for calls. | done (M2), camera scanning untested |
 | `crates/hal` | `cahoots-hal` | HAL traits, the ceremony driver over any set of touch links (a pile, a ring, a pair), pile discovery (seat and count from the stack), SP 800-90B health tests, persistent ledger. `no_std`. | done (M4a) |
+| `crates/badge` | `cahoots-badge` | The badge crate: the `Board` trait and the badge program that runs on it. It boots, runs the ceremony, keeps the circle, and shows the words, a key as a code, or serves custodian requests. `no_std`. | done (M4e) |
 | `crates/host` | `cahoots-host` | Desktop simulator: socket Link, file PadStore, PNG Display. Four processes, each with a socket to both neighbours, run a ceremony. | done (M4a) |
 | `crates/esp32s3` | `cahoots-esp32s3` | `esp-hal` firmware for the Arduino Nano ESP32 with the 1.54" e-paper and two buttons: the four HAL traits on real hardware, the pile over USB with the laptop as the other cards. Built with the esp toolchain, outside the workspace. | in progress (M4b, first board) |
 | `crates/dabao` | | Xous app for the Baochip-1x Dabao, the V2 card. | placeholder (M4c, M5) |

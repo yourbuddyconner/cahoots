@@ -25,7 +25,7 @@
 1. A request names a circle the custodian does not hold: the response is `Error { code: UnknownCircle }` and nothing is spent. Test in Task 3.
 2. Request bytes are not valid CBOR, or valid CBOR of the wrong shape: the response is `Error { code: Malformed }`, never a panic. Test in Task 3.
 3. Consent is refused: the response is `Error { code: Denied }`, `remaining` is unchanged, and the ledger has no new record. Test in Task 3.
-4. A request frame arrives on the down link while the badge is in the ceremony or on the menu's words screen: it is answered `Busy` and the ceremony is unaffected. Test in Task 6.
+4. A request frame arrives on the down link while the badge is on the menu's words screen or any menu item other than Serve: it is answered `Busy`. A request that arrives during the pile or the ceremony is ignored, because the ring owns the links then, and the laptop retries. The ceremony is unaffected. Test in Task 6.
 5. The menu's "key as code" spends exactly 32 bytes once per B press and shows them with `show_qr`; a second B press spends a different range. Test in Task 6.
 
 ---
