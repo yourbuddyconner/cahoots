@@ -9,14 +9,17 @@
 //! the key exchange.
 //!
 //! Each member's KEM public key is bound into its commitment, so someone spliced into the
-//! cable cannot substitute keys without the reveal failing its commitment check.
+//! cable cannot substitute keys without the reveal failing its commitment check. The seat
+//! public key and declared tier travel in the header and are bound the same way: in the
+//! commitment, and in the content's associated data.
 //!
 //! Blob layout (all lengths fixed except the contribution):
 //!
 //! ```text
-//! version (u8 = 1) | from (u8) | pk_from (1216) | k (u8)
+//! version (u8 = 2) | from (u8) | pk_from (1216) | seat_pk (33) | tier (u8) | k (u8)
 //! k × [ to (u8) | ct (1120) | wrap (48) ]
-//! ChaCha20-Poly1305(content_key, nonce 0, aad = "cahoots/reveal/v1" || params || from || pk_from, R_from)
+//! ChaCha20-Poly1305(content_key, nonce 0,
+//!     aad = "cahoots/reveal/v1" || params || from || pk_from || seat_pk || tier, R_from)
 //! ```
 //!
 //! `wrap` is `ChaCha20-Poly1305(wrap_key, nonce 0, aad = from || to, content_key)` where
@@ -24,6 +27,7 @@
 //! info = params || from || to)`. Every key here is used exactly once, so the nonces are zero.
 
 use crate::params::CircleParams;
+use crate::seat::SeatPublic;
 use alloc::vec::Vec;
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
@@ -35,7 +39,7 @@ use x_wing::{
 };
 use zeroize::Zeroizing;
 
-pub const REVEAL_VERSION: u8 = 1;
+pub const REVEAL_VERSION: u8 = 2;
 pub const PUBLIC_KEY_LEN: usize = x_wing::ENCAPSULATION_KEY_SIZE;
 pub const KEM_SEED_LEN: usize = x_wing::DECAPSULATION_KEY_SIZE;
 pub const CIPHERTEXT_LEN: usize = x_wing::CIPHERTEXT_SIZE;
@@ -45,7 +49,9 @@ const TAG_LEN: usize = 16;
 pub const WRAP_LEN: usize = CONTENT_KEY_LEN + TAG_LEN;
 pub const CONTENT_DOMAIN: &[u8] = b"cahoots/reveal/v1";
 pub const WRAP_DOMAIN: &[u8] = b"cahoots/reveal-wrap/v1";
-const HEADER_LEN: usize = 1 + 1 + PUBLIC_KEY_LEN + 1;
+/// A seat public key in the header: a SEC1 compressed P-256 point.
+const SEAT_PUBLIC_LEN: usize = 33;
+const HEADER_LEN: usize = 1 + 1 + PUBLIC_KEY_LEN + SEAT_PUBLIC_LEN + 1 + 1;
 const ENTRY_LEN: usize = 1 + CIPHERTEXT_LEN + WRAP_LEN;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,23 +97,36 @@ fn wrap_key(params: &CircleParams, from: u8, to: u8, shared: &[u8]) -> Zeroizing
     out
 }
 
-/// The content's associated data covers the sender's public key too, so a blob whose key
-/// bytes were altered in transit fails to open instead of opening with a different key.
-fn content_aad(params: &CircleParams, from: u8, pk_from: &[u8]) -> Vec<u8> {
-    let mut aad = Vec::with_capacity(CONTENT_DOMAIN.len() + 80 + PUBLIC_KEY_LEN);
+/// The content's associated data covers the sender's public keys and tier too, so a blob
+/// whose header was altered in transit fails to open instead of opening with other values.
+fn content_aad(
+    params: &CircleParams,
+    from: u8,
+    pk_from: &[u8],
+    seat_pk: &SeatPublic,
+    tier: u8,
+) -> Vec<u8> {
+    let mut aad =
+        Vec::with_capacity(CONTENT_DOMAIN.len() + 80 + PUBLIC_KEY_LEN + SEAT_PUBLIC_LEN + 1);
     aad.extend_from_slice(CONTENT_DOMAIN);
     aad.extend_from_slice(&params.encode());
     aad.push(from);
     aad.extend_from_slice(pk_from);
+    aad.extend_from_slice(&seat_pk.0);
+    aad.push(tier);
     aad
 }
 
 /// Seal `contribution` from member `from` to every `(index, public key)` in `recipients`.
-/// `fill` supplies `randomness_len(n)` bytes in total, drawn as the layout above describes.
+/// `seat_pk` and `tier` are the sender's seat public key and declared tier, carried in the
+/// header. `fill` supplies `randomness_len(n)` bytes in total, drawn as the layout above describes.
+#[allow(clippy::too_many_arguments)]
 pub fn seal(
     params: &CircleParams,
     from: u8,
     pk_from: &[u8],
+    seat_pk: &SeatPublic,
+    tier: u8,
     recipients: &[(u8, &[u8])],
     contribution: &[u8],
     fill: &mut dyn FnMut(&mut [u8]),
@@ -129,6 +148,8 @@ pub fn seal(
     out.push(REVEAL_VERSION);
     out.push(from);
     out.extend_from_slice(pk_from);
+    out.extend_from_slice(&seat_pk.0);
+    out.push(tier);
     out.push(recipients.len() as u8);
     for ((to, _), ek) in recipients.iter().zip(&keys) {
         let mut eseed = Zeroizing::new([0u8; ENCAPS_RANDOMNESS_LEN]);
@@ -159,7 +180,7 @@ pub fn seal(
             Nonce::from_slice(&[0u8; 12]),
             Payload {
                 msg: contribution,
-                aad: &content_aad(params, from, pk_from),
+                aad: &content_aad(params, from, pk_from, seat_pk, tier),
             },
         )
         .expect("encryption cannot fail");
@@ -183,6 +204,10 @@ pub fn sender(blob: &[u8]) -> Option<u8> {
 pub struct Opened {
     pub from: u8,
     pub public_key: [u8; PUBLIC_KEY_LEN],
+    /// The sender's seat public key, as the header carries it.
+    pub seat_public: SeatPublic,
+    /// The sender's declared device tier, as the header carries it.
+    pub tier: u8,
     pub contribution: Zeroizing<Vec<u8>>,
     /// The X-Wing shared secret the sender encapsulated to us. Input to the pair key.
     pub shared: Zeroizing<[u8; 32]>,
@@ -201,6 +226,10 @@ pub fn open(
     let from = blob[1];
     let mut public_key = [0u8; PUBLIC_KEY_LEN];
     public_key.copy_from_slice(&blob[2..2 + PUBLIC_KEY_LEN]);
+    let seat_at = 2 + PUBLIC_KEY_LEN;
+    let seat_public = SeatPublic::parse(&blob[seat_at..seat_at + SEAT_PUBLIC_LEN])
+        .map_err(|_| RevealError::Malformed)?;
+    let tier = blob[seat_at + SEAT_PUBLIC_LEN];
     let k = usize::from(blob[HEADER_LEN - 1]);
     let entries_end = HEADER_LEN + k * ENTRY_LEN;
     if blob.len() < entries_end + TAG_LEN {
@@ -235,7 +264,7 @@ pub fn open(
                 Nonce::from_slice(&[0u8; 12]),
                 Payload {
                     msg: &blob[entries_end..],
-                    aad: &content_aad(params, from, &public_key),
+                    aad: &content_aad(params, from, &public_key, &seat_public, tier),
                 },
             )
             .map_err(|_| RevealError::Corrupted)?,
@@ -246,6 +275,8 @@ pub fn open(
     Ok(Opened {
         from,
         public_key,
+        seat_public,
+        tier,
         contribution,
         shared: shared_out,
     })

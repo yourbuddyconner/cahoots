@@ -15,7 +15,7 @@
 //! | kind | payload |
 //! |---|---|
 //! | `Params` | `index u8 \| CircleParams::encode()` |
-//! | `Commit` | `index u8 \| commitment (32 B) \| KEM public key (1216 B)` |
+//! | `Commit` | `index u8 \| commitment (32 B) \| KEM public key (1216 B) \| seat public key (33 B) \| tier u8` |
 //! | `Reveal` | `index u8 \| sealed reveal (see `cahoots_core::reveal`)` |
 //!
 //! Reveals are sealed to every member, so the wire never carries a contribution in the clear.
@@ -28,6 +28,7 @@ use cahoots_core::ceremony::{Ceremony, CeremonyError, CeremonyResult, Phase};
 use cahoots_core::frame::{self, FrameError};
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::{randomness_len, KEM_SEED_LEN, PUBLIC_KEY_LEN};
+use cahoots_core::seat::SeatKey;
 use zeroize::Zeroizing;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +65,10 @@ pub enum Step {
 }
 
 const MAX_MEMBERS: usize = 8;
+/// A seat public key in a `Commit` payload: SEC1 compressed P-256.
+const SEAT_PUBLIC_LEN: usize = 33;
+/// `Commit` payload after the index: commitment, KEM key, seat key, tier.
+const COMMIT_BODY_LEN: usize = 32 + PUBLIC_KEY_LEN + SEAT_PUBLIC_LEN + 1;
 
 pub struct RingCeremony<L: Link> {
     links: Vec<L>,
@@ -110,6 +115,16 @@ impl<L: Link> RingCeremony<L> {
         entropy.fill(&mut contribution).map_err(RingError::Health)?;
         let mut kem_seed = Zeroizing::new([0u8; KEM_SEED_LEN]);
         entropy.fill(kem_seed.as_mut()).map_err(RingError::Health)?;
+        // The seat seed follows the KEM seed; a seed that is not a valid scalar is redrawn.
+        let mut seat_seed = Zeroizing::new([0u8; 32]);
+        loop {
+            entropy
+                .fill(seat_seed.as_mut())
+                .map_err(RingError::Health)?;
+            if SeatKey::from_seed(&seat_seed).is_ok() {
+                break;
+            }
+        }
         let mut reveal_rand = Zeroizing::new(vec![0u8; randomness_len(params.n)]);
         entropy.fill(&mut reveal_rand).map_err(RingError::Health)?;
         let n = params.n;
@@ -119,6 +134,9 @@ impl<L: Link> RingCeremony<L> {
             index,
             core::mem::take(&mut *contribution),
             *kem_seed,
+            *seat_seed,
+            // Placeholder tier 0 until Task 6 passes the device's declared tier in.
+            0,
         )?;
         Ok(RingCeremony {
             links,
@@ -183,9 +201,11 @@ impl<L: Link> RingCeremony<L> {
         self.seen_commit[me] = true;
         let pb = self.params_bytes.clone();
         self.send(Frame::Params, self.index, &pb);
-        let mut body = Vec::with_capacity(32 + PUBLIC_KEY_LEN);
+        let mut body = Vec::with_capacity(COMMIT_BODY_LEN);
         body.extend_from_slice(&self.ceremony.my_commitment());
         body.extend_from_slice(self.ceremony.my_public_key());
+        body.extend_from_slice(&self.ceremony.my_seat_public().0);
+        body.push(self.ceremony.tier_of(self.index).expect("own tier is set"));
         self.send(Frame::Commit, self.index, &body);
     }
 
@@ -270,11 +290,20 @@ impl<L: Link> RingCeremony<L> {
                 }
             }
             k if k == Frame::Commit as u8 => {
-                if body.len() != 32 + PUBLIC_KEY_LEN {
+                if body.len() != COMMIT_BODY_LEN {
                     return Err(self.abort(RingError::Protocol));
                 }
                 let c: [u8; 32] = body[..32].try_into().expect("32 bytes");
-                if let Err(e) = self.ceremony.add_commitment(index, c, &body[32..]) {
+                let seat_at = 32 + PUBLIC_KEY_LEN;
+                let (kem_pk, seat_pk, tier) = (
+                    &body[32..seat_at],
+                    &body[seat_at..seat_at + SEAT_PUBLIC_LEN],
+                    body[COMMIT_BODY_LEN - 1],
+                );
+                if let Err(e) = self
+                    .ceremony
+                    .add_commitment(index, c, kem_pk, seat_pk, tier)
+                {
                     return Err(self.abort(RingError::Ceremony(e)));
                 }
                 if !self.seen_commit[i] {

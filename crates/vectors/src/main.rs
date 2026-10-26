@@ -30,6 +30,11 @@ fn fill(seed: u64, len: usize) -> Vec<u8> {
         .collect()
 }
 
+/// Placeholder seat seed and tier for every member until Task 4 gives each member its own
+/// seat seed and a tier.
+const SEAT_SEED: [u8; 32] = [0x11; 32];
+const TIER: u8 = 0;
+
 fn ceremony_vectors() -> Value {
     let params = CircleParams::new(3, 192, "vectors", false).unwrap();
     let contributions: Vec<Vec<u8>> = (0..3).map(|i| fill(100 + i, 192)).collect();
@@ -39,15 +44,26 @@ fn ceremony_vectors() -> Value {
     let mut devs: Vec<Ceremony> = contributions
         .iter()
         .enumerate()
-        .map(|(i, c)| Ceremony::new(params.clone(), i as u8, c.clone(), seeds[i]).unwrap())
+        .map(|(i, c)| {
+            Ceremony::new(
+                params.clone(),
+                i as u8,
+                c.clone(),
+                seeds[i],
+                SEAT_SEED,
+                TIER,
+            )
+            .unwrap()
+        })
         .collect();
+    let seat_pk = devs[0].my_seat_public();
     let commits: Vec<([u8; 32], [u8; 1216])> = devs
         .iter()
         .map(|d| (d.my_commitment(), *d.my_public_key()))
         .collect();
     for d in devs.iter_mut() {
         for (j, (c, pk)) in commits.iter().enumerate() {
-            d.add_commitment(j as u8, *c, pk).unwrap();
+            d.add_commitment(j as u8, *c, pk, &seat_pk.0, TIER).unwrap();
         }
     }
     // Sealing randomness: a deterministic stream per member, drawn in the order seal() asks.
@@ -81,9 +97,19 @@ fn ceremony_vectors() -> Value {
     assert_eq!(result.pad.as_slice(), expected.as_slice());
 
     // Mismatch abort: member 1 seals bytes that differ from its commitment, with its real keys.
-    let mut victim = Ceremony::new(params.clone(), 0, contributions[0].clone(), seeds[0]).unwrap();
+    let mut victim = Ceremony::new(
+        params.clone(),
+        0,
+        contributions[0].clone(),
+        seeds[0],
+        SEAT_SEED,
+        TIER,
+    )
+    .unwrap();
     for (j, (c, pk)) in commits.iter().enumerate() {
-        victim.add_commitment(j as u8, *c, pk).unwrap();
+        victim
+            .add_commitment(j as u8, *c, pk, &seat_pk.0, TIER)
+            .unwrap();
     }
     let mut bad = contributions[1].clone();
     bad[0] ^= 0x01;
@@ -93,17 +119,36 @@ fn ceremony_vectors() -> Value {
         buf.copy_from_slice(&rand[1][pos..pos + buf.len()]);
         pos += buf.len();
     };
-    let bad_reveal = reveal::seal(&params, 1, &commits[1].1, &recipients, &bad, &mut f)
-        .unwrap()
-        .blob;
+    let bad_reveal = reveal::seal(
+        &params,
+        1,
+        &commits[1].1,
+        &seat_pk,
+        TIER,
+        &recipients,
+        &bad,
+        &mut f,
+    )
+    .unwrap()
+    .blob;
     let err = victim.add_reveal(1, &bad_reveal).unwrap_err();
     assert_eq!(err, CeremonyError::CommitMismatch(1));
     assert_eq!(victim.phase(), Phase::Aborted);
 
     // Garbled in transit: one flipped byte opens as nothing and changes nothing.
-    let mut victim = Ceremony::new(params.clone(), 0, contributions[0].clone(), seeds[0]).unwrap();
+    let mut victim = Ceremony::new(
+        params.clone(),
+        0,
+        contributions[0].clone(),
+        seeds[0],
+        SEAT_SEED,
+        TIER,
+    )
+    .unwrap();
     for (j, (c, pk)) in commits.iter().enumerate() {
-        victim.add_commitment(j as u8, *c, pk).unwrap();
+        victim
+            .add_commitment(j as u8, *c, pk, &seat_pk.0, TIER)
+            .unwrap();
     }
     let mut garbled = reveals[1].clone();
     let last = garbled.len() - 1;
@@ -115,7 +160,7 @@ fn ceremony_vectors() -> Value {
     assert_eq!(victim.phase(), Phase::Reveal);
 
     json!({
-        "description": "Commit-then-reveal ceremony for n=3, L=192. commit_i = SHA-256(\"cahoots/commit/v1\" || params || i || pk_i || R_i), where pk_i is the X-Wing encapsulation key derived from kem_seed_i. Reveals are sealed to every other member (crates/core/src/reveal.rs): content key K_i, per recipient X-Wing encapsulation with the 64 bytes of randomness given, wrap = ChaCha20-Poly1305(HKDF-SHA256(salt \"cahoots/reveal-wrap/v1\", ikm shared, info params||from||to), nonce 0, aad from||to, K_i), content = ChaCha20-Poly1305(K_i, nonce 0, aad \"cahoots/reveal/v1\"||params||from||pk_from, R_i). pad = XOR of all R_i.",
+        "description": "Commit-then-reveal ceremony for n=3, L=192. commit_i = SHA-256(\"cahoots/commit/v2\" || params || i || pk_i || seat_pk_i || tier_i || R_i), where pk_i is the X-Wing encapsulation key derived from kem_seed_i, seat_pk_i is the 33-byte SEC1 compressed P-256 public key of the seat seed (here 0x11 repeated 32 times for every member) and tier_i is one byte (here 0). Sealed reveals are version 2: version || from || pk_from || seat_pk || tier || k || entries || content. Reveals are sealed to every other member (crates/core/src/reveal.rs): content key K_i, per recipient X-Wing encapsulation with the 64 bytes of randomness given, wrap = ChaCha20-Poly1305(HKDF-SHA256(salt \"cahoots/reveal-wrap/v1\", ikm shared, info params||from||to), nonce 0, aad from||to, K_i), content = ChaCha20-Poly1305(K_i, nonce 0, aad \"cahoots/reveal/v1\"||params||from||pk_from||seat_pk||tier, R_i). pad = XOR of all R_i.",
         "params": {
             "n": params.n, "pad_len": params.pad_len, "name": params.name, "agent_seat": params.agent_seat,
             "encoded": hex::encode(params.encode()),
@@ -153,11 +198,13 @@ fn ceremony_vectors() -> Value {
             "expected": "corrupted; phase stays reveal",
         },
         "single_commit": {
-            "description": "Standalone commitment check: commit(params, index, public_key, contribution).",
+            "description": "Standalone commitment check: commit(params, index, public_key, seat_public_key, tier, contribution).",
             "index": 0,
             "public_key": hex::encode(commits[0].1),
+            "seat_public_key": hex::encode(seat_pk.0),
+            "tier": TIER,
             "contribution": hex::encode(&contributions[0]),
-            "commitment": hex::encode(commit(&params, 0, &commits[0].1, &contributions[0])),
+            "commitment": hex::encode(commit(&params, 0, &commits[0].1, &seat_pk, TIER, &contributions[0])),
         }
     })
 }

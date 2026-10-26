@@ -22,6 +22,13 @@ pub struct SeatKey(SigningKey);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SeatPublic(pub [u8; 33]);
 
+/// Shows the public key only; the scalar never appears in debug output.
+impl core::fmt::Debug for SeatKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("SeatKey").field(&self.public()).finish()
+    }
+}
+
 impl SeatKey {
     /// Treats `seed` as the secret scalar. Fails on zero or a value not below the curve order.
     pub fn from_seed(seed: &[u8; 32]) -> Result<SeatKey, SeatError> {

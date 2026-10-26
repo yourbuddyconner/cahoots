@@ -3,6 +3,7 @@ use cahoots_core::checkwords::check_words;
 use cahoots_core::circle_id::circle_id;
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal;
+use cahoots_core::seat::{SeatKey, SeatPublic};
 
 fn params() -> CircleParams {
     CircleParams::new(3, 512, "ring", false).unwrap()
@@ -22,6 +23,19 @@ fn seed(i: u8) -> [u8; 32] {
     s
 }
 
+fn seat_seed(i: u8) -> [u8; 32] {
+    [i.wrapping_add(1); 32]
+}
+
+fn seat(i: u8) -> SeatPublic {
+    SeatKey::from_seed(&seat_seed(i)).unwrap().public()
+}
+
+/// Each member declares a different tier, so a swap between members shows.
+fn tier(i: u8) -> u8 {
+    i % 5
+}
+
 /// Deterministic randomness for sealing: a counter stream per member.
 fn filler(i: u8) -> impl FnMut(&mut [u8]) {
     let mut x = 0x9E37_79B9_7F4A_7C15u64 ^ u64::from(i);
@@ -36,17 +50,25 @@ fn filler(i: u8) -> impl FnMut(&mut [u8]) {
 }
 
 fn new(i: u8) -> Ceremony {
-    Ceremony::new(params(), i, contribution(i), seed(i)).unwrap()
+    Ceremony::new(params(), i, contribution(i), seed(i), seat_seed(i), tier(i)).unwrap()
 }
 
 fn exchange_commitments(devs: &mut [Ceremony]) {
     let commits: Vec<_> = devs
         .iter()
-        .map(|d| (d.index(), d.my_commitment(), *d.my_public_key()))
+        .map(|d| {
+            (
+                d.index(),
+                d.my_commitment(),
+                *d.my_public_key(),
+                d.my_seat_public(),
+                tier(d.index()),
+            )
+        })
         .collect();
     for d in devs.iter_mut() {
-        for (j, c, pk) in &commits {
-            d.add_commitment(*j, *c, pk).unwrap();
+        for (j, c, pk, sp, t) in &commits {
+            d.add_commitment(*j, *c, pk, &sp.0, *t).unwrap();
         }
     }
 }
@@ -142,6 +164,8 @@ fn reveal_not_for_me_is_refused() {
         &params(),
         1,
         devs[1].my_public_key(),
+        &seat(1),
+        tier(1),
         &[(2, &pk2)],
         &contribution(1),
         &mut filler(1),
@@ -167,6 +191,8 @@ fn a_validly_sealed_wrong_contribution_aborts() {
         &params(),
         1,
         devs[1].my_public_key(),
+        &seat(1),
+        tier(1),
         &recipients,
         &bad,
         &mut filler(1),
@@ -191,12 +217,18 @@ fn substituted_public_key_fails_the_commitment() {
     let mut devs: Vec<Ceremony> = (0..3).map(new).collect();
     let (_, fake_pk) = reveal::keypair(&seed(77));
     let c1 = devs[1].my_commitment();
-    devs[0].add_commitment(1, c1, &fake_pk).unwrap();
+    devs[0]
+        .add_commitment(1, c1, &fake_pk, &seat(1).0, tier(1))
+        .unwrap();
     let (c2, pk2) = (devs[2].my_commitment(), *devs[2].my_public_key());
-    devs[0].add_commitment(2, c2, &pk2).unwrap();
+    devs[0]
+        .add_commitment(2, c2, &pk2, &seat(2).0, tier(2))
+        .unwrap();
     exchange_commitments(&mut devs[1..]);
     let (c0, pk0) = (devs[0].my_commitment(), *devs[0].my_public_key());
-    devs[1].add_commitment(0, c0, &pk0).unwrap();
+    devs[1]
+        .add_commitment(0, c0, &pk0, &seat(0).0, tier(0))
+        .unwrap();
     let blob = devs[1].my_reveal(&mut filler(1)).unwrap().to_vec();
     // Member 0 cannot even open it: it was sealed to member 0's real key, which is fine,
     // but the commitment check uses the substituted key and fails.
@@ -216,7 +248,8 @@ fn late_reveal_stands_in_for_its_commitment() {
     let mut devs: Vec<Ceremony> = (0..3).map(new).collect();
     let c0 = (devs[0].my_commitment(), *devs[0].my_public_key());
     for d in devs[1..].iter_mut() {
-        d.add_commitment(0, c0.0, &c0.1).unwrap();
+        d.add_commitment(0, c0.0, &c0.1, &seat(0).0, tier(0))
+            .unwrap();
     }
     exchange_commitments(&mut devs[1..]);
     let r1 = devs[1].my_reveal(&mut filler(1)).unwrap().to_vec();
@@ -238,7 +271,8 @@ fn late_path_still_lets_the_others_finish() {
     let mut devs: Vec<Ceremony> = (0..3).map(new).collect();
     let c0 = (devs[0].my_commitment(), *devs[0].my_public_key());
     for d in devs[1..].iter_mut() {
-        d.add_commitment(0, c0.0, &c0.1).unwrap();
+        d.add_commitment(0, c0.0, &c0.1, &seat(0).0, tier(0))
+            .unwrap();
     }
     exchange_commitments(&mut devs[1..]);
     let r1 = devs[1].my_reveal(&mut filler(1)).unwrap().to_vec();
@@ -276,44 +310,61 @@ fn rejects_conflicting_duplicate_commitment_bad_index_and_bad_key() {
     let mut d = new(0);
     let other = new(1);
     let (c, pk) = (other.my_commitment(), *other.my_public_key());
-    d.add_commitment(1, c, &pk).unwrap();
+    let (sp, t) = (seat(1).0, tier(1));
+    d.add_commitment(1, c, &pk, &sp, t).unwrap();
     assert_eq!(
-        d.add_commitment(1, c, &pk),
+        d.add_commitment(1, c, &pk, &sp, t),
         Ok(()),
         "identical duplicate is a ring re-forward"
     );
     assert_eq!(
-        d.add_commitment(1, [2u8; 32], &pk).unwrap_err(),
+        d.add_commitment(1, [2u8; 32], &pk, &sp, t).unwrap_err(),
         CeremonyError::ConflictingCommit(1)
     );
     let (_, other_pk) = reveal::keypair(&seed(9));
     assert_eq!(
-        d.add_commitment(1, c, &other_pk).unwrap_err(),
+        d.add_commitment(1, c, &other_pk, &sp, t).unwrap_err(),
         CeremonyError::ConflictingCommit(1)
     );
     assert_eq!(
-        d.add_commitment(3, c, &pk).unwrap_err(),
+        d.add_commitment(3, c, &pk, &sp, t).unwrap_err(),
         CeremonyError::BadIndex(3)
     );
     let my_pk = *d.my_public_key();
     assert_eq!(
-        d.add_commitment(0, [9u8; 32], &my_pk).unwrap_err(),
+        d.add_commitment(0, [9u8; 32], &my_pk, &seat(0).0, tier(0))
+            .unwrap_err(),
         CeremonyError::ConflictingCommit(0)
     );
     assert_eq!(
-        d.add_commitment(2, c, &[0u8; 10]).unwrap_err(),
+        d.add_commitment(2, c, &[0u8; 10], &sp, t).unwrap_err(),
         CeremonyError::BadKey(2)
+    );
+    assert_eq!(
+        d.add_commitment(2, c, &pk, &[0u8; 33], t).unwrap_err(),
+        CeremonyError::BadKey(2),
+        "a seat key that does not parse"
+    );
+    assert_eq!(
+        d.add_commitment(1, c, &pk, &seat(9).0, t).unwrap_err(),
+        CeremonyError::ConflictingCommit(1),
+        "another seat key for a held commitment"
+    );
+    assert_eq!(
+        d.add_commitment(1, c, &pk, &sp, 4).unwrap_err(),
+        CeremonyError::ConflictingCommit(1),
+        "another tier for a held commitment"
     );
 }
 
 #[test]
 fn rejects_wrong_contribution_length() {
     assert_eq!(
-        Ceremony::new(params(), 0, vec![0u8; 100], seed(0)).unwrap_err(),
+        Ceremony::new(params(), 0, vec![0u8; 100], seed(0), seat_seed(0), 0).unwrap_err(),
         CeremonyError::ContributionLength
     );
     assert_eq!(
-        Ceremony::new(params(), 3, contribution(0), seed(0)).unwrap_err(),
+        Ceremony::new(params(), 3, contribution(0), seed(0), seat_seed(0), 0).unwrap_err(),
         CeremonyError::BadIndex(3)
     );
 }
@@ -328,12 +379,14 @@ fn finish_before_complete_is_an_error() {
 fn extra_source_is_xored_into_own_contribution_before_commit() {
     let base = contribution(0);
     let extra = contribution(7);
-    let d = Ceremony::with_extra_source(params(), 0, base.clone(), &extra, seed(0)).unwrap();
+    let d =
+        Ceremony::with_extra_source(params(), 0, base.clone(), &extra, seed(0), seat_seed(0), 0)
+            .unwrap();
     let mut mixed = base;
     for (m, e) in mixed.iter_mut().zip(&extra) {
         *m ^= e;
     }
-    let plain = Ceremony::new(params(), 0, mixed, seed(0)).unwrap();
+    let plain = Ceremony::new(params(), 0, mixed, seed(0), seat_seed(0), 0).unwrap();
     assert_eq!(d.my_commitment(), plain.my_commitment());
     assert_eq!(d.my_public_key(), plain.my_public_key());
 }
@@ -382,7 +435,8 @@ fn late_path_still_yields_pair_keys() {
     let mut devs: Vec<Ceremony> = (0..3).map(new).collect();
     let c0 = (devs[0].my_commitment(), *devs[0].my_public_key());
     for d in devs[1..].iter_mut() {
-        d.add_commitment(0, c0.0, &c0.1).unwrap();
+        d.add_commitment(0, c0.0, &c0.1, &seat(0).0, tier(0))
+            .unwrap();
     }
     exchange_commitments(&mut devs[1..]);
     let r1 = devs[1].my_reveal(&mut filler(1)).unwrap().to_vec();
@@ -402,5 +456,116 @@ fn late_path_still_yields_pair_keys() {
     assert_eq!(
         *results[0].pair_keys[2].as_ref().unwrap(),
         *results[2].pair_keys[0].as_ref().unwrap()
+    );
+}
+
+/// Member 1's own contribution, sealed to members 0 and 2 under the given seat key and tier.
+fn reseal_1(devs: &[Ceremony], seat_pk: &SeatPublic, t: u8) -> Vec<u8> {
+    let recipients: Vec<(u8, &[u8])> =
+        vec![(0, devs[0].my_public_key()), (2, devs[2].my_public_key())];
+    reveal::seal(
+        &params(),
+        1,
+        devs[1].my_public_key(),
+        seat_pk,
+        t,
+        &recipients,
+        &contribution(1),
+        &mut filler(1),
+    )
+    .unwrap()
+    .blob
+}
+
+#[test]
+fn commitments_record_seat_keys_and_tiers() {
+    let mut devs: Vec<Ceremony> = (0..3).map(new).collect();
+    assert_eq!(devs[0].my_seat_public(), seat(0));
+    assert_eq!(devs[0].seat_public_of(0), Some(&seat(0)));
+    assert_eq!(devs[0].tier_of(0), Some(tier(0)));
+    assert_eq!(devs[0].seat_public_of(1), None);
+    assert_eq!(devs[0].tier_of(1), None);
+    exchange_commitments(&mut devs);
+    for i in 0..3u8 {
+        assert_eq!(devs[0].seat_public_of(i), Some(&seat(i)));
+        assert_eq!(devs[0].tier_of(i), Some(tier(i)));
+    }
+    assert_eq!(devs[0].seat_public_of(3), None);
+}
+
+#[test]
+fn reveal_with_another_seat_key_than_committed_aborts_with_commit_mismatch() {
+    let mut devs: Vec<Ceremony> = (0..3).map(new).collect();
+    exchange_commitments(&mut devs);
+    let blob = reseal_1(&devs, &seat(9), tier(1));
+    assert_eq!(
+        devs[0].add_reveal(1, &blob).unwrap_err(),
+        CeremonyError::CommitMismatch(1)
+    );
+    assert_eq!(devs[0].phase(), Phase::Aborted);
+}
+
+#[test]
+fn reveal_with_another_tier_than_committed_aborts() {
+    let mut devs: Vec<Ceremony> = (0..3).map(new).collect();
+    exchange_commitments(&mut devs);
+    let blob = reseal_1(&devs, &seat(1), tier(1) + 1);
+    assert_eq!(
+        devs[0].add_reveal(1, &blob).unwrap_err(),
+        CeremonyError::CommitMismatch(1)
+    );
+    assert_eq!(devs[0].phase(), Phase::Aborted);
+}
+
+#[test]
+fn a_late_reveal_stands_in_and_records_seat_key_and_tier() {
+    let mut devs: Vec<Ceremony> = (0..3).map(new).collect();
+    let c0 = (devs[0].my_commitment(), *devs[0].my_public_key());
+    for d in devs[1..].iter_mut() {
+        d.add_commitment(0, c0.0, &c0.1, &seat(0).0, tier(0))
+            .unwrap();
+    }
+    exchange_commitments(&mut devs[1..]);
+    let r2 = devs[2].my_reveal(&mut filler(2)).unwrap().to_vec();
+    assert_eq!(devs[0].seat_public_of(2), None);
+    devs[0].add_reveal(2, &r2).unwrap();
+    assert_eq!(devs[0].seat_public_of(2), Some(&seat(2)));
+    assert_eq!(devs[0].tier_of(2), Some(tier(2)));
+    // The stand-in is the real commitment: the real one arriving later is a duplicate.
+    let (c2, pk2) = (devs[2].my_commitment(), *devs[2].my_public_key());
+    devs[0]
+        .add_commitment(2, c2, &pk2, &seat(2).0, tier(2))
+        .unwrap();
+}
+
+#[test]
+fn bad_seed_is_reported() {
+    for bad in [[0u8; 32], [0xFFu8; 32]] {
+        assert_eq!(
+            Ceremony::new(params(), 0, contribution(0), seed(0), bad, 0).unwrap_err(),
+            CeremonyError::BadSeed
+        );
+    }
+}
+
+#[test]
+fn tier_above_4_is_refused() {
+    assert_eq!(
+        Ceremony::new(params(), 0, contribution(0), seed(0), seat_seed(0), 5).unwrap_err(),
+        CeremonyError::BadTier
+    );
+    Ceremony::new(params(), 0, contribution(0), seed(0), seat_seed(0), 4).unwrap();
+    let mut d = new(0);
+    let other = new(1);
+    assert_eq!(
+        d.add_commitment(
+            1,
+            other.my_commitment(),
+            other.my_public_key(),
+            &seat(1).0,
+            5
+        )
+        .unwrap_err(),
+        CeremonyError::BadTier
     );
 }

@@ -1,7 +1,8 @@
 //! The ceremony state machine. Transport-agnostic: the caller feeds commitments and sealed
 //! reveals from the ring (devices) or animated QR (phones).
 //!
-//! Commitments are public: a hash plus the member's KEM public key. Reveals are sealed to
+//! Commitments are public: a hash plus the member's KEM public key, seat public key, and
+//! declared device tier. Reveals are sealed to
 //! every other member (see [`crate::reveal`]), so the link never carries a contribution in
 //! the clear. The pad is the XOR of the contributions and never depends on the key exchange.
 
@@ -12,6 +13,7 @@ use crate::commit::{commit, verify_commit, Commitment};
 use crate::pairwise::pair_key;
 use crate::params::CircleParams;
 use crate::reveal::{self, RevealError, KEM_SEED_LEN, PUBLIC_KEY_LEN};
+use crate::seat::{SeatKey, SeatPublic};
 use alloc::vec;
 use alloc::vec::Vec;
 use x_wing::DecapsulationKey;
@@ -33,8 +35,12 @@ pub enum CeremonyError {
     BadIndex(u8),
     ContributionLength,
     WrongPhase,
-    /// A commitment or public key that does not parse.
+    /// A commitment, KEM public key, or seat public key that does not parse.
     BadKey(u8),
+    /// The seat seed is zero or not below the curve order; draw another.
+    BadSeed,
+    /// A declared device tier outside 0 to 4.
+    BadTier,
     /// A second, different commitment arrived for this member.
     ConflictingCommit(u8),
     /// A sealed reveal that failed to open: garbled in transit, or not addressed to us.
@@ -63,8 +69,13 @@ pub struct Ceremony {
     contribution: Zeroizing<Vec<u8>>,
     dk: DecapsulationKey,
     pk: [u8; PUBLIC_KEY_LEN],
+    seat_key: SeatKey,
+    tier: u8,
     commitments: Vec<Option<Commitment>>,
     public_keys: Vec<Option<[u8; PUBLIC_KEY_LEN]>>,
+    /// Seat public keys and declared tiers, stored with each member's commitment.
+    seat_publics: Vec<Option<SeatPublic>>,
+    tiers: Vec<Option<u8>>,
     /// Running XOR of verified reveals. Individual `R_j` are never stored for long.
     pad: Zeroizing<Vec<u8>>,
     revealed: Vec<bool>,
@@ -81,11 +92,15 @@ pub struct Ceremony {
 impl Ceremony {
     /// `contribution` is `L` bytes from the device's randomness. `kem_seed` is 32 more bytes
     /// from the same source; it derives the keypair other members seal their reveals to.
+    /// `seat_seed` is 32 more; it is the seat's signing key. `tier` is the device's declared
+    /// tier, 0 to 4.
     pub fn new(
         params: CircleParams,
         index: u8,
         contribution: Vec<u8>,
         kem_seed: [u8; KEM_SEED_LEN],
+        seat_seed: [u8; 32],
+        tier: u8,
     ) -> Result<Self, CeremonyError> {
         if index >= params.n {
             return Err(CeremonyError::BadIndex(index));
@@ -93,13 +108,20 @@ impl Ceremony {
         if contribution.len() != params.pad_len as usize {
             return Err(CeremonyError::ContributionLength);
         }
+        check_tier(tier)?;
+        let seat_key = SeatKey::from_seed(&seat_seed).map_err(|_| CeremonyError::BadSeed)?;
+        let seat_public = seat_key.public();
         let n = usize::from(params.n);
         let (dk, pk) = reveal::keypair(&kem_seed);
-        let my_commit = commit(&params, index, &pk, &contribution);
+        let my_commit = commit(&params, index, &pk, &seat_public, tier, &contribution);
         let mut commitments = vec![None; n];
         commitments[usize::from(index)] = Some(my_commit);
         let mut public_keys = vec![None; n];
         public_keys[usize::from(index)] = Some(pk);
+        let mut seat_publics = vec![None; n];
+        seat_publics[usize::from(index)] = Some(seat_public);
+        let mut tiers = vec![None; n];
+        tiers[usize::from(index)] = Some(tier);
         // Our own contribution is folded in from the start.
         let mut revealed = vec![false; n];
         revealed[usize::from(index)] = true;
@@ -110,8 +132,12 @@ impl Ceremony {
             contribution: Zeroizing::new(contribution),
             dk,
             pk,
+            seat_key,
+            tier,
             commitments,
             public_keys,
+            seat_publics,
+            tiers,
             revealed,
             pending: Vec::new(),
             sealed: None,
@@ -129,9 +155,11 @@ impl Ceremony {
         mut contribution: Vec<u8>,
         extra: &[u8],
         kem_seed: [u8; KEM_SEED_LEN],
+        seat_seed: [u8; 32],
+        tier: u8,
     ) -> Result<Self, CeremonyError> {
         combine_into(&mut contribution, extra).map_err(|_| CeremonyError::ContributionLength)?;
-        Self::new(params, index, contribution, kem_seed)
+        Self::new(params, index, contribution, kem_seed, seat_seed, tier)
     }
 
     pub fn phase(&self) -> Phase {
@@ -151,6 +179,11 @@ impl Ceremony {
     /// The KEM public key other members seal their reveals to. Public; travels with the commitment.
     pub fn my_public_key(&self) -> &[u8; PUBLIC_KEY_LEN] {
         &self.pk
+    }
+
+    /// Our seat public key. Public; travels with the commitment.
+    pub fn my_seat_public(&self) -> SeatPublic {
+        self.seat_key.public()
     }
 
     /// Random bytes `my_reveal` needs the first time it is called.
@@ -181,6 +214,8 @@ impl Ceremony {
                 &self.params,
                 self.index,
                 &self.pk,
+                &self.seat_publics[usize::from(self.index)].expect("own seat key is set"),
+                self.tier,
                 &recipients,
                 &self.contribution,
                 fill,
@@ -213,11 +248,25 @@ impl Ceremony {
         self.public_keys.get(usize::from(index))?.as_ref()
     }
 
+    /// Seat public key held for a member, once its commitment (or a late reveal) is in.
+    pub fn seat_public_of(&self, index: u8) -> Option<&SeatPublic> {
+        self.seat_publics.get(usize::from(index))?.as_ref()
+    }
+
+    /// Declared device tier held for a member, once its commitment (or a late reveal) is in.
+    pub fn tier_of(&self, index: u8) -> Option<u8> {
+        *self.tiers.get(usize::from(index))?
+    }
+
+    /// A member's commitment with the KEM public key, seat public key, and declared tier it
+    /// was made over.
     pub fn add_commitment(
         &mut self,
         from: u8,
         c: Commitment,
-        public_key: &[u8],
+        kem_pk: &[u8],
+        seat_pk: &[u8],
+        tier: u8,
     ) -> Result<(), CeremonyError> {
         if self.phase == Phase::Aborted {
             return Err(CeremonyError::Aborted);
@@ -225,10 +274,12 @@ impl Ceremony {
         if from >= self.params.n {
             return Err(CeremonyError::BadIndex(from));
         }
-        reveal::parse_public_key(public_key).map_err(|_| CeremonyError::BadKey(from))?;
+        reveal::parse_public_key(kem_pk).map_err(|_| CeremonyError::BadKey(from))?;
+        let seat_public = SeatPublic::parse(seat_pk).map_err(|_| CeremonyError::BadKey(from))?;
+        check_tier(tier)?;
         let mut pk = [0u8; PUBLIC_KEY_LEN];
-        pk.copy_from_slice(public_key);
-        self.store_commitment(from, c, pk)?;
+        pk.copy_from_slice(kem_pk);
+        self.store_commitment(from, c, pk, seat_public, tier)?;
         self.advance_if_all_committed();
         Ok(())
     }
@@ -238,14 +289,25 @@ impl Ceremony {
         from: u8,
         c: Commitment,
         pk: [u8; PUBLIC_KEY_LEN],
+        seat_public: SeatPublic,
+        tier: u8,
     ) -> Result<(), CeremonyError> {
         let i = usize::from(from);
-        match (&self.commitments[i], &self.public_keys[i]) {
-            (Some(existing), Some(existing_pk)) if *existing == c && *existing_pk == pk => {}
-            (Some(_), _) => return Err(CeremonyError::ConflictingCommit(from)),
-            (None, _) => {
+        match self.commitments[i] {
+            Some(existing) => {
+                let same = existing == c
+                    && self.public_keys[i] == Some(pk)
+                    && self.seat_publics[i] == Some(seat_public)
+                    && self.tiers[i] == Some(tier);
+                if !same {
+                    return Err(CeremonyError::ConflictingCommit(from));
+                }
+            }
+            None => {
                 self.commitments[i] = Some(c);
                 self.public_keys[i] = Some(pk);
+                self.seat_publics[i] = Some(seat_public);
+                self.tiers[i] = Some(tier);
             }
         }
         Ok(())
@@ -285,7 +347,7 @@ impl Ceremony {
     /// Open a sealed reveal from `from` and fold it in.
     ///
     /// Before every commitment is held, a reveal may stand in for its own commitment: the
-    /// commitment is derived from the opened contribution and key. That is safe for the
+    /// commitment is derived from the opened contribution, KEM key, seat key, and tier. That is safe for the
     /// receiver because its own contribution was fixed before it showed anyone anything.
     /// Our own reveal is a no-op. A re-forwarded reveal after completion is still verified.
     pub fn add_reveal(&mut self, from: u8, blob: &[u8]) -> Result<(), CeremonyError> {
@@ -308,20 +370,38 @@ impl Ceremony {
             }
         };
         let i = usize::from(from);
-        self.received[i] = Some(opened.shared.clone());
         match self.commitments[i] {
             Some(expected) => {
+                // Verified against the reveal's own seat key and tier: a reveal that carries
+                // another seat key or tier than was committed does not match.
                 let pk = self.public_keys[i].expect("key stored with commitment");
-                if !verify_commit(&self.params, from, &pk, &opened.contribution, &expected) {
+                if !verify_commit(
+                    &self.params,
+                    from,
+                    &pk,
+                    &opened.seat_public,
+                    opened.tier,
+                    &opened.contribution,
+                    &expected,
+                ) {
                     self.abort();
                     return Err(CeremonyError::CommitMismatch(from));
                 }
             }
             None => {
-                let c = commit(&self.params, from, &opened.public_key, &opened.contribution);
-                self.store_commitment(from, c, opened.public_key)?;
+                check_tier(opened.tier)?;
+                let c = commit(
+                    &self.params,
+                    from,
+                    &opened.public_key,
+                    &opened.seat_public,
+                    opened.tier,
+                    &opened.contribution,
+                );
+                self.store_commitment(from, c, opened.public_key, opened.seat_public, opened.tier)?;
             }
         }
+        self.received[i] = Some(opened.shared.clone());
         if self.phase == Phase::Commit {
             if !self.pending.iter().any(|(j, _)| *j == from) {
                 self.pending.push((from, opened.contribution));
@@ -364,5 +444,13 @@ impl Ceremony {
             pair_keys,
         })
         // `self.contribution` and `self.dk` are wiped on drop here.
+    }
+}
+
+fn check_tier(tier: u8) -> Result<(), CeremonyError> {
+    if tier <= 4 {
+        Ok(())
+    } else {
+        Err(CeremonyError::BadTier)
     }
 }

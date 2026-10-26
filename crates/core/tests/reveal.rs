@@ -1,5 +1,8 @@
 use cahoots_core::params::CircleParams;
-use cahoots_core::reveal::{self, RevealError, CIPHERTEXT_LEN, PUBLIC_KEY_LEN, WRAP_LEN};
+use cahoots_core::reveal::{
+    self, RevealError, CIPHERTEXT_LEN, PUBLIC_KEY_LEN, REVEAL_VERSION, WRAP_LEN,
+};
+use cahoots_core::seat::{SeatKey, SeatPublic};
 
 fn params() -> CircleParams {
     CircleParams::new(4, 256, "seal", false).unwrap()
@@ -7,6 +10,12 @@ fn params() -> CircleParams {
 
 fn seed(i: u8) -> [u8; 32] {
     [i; 32]
+}
+
+fn seat(i: u8) -> SeatPublic {
+    SeatKey::from_seed(&[i.wrapping_add(1); 32])
+        .unwrap()
+        .public()
 }
 
 fn filler(tag: u8) -> impl FnMut(&mut [u8]) {
@@ -48,13 +57,16 @@ fn every_recipient_opens_and_nobody_else() {
         &params(),
         1,
         &keys[1].1,
+        &seat(1),
+        3,
         &recipients,
         &contribution,
         &mut filler(1),
     )
     .unwrap()
     .blob;
-    let expected_len = 1 + 1 + PUBLIC_KEY_LEN + 1 + 3 * (1 + CIPHERTEXT_LEN + WRAP_LEN) + 256 + 16;
+    let expected_len =
+        1 + 1 + PUBLIC_KEY_LEN + 33 + 1 + 1 + 3 * (1 + CIPHERTEXT_LEN + WRAP_LEN) + 256 + 16;
     assert_eq!(blob.len(), expected_len);
     assert_eq!(reveal::sender(&blob), Some(1));
     for &j in &[0u8, 2, 3] {
@@ -84,6 +96,8 @@ fn any_flipped_byte_is_corrupted_not_a_different_contribution() {
         &CircleParams::new(2, 256, "seal", false).unwrap(),
         1,
         &keys[1].1,
+        &seat(1),
+        3,
         &recipients,
         &contribution,
         &mut filler(2),
@@ -124,6 +138,92 @@ fn randomness_budget_matches_what_seal_draws() {
         drawn += buf.len();
         buf.fill(0x42);
     };
-    reveal::seal(&params(), 0, &keys[0].1, &recipients, &[0u8; 256], &mut f).unwrap();
+    reveal::seal(
+        &params(),
+        0,
+        &keys[0].1,
+        &seat(0),
+        0,
+        &recipients,
+        &[0u8; 256],
+        &mut f,
+    )
+    .unwrap();
     assert_eq!(drawn, reveal::randomness_len(4));
+}
+
+fn sealed_from_1(
+    tier: u8,
+) -> (
+    Vec<(x_wing::DecapsulationKey, [u8; PUBLIC_KEY_LEN])>,
+    Vec<u8>,
+) {
+    let keys: Vec<_> = (0..4u8).map(|i| reveal::keypair(&seed(i))).collect();
+    let recipients: Vec<(u8, &[u8])> = [0u8, 2, 3]
+        .iter()
+        .map(|&j| (j, keys[j as usize].1.as_slice()))
+        .collect();
+    let blob = reveal::seal(
+        &params(),
+        1,
+        &keys[1].1,
+        &seat(1),
+        tier,
+        &recipients,
+        &[0x5Au8; 256],
+        &mut filler(5),
+    )
+    .unwrap()
+    .blob;
+    (keys, blob)
+}
+
+#[test]
+fn header_carries_seat_key_and_tier() {
+    assert_eq!(REVEAL_VERSION, 2);
+    let (_, blob) = sealed_from_1(4);
+    assert_eq!(blob[0], 2);
+    assert_eq!(blob[1], 1);
+    let at = 2 + PUBLIC_KEY_LEN;
+    assert_eq!(&blob[at..at + 33], &seat(1).0[..]);
+    assert_eq!(blob[at + 33], 4, "tier");
+    assert_eq!(blob[at + 34], 3, "k");
+}
+
+#[test]
+fn opened_reports_them() {
+    let (keys, blob) = sealed_from_1(2);
+    let o = reveal::open(&params(), 0, &keys[0].0, &blob).unwrap();
+    assert_eq!(o.from, 1);
+    assert_eq!(o.seat_public, seat(1));
+    assert_eq!(o.tier, 2);
+}
+
+#[test]
+fn a_changed_tier_in_the_header_fails_to_open() {
+    let (keys, blob) = sealed_from_1(2);
+    let mut bad = blob.clone();
+    bad[2 + PUBLIC_KEY_LEN + 33] = 3;
+    assert_eq!(
+        reveal::open(&params(), 0, &keys[0].0, &bad).unwrap_err(),
+        RevealError::Corrupted
+    );
+    // Another valid seat key in the header is also covered by the AAD.
+    let mut swapped = blob.clone();
+    swapped[2 + PUBLIC_KEY_LEN..2 + PUBLIC_KEY_LEN + 33].copy_from_slice(&seat(7).0);
+    assert_eq!(
+        reveal::open(&params(), 0, &keys[0].0, &swapped).unwrap_err(),
+        RevealError::Corrupted
+    );
+}
+
+#[test]
+fn a_seat_key_that_does_not_parse_is_malformed() {
+    let (keys, blob) = sealed_from_1(0);
+    let mut bad = blob.clone();
+    bad[2 + PUBLIC_KEY_LEN] = 0x05;
+    assert_eq!(
+        reveal::open(&params(), 0, &keys[0].0, &bad).unwrap_err(),
+        RevealError::Malformed
+    );
 }

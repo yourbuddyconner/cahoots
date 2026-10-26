@@ -14,6 +14,7 @@ use cahoots_core::pad::{self, MemPadStorage, Pad, PadError, PadStorage};
 use cahoots_core::pairwise;
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::PUBLIC_KEY_LEN;
+use cahoots_core::seat::SeatKey;
 use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
 use wasm_bindgen::prelude::*;
 use zeroize::Zeroizing;
@@ -116,11 +117,19 @@ fn ceremony_err(e: CeremonyError) -> String {
         CeremonyError::WrongPhase => "wrong-phase".into(),
         CeremonyError::ConflictingCommit(i) => format!("conflicting-commit:{i}"),
         CeremonyError::BadKey(i) => format!("bad-key:{i}"),
+        CeremonyError::BadSeed => "bad-seed".into(),
+        CeremonyError::BadTier => "bad-tier".into(),
         CeremonyError::Corrupted(i) => format!("corrupted:{i}"),
         CeremonyError::CommitMismatch(i) => format!("commit-mismatch:{i}"),
         CeremonyError::Aborted => "aborted".into(),
     }
 }
+
+/// Placeholder seat seed and tier until Task 9 takes a seat seed and a tier from the app.
+/// Every member uses the same seed, so a commitment from another member carries no seat key
+/// on the wire yet and `add_commitment` rebuilds it from this seed.
+const PLACEHOLDER_SEAT_SEED: [u8; 32] = [0x11; 32];
+const PLACEHOLDER_TIER: u8 = 0;
 
 fn params_err(e: cahoots_core::params::ParamsError) -> String {
     format!("params:{e:?}").to_lowercase()
@@ -154,8 +163,23 @@ impl WasmCeremony {
             .try_into()
             .map_err(|_| "kem-seed-length".to_string())?;
         let inner = match extra {
-            Some(x) => Ceremony::with_extra_source(params, index, contribution.to_vec(), &x, seed),
-            None => Ceremony::new(params, index, contribution.to_vec(), seed),
+            Some(x) => Ceremony::with_extra_source(
+                params,
+                index,
+                contribution.to_vec(),
+                &x,
+                seed,
+                PLACEHOLDER_SEAT_SEED,
+                PLACEHOLDER_TIER,
+            ),
+            None => Ceremony::new(
+                params,
+                index,
+                contribution.to_vec(),
+                seed,
+                PLACEHOLDER_SEAT_SEED,
+                PLACEHOLDER_TIER,
+            ),
         }
         .map_err(ceremony_err)?;
         Ok(WasmCeremony { inner })
@@ -193,8 +217,12 @@ impl WasmCeremony {
             return Err("commitment-length".to_string());
         }
         let c: [u8; 32] = commitment[..32].try_into().expect("32 bytes");
+        // Task 9 carries the seat key and tier in the commitment; until then, the placeholder.
+        let seat_pk = SeatKey::from_seed(&PLACEHOLDER_SEAT_SEED)
+            .expect("placeholder seed is a valid scalar")
+            .public();
         self.inner
-            .add_commitment(from, c, &commitment[32..])
+            .add_commitment(from, c, &commitment[32..], &seat_pk.0, PLACEHOLDER_TIER)
             .map_err(ceremony_err)
     }
 

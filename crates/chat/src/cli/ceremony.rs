@@ -32,18 +32,22 @@ pub fn local_ceremony(
         getrandom::getrandom(&mut r).map_err(|e| StoreError::Io(e.to_string()))?;
         let mut seed = Zeroizing::new([0u8; 32]);
         getrandom::getrandom(seed.as_mut()).map_err(|e| StoreError::Io(e.to_string()))?;
+        let mut seat_seed = Zeroizing::new([0u8; 32]);
+        getrandom::getrandom(seat_seed.as_mut()).map_err(|e| StoreError::Io(e.to_string()))?;
         devs.push(
-            Ceremony::new(params.clone(), i, r.to_vec(), *seed)
+            // Tier 0: these simulated members are software only. No task in the seats plan
+            // changes this; Task 3 drives the attest phase here.
+            Ceremony::new(params.clone(), i, r.to_vec(), *seed, *seat_seed, 0)
                 .map_err(|e| StoreError::Format(std::format!("ceremony: {e:?}")))?,
         );
     }
     let commits: Vec<_> = devs
         .iter()
-        .map(|d| (d.my_commitment(), *d.my_public_key()))
+        .map(|d| (d.my_commitment(), *d.my_public_key(), d.my_seat_public()))
         .collect();
     for d in devs.iter_mut() {
-        for (j, (c, pk)) in commits.iter().enumerate() {
-            d.add_commitment(j as u8, *c, pk)
+        for (j, (c, pk, sp)) in commits.iter().enumerate() {
+            d.add_commitment(j as u8, *c, pk, &sp.0, 0)
                 .map_err(|e| StoreError::Format(std::format!("commit: {e:?}")))?;
         }
     }
