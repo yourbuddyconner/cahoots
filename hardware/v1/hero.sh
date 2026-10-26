@@ -1,5 +1,5 @@
 #!/bin/sh
-# Angled renders of both sides, composed into hero.png. Needs the repo's video/ node_modules (Playwright + Chrome).
+# Angled renders of both sides, composed into hero.png. Needs the repo's web/ node_modules (npm install in web/; Playwright + Chrome).
 set -e
 cd "$(dirname "$0")"
 CLI=/Applications/KiCad.app/Contents/MacOS/kicad-cli
@@ -15,7 +15,7 @@ cat > "$T/index.html" <<HTML
 <div class="brand"><svg viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#1B2228"/><circle cx="32" cy="32" r="22" fill="none" stroke="#C8783C" stroke-width="3"/><circle cx="32" cy="32" r="13" fill="none" stroke="#E8E4DA" stroke-width="3"/><circle cx="32" cy="32" r="4" fill="#F2B544"/></svg><span>Cahoots</span></div><div class="sub">Badge · V1</div></div>
 HTML
 HERO="$(pwd)/hero.png"
-(cd ../../video && node -e '
+(cd ../../web && node -e '
 const { chromium } = require("playwright");
 (async () => { const b = await chromium.launch({ channel: "chrome" }); const p = await b.newPage({ viewport: { width: 2400, height: 1350 } });
   await p.goto("file://" + process.argv[1] + "/index.html"); await p.waitForTimeout(1500); await p.evaluate(() => document.fonts.ready);

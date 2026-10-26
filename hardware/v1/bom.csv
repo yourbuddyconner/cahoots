@@ -7,6 +7,8 @@ FPC 24P 0.5mm bottom contact,J1,Hirose_FH12-24S-0.5SH_1x24-1MP_P0.50mm_Horizonta
 "UP port, JST-SH 4",J2,JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal,C160404,JST SM04B-SRSS-TB
 "DN port, JST-SH 4",J3,JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal,C160404,JST SM04B-SRSS-TB
 "UP, magnetic pogo pins",J4,Pogo_MG005_1x05,,"Adafruit 5413 pair, pin half"
+"Qwiic / STEMMA QT, JST-SH 4",J5,JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal,C160404,JST SM04B-SRSS-TB
+"spare GPIO, 2x5",J6,PinHeader_2x05_P2.54mm_Vertical,,any 2x5 2.54 mm header
 47uH 500mA,L1,L_Changjiang_FNR4030S,,FNR4030S470MT (verify)
 AO3400A,Q1,SOT-23,C20917,"(Si1308EDL in the reference; 30 V, 5.7 A)"
 1M,R1,R_0603_1608Metric,C22935,

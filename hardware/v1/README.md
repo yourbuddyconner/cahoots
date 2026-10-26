@@ -53,7 +53,9 @@ Edit `design.py`, never the generated files: the next run overwrites them.
 
 **Buttons.** A is next, B is confirm, each to ground on the chip's pull-ups.
 
-**Pile links.** Badges stack face to face. J4 at the top end of the front is the pin half of an Adafruit 5413 magnetic connector (Weilichuang MG005): five pogo pins on 2.54 mm, a magnet at each end, 2 A rated, 0.9 mm stroke, standing on the board with its pins up through a window in the lid, 1.2 mm proud of the top. The pad half is not on the board: it sits face down in a window in the tray floor, flush with the outside, and a short JST-SH pigtail wires it to the DN socket J3 (its pin 1 to J3 pin 1, pin 2 to J3 pin 3, pin 4 to J3 pin 4). Stack two badges and the lower one's pins meet the upper one's pads, pin for pin, the magnets holding them; pins 1 and 5 are ground, 2 and 4 the UART, 3 spare. J2 and J3 are JST-SH 4-pin sockets at the bottom edge, UP and DN, for a cable to a badge on the bench or a laptop; a straight cable works because TX and RX are crossed between the two. There is no detect wire: a connected peer's TX holds our RX high, and the firmware keeps a pull-down on each RX. UP is UART0, DN is UART1.
+**Peripherals.** J5 at the bottom centre of the front is a Qwiic (STEMMA QT) socket, the same JST-SH 4-pin part as the pile ports, in the Qwiic pin order: 1 GND, 2 3V3, 3 SDA, 4 SCL, on the Pico's I2C0 (GP8 and GP9). Any Qwiic board plugs in with its own cable. J6 on the back, between the power switch and the cell, is a 2x5 2.54 mm header: 3V3, GND and eight of the Pico's spare GPIO, for whatever a firmware fork needs to drive. Nothing else on the board uses those pins.
+
+**Pile links.** Badges stack face to face. J4 at the top end of the front is the pin half of an Adafruit 5413 magnetic connector (Weilichuang MG005): five pogo pins on 2.54 mm, a magnet at each end, 2 A rated, 0.9 mm stroke, standing on the board with its pins up through a window in the lid, 1.2 mm proud of the top. The pad half is not on the board: it sits face down in a window in the tray floor, flush with the outside, and a short JST-SH pigtail wires it to the DN socket J3 (its pin 1 to J3 pin 1, pin 2 to J3 pin 3, pin 4 to J3 pin 4). Stack two badges and the lower one's pins meet the upper one's pads, pin for pin, the magnets holding them; pins 1 and 5 are ground, 2 and 4 the UART, 3 spare. Pin 3 carries no power: feeding one badge's regulator from another's is a question for V2, and two UART lines and ground are the pile. J2 and J3 are JST-SH 4-pin sockets at the bottom edge, UP and DN, for a cable to a badge on the bench or a laptop; a straight cable works because TX and RX are crossed between the two. There is no detect wire: a connected peer's TX holds our RX high, and the firmware keeps a pull-down on each RX. UP is UART0, DN is UART1.
 
 ## Pin map
 
@@ -67,6 +69,11 @@ Edit `design.py`, never the generated files: the next run overwrites them.
 | EPD_BUSY | GP21 | 27 | BUSY |
 | BTN_A | GP14 | 19 | switch A to GND |
 | BTN_B | GP15 | 20 | switch B to GND |
+| I2C_SDA | GP8 | 11 | J5 pin 3 (Qwiic SDA) |
+| I2C_SCL | GP9 | 12 | J5 pin 4 (Qwiic SCL) |
+| GP6, GP7 | GP6, GP7 | 9, 10 | J6 pins 3, 4 |
+| GP10, GP11, GP12, GP13 | GP10 to GP13 | 14, 15, 16, 17 | J6 pins 5, 6, 7, 8 |
+| GP22, GP26 | GP22, GP26 | 29, 31 | J6 pins 9, 10 |
 | UP_TX | GP0 | 1 | J4 pin 2, J2 pin 3 |
 | UP_RX | GP1 | 2 | J4 pin 4, J2 pin 4; pull-down, high means a peer |
 | DN_RX | GP5 | 7 | J3 pin 3, and through the pigtail the floor pad 2; pull-down, high means a peer |

@@ -71,6 +71,8 @@ Use a plain Pico 2 (RP2350, no wireless). The Pico 2 W works for tinkering, but 
 | DC | data / command | GP16 | 21 |
 | RST | reset | GP20 | 26 |
 | BUSY | busy, high while the panel refreshes | GP21 | 27 |
+| Qwiic SDA (optional) | I2C0 data | GP8 | 11 |
+| Qwiic SCL (optional) | I2C0 clock | GP9 | 12 |
 
 | Button | Pico GPIO | Physical pin | Meaning |
 |---|---|---|---|
@@ -80,6 +82,8 @@ Use a plain Pico 2 (RP2350, no wireless). The Pico 2 W works for tinkering, but 
 Each button goes between its GPIO and a GND pin. The firmware enables the pull-ups.
 
 Physical pin numbers count from pin 1 at the USB end, down the left column with the USB at the top and the component side up, then up the right column. GP18 to GP21 and the two button pins sit together on the right column, so the whole build takes one short run of jumpers.
+
+Any Qwiic or STEMMA QT board plugs into V1's socket, and on the breadboard into GP8 and GP9 with 3V3 and GND, so a peripheral tried here works on V1 unchanged.
 
 Two Picos can also form a pile over UART, which is what V1's connectors carry. The upper board's UART0 (GP0 TX, pin 1; GP1 RX, pin 2) is its link down. The lower board's UART1 (GP4 TX, pin 6; GP5 RX, pin 7) is its link up. Cross them: upper GP0 to lower GP5, upper GP1 to lower GP4, and GND to GND. On V1 the same signals run through the pogo pair and the JST-SH sockets.
 
