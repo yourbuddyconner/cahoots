@@ -8,5 +8,5 @@ extern crate alloc;
 pub mod badge;
 pub mod board;
 
-pub use badge::Badge;
+pub use badge::{Badge, Step};
 pub use board::{Board, BoardError, Circle};

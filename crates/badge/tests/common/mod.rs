@@ -6,7 +6,9 @@ use cahoots_core::params::CircleParams;
 use cahoots_hal::health::{HealthTests, Tested};
 use cahoots_hal::ledger::RecordStore;
 use cahoots_hal::{Display, Entropy, EraseError, HealthError, Link, PadStore, StoreError};
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
+use std::rc::Rc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Button {
@@ -77,27 +79,58 @@ impl RecordStore for VecRecords {
     }
 }
 
-/// One end of an in-memory link; `peer_present` is a flag.
-#[derive(Default)]
+/// One end of an in-memory cable. `tx` is the other end's `rx`, and both ends share the
+/// detect line, so `peer_present` is true on both ends of a cable.
 pub struct FakeLink {
-    pub inbox: VecDeque<u8>,
-    pub outbox: Vec<u8>,
-    pub present: bool,
+    pub tx: Rc<RefCell<VecDeque<u8>>>,
+    pub rx: Rc<RefCell<VecDeque<u8>>>,
+    pub present: Rc<Cell<bool>>,
+}
+impl FakeLink {
+    /// A connector with nothing plugged in.
+    pub fn open() -> Self {
+        Self {
+            tx: Rc::default(),
+            rx: Rc::default(),
+            present: Rc::new(Cell::new(false)),
+        }
+    }
 }
 impl Link for FakeLink {
     fn send(&mut self, frame: &[u8]) {
-        self.outbox.extend_from_slice(frame);
+        self.tx.borrow_mut().extend(frame);
     }
     fn recv(&mut self, buf: &mut [u8]) -> usize {
-        let n = buf.len().min(self.inbox.len());
+        let mut q = self.rx.borrow_mut();
+        let n = buf.len().min(q.len());
         for b in buf.iter_mut().take(n) {
-            *b = self.inbox.pop_front().unwrap();
+            *b = q.pop_front().unwrap();
         }
         n
     }
     fn peer_present(&self) -> bool {
-        self.present
+        self.present.get()
     }
+}
+
+/// A cable: `(lower, upper)`. The lower end goes in the lower card's `up`, the upper end in
+/// the upper card's `down`.
+pub fn cable() -> (FakeLink, FakeLink) {
+    let a: Rc<RefCell<VecDeque<u8>>> = Rc::default();
+    let b: Rc<RefCell<VecDeque<u8>>> = Rc::default();
+    let present = Rc::new(Cell::new(true));
+    (
+        FakeLink {
+            tx: a.clone(),
+            rx: b.clone(),
+            present: present.clone(),
+        },
+        FakeLink {
+            tx: b,
+            rx: a,
+            present,
+        },
+    )
 }
 
 pub struct FakeBoard {
@@ -113,6 +146,8 @@ pub struct FakeBoard {
     pub delays: u32,
     pub log: Vec<String>,
     pub selftest_lines: Vec<String>,
+    /// The `(down, up)` links handed out by the next `links()` call; open ends when `None`.
+    pub links: Option<(FakeLink, FakeLink)>,
 }
 
 impl FakeBoard {
@@ -132,7 +167,15 @@ impl FakeBoard {
             delays: 0,
             log: Vec::new(),
             selftest_lines: vec!["fake: ok".into()],
+            links: None,
         }
+    }
+
+    /// A board whose random source starts from `seed`, so two fakes in one circle differ.
+    pub fn seeded(seed: u64) -> Self {
+        let mut b = Self::new();
+        b.entropy = Tested::new(Xorshift(seed), HealthTests::for_min_entropy(6));
+        b
     }
 
     /// Pre-loaded with a 3-member circle and a 192-byte pad.
@@ -189,7 +232,9 @@ impl Board for FakeBoard {
         }
     }
     fn links(&mut self) -> (FakeLink, FakeLink) {
-        (FakeLink::default(), FakeLink::default())
+        self.links
+            .take()
+            .unwrap_or_else(|| (FakeLink::open(), FakeLink::open()))
     }
     fn load_circle(&self) -> Option<Circle> {
         self.circle.clone()
