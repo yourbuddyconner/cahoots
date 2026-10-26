@@ -189,6 +189,8 @@ Any request can get `Error { code }` as its response. The codes are `UnknownCirc
 
 A custodian MUST obtain its owner's consent before it answers any request except `Identify` and `Remaining`. A custodian that is refused answers `Denied`. A badge asks for consent with a line on its screen, and its owner allows the request with the B button.
 
+A badge answers `Busy` to a request that arrives on the words screen or on any menu item other than Serve, and ignores a request that arrives during the pile or the ceremony, so the laptop retries.
+
 A custodian MUST accept only the canonical encoding of a message. It answers `Malformed` to trailing bytes, extra fields, truncation, and any encoding that differs from the one it would produce itself.
 
 ## 7. Test vectors
