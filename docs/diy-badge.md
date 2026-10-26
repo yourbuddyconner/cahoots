@@ -19,7 +19,21 @@ All three run the same Rust core and the same ceremony. The four trait implement
 - **A wire to the next badge.** This is the touch link, one per neighbour. It is a UART between two boards, or the pogo pins and pads of the pile. Reveals are sealed to every member before they go on the wire, so the wire carries no secret and needs no handshake of its own. No radio is used during a ceremony on any board.
 - **USB to a phone or laptop.** The browser app connects over WebUSB or WebSerial and becomes the badge's camera: it scans the other members' codes with the phone camera and passes them down the cable, and it can mirror the badge's screen. The secret never goes up the cable. Only commitments, reveals, sealed messages, and the ledger position do. This is roadmap item M4d. Today the USB link carries the pile protocol to a laptop running `cahoots-host`.
 
-## The DIY Arduino build
+## Build it yourself
+
+Two boards you can build today on a breadboard or with jumper wires, with the same panel and the same two buttons. The Arduino Nano ESP32 is the one the firmware runs on now. The Raspberry Pi Pico 2 is wired the way V1 is, so the firmware port for V1 will run on this build unchanged.
+
+### Parts for either build
+
+- A Waveshare 1.54" e-Paper Module V2 (200 × 200, SSD1681 controller, SPI). It comes with an 8-wire cable: an 8-pin plug for the module and eight single female sockets at the other end. The same panel goes on V1 and V2.
+- Two 6 mm tactile switches, the square four-leg kind. Each goes between a pin and GND; the chip's internal pull-up does the rest, so there are no resistors.
+- A breadboard and jumper wires, or push the cable's sockets straight onto the header pins.
+- A USB cable that carries data. Many USB-C cables carry power only, and the symptom is no serial port at all.
+
+Read the labels printed on the module's driver board, not the wire colours. Power the module from 3V3, so every signal matches the board's logic level. Leave the two solder-pad settings on the back of the module as shipped; 4-wire SPI is what the firmware uses.
+
+### Arduino Nano ESP32
+
 
 This is the board on the bench, and the firmware runs here first. The parts are an Arduino Nano ESP32 (an ESP32-S3 with 16 MB of flash and 8 MB of PSRAM, USB-C, 3.3 V logic), a Waveshare 1.54" e-Paper Module V2 (200 × 200, SSD1681 controller, SPI, the 8-pin cable), and two 6 mm tactile switches. Everything joins with jumper wires. The wiring, with a diagram and the pin positions on the Nano's headers, is in [hardware/nano-esp32-epaper](../hardware/nano-esp32-epaper/README.md). That directory also holds the Arduino sketch that checked the panel before the firmware existed.
 
@@ -35,6 +49,43 @@ The firmware is [`crates/esp32s3`](../crates/esp32s3/README.md), `no_std` Rust o
 What it proves: the four HAL traits work on real hardware, the panel shows the badge's screens, and a board completes a pile and a ceremony with a laptop standing in for the other cards. The board is the top card. When its seat appears on the status line, press B and it counts the pile. The six words appear, B keeps the circle and A discards it. The laptop prints each simulated card's words and they match the glass.
 
 What it does not prove: the pad is plaintext on flash, so a reader with physical access can copy it. Flash encryption and secure boot are one-way eFuse operations and wait for sign-off. The radio is present on the chip and no radio code is linked. That makes this board T1. A UART link to a second Nano, PIN entry and the QR screen are listed in the crate README under "Not yet".
+
+Step by step:
+
+1. Wire the module and the buttons as in the table. The [bring-up README](../hardware/nano-esp32-epaper/README.md) has a wiring diagram and says which physical header pin is which.
+2. Check the panel first with the Arduino sketch in [hardware/nano-esp32-epaper](../hardware/nano-esp32-epaper/README.md). It draws the badge's screens and the QR code sizes, and it needs only the Arduino IDE or `arduino-cli` with the ESP32 core and GxEPD2. Start SPI at 1 MHz; the module's level shifter and jumper wires drop frames at the library's default 10 MHz.
+3. Build and flash the Rust firmware from [`crates/esp32s3`](../crates/esp32s3/README.md). The first flash needs the chip in ROM download mode (B1 to GND while plugging in), because the board ships with Arduino's bootloader. The README has the exact steps, and how to put the Arduino bootloader back.
+4. Run a ceremony with the laptop standing in for the other cards: `cargo run -p cahoots-host -- pile --cards 3 --serial /dev/cu.usbmodem* --name bench --state /tmp/pile`. The board is the top card. Press B when its seat appears, watch the commits and reveals arrive, read the six words, and press B to keep the circle.
+
+### Raspberry Pi Pico 2
+
+Use a plain Pico 2 (RP2350, no wireless). The Pico 2 W works for tinkering, but the point of this build is a board with no radio, and V1 uses the plain one. The pins below are V1's pin map from [hardware/v1/design.py](../hardware/v1/design.py). Wire the DIY build the same way and the V1 firmware will run on it without a different pin table.
+
+| Module wire | Signal | Pico GPIO | Physical pin |
+|---|---|---|---|
+| VCC | 3.3 V | 3V3 (OUT) | 36 |
+| GND | ground | GND | 38 (or any GND: 3, 8, 13, 18, 23, 28) |
+| DIN | SPI MOSI | GP19 | 25 |
+| CLK | SPI SCK | GP18 | 24 |
+| CS | chip select | GP17 | 22 |
+| DC | data / command | GP16 | 21 |
+| RST | reset | GP20 | 26 |
+| BUSY | busy, high while the panel refreshes | GP21 | 27 |
+
+| Button | Pico GPIO | Physical pin | Meaning |
+|---|---|---|---|
+| A | GP14 | 19 | next |
+| B | GP15 | 20 | confirm |
+
+Each button goes between its GPIO and a GND pin. The firmware enables the pull-ups.
+
+Physical pin numbers count from pin 1 at the USB end, down the left column with the USB at the top and the component side up, then up the right column. GP18 to GP21 and the two button pins sit together on the right column, so the whole build takes one short run of jumpers.
+
+Two Picos can also form a pile over UART, which is what V1's connectors carry. The upper board's UART0 (GP0 TX, pin 1; GP1 RX, pin 2) is its link down. The lower board's UART1 (GP4 TX, pin 6; GP5 RX, pin 7) is its link up. Cross them: upper GP0 to lower GP5, upper GP1 to lower GP4, and GND to GND. On V1 the same signals run through the pogo pair and the JST-SH sockets.
+
+Firmware: the Pico 2 port of the four board modules (`display.rs`, `link.rs`, `store.rs`, `entropy.rs`) is the next step on the roadmap, after the Nano ceremony. Until it lands, this build is the hardware half: the wiring is final because it is V1's, and the panel can be checked with any SSD1681 example that uses the pins above. When the port lands, flashing is the usual Pico way: hold BOOTSEL while plugging in and drag the `.uf2` onto the drive that appears.
+
+What the Pico build adds over the Nano: no radio on the chip, a flash chip that holds the pad, and the exact pin map of the board you can order.
 
 ## V1
 
