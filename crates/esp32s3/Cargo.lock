@@ -126,6 +126,7 @@ dependencies = [
  "cahoots-core",
  "cahoots-custodian",
  "cahoots-hal",
+ "embedded-graphics",
  "zeroize",
 ]
 
@@ -162,7 +163,6 @@ dependencies = [
  "cahoots-custodian",
  "cahoots-hal",
  "critical-section",
- "embedded-graphics",
  "embedded-hal 1.0.0",
  "embedded-hal-bus",
  "epd-waveshare",

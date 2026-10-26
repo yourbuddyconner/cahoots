@@ -12,9 +12,9 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use cahoots_badge::{Board, BoardError, Circle};
+use cahoots_badge::{screens, Board, BoardError, Circle, Press};
 use cahoots_hal::health::Tested;
-use cahoots_hal::Link;
+use cahoots_hal::{Display, Link};
 use esp_hal::delay::Delay;
 
 /// This board's proposal for a circle, used only if it is the bottom of the pile.
@@ -47,12 +47,8 @@ impl Board for NanoBoard {
         &mut self.screen
     }
 
-    fn a_pressed(&mut self) -> bool {
-        self.buttons.a.pressed()
-    }
-
-    fn b_pressed(&mut self) -> bool {
-        self.buttons.b.pressed()
+    fn press(&mut self) -> Press {
+        self.buttons.press()
     }
 
     fn a_down(&self) -> bool {
@@ -77,23 +73,17 @@ impl Board for NanoBoard {
         (Box::new(UsbLink), Box::new(Absent))
     }
 
-    /// The circle record on flash. `main` puts the stored circle's name on the screen before
-    /// the badge starts, because this takes `&self`.
+    /// The circle record on flash.
     fn load_circle(&self) -> Option<Circle> {
         store::load_circle(&self.flash)
     }
 
-    /// Writes the circle record and puts the circle's name in the screen's header.
     fn save_circle(&mut self, c: &Circle) -> Result<(), BoardError> {
-        store::save_circle(&self.flash, c).map_err(|()| BoardError::Storage)?;
-        self.screen.circle = c.params.name.clone();
-        Ok(())
+        store::save_circle(&self.flash, c).map_err(|()| BoardError::Storage)
     }
 
     fn wipe(&mut self, pad_len: u32) -> Result<(), BoardError> {
-        store::wipe(&self.flash, pad_len).map_err(|()| BoardError::Storage)?;
-        self.screen.circle.clear();
-        Ok(())
+        store::wipe(&self.flash, pad_len).map_err(|()| BoardError::Storage)
     }
 
     fn write_pad(&mut self, pad: &[u8]) -> Result<FlashPadStore, BoardError> {
@@ -125,7 +115,7 @@ impl Board for NanoBoard {
     /// The flash line and the buttons line. The badge adds the TRNG and circle lines.
     fn selftest(&mut self) -> Vec<String> {
         if let Some(msg) = store::take_panic(&self.flash) {
-            // Keep the file name and line, drop the directory; wrap to the screen's width.
+            // Keep the file name and line, drop the directory. The screen wraps the rest.
             let msg = msg.replace("PANIC: panicked at ", "");
             let compact: String = msg
                 .split('\n')
@@ -133,28 +123,11 @@ impl Board for NanoBoard {
                 .filter(|l| !l.is_empty())
                 .collect::<Vec<_>>()
                 .join(" ");
-            let mut lines: Vec<String> = vec!["last boot panicked:".into()];
-            let mut cur = String::new();
-            for word in compact.split_whitespace() {
-                if !cur.is_empty() && cur.len() + 1 + word.len() > 31 {
-                    lines.push(core::mem::take(&mut cur));
-                    if lines.len() == 8 {
-                        break;
-                    }
-                }
-                if !cur.is_empty() {
-                    cur.push(' ');
-                }
-                cur.push_str(word);
-            }
-            if !cur.is_empty() && lines.len() < 8 {
-                lines.push(cur);
-            }
-            lines.push("B to continue".into());
             log!("last boot panicked: {compact}");
-            let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
-            self.screen.screen("cahoots", &refs);
-            while !self.buttons.b.pressed() {
+            let screen = screens::panic(&compact);
+            self.note_screen(&screen.lines);
+            self.screen.draw(&screen.frame);
+            while self.buttons.press() != Press::Both {
                 let _ = <UsbLink as Link>::flush(&mut UsbLink);
                 self.delay.delay_millis(10);
             }
@@ -180,6 +153,14 @@ impl Board for NanoBoard {
 
     fn log(&mut self, line: &str) {
         log!("{line}");
+    }
+
+    /// Each line of the screen goes to the trace sector, so the last screens can be read
+    /// back with espflash after a hang.
+    fn note_screen(&mut self, lines: &[String]) {
+        for line in lines {
+            store::trace(&format!("screen: {line}"));
+        }
     }
 }
 

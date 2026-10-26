@@ -20,7 +20,7 @@ mod store;
 use alloc::format;
 use board::NanoBoard;
 use buttons::{Button, Buttons};
-use cahoots_badge::{Badge, Board as _};
+use cahoots_badge::{screens, Badge, Board as _};
 use cahoots_hal::health::{HealthTests, Tested};
 use cahoots_hal::Display as _;
 use esp_hal::clock::CpuClock;
@@ -32,11 +32,6 @@ use esp_hal::spi::Mode;
 use esp_hal::time::Rate;
 
 esp_bootloader_esp_idf::esp_app_desc!();
-
-/// What the top line says about where the randomness came from. A hardware random source
-/// with health tests, no radio code linked, and the pad plaintext on flash: tier 1, as
-/// `NanoBoard::tier` reports.
-const LABEL: &str = "TRNG T1";
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -85,27 +80,21 @@ fn main() -> ! {
     let dc = Output::new(p.GPIO18, Level::Low, OutputConfig::default());
     let rst = Output::new(p.GPIO17, Level::High, OutputConfig::default());
     let busy = Input::new(p.GPIO10, InputConfig::default());
-    let mut screen = display::Epd::new(spi, cs, dc, rst, busy, delay, LABEL).expect("e-paper");
+    let screen = display::Epd::new(spi, cs, dc, rst, busy, delay).expect("e-paper");
     log!("e-paper up");
     log!("heap: {}", esp_alloc::HEAP.stats());
 
     let pull_up = InputConfig::default().with_pull(Pull::Up);
-    let btn = Buttons {
-        a: Button::new(Input::new(p.GPIO5, pull_up)),
-        b: Button::new(Input::new(p.GPIO6, pull_up)),
-    };
+    let btn = Buttons::new(
+        Button::new(Input::new(p.GPIO5, pull_up)),
+        Button::new(Input::new(p.GPIO6, pull_up)),
+    );
 
     let _trng_source = TrngSource::new(p.RNG, p.ADC1);
     let entropy = Tested::new(
         entropy::Hw::new().expect("trng"),
         HealthTests::for_min_entropy(6),
     );
-    // The badge never names the circle to the display, so the board does: here for a
-    // stored circle, and in `NanoBoard::save_circle` for a new one.
-    if let Some(c) = store::load_circle(&flash) {
-        screen.circle = c.params.name;
-    }
-
     let mut badge = Badge::new(NanoBoard {
         screen,
         buttons: btn,
@@ -119,7 +108,9 @@ fn main() -> ! {
         if badge.circle().is_none() {
             if let Err(e) = badge.run_once() {
                 log!("{e}");
-                badge.board().display().show_status(&e);
+                let screen = screens::status(&[&e]);
+                badge.board().note_screen(&screen.lines);
+                badge.board().display().draw(&screen.frame);
                 badge.board().delay_ms(1500);
             }
         } else {

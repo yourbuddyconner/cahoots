@@ -17,11 +17,15 @@ The same as the bring-up sketch in [hardware/nano-esp32-epaper](../../hardware/n
 
 ## What the board does
 
-1. **Self-test** on the screen and in the log: the random source through the SP 800-90B health tests, a flash sector erased, programmed and read back, the buttons, and whether a circle is stored. Holding A through the self-test forgets the stored circle.
+Two buttons give three gestures: A alone is Left, B alone is Right, and both pressed within 80 ms of each other is Both. Left and Right turn pages; Both selects, keeps or allows. On a question, Both says yes and either button alone says no. A press counts only after the button has read the same for 30 ms, and a single press waits out the 80 ms before it counts, so a Both is never also reported as a Left or a Right.
+
+1. **Self-test** on the screen and in the log: the random source through the SP 800-90B health tests, a flash sector erased, programmed and read back, the buttons, and whether a circle is stored. Both skips the rest of the wait. To forget the stored circle, hold A from before power-on until the self-test ends; a Both never forgets it. If the last boot panicked, the panic message comes first, and Both continues.
 2. **If a circle is stored**, it shows the six words from the circle record and goes to the menu (step 5).
-3. **Pile.** The board waits for a pile below it on the USB link. A laptop running `cahoots-host pile --serial` stands in for the other cards. The board is the top card: when its seat appears on the status line, press B and it counts the pile.
-4. **Ceremony.** The status line shows commits and reveals arriving; the six words appear. B keeps the circle, writing the pad to flash with the ledger and the circle record (params, seat, circle id and the six words); A discards it.
-5. **Menu**, once a circle is stored. A moves to the next item and B chooses it: `words` shows the six words again; `key as code` spends 32 bytes of pad as a key and shows them as a code; `serve` answers custodian requests from the laptop on the USB link, and each request that spends pad asks first, B to allow and A to refuse.
+3. **Pile.** The board waits for a pile below it on the USB link. A laptop running `cahoots-host pile --serial` stands in for the other cards. The board is the top card: when its seat appears on the screen, press Both and it counts the pile.
+4. **Ceremony.** The screen shows commits and reveals arriving; the six words appear with the question "keep this circle?". Both keeps the circle, writing the pad to flash with the ledger and the circle record (params, seat, circle id and the six words); Left or Right discards it.
+5. **Menu**, once a circle is stored. Left and Right move between the pages and Both chooses one: `words` shows the six words again; `key as code` spends 32 bytes of pad as a key and shows them as a code; `serve a laptop` answers custodian requests from the laptop on the USB link, and each request that spends pad asks first, Both to allow and Left or Right to refuse.
+
+Every screen is a full refresh, so each change flashes once. Each screen's text also goes to the trace sector (see below) until the sector is full.
 
 ## Build
 
@@ -76,7 +80,7 @@ without the screen or the USB link:
 
 | Address | What |
 |---|---|
-| `0x411000` | The last panic's message, shown on the self-test screen at the next boot and erased |
+| `0x411000` | The last panic's message, shown on the screen at the next boot and erased |
 | `0x412000` | Every log line of the current boot, written as it happens |
 
 ```sh
