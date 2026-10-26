@@ -17,11 +17,12 @@ use std::time::{Duration, Instant};
 
 const PAD_LEN: u32 = 16 * 1024;
 
+/// Wait until one whole line of the board's `screen.txt` is `want`.
 fn wait_screen(dir: &Path, want: &str) {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let s = std::fs::read_to_string(dir.join("screen.txt")).unwrap_or_default();
-        if s.contains(want) {
+        if s.lines().any(|l| l == want) {
             return;
         }
         assert!(Instant::now() < deadline, "stuck at {s:?}, want {want:?}");
@@ -81,7 +82,9 @@ fn a_host_board_in_serve_answers_identify_on_its_down_link() {
     wait_screen(&dir, "1/3");
     std::fs::write(dir.join("buttons.tmp"), "R\nR\nB\n").unwrap();
     std::fs::rename(dir.join("buttons.tmp"), dir.join("buttons.txt")).unwrap();
-    wait_screen(&dir, "a laptop is listening");
+    // The line "serving" appears only once serving has started: before it, the Serve page
+    // shows "Both to start serving" instead, and "a laptop is listening" shows either way.
+    wait_screen(&dir, "serving");
 
     let payload = Request::Identify.encode();
     laptop
