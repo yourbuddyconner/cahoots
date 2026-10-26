@@ -143,8 +143,14 @@ impl Request {
         minicbor::to_vec(self).expect("encoding into a Vec cannot fail")
     }
 
+    /// Strict: the input must be exactly one canonical encoding. Trailing bytes, extra
+    /// fields (such as another message type's) and truncation are all `Malformed`.
     pub fn decode(bytes: &[u8]) -> Result<Request, ErrorCode> {
-        minicbor::decode(bytes).map_err(|_| ErrorCode::Malformed)
+        let msg: Request = minicbor::decode(bytes).map_err(|_| ErrorCode::Malformed)?;
+        if msg.encode() != bytes {
+            return Err(ErrorCode::Malformed);
+        }
+        Ok(msg)
     }
 }
 
@@ -153,8 +159,14 @@ impl Response {
         minicbor::to_vec(self).expect("encoding into a Vec cannot fail")
     }
 
+    /// Strict: the input must be exactly one canonical encoding. Trailing bytes, extra
+    /// fields (such as another message type's) and truncation are all `Malformed`.
     pub fn decode(bytes: &[u8]) -> Result<Response, ErrorCode> {
-        minicbor::decode(bytes).map_err(|_| ErrorCode::Malformed)
+        let msg: Response = minicbor::decode(bytes).map_err(|_| ErrorCode::Malformed)?;
+        if msg.encode() != bytes {
+            return Err(ErrorCode::Malformed);
+        }
+        Ok(msg)
     }
 }
 

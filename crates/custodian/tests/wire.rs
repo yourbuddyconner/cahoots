@@ -112,3 +112,59 @@ fn pad_errors_map_to_codes() {
     );
     assert_eq!(ErrorCode::from(PadError::Exhausted), ErrorCode::Exhausted);
 }
+
+#[test]
+fn other_message_type_is_malformed() {
+    let resp = Response::Identity {
+        circles: vec![],
+        tier: 0,
+        name: "x".into(),
+    };
+    assert_eq!(Request::decode(&resp.encode()), Err(ErrorCode::Malformed));
+    let mut req = Request::Identify.encode();
+    assert_eq!(Request::decode(&req), Ok(Request::Identify));
+    req.push(0x00);
+    assert_eq!(Request::decode(&req), Err(ErrorCode::Malformed));
+    let mut r = Response::Key { key: [1; 32] }.encode();
+    r.push(0x00);
+    assert_eq!(Response::decode(&r), Err(ErrorCode::Malformed));
+}
+
+#[test]
+fn wrong_lengths_are_malformed() {
+    // PskFor [2, [bytes(20), bytes(0)]]: handle one byte short.
+    let mut short_handle = vec![0x82, 0x02, 0x82, 0x54];
+    short_handle.extend([0u8; 20]);
+    short_handle.push(0x40);
+    assert_eq!(Request::decode(&short_handle), Err(ErrorCode::Malformed));
+    // Remaining [5, [bytes(15)]]: circle id one byte short.
+    let mut short_circle = vec![0x82, 0x05, 0x81, 0x4F];
+    short_circle.extend([0u8; 15]);
+    assert_eq!(Request::decode(&short_circle), Err(ErrorCode::Malformed));
+    // Key [2, [bytes(31)]]: key one byte short.
+    let mut short_key = vec![0x82, 0x02, 0x81, 0x58, 0x1F];
+    short_key.extend([0u8; 31]);
+    assert_eq!(Response::decode(&short_key), Err(ErrorCode::Malformed));
+}
+
+#[test]
+fn truncated_is_malformed() {
+    let req = Request::Psk {
+        circle: [1; 16],
+        context: b"ctx".to_vec(),
+    }
+    .encode();
+    assert_eq!(
+        Request::decode(&req[..req.len() - 1]),
+        Err(ErrorCode::Malformed)
+    );
+    let resp = Response::Bytes {
+        handle: handle(),
+        bytes: vec![1, 2, 3],
+    }
+    .encode();
+    assert_eq!(
+        Response::decode(&resp[..resp.len() - 1]),
+        Err(ErrorCode::Malformed)
+    );
+}
