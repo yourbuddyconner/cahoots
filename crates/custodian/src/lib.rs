@@ -14,7 +14,9 @@
 extern crate alloc;
 
 pub mod contract;
+pub mod serve;
 pub mod wire;
 
 pub use cahoots_core::CircleId;
 pub use contract::*;
+pub use serve::{serve, AlwaysAllow, Consent};
