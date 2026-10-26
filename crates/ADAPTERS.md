@@ -1,6 +1,6 @@
 # Adapters
 
-These are thin crates that feed `cahoots-provider` output into standard pre-shared-key slots. Adapters never read the pad. They call `psk` / `psk_for`. WireGuard and age then derive a protocol-specific key with `derive_session_key` and a per-protocol context, so a PSK released for one protocol can't be reused in another. HPKE passes the 32 pad bytes to the key schedule as the PSK and binds the handle through `psk_id`.
+These are thin crates that feed the output of a custodian into standard pre-shared-key slots. Each adapter is a consumer of the `Custodian` contract in `cahoots-custodian`, and it reaches that contract through `cahoots-provider`, which re-exports it as `PadProvider`. Adapters never read the pad. They call `psk` / `psk_for`. WireGuard and age then derive a protocol-specific key with `derive_session_key` and a per-protocol context, so a PSK released for one protocol can't be reused in another. HPKE passes the 32 pad bytes to the key schedule as the PSK and binds the handle through `psk_id`.
 
 | Crate | Slot | Status |
 |---|---|---|

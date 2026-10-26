@@ -170,6 +170,27 @@ Implementation: `crates/core/src/control.rs`; the WireGuard use is `crates/wireg
 - Erasure overwrites the bytes, then verifies by reading back.
 - Phone storage gives no erasure guarantee. The phone client MUST say erasure is best effort.
 
-## 6. Test vectors
+## 6. Custodian messages (informative)
+
+A custodian is a device or program that holds a pad and releases keys from it. A consumer asks a custodian for keys with the messages below. The messages are not part of the ceremony, and a client can follow version 1 without them. They are defined in `crates/custodian`.
+
+Messages are CBOR (RFC 8949), array-encoded. A request travels in a frame of kind `KIND_REQUEST = 40`, and its response travels in a frame of kind `KIND_RESPONSE = 41`. A device that does not own these kinds ignores them.
+
+| Request | Fields | Response |
+|---|---|---|
+| `Identify` | none | `Identity { circles, tier, name }` |
+| `Psk` | `circle`, `context` | `Psk { handle, key }` |
+| `PskFor` | `handle`, `context` | `Key { key }` |
+| `Spend` | `circle`, `len` | `Bytes { handle, bytes }` |
+| `SpendFor` | `handle`, `len` | `Bytes { handle, bytes }` |
+| `Remaining` | `circle` | `Remaining { bytes, low }` |
+
+Any request can get `Error { code }` as its response. The codes are `UnknownCircle`, `Exhausted`, `AlreadySpent`, `OutOfRange`, `Config`, `Storage`, `Malformed`, `Denied` and `Busy`.
+
+A custodian MUST obtain its owner's consent before it answers any request except `Identify` and `Remaining`. A custodian that is refused answers `Denied`. A badge asks for consent with a line on its screen, and its owner allows the request with the B button.
+
+A custodian MUST accept only the canonical encoding of a message. It answers `Malformed` to trailing bytes, extra fields, truncation, and any encoding that differs from the one it would produce itself.
+
+## 7. Test vectors
 
 `crates/vectors/*.json` are generated from `cahoots-core` by `cargo run -p cahoots-vectors`, except `chat.json`, written by `crates/chat/tests/vectors.rs`, and `psk.json`, written by `crates/provider/tests/psk_vectors.rs`. They cover the ceremony (KEM seeds, public keys, sealing randomness, sealed reveals, a mismatch abort, and a garbled reveal), pair keys and hello words (`pair_keys` and `hello_words` in `ceremony.json`), control messages, check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. Every client MUST reproduce them.
