@@ -131,6 +131,12 @@ impl Board for NanoBoard {
                 let _ = <UsbLink as Link>::flush(&mut UsbLink);
                 self.delay.delay_millis(10);
             }
+            // The badge reads A after this returns to decide on the wipe, so the Both that
+            // dismissed this screen must be over first.
+            while self.buttons.a.is_down() || self.buttons.b.is_down() {
+                let _ = <UsbLink as Link>::flush(&mut UsbLink);
+                self.delay.delay_millis(10);
+            }
         }
         let pad_in_the_way = store::load_circle(&self.flash)
             .is_some_and(|c| c.params.pad_len > store::PAD_CAP - store::SECTOR);
@@ -148,6 +154,8 @@ impl Board for NanoBoard {
             state(self.buttons.a.is_down()),
             state(self.buttons.b.is_down())
         );
+        // Nothing pressed during the self-test carries into the badge's first screen.
+        self.buttons.clear();
         vec![flash, buttons]
     }
 
