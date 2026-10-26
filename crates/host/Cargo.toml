@@ -10,6 +10,8 @@ publish = false
 [dependencies]
 cahoots-core = { workspace = true, features = ["std"] }
 cahoots-hal = { workspace = true, features = ["std"] }
+cahoots-badge = { workspace = true, features = ["std"] }
+cahoots-custodian = { workspace = true, features = ["std"] }
 png = "0.17"
 base64 = "0.22"
 getrandom = "0.3"

@@ -6,7 +6,10 @@
 //! - [`store::FileRecordStore`]: the ledger region as a file.
 //! - [`display::PngDisplay`]: a 200x200 1-bit "e-paper" rendered to PNG.
 //! - [`device::Device`]: one simulated badge with a state directory.
+//! - [`board::HostBoard`]: the same stand-ins as a `cahoots_badge::Board`, so the badge crate
+//!   runs here as it does on a board.
 
+pub mod board;
 pub mod device;
 pub mod display;
 mod font;
