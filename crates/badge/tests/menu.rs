@@ -4,9 +4,11 @@ mod common;
 
 use cahoots_badge::Badge;
 use cahoots_core::frame::{self, Frame};
-use cahoots_custodian::wire::{ErrorCode, Request, Response, KIND_REQUEST, KIND_RESPONSE};
+use cahoots_custodian::wire::{
+    ErrorCode, Request, Response, KIND_REQUEST, KIND_RESPONSE, MAX_REQUEST_LEN,
+};
 use cahoots_custodian::CircleId;
-use cahoots_hal::Link;
+use cahoots_hal::{Entropy, Link};
 use common::{cable, Button, FakeBoard, FakeLink, FAKE_TIER};
 
 /// A badge booted with a stored circle and in the menu, and the laptop end of its down link.
@@ -230,4 +232,81 @@ fn a_request_outside_serve_is_busy() {
             }
         )]
     );
+}
+
+#[test]
+fn serve_resyncs_after_garbage_on_the_down_link() {
+    let (mut badge, mut laptop, id) = serving();
+    let mut junk = vec![0u8; 2048];
+    common::Xorshift(0x1234_5678_9ABC_DEF1)
+        .fill(&mut junk)
+        .unwrap();
+    laptop.send(&junk);
+    badge.idle_step();
+    send(&mut laptop, 11, &Request::Identify);
+    badge.idle_step();
+    match responses(&mut laptop).as_slice() {
+        [(11, Response::Identity { circles, .. })] => assert_eq!(circles[0].circle_id, id),
+        other => panic!("not an identity: {other:?}"),
+    }
+}
+
+#[test]
+fn serve_resyncs_past_a_header_that_is_never_filled() {
+    let (mut badge, mut laptop, id) = serving();
+    // A header whose length is never filled: the request behind it must still be read.
+    let mut fake = vec![KIND_REQUEST, 0, 0, 0, 0];
+    fake.extend_from_slice(&3000u32.to_le_bytes());
+    laptop.send(&fake);
+    send(&mut laptop, 12, &Request::Identify);
+    badge.idle_step();
+    match responses(&mut laptop).as_slice() {
+        [(12, Response::Identity { circles, .. })] => assert_eq!(circles[0].circle_id, id),
+        other => panic!("not an identity: {other:?}"),
+    }
+}
+
+#[test]
+fn serve_drops_a_header_longer_than_any_request() {
+    let (mut badge, mut laptop, id) = serving();
+    let mut fake = vec![KIND_REQUEST, 0, 0, 0, 0];
+    fake.extend_from_slice(&(MAX_REQUEST_LEN as u32 + 1).to_le_bytes());
+    laptop.send(&fake);
+    badge.idle_step();
+    send(&mut laptop, 13, &Request::Identify);
+    badge.idle_step();
+    match responses(&mut laptop).as_slice() {
+        [(13, Response::Identity { circles, .. })] => assert_eq!(circles[0].circle_id, id),
+        other => panic!("not an identity: {other:?}"),
+    }
+}
+
+#[test]
+fn a_press_before_the_prompt_is_not_consent() {
+    let (mut badge, mut laptop, id) = serving();
+    let before = remaining(&mut badge, &mut laptop, id);
+    // B tapped while the prompt's refresh blocks: queued before the badge reads the request.
+    badge.board().buttons.push_back(Button::B);
+    send(
+        &mut laptop,
+        8,
+        &Request::Psk {
+            circle: id,
+            context: b"wg".to_vec(),
+        },
+    );
+    badge.idle_step();
+    assert!(responses(&mut laptop).is_empty());
+    assert!(badge.board().buttons.is_empty(), "the early press is spent");
+    assert_eq!(
+        badge.board().display.status.last().unwrap(),
+        "spend 32 for fakes? B yes . A no"
+    );
+    press(&mut badge, Button::B);
+    let got = responses(&mut laptop);
+    assert!(
+        matches!(got.as_slice(), [(8, Response::Psk { .. })]),
+        "{got:?}"
+    );
+    assert_eq!(remaining(&mut badge, &mut laptop, id), before - 32);
 }

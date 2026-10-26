@@ -10,7 +10,9 @@ use cahoots_core::ceremony::CeremonyResult;
 use cahoots_core::frame::{self, Frame, FrameError};
 use cahoots_core::pad::Pad;
 use cahoots_core::params::CircleParams;
-use cahoots_custodian::wire::{ErrorCode, Request, Response, KIND_REQUEST, KIND_RESPONSE};
+use cahoots_custodian::wire::{
+    ErrorCode, Request, Response, KIND_REQUEST, KIND_RESPONSE, MAX_REQUEST_LEN,
+};
 use cahoots_custodian::{
     serve, CircleId, CircleInfo, Consent, Custodian, PadError, PskHandle, PSK_LEN,
 };
@@ -521,6 +523,9 @@ impl<B: Board> Badge<B> {
     }
 
     fn menu_step(board: &mut B, c: &Circle, m: &mut Menu<B>) {
+        let asked = m.pending.is_some();
+        // Read a chunk and decode after each, so `rx` never holds more than one request
+        // frame and one chunk, whatever arrives.
         let mut buf = [0u8; 256];
         loop {
             let n = m.down.recv(&mut buf);
@@ -528,43 +533,16 @@ impl<B: Board> Badge<B> {
                 break;
             }
             m.rx.extend_from_slice(&buf[..n]);
+            Self::menu_decode(board, c, m);
         }
-        loop {
-            let (kind, seq, payload, used) = match frame::decode(&m.rx) {
-                Ok((f, used)) => (f.kind, f.seq, f.payload.to_vec(), used),
-                Err(FrameError::Incomplete) => break,
-                Err(FrameError::Crc) => {
-                    m.rx.remove(0);
-                    continue;
-                }
-            };
-            m.rx.drain(..used);
-            if kind != KIND_REQUEST {
-                continue;
-            }
-            if !m.serving || m.pending.is_some() {
-                let busy = Response::Error {
-                    code: ErrorCode::Busy,
-                };
-                respond(&mut m.down, seq, &busy.encode());
-                continue;
-            }
-            match Request::decode(&payload).ok().as_ref().and_then(spends) {
-                Some(n) => {
-                    board
-                        .display()
-                        .show_status(&format!("spend {n} for {}? B yes . A no", c.params.name));
-                    m.pending = Some(Pending {
-                        seq,
-                        request: payload,
-                    });
-                }
-                // Identify, Remaining and anything malformed: answered now, never asked.
-                None => {
-                    let resp = serve(&mut m.pad, &mut Answer(false), &payload);
-                    respond(&mut m.down, seq, &resp);
-                }
-            }
+
+        // A press made before the prompt was on the screen is not an answer to it: on the
+        // Nano the prompt's refresh blocks for hundreds of milliseconds. Drop both edges and
+        // count only presses seen on a later call.
+        if !asked && m.pending.is_some() {
+            let _ = board.a_pressed();
+            let _ = board.b_pressed();
+            return;
         }
 
         if let Some(p) = &m.pending {
@@ -610,6 +588,59 @@ impl<B: Board> Badge<B> {
                 Item::Serve => {
                     m.serving = true;
                     board.display().show_status("serving. A for menu");
+                }
+            }
+        }
+    }
+
+    /// Answer or queue every whole request frame in `rx`. Bytes that are not a frame, or a
+    /// header longer than any request, are dropped one at a time to resync. A partial header
+    /// left by garbage can claim a length that is never filled, so while the front is
+    /// incomplete, a whole frame further on wins and the bytes before it are dropped.
+    fn menu_decode(board: &mut B, c: &Circle, m: &mut Menu<B>) {
+        loop {
+            let (kind, seq, payload, used) = match frame::decode_max(&m.rx, MAX_REQUEST_LEN) {
+                Ok((f, used)) => (f.kind, f.seq, f.payload.to_vec(), used),
+                Err(FrameError::Incomplete) => {
+                    let whole = |i: &usize| frame::decode_max(&m.rx[*i..], MAX_REQUEST_LEN).is_ok();
+                    match (1..m.rx.len()).find(whole) {
+                        Some(skip) => {
+                            m.rx.drain(..skip);
+                            continue;
+                        }
+                        None => break,
+                    }
+                }
+                Err(FrameError::Crc) => {
+                    m.rx.remove(0);
+                    continue;
+                }
+            };
+            m.rx.drain(..used);
+            if kind != KIND_REQUEST {
+                continue;
+            }
+            if !m.serving || m.pending.is_some() {
+                let busy = Response::Error {
+                    code: ErrorCode::Busy,
+                };
+                respond(&mut m.down, seq, &busy.encode());
+                continue;
+            }
+            match Request::decode(&payload).ok().as_ref().and_then(spends) {
+                Some(n) => {
+                    board
+                        .display()
+                        .show_status(&format!("spend {n} for {}? B yes . A no", c.params.name));
+                    m.pending = Some(Pending {
+                        seq,
+                        request: payload,
+                    });
+                }
+                // Identify, Remaining and anything malformed: answered now, never asked.
+                None => {
+                    let resp = serve(&mut m.pad, &mut Answer(false), &payload);
+                    respond(&mut m.down, seq, &resp);
                 }
             }
         }

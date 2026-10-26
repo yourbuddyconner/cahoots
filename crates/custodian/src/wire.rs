@@ -15,6 +15,9 @@ use minicbor::{Decode, Decoder, Encode, Encoder};
 pub const KIND_REQUEST: u8 = 40;
 /// Frame kind for a response.
 pub const KIND_RESPONSE: u8 = 41;
+/// The longest request payload a custodian reads, in bytes. A request is a few fields and a
+/// short context label, far under this. A request frame that claims more is not a request.
+pub const MAX_REQUEST_LEN: usize = 4096;
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
 #[cbor(array)]
