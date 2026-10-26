@@ -10,6 +10,7 @@ pub mod circle_id;
 pub mod combine;
 pub mod commit;
 pub mod control;
+pub mod cose;
 pub mod frame;
 pub mod ledger;
 pub mod message;
@@ -17,5 +18,6 @@ pub mod pad;
 pub mod pairwise;
 pub mod params;
 pub mod reveal;
+pub mod seat;
 
 pub use circle_id::CircleId;
