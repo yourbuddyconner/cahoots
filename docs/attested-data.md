@@ -86,7 +86,15 @@ A keypad, a switch panel, a card reader or a fingerprint module on the chip's bu
 
 ### Attested time
 
-The chip's counter orders readings but knows no wall-clock time. A real-time clock on the chip's bus gives attested timestamps, with the caveat that the clock can be set through the same bus. A node that only reports time and position is a small witness that other nodes can quote.
+The chip's counter orders readings but knows no wall-clock time. A real-time clock on the chip's bus gives attested timestamps, with the caveat that the clock can be set through the same bus by the node's owner. So an attested timestamp from a node says "the chip read this from a clock its owner controls": good enough for a log, useless as the clock a grant expires on. The clock that no single party controls is the circle's log, and section 4 says how to use it.
+
+### Delegation grants and agents
+
+The chip signs a grant, after both buttons on a screen that shows it: this key may ask for these things in this circle, up to this many bytes, until this position in the log, and may hand a narrower grant onward. One format covers three needs: a laptop joins the badge's trusted list with a scope instead of blanket trust, a screenless node receives its policy at the ceremony, and a program acting for a person carries proof of what it may do. The badge is the root of its owner's agent keys, and the consent screen is the only place a grant is born. Revocation is a message in the log.
+
+### Cameras
+
+A camera module hashes each frame or clip and exposes the digest as a register; the chip signs the digest with the log nonce; the footage is bulk-encrypted under keys the pad derives per period, since video would spend a pad in an hour. The attestation is what makes a clip count as evidence. What makes such a network different from a commercial one is the governance the design gives for free: footage opens only with the approval of several members on their badges, the keys of a period are destroyed when it ends so retention is enforced by the design rather than by a policy, and there is no operator holding an archive. A camera network the people under the cameras could consent to. It needs the approvals work, the node, the digest module and the period keys, so it comes last.
 
 ### Agents acting on readings
 
@@ -102,6 +110,8 @@ The hosted seat ([roadmap M3](plan.md)) and the approvals work give a program a 
 
 **Heartbeats.** The host controls when readings happen. A circle that expects a reading every interval sees silence as information, and the chip's counter shows how many readings were taken but never posted.
 
+**Time is the log.** Anything that must expire or come into force, a grant, a seal, a period key, is bound to a position in the circle's log or to a chip's counter, which no grantee can move. Wall-clock time is the verifier's own clock, used as an outer bound and never taken from the party that benefits. Revocation is a message in the log.
+
 **Pinned in the room.** The manufacturer's certificate is used once, at the ceremony, to check that a key is in a chip. After that the circle trusts the keys it pinned. A circle may skip the manufacturer entirely and pin on sight.
 
 ## 5. What has to be decided before designing
@@ -114,4 +124,11 @@ The hosted seat ([roadmap M3](plan.md)) and the approvals work give a program a 
 - **Public mode.** Posting readings in the clear with a signature is a different transport from the circle's feed and needs its own rules on what a public reading carries.
 - **NFC proximity.** Proof of meeting needs the contactless side on and a defined exchange between two chips. It also needs an answer to what a stranger's tap may read, which is open decision 16.
 - **Verification off the badge.** Members verify readings on phones and laptops, so the attestation format and the pinned-key list must be readable there. The app's wasm core is where that lands.
-- **Which three first.** Not every family on this page needs building. The ones with a module in hand and a reason to exist in the project's own story are cold chain and track and trace, environmental monitoring in public mode, and proof of meeting.
+## 6. A first order
+
+Not every family on this page needs building. The order that each step makes the next cheaper:
+
+1. **Delegation grants with the chip's signer.** Reuses M4f and nothing else, and is the trusted list, the node policy and the agent identity in one format.
+2. **Proof of meeting.** A tap and a nonce; the fix for position spoofing everywhere else.
+3. **Readings, with the counter and the log as their time.** Cold chain and track and trace first, since it exercises grants, custody approvals and seals together; public environmental monitoring second, since the existing networks have exactly the gap this fills. A real-time clock joins for logging, under the caveat above.
+4. **The camera node**, once approvals and period keys exist.
