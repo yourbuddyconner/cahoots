@@ -51,3 +51,16 @@ fn a_held_at_boot_forgets_the_circle() {
         .contains("release A"));
     assert!(!badge.board().a_down());
 }
+
+#[test]
+fn boot_shows_the_recorded_words_after_bytes_are_spent() {
+    // Spending erases pad bytes. The words come from the record, so they do not change.
+    let (mut board, params, pad) = FakeBoard::with_circle();
+    board.pad[64..96].fill(0);
+    let mut badge = Badge::new(board);
+    badge.boot();
+    assert_eq!(
+        badge.board().display.words[0],
+        check_words(&params, &pad).map(String::from)
+    );
+}

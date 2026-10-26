@@ -7,17 +7,18 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use cahoots_core::ceremony::CeremonyResult;
-use cahoots_core::checkwords::check_words;
 use cahoots_core::frame::{self, Frame, FrameError};
 use cahoots_core::pad::Pad;
 use cahoots_core::params::CircleParams;
 use cahoots_custodian::wire::{ErrorCode, Request, Response, KIND_REQUEST, KIND_RESPONSE};
-use cahoots_custodian::{serve, Consent, Custodian, PSK_LEN};
+use cahoots_custodian::{
+    serve, CircleId, CircleInfo, Consent, Custodian, PadError, PskHandle, PSK_LEN,
+};
 use cahoots_hal::ledger::PersistentLedger;
 use cahoots_hal::pile::{Pile, PileError};
 use cahoots_hal::ring::{RingCeremony, Step as RingStep};
 use cahoots_hal::store::StorePad;
-use cahoots_hal::{Display, Entropy, Link, PadStore};
+use cahoots_hal::{Display, Entropy, Link};
 use zeroize::Zeroizing;
 
 /// What one [`Badge::step`] did, or where the pass stands after it.
@@ -65,8 +66,60 @@ enum State<L: Link> {
     },
 }
 
-/// The custodian a badge serves: its stored pad and its ledger.
-type Custody<B> = Pad<StorePad<<B as Board>::Pad>, PersistentLedger<<B as Board>::Records>>;
+/// The custodian a badge serves: its stored pad and its ledger, reporting the board's tier.
+type Custody<B> = Tiered<Pad<StorePad<<B as Board>::Pad>, PersistentLedger<<B as Board>::Records>>>;
+
+/// A custodian that reports `tier` for every circle it holds. Everything else is `inner`'s.
+struct Tiered<C> {
+    inner: C,
+    tier: u8,
+}
+
+impl<C: Custodian> Custodian for Tiered<C> {
+    fn circles(&self) -> Vec<CircleInfo> {
+        let mut circles = self.inner.circles();
+        for c in &mut circles {
+            c.tier = self.tier;
+        }
+        circles
+    }
+
+    fn psk(
+        &mut self,
+        circle: &CircleId,
+        context: &[u8],
+    ) -> Result<(PskHandle, Zeroizing<[u8; 32]>), PadError> {
+        self.inner.psk(circle, context)
+    }
+
+    fn psk_for(
+        &mut self,
+        handle: &PskHandle,
+        context: &[u8],
+    ) -> Result<Zeroizing<[u8; 32]>, PadError> {
+        self.inner.psk_for(handle, context)
+    }
+
+    fn spend(
+        &mut self,
+        circle: &CircleId,
+        len: u32,
+    ) -> Result<(PskHandle, Zeroizing<Vec<u8>>), PadError> {
+        self.inner.spend(circle, len)
+    }
+
+    fn spend_for(&mut self, handle: &PskHandle, len: u32) -> Result<Zeroizing<Vec<u8>>, PadError> {
+        self.inner.spend_for(handle, len)
+    }
+
+    fn remaining(&self, circle: &CircleId) -> u64 {
+        self.inner.remaining(circle)
+    }
+
+    fn low_pad(&self, circle: &CircleId) -> bool {
+        self.inner.low_pad(circle)
+    }
+}
 
 /// The menu items, in the order A cycles through them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,7 +158,6 @@ struct Menu<B: Board> {
     pad: Custody<B>,
     down: B::Link,
     rx: Vec<u8>,
-    words: [&'static str; 6],
     item: Item,
     /// B was pressed on the serve item: requests on the down link are answered.
     serving: bool,
@@ -202,13 +254,10 @@ impl<B: Board> Badge<B> {
         };
 
         if let Some(c) = &self.circle {
-            let pad = self.board.open_pad(c.params.pad_len);
-            let mut whole = vec![0u8; c.params.pad_len as usize];
-            pad.read(0, &mut whole);
-            let words = check_words(&c.params, &whole);
+            let words = c.check_words();
             self.board.display().show_words(&words);
             self.board
-                .log(&format!("words from flash: {}", words.join(" ")));
+                .log(&format!("words from the record: {}", words.join(" ")));
         }
     }
 
@@ -379,10 +428,13 @@ impl<B: Board> Badge<B> {
                     self.board
                         .records(true)
                         .map_err(|_| "flash: ledger erase failed")?;
+                    let words = crate::board::word_indices(&result.check_words)
+                        .ok_or("words: not in the word list")?;
                     let circle = Circle {
                         params: result.params.clone(),
                         seat,
                         circle_id: result.circle_id,
+                        words,
                     };
                     self.board
                         .save_circle(&circle)
@@ -426,11 +478,8 @@ impl<B: Board> Badge<B> {
 
     fn enter_menu(&mut self, c: &Circle) -> Idle<B> {
         let len = c.params.pad_len;
+        let tier = self.board.tier();
         let store = self.board.open_pad(len);
-        let mut whole = Zeroizing::new(vec![0u8; len as usize]);
-        store.read(0, &mut whole);
-        let words = check_words(&c.params, &whole);
-        drop(whole);
         let pad = self
             .board
             .records(false)
@@ -447,6 +496,7 @@ impl<B: Board> Badge<B> {
                     StorePad::new(store),
                     ledger,
                 )
+                .map(|pad| Tiered { inner: pad, tier })
                 .map_err(|e| format!("pad: {e:?}"))
             });
         match pad {
@@ -457,7 +507,6 @@ impl<B: Board> Badge<B> {
                     pad,
                     down,
                     rx: Vec::new(),
-                    words,
                     item: Item::Words,
                     serving: false,
                     pending: None,
@@ -550,7 +599,7 @@ impl<B: Board> Badge<B> {
             board.display().show_status(m.item.label());
         } else if board.b_pressed() {
             match m.item {
-                Item::Words => board.display().show_words(&m.words),
+                Item::Words => board.display().show_words(&c.check_words()),
                 Item::KeyAsCode => match m.pad.spend(&c.circle_id, PSK_LEN) {
                     Ok((_, bytes)) => {
                         board.display().show_qr(&bytes);

@@ -7,7 +7,7 @@ use cahoots_core::frame::{self, Frame};
 use cahoots_custodian::wire::{ErrorCode, Request, Response, KIND_REQUEST, KIND_RESPONSE};
 use cahoots_custodian::CircleId;
 use cahoots_hal::Link;
-use common::{cable, Button, FakeBoard, FakeLink};
+use common::{cable, Button, FakeBoard, FakeLink, FAKE_TIER};
 
 /// A badge booted with a stored circle and in the menu, and the laptop end of its down link.
 fn in_the_menu() -> (Badge<FakeBoard>, FakeLink, CircleId) {
@@ -109,6 +109,21 @@ fn words_shows_the_six_words() {
 }
 
 #[test]
+fn words_are_the_same_after_a_spend() {
+    let (mut badge, _laptop, _) = in_the_menu();
+    press(&mut badge, Button::B);
+    let before = badge.board().display.words.last().unwrap().clone();
+    press(&mut badge, Button::A);
+    press(&mut badge, Button::B);
+    assert_eq!(badge.board().display.qr.len(), 1);
+    press(&mut badge, Button::A);
+    press(&mut badge, Button::A);
+    assert_eq!(badge.board().display.status.last().unwrap(), "words");
+    press(&mut badge, Button::B);
+    assert_eq!(badge.board().display.words.last().unwrap(), &before);
+}
+
+#[test]
 fn serve_answers_identify_without_a_prompt() {
     let (mut badge, mut laptop, id) = serving();
     send(&mut laptop, 7, &Request::Identify);
@@ -116,8 +131,10 @@ fn serve_answers_identify_without_a_prompt() {
     let got = responses(&mut laptop);
     assert_eq!(got.len(), 1);
     match &got[0] {
-        (7, Response::Identity { circles, .. }) => {
+        (7, Response::Identity { circles, tier, .. }) => {
+            assert_eq!(*tier, FAKE_TIER);
             assert_eq!(circles.len(), 1);
+            assert_eq!(circles[0].tier, FAKE_TIER);
             assert_eq!(circles[0].circle_id, id);
             assert_eq!(circles[0].name, "fakes");
             assert_eq!(circles[0].seat, 1);

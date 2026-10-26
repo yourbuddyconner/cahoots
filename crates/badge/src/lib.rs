@@ -9,4 +9,4 @@ pub mod badge;
 pub mod board;
 
 pub use badge::{Badge, Step};
-pub use board::{Board, BoardError, Circle};
+pub use board::{word_indices, Board, BoardError, Circle};

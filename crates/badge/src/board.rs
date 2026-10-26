@@ -2,6 +2,7 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
+use cahoots_core::checkwords::WORDLIST;
 use cahoots_core::circle_id::CircleId;
 use cahoots_core::params::CircleParams;
 use cahoots_hal::ledger::RecordStore;
@@ -14,12 +15,33 @@ pub enum BoardError {
     Link,
 }
 
-/// The circle a badge belongs to: its parameters, this card's seat and the circle id.
+/// The circle a badge belongs to: its parameters, this card's seat, the circle id and the
+/// six check words the ceremony produced.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Circle {
     pub params: CircleParams,
     pub seat: u8,
     pub circle_id: CircleId,
+    /// The check words as indices into `WORDLIST`. Stored at keep time, because spending
+    /// erases pad bytes and words worked out from the pad later would differ.
+    pub words: [u16; 6],
+}
+
+impl Circle {
+    /// The six check words, looked up in `WORDLIST`.
+    pub fn check_words(&self) -> [&'static str; 6] {
+        self.words
+            .map(|i| WORDLIST[usize::from(i) % WORDLIST.len()])
+    }
+}
+
+/// The indices into `WORDLIST` of six check words, or `None` if one is not in the list.
+pub fn word_indices(words: &[&str; 6]) -> Option<[u16; 6]> {
+    let mut out = [0u16; 6];
+    for (slot, w) in out.iter_mut().zip(words) {
+        *slot = WORDLIST.iter().position(|x| x == w)? as u16;
+    }
+    Some(out)
 }
 
 /// One board: drivers plus a pin table. The badge logic is generic over this trait.

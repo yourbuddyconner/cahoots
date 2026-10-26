@@ -82,6 +82,8 @@ fn two_fake_cards_complete_a_ceremony_and_keep_it() {
         b2.board().display.words.last()
     );
     assert!(b1.board().display.words.last().is_some());
+    let kept = b1.circle().unwrap().check_words().map(String::from);
+    assert_eq!(b1.board().display.words.last(), Some(&kept));
     assert_eq!(b1.circle().unwrap().seat, 0);
     assert_eq!(b2.circle().unwrap().seat, 1);
     assert_eq!(b1.circle().unwrap().params.n, 2);

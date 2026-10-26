@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
-use cahoots_badge::{Board, BoardError, Circle};
+use cahoots_badge::{word_indices, Board, BoardError, Circle};
+use cahoots_core::checkwords::check_words;
 use cahoots_core::circle_id::circle_id;
 use cahoots_core::params::CircleParams;
 use cahoots_hal::health::{HealthTests, Tested};
@@ -133,6 +134,9 @@ pub fn cable() -> (FakeLink, FakeLink) {
     )
 }
 
+/// The tier the fake board reports. Non-zero, so a test can see it passed through.
+pub const FAKE_TIER: u8 = 1;
+
 pub struct FakeBoard {
     pub entropy: Tested<Xorshift>,
     pub display: FakeDisplay,
@@ -188,6 +192,7 @@ impl FakeBoard {
             params: params.clone(),
             seat: 1,
             circle_id: circle_id(&pad),
+            words: word_indices(&check_words(&params, &pad)).unwrap(),
         });
         (b, params, pad)
     }
@@ -267,7 +272,7 @@ impl Board for FakeBoard {
         ("fakes".into(), 192)
     }
     fn tier(&self) -> u8 {
-        0
+        FAKE_TIER
     }
     fn selftest(&mut self) -> Vec<String> {
         self.selftest_lines.clone()
