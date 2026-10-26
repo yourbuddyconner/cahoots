@@ -98,7 +98,8 @@ pub fn run_card(card: Card) -> Result<Device, DeviceError> {
     let seat = ready.seat;
     let params = ready.params.clone();
     let ring = pile
-        .into_ceremony(ready, entropy.as_mut())
+        // The host is a T0 device.
+        .into_ceremony(ready, entropy.as_mut(), 0)
         .map_err(DeviceError::Ring)?;
     let (result, _links) = ring
         .run(

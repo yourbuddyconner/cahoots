@@ -91,7 +91,7 @@ fn a_pile_of_four_completes_a_ceremony() {
         .zip(ready)
         .enumerate()
         .map(|(i, (c, r))| {
-            c.into_ceremony(r.unwrap(), &mut Det(7000 + i as u64))
+            c.into_ceremony(r.unwrap(), &mut Det(7000 + i as u64), 0)
                 .unwrap()
         })
         .collect();

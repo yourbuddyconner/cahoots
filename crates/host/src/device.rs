@@ -74,7 +74,8 @@ impl Device {
         let name = format!("dev{index}");
         let mut display = PngDisplay::new(&dir.join("display.png"), &name);
         let ring =
-            RingCeremony::new(params.clone(), index, entropy, links).map_err(DeviceError::Ring)?;
+            // The host is a T0 device.
+            RingCeremony::new(params.clone(), index, entropy, links, 0).map_err(DeviceError::Ring)?;
         let (result, _links) = ring
             .run(
                 |s| display.show_lines(&[s]),

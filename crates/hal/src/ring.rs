@@ -2,25 +2,35 @@
 //!
 //! Every device has one or more [`Link`]s, one per cable: two in a pile (down and up) or in a
 //! closed ring (previous and next), one in a pair. Each device originates its own params,
-//! commitment, and reveal frames on every link, and forwards every frame it sees for the first
-//! time on every link except the one it arrived on, keyed by (kind, member index). Copies that
-//! come back round, or arrive from both sides, are dropped by that dedupe, so the same driver
-//! is correct on a line, a ring, or a pair. A device sends its reveal only once it holds all
-//! `n` commitments. Hops deliver bytes in order, so a reveal never overtakes the commitments
-//! that precede it; early reveals are buffered anyway. Frames of the pile layer (kinds 16 and
-//! up, see [`crate::pile`]) are ignored.
+//! commitment, reveal, and attest frames on every link, and forwards every frame it sees for
+//! the first time on every link except the one it arrived on, keyed by (kind, member index).
+//! Copies that come back round, or arrive from both sides, are dropped by that dedupe, so the
+//! same driver is correct on a line, a ring, or a pair.
+//!
+//! A device sends its reveal only once it holds all `n` commitments, and its attestation of
+//! the manifest only once every reveal is in. Hops deliver bytes in order, so a reveal never
+//! overtakes the commitments that precede it; early reveals and attestations are buffered
+//! anyway. The ceremony is complete when every seat has signed the manifest.
+//!
+//! Reveals and attestations are checked by the ceremony, and a member's slot is marked only
+//! once its copy is accepted: a corrupted or forged copy that arrives first is dropped and
+//! does not block the real one. Until then each distinct body is forwarded once (it is
+//! remembered by its SHA-256), and at most four distinct bodies per member and kind, so
+//! forwarding stays bounded. A frame that claims our own index is dropped.
+//!
+//! Frames of the pile layer (kinds 16 and up, see [`crate::pile`]) are ignored.
 //!
 //! Frame payloads:
 //!
 //! | kind | payload |
 //! |---|---|
 //! | `Params` | `index u8 \| CircleParams::encode()` |
-//! | `Commit` | `index u8 \| commitment (32 B) \| KEM public key (1216 B) \| seat public key (33 B) \| tier u8` |
+//! | `Commit` | `index u8 \| commitment (32 B) \| KEM public key (1216 B) \| seat public key (33 B, SEC1 compressed) \| tier u8` |
 //! | `Reveal` | `index u8 \| sealed reveal (see `cahoots_core::reveal`)` |
-//! | `Attest` | `index u8 \| COSE_Sign1 over the manifest (see `cahoots_core::manifest`)` |
+//! | `Abort`  | `index u8 \| reason u8` |
+//! | `Attest` | `index u8 \| detached COSE_Sign1 over the manifest, at most 256 B (see `cahoots_core::manifest`)` |
 //!
 //! Reveals are sealed to every member, so the wire never carries a contribution in the clear.
-//! | `Abort`  | `index u8 \| reason u8` |
 
 use crate::{Entropy, HealthError, Link};
 use alloc::vec;
@@ -30,6 +40,7 @@ use cahoots_core::frame::{self, FrameError};
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::{randomness_len, KEM_SEED_LEN, PUBLIC_KEY_LEN};
 use cahoots_core::seat::SeatKey;
+use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,8 +50,7 @@ pub enum Frame {
     Commit = 2,
     Reveal = 3,
     Abort = 4,
-    /// Minimal attest round for now; Task 6 adds the tier argument, the status line, and the
-    /// ring tests for it.
+    /// A seat's signature over the manifest.
     Attest = 5,
 }
 
@@ -73,6 +83,15 @@ const MAX_MEMBERS: usize = 8;
 const SEAT_PUBLIC_LEN: usize = 33;
 /// `Commit` payload after the index: commitment, KEM key, seat key, tier.
 const COMMIT_BODY_LEN: usize = 32 + PUBLIC_KEY_LEN + SEAT_PUBLIC_LEN + 1;
+/// Largest `Attest` body. A COSE_Sign1 with a one-byte key id and a 64-byte signature is
+/// under 120 bytes.
+const MAX_ATTEST_BODY: usize = 256;
+/// Distinct reveal or attest bodies forwarded per member before its copy is accepted. One is
+/// normal; the rest leave room for corrupted or forged copies without letting them loop.
+const MAX_COPIES: usize = 4;
+/// Draws of the seat seed before the entropy source is taken to be broken. A uniform draw
+/// is a valid P-256 scalar with probability above 1 - 2^-32.
+const SEAT_SEED_TRIES: usize = 8;
 
 pub struct RingCeremony<L: Link> {
     links: Vec<L>,
@@ -85,11 +104,16 @@ pub struct RingCeremony<L: Link> {
     rx: Vec<Vec<u8>>,
     seen_params: [bool; MAX_MEMBERS],
     seen_commit: [bool; MAX_MEMBERS],
+    /// Reveals accepted by the ceremony, ours included.
     seen_reveal: [bool; MAX_MEMBERS],
     pending_reveals: Vec<(u8, Zeroizing<Vec<u8>>)>,
+    /// Attestations accepted by the ceremony, ours included.
     seen_attest: [bool; MAX_MEMBERS],
     /// Attestations that arrived before our phase was `Attest`, or not yet applied.
     pending_attestations: Vec<(u8, Vec<u8>)>,
+    /// (kind, member, SHA-256 of the body) of each reveal or attest body forwarded for a
+    /// member whose copy is not yet accepted.
+    copies: Vec<(u8, u8, [u8; 32])>,
     attested_self: bool,
     /// Randomness for sealing our reveal, drawn up front so no entropy source is held.
     reveal_rand: Zeroizing<Vec<u8>>,
@@ -98,15 +122,18 @@ pub struct RingCeremony<L: Link> {
 }
 
 impl<L: Link> RingCeremony<L> {
-    /// Draw the contribution from `entropy` (already health-tested) and prepare the
-    /// commitment. Nothing is sent until [`start`](Self::start).
+    /// Draw the contribution, the KEM seed, and the seat seed from `entropy` (already
+    /// health-tested) and prepare the commitment. `tier` is this device's declared tier, 0
+    /// to 4; another is `RingError::Ceremony(CeremonyError::BadTier)`. Nothing is sent until
+    /// [`start`](Self::start).
     pub fn new(
         params: CircleParams,
         index: u8,
         entropy: &mut dyn Entropy,
         links: Vec<L>,
+        tier: u8,
     ) -> Result<Self, RingError> {
-        Self::new_buffered(params, index, entropy, links, Vec::new())
+        Self::new_buffered(params, index, entropy, links, Vec::new(), tier)
     }
 
     /// Like [`new`](Self::new), with bytes that already arrived on each link before the
@@ -117,21 +144,28 @@ impl<L: Link> RingCeremony<L> {
         entropy: &mut dyn Entropy,
         links: Vec<L>,
         mut buffered: Vec<Vec<u8>>,
+        tier: u8,
     ) -> Result<Self, RingError> {
         buffered.resize(links.len(), Vec::new());
         let mut contribution = Zeroizing::new(vec![0u8; params.pad_len as usize]);
         entropy.fill(&mut contribution).map_err(RingError::Health)?;
         let mut kem_seed = Zeroizing::new([0u8; KEM_SEED_LEN]);
         entropy.fill(kem_seed.as_mut()).map_err(RingError::Health)?;
-        // The seat seed follows the KEM seed; a seed that is not a valid scalar is redrawn.
+        // The seat seed follows the KEM seed; a seed that is not a valid scalar is redrawn, a
+        // few times only: a source that keeps failing is stuck.
         let mut seat_seed = Zeroizing::new([0u8; 32]);
-        loop {
+        let mut valid = false;
+        for _ in 0..SEAT_SEED_TRIES {
             entropy
                 .fill(seat_seed.as_mut())
                 .map_err(RingError::Health)?;
             if SeatKey::from_seed(&seat_seed).is_ok() {
+                valid = true;
                 break;
             }
+        }
+        if !valid {
+            return Err(RingError::Health(HealthError::RepetitionCount));
         }
         let mut reveal_rand = Zeroizing::new(vec![0u8; randomness_len(params.n)]);
         entropy.fill(&mut reveal_rand).map_err(RingError::Health)?;
@@ -143,8 +177,7 @@ impl<L: Link> RingCeremony<L> {
             core::mem::take(&mut *contribution),
             *kem_seed,
             *seat_seed,
-            // Placeholder tier 0 until Task 6 passes the device's declared tier in.
-            0,
+            tier,
         )?;
         Ok(RingCeremony {
             links,
@@ -160,6 +193,7 @@ impl<L: Link> RingCeremony<L> {
             pending_reveals: Vec::new(),
             seen_attest: [false; MAX_MEMBERS],
             pending_attestations: Vec::new(),
+            copies: Vec::new(),
             attested_self: false,
             reveal_rand,
             revealed_self: false,
@@ -178,6 +212,9 @@ impl<L: Link> RingCeremony<L> {
     }
     pub fn reveals_held(&self) -> u8 {
         self.seen_reveal.iter().filter(|&&s| s).count() as u8
+    }
+    pub fn attestations_held(&self) -> u8 {
+        self.seen_attest.iter().filter(|&&s| s).count() as u8
     }
 
     /// Send on every link that has a peer.
@@ -324,16 +361,22 @@ impl<L: Link> RingCeremony<L> {
                 }
             }
             k if k == Frame::Reveal as u8 => {
-                if !self.seen_reveal[i] {
-                    self.seen_reveal[i] = true;
-                    self.send_except(kind, index, &body, Some(from));
+                // Ours is marked when we send it; a copy from a peer is never needed.
+                if index != self.index
+                    && !self.seen_reveal[i]
+                    && self.first_sight(kind, index, &body, from)
+                {
                     self.pending_reveals.push((index, Zeroizing::new(body)));
                 }
             }
             k if k == Frame::Attest as u8 => {
-                if !self.seen_attest[i] {
-                    self.seen_attest[i] = true;
-                    self.send_except(kind, index, &body, Some(from));
+                if body.len() > MAX_ATTEST_BODY {
+                    return Err(self.abort(RingError::Protocol));
+                }
+                if index != self.index
+                    && !self.seen_attest[i]
+                    && self.first_sight(kind, index, &body, from)
+                {
                     self.pending_attestations.push((index, body));
                 }
             }
@@ -343,6 +386,34 @@ impl<L: Link> RingCeremony<L> {
             _ => return Err(self.abort(RingError::Protocol)),
         }
         Ok(())
+    }
+
+    /// Forward a reveal or attest body for `index` the first time we see it. False, and
+    /// nothing sent, when this body came by before (a copy coming back round, or from the
+    /// other side) or `index` already used up its [`MAX_COPIES`].
+    fn first_sight(&mut self, kind: u8, index: u8, body: &[u8], from: usize) -> bool {
+        let digest: [u8; 32] = Sha256::digest(body).into();
+        let mut held = 0;
+        for &(k, i, d) in &self.copies {
+            if (k, i) == (kind, index) {
+                if d == digest {
+                    return false;
+                }
+                held += 1;
+            }
+        }
+        if held >= MAX_COPIES {
+            return false;
+        }
+        self.copies.push((kind, index, digest));
+        self.send_except(kind, index, body, Some(from));
+        true
+    }
+
+    /// `index`'s copy of `kind` was accepted: later copies are dropped by the seen flag.
+    fn forget_copies(&mut self, kind: Frame, index: u8) {
+        self.copies
+            .retain(|&(k, i, _)| (k, i) != (kind as u8, index));
     }
 
     /// Once all commitments are held, reveal ourselves and apply any buffered reveals.
@@ -368,8 +439,14 @@ impl<L: Link> RingCeremony<L> {
         }
         let pending = core::mem::take(&mut self.pending_reveals);
         for (idx, r) in pending {
+            if self.seen_reveal[usize::from(idx)] {
+                continue;
+            }
             match self.ceremony.add_reveal(idx, &r) {
-                Ok(()) => {}
+                Ok(()) => {
+                    self.seen_reveal[usize::from(idx)] = true;
+                    self.forget_copies(Frame::Reveal, idx);
+                }
                 // A garbled frame on a wire is a CRC failure before it gets here; a sealed
                 // reveal that still fails to open is not addressed to us. Drop it and keep going.
                 Err(CeremonyError::Corrupted(_)) => {}
@@ -396,8 +473,14 @@ impl<L: Link> RingCeremony<L> {
         }
         let pending = core::mem::take(&mut self.pending_attestations);
         for (idx, a) in pending {
+            if self.seen_attest[usize::from(idx)] {
+                continue;
+            }
             match self.ceremony.add_attestation(idx, &a) {
-                Ok(()) => {}
+                Ok(()) => {
+                    self.seen_attest[usize::from(idx)] = true;
+                    self.forget_copies(Frame::Attest, idx);
+                }
                 // Like a reveal that fails to open: drop it and keep going.
                 Err(CeremonyError::BadAttestation(_)) => {}
                 Err(e) => return Err(self.abort(RingError::Ceremony(e))),
@@ -420,7 +503,7 @@ impl<L: Link> RingCeremony<L> {
         mut status: impl FnMut(&str),
         mut idle: impl FnMut(),
     ) -> Result<(CeremonyResult, Vec<L>), RingError> {
-        let mut last = (0u8, 0u8);
+        let mut last = (0u8, 0u8, 0u8);
         status("ceremony: waiting for the others");
         self.start();
         loop {
@@ -431,7 +514,11 @@ impl<L: Link> RingCeremony<L> {
                     return Err(e);
                 }
             };
-            let now = (self.commitments_held(), self.reveals_held());
+            let now = (
+                self.commitments_held(),
+                self.reveals_held(),
+                self.attestations_held(),
+            );
             if now != last {
                 last = now;
                 let mut s = StatusLine::new();
@@ -441,6 +528,10 @@ impl<L: Link> RingCeremony<L> {
                 s.push_num(self.n);
                 s.push("  reveals ");
                 s.push_num(now.1);
+                s.push("/");
+                s.push_num(self.n);
+                s.push("  attestations ");
+                s.push_num(now.2);
                 s.push("/");
                 s.push_num(self.n);
                 status(s.as_str());
@@ -471,14 +562,14 @@ impl<L: Link> RingCeremony<L> {
 
 /// Tiny fixed-capacity string builder so status lines need no formatting machinery.
 struct StatusLine {
-    buf: [u8; 48],
+    buf: [u8; 64],
     len: usize,
 }
 
 impl StatusLine {
     fn new() -> Self {
         StatusLine {
-            buf: [0; 48],
+            buf: [0; 64],
             len: 0,
         }
     }

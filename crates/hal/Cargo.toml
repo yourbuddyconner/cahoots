@@ -13,6 +13,7 @@ std = ["cahoots-core/std"]
 [dependencies]
 cahoots-core = { workspace = true }
 crc = { version = "3.3", default-features = false }
+sha2 = { workspace = true }
 zeroize = { version = "1.8", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]

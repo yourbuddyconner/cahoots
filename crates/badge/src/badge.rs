@@ -348,7 +348,8 @@ impl<B: Board> Badge<B> {
                         &format!("seat {seat} of {}: {}", params.n, params.name),
                     );
                     let mut ring = pile
-                        .into_ceremony(ready, self.board.entropy())
+                        // Tier 0 until the board declares its own.
+                        .into_ceremony(ready, self.board.entropy(), 0)
                         .map_err(|e| format!("ceremony: {e:?}"))?;
                     show_status(&mut self.board, "ceremony: waiting for the others");
                     ring.start();

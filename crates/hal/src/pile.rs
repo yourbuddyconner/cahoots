@@ -259,10 +259,12 @@ impl<L: Link> Pile<L> {
     }
 
     /// Hand the links, and any ceremony bytes that already arrived on them, to the ceremony.
+    /// `tier` is this device's declared tier (see [`RingCeremony::new`]).
     pub fn into_ceremony(
         self,
         ready: Ready,
         entropy: &mut dyn Entropy,
+        tier: u8,
     ) -> Result<RingCeremony<L>, RingError> {
         let [down, up] = self.links;
         let [rx_down, rx_up] = self.rx;
@@ -272,6 +274,7 @@ impl<L: Link> Pile<L> {
             entropy,
             vec![down, up],
             vec![rx_down, rx_up],
+            tier,
         )
     }
 }
