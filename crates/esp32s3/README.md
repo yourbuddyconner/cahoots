@@ -81,7 +81,7 @@ without the screen or the USB link:
 | Address | What |
 |---|---|
 | `0x411000` | The last panic's message, shown on the screen at the next boot and erased |
-| `0x412000` | Every log line of the current boot, written as it happens |
+| `0x412000` | Every log line and every screen of the current boot, written as it happens, except a key screen, which is never traced |
 
 ```sh
 espflash read-flash -p /dev/cu.usbmodem101 0x412000 0x1000 /tmp/trace.bin   # then strip 0xFF

@@ -30,9 +30,10 @@ fn press(badge: &mut Badge<FakeBoard>, gesture: Press) {
 }
 
 /// The last screen is menu page `page` of 3, titled `title`.
+/// The words page has no title: its six words are the page.
 fn on_page(badge: &mut Badge<FakeBoard>, page: usize, title: &str) -> bool {
     let b = badge.board();
-    b.shows(&format!("{page}/3")) && b.shows(title)
+    b.shows(&format!("{page}/3")) && (title.is_empty() || b.shows(title))
 }
 
 /// Right twice to the Serve page, then Both to start serving.
@@ -102,7 +103,7 @@ fn remaining(badge: &mut Badge<FakeBoard>, laptop: &mut FakeLink, id: CircleId) 
 #[test]
 fn the_menu_opens_on_the_words_page() {
     let (mut badge, _laptop, _) = in_the_menu();
-    assert!(on_page(&mut badge, 1, "words"));
+    assert!(on_page(&mut badge, 1, ""));
     let kept = badge.circle().unwrap().check_words().map(String::from);
     assert_eq!(badge.board().words().last(), Some(&kept));
 }
@@ -116,13 +117,13 @@ fn left_and_right_walk_the_page_ring() {
     press(&mut badge, Press::Right);
     assert!(on_page(&mut badge, 3, "serve a laptop"));
     press(&mut badge, Press::Right);
-    assert!(on_page(&mut badge, 1, "words"));
+    assert!(on_page(&mut badge, 1, ""));
     press(&mut badge, Press::Left);
     assert!(on_page(&mut badge, 3, "serve a laptop"));
     press(&mut badge, Press::Left);
     assert!(on_page(&mut badge, 2, "key as code"));
     press(&mut badge, Press::Left);
-    assert!(on_page(&mut badge, 1, "words"));
+    assert!(on_page(&mut badge, 1, ""));
     assert!(
         badge.board().codes().is_empty(),
         "turning pages spends nothing"
@@ -186,7 +187,7 @@ fn both_on_the_words_page_spends_nothing() {
     let (mut badge, mut laptop, id) = serving();
     let before = remaining(&mut badge, &mut laptop, id);
     press(&mut badge, Press::Right);
-    assert!(on_page(&mut badge, 1, "words"));
+    assert!(on_page(&mut badge, 1, ""));
     press(&mut badge, Press::Both);
     press(&mut badge, Press::Both);
     assert!(badge.board().codes().is_empty());
@@ -201,7 +202,7 @@ fn both_on_the_words_page_shows_the_six_words_again() {
     let first = badge.board().words().last().unwrap().clone();
     let n = badge.board().words().len();
     press(&mut badge, Press::Both);
-    assert!(on_page(&mut badge, 1, "words"));
+    assert!(on_page(&mut badge, 1, ""));
     assert_eq!(badge.board().words().len(), n + 1);
     assert_eq!(badge.board().words().last().unwrap(), &first);
 }
@@ -215,7 +216,7 @@ fn words_are_the_same_after_a_spend() {
     assert_eq!(badge.board().codes().len(), 1);
     press(&mut badge, Press::Both);
     press(&mut badge, Press::Left);
-    assert!(on_page(&mut badge, 1, "words"));
+    assert!(on_page(&mut badge, 1, ""));
     assert_eq!(badge.board().words().last().unwrap(), &before);
 }
 
@@ -344,7 +345,7 @@ fn a_request_outside_serve_is_busy() {
 fn turning_off_the_serve_page_stops_serving() {
     let (mut badge, mut laptop, _) = serving();
     press(&mut badge, Press::Right);
-    assert!(on_page(&mut badge, 1, "words"));
+    assert!(on_page(&mut badge, 1, ""));
     press(&mut badge, Press::Left);
     send(&mut laptop, 2, &Request::Identify);
     badge.idle_step();

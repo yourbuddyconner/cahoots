@@ -16,6 +16,7 @@ cahoots-hal = { workspace = true }
 cahoots-custodian = { workspace = true }
 zeroize = { workspace = true, features = ["alloc"] }
 embedded-graphics = { version = "0.8", default-features = false }
+profont = { version = "0.7", default-features = false }
 
 [dev-dependencies]
 cahoots-core = { workspace = true, features = ["std"] }

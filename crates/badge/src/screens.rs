@@ -17,6 +17,7 @@ use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Line, PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Alignment, Baseline, Text, TextStyleBuilder};
+use profont::{PROFONT_18_POINT, PROFONT_24_POINT};
 
 /// One screen: the text it shows, top to bottom, and the frame a board draws.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,6 +26,9 @@ pub struct Screen {
     /// [`status`] are kept whole here; a line too wide for the screen wraps in the frame.
     pub lines: Vec<String>,
     pub frame: Frame,
+    /// The screen shows key bytes. A board must not copy its lines anywhere that outlives
+    /// the screen, such as a log or a trace on flash: the pad erased those bytes already.
+    pub secret: bool,
 }
 
 /// The y of the rule under the header.
@@ -64,12 +68,35 @@ pub fn ceremony(commits: u8, reveals: u8, n: u8) -> Screen {
     s.done()
 }
 
-/// The six check words in two columns, read across then down, and a note under them.
-pub fn words(circle: &str, tier: &str, words: &[&str; 6], note: &str) -> Screen {
+/// The six check words, one per row in the large face, under the circle's header.
+pub fn words(circle: &str, tier: &str, words: &[&str; 6]) -> Screen {
     let mut s = Draw::new();
     s.header(circle, tier);
-    s.word_grid(40, words);
-    s.wrapped(&FONT_8X13, 140, note);
+    s.word_rows(words);
+    s.done()
+}
+
+/// The menu's words page: the header with "page/pages" in its middle, the six words one per
+/// row in the large face, and an arrow on each side that has a neighbouring page.
+pub fn words_page(
+    circle: &str,
+    tier: &str,
+    page: usize,
+    pages: usize,
+    words: &[&str; 6],
+    left: bool,
+    right: bool,
+) -> Screen {
+    let mut s = Draw::new();
+    s.header(circle, tier);
+    s.centered(&FONT_8X13, 7, &format!("{page}/{pages}"));
+    s.word_rows(words);
+    if left {
+        s.arrow(2, "<");
+    }
+    if right {
+        s.arrow(W - 10, ">");
+    }
     s.done()
 }
 
@@ -77,9 +104,11 @@ pub fn words(circle: &str, tier: &str, words: &[&str; 6], note: &str) -> Screen 
 pub fn keep_prompt(words: &[&str; 6]) -> Screen {
     let mut s = Draw::new();
     s.inverted_centered(&FONT_10X20, 4, "keep this circle?");
-    s.word_grid(40, words);
-    s.centered(&FONT_8X13, 140, "Both to keep");
-    s.centered(&FONT_8X13, 158, "one button discards");
+    for (i, w) in words.iter().enumerate() {
+        s.centered(&PROFONT_18_POINT, 30 + 23 * i as i32, w);
+    }
+    s.centered(&FONT_8X13, 172, "Both to keep");
+    s.centered(&FONT_8X13, 186, "one button discards");
     s.done()
 }
 
@@ -124,7 +153,9 @@ pub fn code(bytes: &[u8]) -> Screen {
             .collect();
         s.centered(&FONT_10X20, 40 + 26 * i as i32, &groups.join(" "));
     }
-    s.done()
+    let mut s = s.done();
+    s.secret = true;
+    s
 }
 
 /// The question a spending request asks: spend `len` bytes for `circle`?
@@ -249,6 +280,7 @@ impl Draw {
         Screen {
             lines: self.lines,
             frame: self.frame,
+            secret: false,
         }
     }
 
@@ -321,20 +353,11 @@ impl Draw {
         y
     }
 
-    /// Two columns of three words, across then down: one line per row.
-    fn word_grid(&mut self, y: i32, words: &[&str; 6]) {
-        for (i, pair) in words.chunks(2).enumerate() {
-            let y = y + 28 * i as i32;
-            let on = BinaryColor::On;
-            self.text(&FONT_10X20, Point::new(12, y), Alignment::Left, on, pair[0]);
-            self.text(
-                &FONT_10X20,
-                Point::new(108, y),
-                Alignment::Left,
-                on,
-                pair[1],
-            );
-            self.lines.push(format!("{} {}", pair[0], pair[1]));
+    /// The six words one per row, centred, in the large face, filling the screen below the
+    /// header.
+    fn word_rows(&mut self, words: &[&str; 6]) {
+        for (i, w) in words.iter().enumerate() {
+            self.centered(&PROFONT_24_POINT, 30 + 28 * i as i32, w);
         }
     }
 

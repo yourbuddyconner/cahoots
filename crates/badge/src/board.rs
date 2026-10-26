@@ -97,7 +97,9 @@ pub trait Board {
     fn log(&mut self, line: &str);
     /// The text of the screen the badge is about to draw, top line first. A board that
     /// keeps a text copy of the screen (a test fake, the host simulator) records it here.
-    fn note_screen(&mut self, lines: &[String]) {
-        let _ = lines;
+    /// A `secret` screen shows key bytes: a board must not write those lines to a log, a
+    /// trace or anywhere else that outlives the screen.
+    fn note_screen(&mut self, lines: &[String], secret: bool) {
+        let _ = (lines, secret);
     }
 }

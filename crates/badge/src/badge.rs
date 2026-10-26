@@ -721,7 +721,7 @@ fn respond<L: Link>(link: &mut L, seq: u32, response: &[u8]) {
 
 /// Note `screen`'s lines on the board, then draw its frame.
 fn show<B: Board>(board: &mut B, screen: Screen) {
-    board.note_screen(&screen.lines);
+    board.note_screen(&screen.lines, screen.secret);
     board.display().draw(&screen.frame);
 }
 
@@ -732,12 +732,21 @@ fn show_status<B: Board>(board: &mut B, s: &str) {
 
 /// The menu's current page for the stored circle `c`.
 fn show_page<B: Board>(board: &mut B, c: &Circle, m: &Menu<B>) {
-    let words = c.check_words();
-    let rows: Vec<String>;
+    let tier = tier_label(board.tier());
     let body: Vec<&str> = match m.page {
         Page::Words => {
-            rows = words.chunks(2).map(|p| p.join(" ")).collect();
-            rows.iter().map(String::as_str).collect()
+            let words = c.check_words();
+            let page = screens::words_page(
+                &c.params.name,
+                &tier,
+                m.page.index() + 1,
+                Page::ALL.len(),
+                &words,
+                true,
+                true,
+            );
+            show(board, page);
+            return;
         }
         Page::Key => vec!["Both to spend 32 bytes"],
         Page::Serve => {
@@ -752,7 +761,6 @@ fn show_page<B: Board>(board: &mut B, c: &Circle, m: &Menu<B>) {
             body
         }
     };
-    let tier = tier_label(board.tier());
     let page = screens::menu_page(
         &c.params.name,
         &tier,
@@ -769,10 +777,7 @@ fn show_page<B: Board>(board: &mut B, c: &Circle, m: &Menu<B>) {
 /// The words of the stored circle `c`, under its header.
 fn show_words<B: Board>(board: &mut B, c: &Circle, words: &[&str; 6]) {
     let tier = tier_label(board.tier());
-    show(
-        board,
-        screens::words(&c.params.name, &tier, words, "say them aloud"),
-    );
+    show(board, screens::words(&c.params.name, &tier, words));
 }
 
 /// The header's label for a board's tier.

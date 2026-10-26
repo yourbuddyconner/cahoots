@@ -376,8 +376,14 @@ impl Board for HostBoard {
         eprintln!("[{}] {line}", self.name);
     }
 
-    fn note_screen(&mut self, lines: &[String]) {
-        eprintln!("[{}] {}", self.name, lines.join("\n"));
+    /// The screen's text goes to stderr and `screen.txt`. A key screen goes only to the
+    /// file, which the simulator's tests read; the terminal log keeps no copy of a key.
+    fn note_screen(&mut self, lines: &[String], secret: bool) {
+        if secret {
+            eprintln!("[{}] (a key screen)", self.name);
+        } else {
+            eprintln!("[{}] {}", self.name, lines.join("\n"));
+        }
         self.display.note(lines);
     }
 }

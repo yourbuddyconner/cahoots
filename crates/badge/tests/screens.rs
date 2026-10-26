@@ -12,14 +12,13 @@ fn any_black(f: &Frame, x0: usize, x1: usize, y0: usize, y1: usize) -> bool {
 
 #[test]
 fn words_screen_lists_the_words_in_order() {
-    let s = words("bench", "TRNG T1", &W, "say them aloud");
+    let s = words("bench", "TRNG T1", &W);
     let tokens: Vec<&str> = s.lines.iter().flat_map(|l| l.split_whitespace()).collect();
     let at = tokens
         .iter()
         .position(|t| *t == W[0])
         .expect("the first word");
     assert_eq!(&tokens[at..at + 6], &W);
-    assert!(s.lines.iter().any(|l| l == "say them aloud"));
     assert!(s.lines[0].contains("bench") && s.lines[0].contains("TRNG T1"));
 }
 
@@ -49,8 +48,15 @@ fn code_screen_shows_32_bytes_as_four_rows() {
 
 #[test]
 fn a_frame_is_deterministic() {
-    let a = words("bench", "TRNG T1", &W, "say them aloud");
-    let b = words("bench", "TRNG T1", &W, "say them aloud");
+    let a = words("bench", "TRNG T1", &W);
+    let b = words("bench", "TRNG T1", &W);
     assert_eq!(a.frame.bits, b.frame.bits);
     assert!(a.frame.bits.iter().any(|&b| b != 0));
+}
+
+#[test]
+fn only_the_code_screen_is_secret() {
+    assert!(code(&[0xAB; 32]).secret);
+    assert!(!words("bench", "TRNG T1", &W).secret);
+    assert!(!menu_page("bench", "TRNG T1", 2, 3, "key as code", &["x"], true, true).secret);
 }

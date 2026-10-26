@@ -109,7 +109,7 @@ fn main() -> ! {
             if let Err(e) = badge.run_once() {
                 log!("{e}");
                 let screen = screens::status(&[&e]);
-                badge.board().note_screen(&screen.lines);
+                badge.board().note_screen(&screen.lines, screen.secret);
                 badge.board().display().draw(&screen.frame);
                 badge.board().delay_ms(1500);
             }

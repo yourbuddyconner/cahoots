@@ -30,11 +30,11 @@ Every screen has the same skeleton: the circle name and the tier label in a head
 | Last panic | the recorded message | | continue |
 | Pile | "stack the cards" and the seat once known | | start the count (top card) |
 | Ceremony | "commits x/n", "reveals y/n" as a two-line counter | | |
-| Words | the six words in two columns, "say them aloud" | | keep, during the keep prompt |
+| Words | the six words, one per row in a large face (ProFont 24 point) | | |
 | Keep prompt | "keep this circle?" with Both = keep, either = discard | discard | keep |
-| Menu, Words page | the six words | pages | redraw |
+| Menu, Words page | the six words, one per row in the large face, "1/3" in the header; no title | pages | redraw |
 | Menu, Key page | "key as code", "Both to spend 32 bytes" | pages | spend and show the Code screen |
-| Code | the 32 bytes as 4 rows of 8 hex pairs, inverted title "code" | back to the Key page | |
+| Code | the 32 bytes as 4 rows of 8 hex pairs, inverted title "code"; marked `secret`, so a board never copies its lines to a log or a trace | back to the Key page | |
 | Menu, Serve page | "serve a laptop", a "listening" line once a peer is present | pages | start serving |
 | Consent prompt | "spend N bytes for <circle>?", "Both to allow" | refuse | allow |
 | Status | one or two lines, for errors and transient notes | | |

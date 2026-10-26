@@ -319,7 +319,7 @@ impl Board for FakeBoard {
     fn log(&mut self, line: &str) {
         self.log.push(line.to_string());
     }
-    fn note_screen(&mut self, lines: &[String]) {
+    fn note_screen(&mut self, lines: &[String], _secret: bool) {
         self.screens.push(lines.to_vec());
     }
 }

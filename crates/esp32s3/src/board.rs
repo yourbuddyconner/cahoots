@@ -125,7 +125,7 @@ impl Board for NanoBoard {
                 .join(" ");
             log!("last boot panicked: {compact}");
             let screen = screens::panic(&compact);
-            self.note_screen(&screen.lines);
+            self.note_screen(&screen.lines, screen.secret);
             self.screen.draw(&screen.frame);
             while self.buttons.press() != Press::Both {
                 let _ = <UsbLink as Link>::flush(&mut UsbLink);
@@ -164,8 +164,13 @@ impl Board for NanoBoard {
     }
 
     /// Each line of the screen goes to the trace sector, so the last screens can be read
-    /// back with espflash after a hang.
-    fn note_screen(&mut self, lines: &[String]) {
+    /// back with espflash after a hang. A key screen is not copied: the pad erased those
+    /// bytes when it released them, and the trace sector must not keep them.
+    fn note_screen(&mut self, lines: &[String], secret: bool) {
+        if secret {
+            store::trace("screen: a key, not traced");
+            return;
+        }
         for line in lines {
             store::trace(&format!("screen: {line}"));
         }
