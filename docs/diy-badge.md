@@ -15,7 +15,7 @@ All three run the same Rust core and the same ceremony. The four trait implement
 ## What every board shares
 
 - **An e-paper screen.** Every board uses a 1.54" 200 × 200 e-paper panel. It holds the six words with no power, it is readable in sunlight, and it never needs to animate. A single code fits on it, and the reveal, which is too big for a single code, travels over the wire or the USB cable instead. A 200 × 200 panel shows a version 4 code at 6 pixels per module, which a phone reads at arm's length.
-- **Two buttons.** A is next, B is confirm. That is enough for every screen: cycle through a PIN digit with A and lock it with B, confirm the words with B or reject them with A, pick a seat with A and take it with B. There is no joystick.
+- **Two buttons.** The left button (A) goes to the previous page. The right button (B) goes to the next. Both together within 80 ms select, keep or allow. On a question, both buttons say yes and either one alone says no. That is enough for every screen, with no joystick. The badge draws each screen itself, so every board shows the same picture.
 - **A wire to the next badge.** This is the touch link, one per neighbour. It is a UART between two boards, or the pogo pins and pads of the pile. Reveals are sealed to every member before they go on the wire, so the wire carries no secret and needs no handshake of its own. No radio is used during a ceremony on any board.
 - **USB to a phone or laptop.** The browser app connects over WebUSB or WebSerial and becomes the badge's camera: it scans the other members' codes with the phone camera and passes them down the cable, and it can mirror the badge's screen. The secret never goes up the cable. Only commitments, reveals, sealed messages, and the ledger position do. This is roadmap item M4d. Today the USB link carries the pile protocol to a laptop running `cahoots-host`.
 
@@ -41,12 +41,12 @@ This is the board on the bench, and the firmware runs here first. The parts are 
 |---|---|---|
 | e-paper CLK, DIN | D13, D11 | 48, 38 |
 | e-paper CS, DC, RST, BUSY | D10, D9, D8, D7 | 21, 18, 17, 10 |
-| button A (next), B (confirm), to GND | D2, D3 | 5, 6 |
+| button A (left), B (right), to GND | D2, D3 | 5, 6 |
 | link to the laptop | USB-C | USB-Serial-JTAG |
 
 The firmware is [`crates/esp32s3`](../crates/esp32s3/README.md), `no_std` Rust on `esp-hal`, and its design is in [docs/superpowers/specs/2026-10-23-esp32s3-firmware-design.md](superpowers/specs/2026-10-23-esp32s3-firmware-design.md). The display driver is `epd-waveshare`'s `epd1in54_v2` over SPI at 1 MHz, because 10 MHz does not get through the module's level shifter on jumper wires. The pad lives in a 1 MiB region of the flash, the ledger in 64 KiB after it, and the circle record in 4 KiB after that.
 
-What it proves: the four HAL traits work on real hardware, the panel shows the badge's screens, and a board completes a pile and a ceremony with a laptop standing in for the other cards. The board is the top card. When its seat appears on the status line, press B and it counts the pile. The six words appear, B keeps the circle and A discards it. The laptop prints each simulated card's words and they match the glass.
+What it proves: the four HAL traits work on real hardware, the panel shows the badge's screens, and a board completes a pile and a ceremony with a laptop standing in for the other cards. The board is the top card. When its seat appears on the status line, press both buttons and it counts the pile. The six words appear; both buttons keep the circle and either one alone discards it. The laptop prints each simulated card's words and they match the glass.
 
 What it does not prove: the pad is plaintext on flash, so a reader with physical access can copy it. Flash encryption and secure boot are one-way eFuse operations and wait for sign-off. The radio is present on the chip and no radio code is linked. That makes this board T1. A UART link to a second Nano, PIN entry and the QR screen are listed in the crate README under "Not yet".
 
@@ -55,7 +55,7 @@ Step by step:
 1. Wire the module and the buttons as in the table. The [bring-up README](../hardware/nano-esp32-epaper/README.md) has a wiring diagram and says which physical header pin is which.
 2. Check the panel first with the Arduino sketch in [hardware/nano-esp32-epaper](../hardware/nano-esp32-epaper/README.md). It draws the badge's screens and the QR code sizes, and it needs only the Arduino IDE or `arduino-cli` with the ESP32 core and GxEPD2. Start SPI at 1 MHz; the module's level shifter and jumper wires drop frames at the library's default 10 MHz.
 3. Build and flash the Rust firmware from [`crates/esp32s3`](../crates/esp32s3/README.md). The first flash needs the chip in ROM download mode (B1 to GND while plugging in), because the board ships with Arduino's bootloader. The README has the exact steps, and how to put the Arduino bootloader back.
-4. Run a ceremony with the laptop standing in for the other cards: `cargo run -p cahoots-host -- pile --cards 3 --serial /dev/cu.usbmodem* --name bench --state /tmp/pile`. The board is the top card. Press B when its seat appears, watch the commits and reveals arrive, read the six words, and press B to keep the circle.
+4. Run a ceremony with the laptop standing in for the other cards: `cargo run -p cahoots-host -- pile --cards 3 --serial /dev/cu.usbmodem* --name bench --state /tmp/pile`. The board is the top card. Press both buttons when its seat appears, watch the commits and reveals arrive, read the six words, and press both to keep the circle.
 
 ### Raspberry Pi Pico 2
 
@@ -76,8 +76,8 @@ Use a plain Pico 2 (RP2350, no wireless). The Pico 2 W works for tinkering, but 
 
 | Button | Pico GPIO | Physical pin | Meaning |
 |---|---|---|---|
-| A | GP14 | 19 | next |
-| B | GP15 | 20 | confirm |
+| A | GP14 | 19 | left, previous page |
+| B | GP15 | 20 | right, next page |
 
 Each button goes between its GPIO and a GND pin. The firmware enables the pull-ups.
 
@@ -122,7 +122,7 @@ The badge is a card: 54 × 86 mm, 3 mm thick, clear polycarbonate, with a slot a
 
 The tallest column is the battery's, and with adhesive and tolerance the card comes out at 2.9 to 3.2 mm: four credit cards. A pile of eight is 25 mm. Whether a coin cell can power a ceremony and a refresh is the open measurement in the manufacturing plan; a thin rechargeable pouch cell is the alternative, and the thickness follows that answer.
 
-**Cards stack instead of lining up.** Four magnets in the floor line a card up on the one below and hold it a fraction of a millimetre above it, with opposite poles so it only snaps on one way round. Four gold pads on the face at the contacts end meet four spring fingers under the card above. A pile is a line of links, so each card has one link up and one down. The firmware for it is in `crates/hal`: the ceremony driver floods each new frame on every link except the one it came from, which its dedupe makes correct on a line, a ring, or a pair. The pile layer (`hal::pile`) gives each card its seat from the card below it, with the bottom card naming the circle, and sends the count down from the top card when its button is pressed. Nobody says a seat number out loud. The ritual: press B on the top card, wait for the six words to appear on each screen, then press B to keep the circle or A to discard it. V1 tests this ritual with real magnets and pogo pins before the card is drawn.
+**Cards stack instead of lining up.** Four magnets in the floor line a card up on the one below and hold it a fraction of a millimetre above it, with opposite poles so it only snaps on one way round. Four gold pads on the face at the contacts end meet four spring fingers under the card above. A pile is a line of links, so each card has one link up and one down. The firmware for it is in `crates/hal`: the ceremony driver floods each new frame on every link except the one it came from, which its dedupe makes correct on a line, a ring, or a pair. The pile layer (`hal::pile`) gives each card its seat from the card below it, with the bottom card naming the circle, and sends the count down from the top card when both its buttons are pressed. Nobody says a seat number out loud. The ritual: press both buttons on the top card, wait for the six words to appear on each screen, then press both to keep the circle or either one alone to discard it. V1 tests this ritual with real magnets and pogo pins before the card is drawn.
 
 **What 3 mm costs.** No USB-C: the receptacle alone needs about 3.2 mm of device, so the phone link runs through the same pads over a small dock with a USB-C socket on it. A coin cell instead of a charger: e-paper draws only when it changes, a ceremony is a few seconds of compute, and sleep is microamps, so a CR2016 would run the badge for a year or more and is replaceable anywhere. Glass in the card: the e-paper is glass, so it hangs on a lanyard and should not ride in a back pocket.
 

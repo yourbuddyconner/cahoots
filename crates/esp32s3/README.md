@@ -12,7 +12,7 @@ The same as the bring-up sketch in [hardware/nano-esp32-epaper](../../hardware/n
 |---|---|---|
 | e-paper CLK, DIN | D13, D11 | 48, 38 |
 | e-paper CS, DC, RST, BUSY | D10, D9, D8, D7 | 21, 18, 17, 10 |
-| button A (next), B (confirm), to GND | D2, D3 | 5, 6 |
+| button A (left), B (right), to GND | D2, D3 | 5, 6 |
 | link to the laptop | USB-C | USB-Serial-JTAG |
 
 ## What the board does
@@ -59,7 +59,7 @@ Flashing replaces the Arduino bootloader. To run the Arduino bring-up sketch aga
 cargo run -p cahoots-host -- pile --cards 3 --serial /dev/cu.usbmodem* --name bench --state /tmp/pile
 ```
 
-The laptop runs two simulated cards, bottom first, with the serial port as the top simulated card's up link; the board is card 3. On the board, wait for "seat 2" on the status line, press B, watch the commits and reveals count up, read the words, and press B to keep them. The host prints each simulated card's words and circle id; they match the glass. The board's log lines arrive on the same port and the host prints them as `[board] ...`.
+The laptop runs two simulated cards, bottom first, with the serial port as the top simulated card's up link; the board is card 3. On the board, wait for "seat 2" on the screen, press both buttons, watch the commits and reveals count up, read the words, and press both to keep them. The host prints each simulated card's words and circle id; they match the glass. The board's log lines arrive on the same port and the host prints them as `[board] ...`.
 
 ## The link over USB
 
