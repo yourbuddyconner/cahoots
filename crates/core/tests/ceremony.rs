@@ -832,3 +832,99 @@ fn the_result_carries_the_seat_key_whose_public_is_in_the_roster() {
         assert_eq!(r.seat_key.public(), seat(i));
     }
 }
+
+fn unhex(v: &serde_json::Value) -> Vec<u8> {
+    hex::decode(v.as_str().unwrap()).unwrap()
+}
+
+/// Rebuilds `crates/vectors/ceremony.json` from its inputs and compares every derived field.
+#[test]
+fn the_vectors_file_is_reproduced_from_its_inputs() {
+    let v: serde_json::Value =
+        serde_json::from_str(include_str!("../../vectors/ceremony.json")).unwrap();
+    let p = &v["params"];
+    let params = CircleParams::new(
+        p["n"].as_u64().unwrap() as u8,
+        p["pad_len"].as_u64().unwrap() as u32,
+        p["name"].as_str().unwrap(),
+        p["agent_seat"].as_bool().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(hex::encode(params.encode()), p["encoded"].as_str().unwrap());
+    let n = usize::from(params.n);
+    // Per-member fields are parallel arrays at the top level.
+    let field = |k: &str, i: usize| v[k].as_array().unwrap()[i].clone();
+    let tier_of = |i: usize| field("tiers", i).as_u64().unwrap() as u8;
+    let mut devs: Vec<Ceremony> = (0..n)
+        .map(|i| {
+            let seat_seed: [u8; 32] = unhex(&field("seat_seeds", i)).try_into().unwrap();
+            let kem_seed: [u8; 32] = unhex(&field("kem_seeds", i)).try_into().unwrap();
+            let d = Ceremony::new(
+                params.clone(),
+                i as u8,
+                unhex(&field("contributions", i)),
+                kem_seed,
+                seat_seed,
+                tier_of(i),
+            )
+            .unwrap();
+            let sp = SeatKey::from_seed(&seat_seed).unwrap().public();
+            assert_eq!(d.my_seat_public(), sp);
+            assert_eq!(sp.0.to_vec(), unhex(&field("seat_publics", i)));
+            assert_eq!(d.my_public_key().to_vec(), unhex(&field("public_keys", i)));
+            assert_eq!(d.my_commitment().to_vec(), unhex(&field("commitments", i)));
+            d
+        })
+        .collect();
+    let commits: Vec<_> = devs
+        .iter()
+        .map(|d| (d.my_commitment(), *d.my_public_key(), d.my_seat_public()))
+        .collect();
+    for d in devs.iter_mut() {
+        for (j, (c, pk, sp)) in commits.iter().enumerate() {
+            d.add_commitment(j as u8, *c, pk, &sp.0, tier_of(j))
+                .unwrap();
+        }
+    }
+    let reveals: Vec<Vec<u8>> = devs
+        .iter_mut()
+        .enumerate()
+        .map(|(i, d)| {
+            let rand = unhex(&field("seal_randomness", i));
+            let mut pos = 0usize;
+            let mut f = |buf: &mut [u8]| {
+                buf.copy_from_slice(&rand[pos..pos + buf.len()]);
+                pos += buf.len();
+            };
+            let blob = d.my_reveal(&mut f).unwrap().to_vec();
+            assert_eq!(blob, unhex(&field("sealed_reveals", i)));
+            blob
+        })
+        .collect();
+    for d in devs.iter_mut() {
+        for (j, r) in reveals.iter().enumerate() {
+            d.add_reveal(j as u8, r).unwrap();
+        }
+    }
+    let body = unhex(&v["manifest"]);
+    for d in &devs {
+        assert_eq!(d.manifest().unwrap(), body.as_slice());
+    }
+    let atts: Vec<Vec<u8>> = devs.iter().map(|d| d.my_attestation().unwrap()).collect();
+    for (i, a) in atts.iter().enumerate() {
+        assert_eq!(*a, unhex(&field("attestations", i)));
+    }
+    for d in devs.iter_mut() {
+        for (j, a) in atts.iter().enumerate() {
+            d.add_attestation(j as u8, a).unwrap();
+        }
+    }
+    let m = Manifest::decode(&body).unwrap();
+    assert_eq!(hex::encode(m.id()), v["manifest_id"].as_str().unwrap());
+    for d in devs {
+        let r = d.finish().unwrap();
+        assert_eq!(r.manifest.encode(), unhex(&v["sealed_manifest"]));
+        assert_eq!(r.manifest.verify().unwrap().id(), m.id());
+        assert_eq!(r.pad.to_vec(), unhex(&v["pad"]));
+    }
+}

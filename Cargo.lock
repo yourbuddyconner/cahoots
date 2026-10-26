@@ -422,6 +422,7 @@ dependencies = [
  "poly1305 0.8.0",
  "proptest",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
  "subtle",
  "x-wing",
