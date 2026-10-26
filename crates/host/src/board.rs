@@ -5,9 +5,9 @@
 //! - `pad.bin`, `ledger.bin` and `circle.txt`: the same files [`crate::device::Device`]
 //!   keeps, so `Device::open` (and `cahoots-host status`, `send`, `recv`) work on a
 //!   directory a `HostBoard` kept.
-//! - `display.png`: the screen. `status.txt` holds the text of the latest screen, so a
+//! - `display.png`: the screen. `screen.txt` holds the text of the latest screen, so a
 //!   script or a test can follow the badge without reading the image.
-//! - `buttons.txt`: the buttons. Each line `A` or `B` is one press. The board reads the
+//! - `buttons.txt`: the buttons. Each line `L`, `R` or `B` (Both) is one gesture. The board reads the
 //!   file in `delay_ms` and removes it, so each press is delivered once. Write it in one go
 //!   (for example `echo B > buttons.txt`, or write a side file and rename it in).
 //! - `a_down`: while this file exists, button A is held.
@@ -94,28 +94,28 @@ impl Entropy for HostEntropy {
     }
 }
 
-/// [`PngDisplay`] plus `status.txt`, the text of the latest screen.
+/// [`PngDisplay`] plus `screen.txt`, the text of the latest screen.
 pub struct HostDisplay {
     png: PngDisplay,
-    status_path: PathBuf,
+    screen_path: PathBuf,
 }
 
 impl HostDisplay {
     pub fn new(dir: &Path, name: &str) -> Self {
         HostDisplay {
             png: PngDisplay::new(&dir.join("display.png"), name),
-            status_path: dir.join("status.txt"),
+            screen_path: dir.join("screen.txt"),
         }
     }
 }
 
 impl HostDisplay {
-    /// Write the screen's lines to `status.txt`, one per line.
+    /// Write the screen's lines to `screen.txt`, one per line.
     fn note(&mut self, lines: &[String]) {
         // Write a side file and rename it in, so a reader never sees half a screen.
-        let tmp = self.status_path.with_extension("tmp");
+        let tmp = self.screen_path.with_extension("tmp");
         if std::fs::write(&tmp, lines.join("\n")).is_ok() {
-            let _ = std::fs::rename(&tmp, &self.status_path);
+            let _ = std::fs::rename(&tmp, &self.screen_path);
         }
     }
 }
@@ -128,8 +128,9 @@ impl Display for HostDisplay {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Button {
-    A,
-    B,
+    Left,
+    Right,
+    Both,
 }
 
 /// One simulated badge as a [`Board`]. See the module docs for the files it keeps.
@@ -197,8 +198,9 @@ impl HostBoard {
         let _ = std::fs::remove_file(&taken);
         for line in text.lines() {
             match line.trim() {
-                "A" | "a" => self.buttons.push_back(Button::A),
-                "B" | "b" => self.buttons.push_back(Button::B),
+                "L" | "l" => self.buttons.push_back(Button::Left),
+                "R" | "r" => self.buttons.push_back(Button::Right),
+                "B" | "b" => self.buttons.push_back(Button::Both),
                 "" => {}
                 other => eprintln!("[{}] buttons.txt: ignored {other:?}", self.name),
             }
@@ -253,12 +255,12 @@ impl Board for HostBoard {
         &mut self.display
     }
 
-    /// The next queued press: `A` is Left and `B` is Right. There is no way to write Both
-    /// yet.
+    /// The next queued gesture, one per call: `L`, `R` or `B` (Both).
     fn press(&mut self) -> Press {
         match self.buttons.pop_front() {
-            Some(Button::A) => Press::Left,
-            Some(Button::B) => Press::Right,
+            Some(Button::Left) => Press::Left,
+            Some(Button::Right) => Press::Right,
+            Some(Button::Both) => Press::Both,
             None => Press::None,
         }
     }

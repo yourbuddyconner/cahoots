@@ -15,7 +15,7 @@
 //!
 //! `badge` runs one card through the badge crate on a [`HostBoard`]: boot, then a pile pass
 //! while it has no circle, then the idle menu. `--listen` is the down link and `--next` the
-//! up link; `-` means nothing is plugged in on that side. Press buttons by writing `A` or `B`
+//! up link; `-` means nothing is plugged in on that side. Press buttons by writing `L`, `R` or `B` (Both)
 //! lines to `buttons.txt` in the state directory.
 
 use base64::Engine;

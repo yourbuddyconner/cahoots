@@ -1,4 +1,4 @@
-//! A `HostBoard` with a kept circle, driven into Serve with `buttons.txt`, answers an
+//! A `HostBoard` with a kept circle, driven into Serve with `buttons.txt` (`L`, `R`, `B`), answers an
 //! `Identify` request from a plain socket client on its down link.
 
 use cahoots_badge::{word_indices, Badge, Board, Circle};
@@ -17,11 +17,11 @@ use std::time::{Duration, Instant};
 
 const PAD_LEN: u32 = 16 * 1024;
 
-fn wait_status(dir: &Path, want: &str) {
+fn wait_screen(dir: &Path, want: &str) {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
-        let s = std::fs::read_to_string(dir.join("status.txt")).unwrap_or_default();
-        if s == want {
+        let s = std::fs::read_to_string(dir.join("screen.txt")).unwrap_or_default();
+        if s.contains(want) {
             return;
         }
         assert!(Instant::now() < deadline, "stuck at {s:?}, want {want:?}");
@@ -47,7 +47,6 @@ fn keep_a_circle(dir: &Path) -> Circle {
 }
 
 #[test]
-#[ignore = "needs Both from buttons.txt and screen.txt, which Task 4 adds"]
 fn a_host_board_in_serve_answers_identify_on_its_down_link() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("card");
@@ -78,11 +77,11 @@ fn a_host_board_in_serve_answers_identify_on_its_down_link() {
         }
     };
 
-    // Words, then A to key as code, A to serve, B to start serving.
-    wait_status(&dir, "words");
-    std::fs::write(dir.join("buttons.tmp"), "A\nA\nB\n").unwrap();
+    // The words page, then Right twice to Serve, then Both to start serving.
+    wait_screen(&dir, "1/3");
+    std::fs::write(dir.join("buttons.tmp"), "R\nR\nB\n").unwrap();
     std::fs::rename(dir.join("buttons.tmp"), dir.join("buttons.txt")).unwrap();
-    wait_status(&dir, "serving. A for menu");
+    wait_screen(&dir, "a laptop is listening");
 
     let payload = Request::Identify.encode();
     laptop

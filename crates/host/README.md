@@ -8,7 +8,7 @@ Runs the real `cahoots-hal` device logic on a laptop with stand-ins for the hard
 | Touch link (UART) | A Unix-domain socket to each neighbour |
 | Pad region (NOR flash or RRAM) | `pad.bin`, 4 KiB erase unit, erase = overwrite zeros + sync |
 | Ledger region | `ledger.bin`, 64 KiB of `0xFF`, 16-byte append-only records |
-| 200x200 e-paper | `display.png`, re-rendered on every status change |
+| 200x200 e-paper | `display.png`, re-rendered on every screen change |
 
 A simulated badge is a `CSPRNG` source, not a hardware TRNG. Its circles are labelled `CSPRNG`.
 
@@ -56,7 +56,7 @@ cargo run -p cahoots-host -- pile --cards 3 --state /tmp/pile                   
 cargo run -p cahoots-host -- pile --cards 3 --serial /dev/cu.usbmodem* --state /tmp/pile   # two simulated, a board on top
 ```
 
-`pile` stacks cards on Unix sockets, bottom first, and runs `hal::pile` discovery on each: the bottom card names the circle, the top card presses B. With `--serial`, the top simulated card's up link is that serial port and a real badge is the top card; its button starts the count. `SerialLink` mirrors `SocketLink` and adds what a USB port needs: a `Ping` frame twice a second so the board can tell the laptop is there, and the board's `Log` frames printed here as `[board] ...`.
+`pile` stacks cards on Unix sockets, bottom first, and runs `hal::pile` discovery on each: the bottom card names the circle, the top card presses Both. With `--serial`, the top simulated card's up link is that serial port and a real badge is the top card; its buttons start the count. `SerialLink` mirrors `SocketLink` and adds what a USB port needs: a `Ping` frame twice a second so the board can tell the laptop is there, and the board's `Log` frames printed here as `[board] ...`.
 
 ## The badge crate on the laptop
 
@@ -66,8 +66,8 @@ cargo run -p cahoots-host -- pile --cards 3 --serial /dev/cu.usbmodem* --state /
 H=target/debug/cahoots-host
 $H badge --state /tmp/b0 --listen - --next /tmp/b1.sock --name sf --pad-len 16384 &   # bottom
 $H badge --state /tmp/b1 --listen /tmp/b1.sock --next - --name sf --pad-len 16384 &   # top
-echo B > /tmp/b1/buttons.txt     # top card, once it shows its seat: count the pile
-echo B > /tmp/b0/buttons.txt     # at "B keep this circle . A discard" on each card: keep
+echo B > /tmp/b1/buttons.txt     # top card, once it shows its seat: Both starts the count
+echo B > /tmp/b0/buttons.txt     # at "keep this circle?" on each card: Both keeps it
 echo B > /tmp/b1/buttons.txt
 ```
 
@@ -76,8 +76,8 @@ The state directory holds the files `Device` keeps (`pad.bin`, `ledger.bin`, `ci
 | File | What it does |
 |---|---|
 | `display.png` | The screen |
-| `status.txt` | The text of the latest screen, so a script can follow the card |
-| `buttons.txt` | Each line `A` or `B` is one press. The card reads the file and removes it. |
+| `screen.txt` | The text of the latest screen, one line per row, so a script can follow the card |
+| `buttons.txt` | Each line `L`, `R` or `B` is one gesture: Left, Right or Both. The card reads the file, removes it, and takes one gesture per poll. |
 | `a_down` | While this file exists, button A is held. Create it before boot to forget the circle. |
 
-`tests/badge.rs` runs two `HostBoard`s in threads over a socket, presses B by writing `buttons.txt`, and checks that both cards keep the same circle and that `Device::open` reads the same check words from each directory.
+`tests/badge.rs` runs two `HostBoard`s in threads over a socket, presses Both by writing `buttons.txt`, and checks that both cards keep the same circle and that `Device::open` reads the same check words from each directory.

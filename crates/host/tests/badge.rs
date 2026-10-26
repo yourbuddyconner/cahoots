@@ -1,5 +1,5 @@
 //! Two `HostBoard`s in a pile over a Unix socket, each running the badge crate in its own
-//! thread. The test presses the buttons by writing `buttons.txt` and watches `status.txt`.
+//! thread. The test presses the buttons by writing `buttons.txt` and watches `screen.txt`.
 
 use cahoots_badge::Badge;
 use cahoots_host::board::HostBoard;
@@ -9,11 +9,11 @@ use std::time::{Duration, Instant};
 
 const PAD_LEN: u32 = 16 * 1024;
 
-/// Wait until the board's `status.txt` satisfies `ok`, or panic after a minute.
-fn wait_status(dir: &Path, ok: impl Fn(&str) -> bool) {
+/// Wait until the board's `screen.txt` satisfies `ok`, or panic after a minute.
+fn wait_screen(dir: &Path, ok: impl Fn(&str) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
-        let s = std::fs::read_to_string(dir.join("status.txt")).unwrap_or_default();
+        let s = std::fs::read_to_string(dir.join("screen.txt")).unwrap_or_default();
         if ok(&s) {
             return;
         }
@@ -43,7 +43,6 @@ fn circle_id_line(dir: &Path) -> String {
 }
 
 #[test]
-#[ignore = "needs Both from buttons.txt and screen.txt, which Task 4 adds"]
 fn two_host_boards_complete_a_ceremony_through_the_badge_crate() {
     let tmp = tempfile::tempdir().unwrap();
     let bottom: PathBuf = tmp.path().join("bottom");
@@ -66,13 +65,13 @@ fn two_host_boards_complete_a_ceremony_through_the_badge_crate() {
     let h_bottom = spawn(bottom.clone(), "-".into(), sock.clone(), 11);
     let h_top = spawn(top.clone(), sock, "-".into(), 22);
 
-    // B on top once it has a seat, then B on both at the keep prompt.
-    wait_status(&top, |s| {
-        s.starts_with("seat ") && s.ends_with("B when the pile is whole")
+    // Both on top once it has a seat, then Both on each card at the keep prompt.
+    wait_screen(&top, |s| {
+        s.contains("seat 1") && s.contains("Both on top starts")
     });
     press(&top, "B");
     for dir in [&bottom, &top] {
-        wait_status(dir, |s| s == "B keep this circle . A discard");
+        wait_screen(dir, |s| s.contains("keep this circle?"));
         press(dir, "B");
     }
     let c_bottom = h_bottom.join().unwrap();
