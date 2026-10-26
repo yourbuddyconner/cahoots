@@ -66,7 +66,7 @@ await L.page.fill("input[type=text]", "e2e-test");
 await L.page.click("text=Continue");
 await L.snap("pick");
 await L.page.click("text=Make my contribution");
-await L.page.waitForSelector("text=Step 1 of 3");
+await L.page.waitForSelector("text=Step 1 of 4");
 await L.snap("commit");
 await L.menu(); await L.page.click("text=Copy as text"); const commitL = await L.clip(); await L.closeSheet();
 if (!commitL?.startsWith("cahoots-commit:0:")) throw new Error(`leader commit text: ${commitL}`);
@@ -82,29 +82,45 @@ await J.snap("pick");
 const seat1Disabled = await J.page.$eval('.seg button[data-v="0"]', (b) => b.disabled);
 if (!seat1Disabled) throw new Error("seat 1 should be marked taken for the joiner");
 await J.page.click("text=Make my contribution");
-await J.page.waitForSelector("text=Step 2 of 3"); // the joiner already holds the leader's commitment, so it is in reveal
+await J.page.waitForSelector("text=Step 2 of 4"); // the joiner already holds the leader's commitment, so it is in reveal
 await J.snap("reveal");
 await J.menu(); await J.page.click("text=Copy as text"); const revealJ = await J.clip(); await J.closeSheet();
 if (!revealJ?.startsWith("cahoots-reveal:1:")) throw new Error(`joiner reveal text: ${revealJ}`);
 
-// Leader takes the joiner's reveal as commitment plus reveal. With two people that completes the
-// leader's ceremony at once, so the leader lands on the check words and shares its reveal from there.
+// Leader takes the joiner's reveal as commitment plus reveal. With two people that is every reveal,
+// so the leader moves on to signing and shares its reveal and its signature from there.
 await L.menu(); await L.page.click("text=Paste a code"); await L.paste(revealJ);
-await L.page.waitForSelector('button:text-is("They have scanned it")');
+await L.page.waitForSelector("text=Step 3 of 4");
 await L.closeSheet();
-await L.snap("reveal-done");
-await L.menu(); await L.page.click(".sheet >> text=Copy as text"); const revealL = await L.clip(); await L.closeSheet();
+await L.snap("sign");
+await L.menu(); await L.page.click(".sheet >> text=Copy my reveal"); const revealL = await L.clip(); await L.closeSheet();
 if (!revealL?.startsWith("cahoots-reveal:0:")) throw new Error(`leader reveal text: ${revealL}`);
+await L.menu(); await L.page.click(".sheet >> text=Copy as text"); const attestL = await L.clip(); await L.closeSheet();
+if (!attestL?.startsWith("cahoots-attest:0:")) throw new Error(`leader signature text: ${attestL}`);
 
-// Joiner takes the leader's reveal and completes; both confirm the others have scanned.
+// Joiner gets the leader's signature before its reveal: it is kept until the reveal arrives.
+await J.menu(); await J.page.click("text=Paste a code"); await J.paste(attestL);
+await J.page.waitForSelector("text=Kept seat 1's signature");
+await J.closeSheet();
 await J.menu(); await J.page.click("text=Paste a code"); await J.paste(revealL);
+// Every reveal and every signature the joiner needs is in, so it completes at once and keeps
+// showing its own signature for the leader.
 await J.page.waitForSelector('button:text-is("They have scanned it")');
 await J.closeSheet();
+await J.snap("sign-done");
+await J.menu(); await J.page.click(".sheet >> text=Copy as text"); const attestJ = await J.clip(); await J.closeSheet();
+if (!attestJ?.startsWith("cahoots-attest:1:")) throw new Error(`joiner signature text: ${attestJ}`);
+
+// Leader takes the joiner's signature and completes; both confirm the other has scanned.
+await L.menu(); await L.page.click("text=Paste a code"); await L.paste(attestJ);
+await L.page.waitForSelector('button:text-is("They have scanned it")');
+await L.closeSheet();
+await L.snap("sign-done");
 await J.page.click('button:text-is("They have scanned it")');
-await J.page.waitForSelector("text=Step 3 of 3");
+await J.page.waitForSelector("text=Step 4 of 4");
 await J.snap("words");
 await L.page.click('button:text-is("They have scanned it")');
-await L.page.waitForSelector("text=Step 3 of 3");
+await L.page.waitForSelector("text=Step 4 of 4");
 await L.snap("words");
 const wordsOf = (p) => p.$$eval(".words div", (els) => els.map((e) => e.textContent.replace(/^\d+/, "").trim()).join(" "));
 const wL = await wordsOf(L.page), wJ = await wordsOf(J.page);
@@ -113,6 +129,14 @@ console.log("check words:", wL);
 await L.page.click("text=They match"); await J.page.click("text=They match");
 await L.page.waitForSelector(".budget"); await J.page.waitForSelector(".budget");
 await L.snap("hub"); await J.snap("hub");
+
+// The saved circle is state version 4 and carries the seat key and the signed manifest.
+const saved = (p) => p.evaluate(() => new Promise((res, rej) => {
+  const req = indexedDB.open("cahoots");
+  req.onsuccess = () => { const g = req.result.transaction("circles").objectStore("circles").getAll(); g.onsuccess = () => res(g.result.map((r) => r.state[0])); g.onerror = () => rej(g.error); };
+  req.onerror = () => rej(req.error);
+}));
+for (const p of [L, J]) { const v = await saved(p.page); if (v.length !== 1 || v[0] !== 4) throw new Error(`${p.name} saved state versions: ${v}`); }
 
 // Hello words: what the leader says is what the joiner expects, both move together, and the number survives a reload.
 await L.page.click("text=Hello words"); await L.page.waitForSelector(".hello");
@@ -168,4 +192,4 @@ await L.snap("home-with-cahoot");
 await browser.close();
 server.close();
 if (errors.length) { console.error("page errors:\n" + errors.join("\n")); process.exit(1); }
-console.log("e2e ok: two-member ceremony, OTP message, replay refused. Screenshots in", out);
+console.log("e2e ok: two-member ceremony with signatures, OTP message, replay refused. Screenshots in", out);

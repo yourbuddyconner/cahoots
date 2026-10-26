@@ -13,6 +13,10 @@ fn seed(i: u8) -> Vec<u8> {
     vec![0x40 + i; 32]
 }
 
+fn seat(i: u8) -> Vec<u8> {
+    vec![0x60 + i; 32]
+}
+
 /// Randomness for sealing: enough bytes for the ceremony, deterministic per member.
 fn rand(c: &WasmCeremony, i: u8) -> Vec<u8> {
     contribution(100 + i, c.reveal_randomness_len())
@@ -30,6 +34,8 @@ fn two_member_ceremony_through_bindings_agrees() {
         &contribution(0, l),
         None,
         &seed(0),
+        &seat(0),
+        0,
     )
     .unwrap();
     let mut b = WasmCeremony::new(
@@ -41,13 +47,21 @@ fn two_member_ceremony_through_bindings_agrees() {
         &contribution(1, l),
         None,
         &seed(1),
+        &seat(1),
+        0,
     )
     .unwrap();
     assert_eq!(a.phase(), "commit");
     assert!(a.reveal(&[]).unwrap().is_none());
     let ca = a.commitment();
     let cb = b.commitment();
-    assert_eq!(ca.len(), 32 + 1216);
+    assert_eq!(ca.len(), 32 + 1216 + 33 + 1);
+    assert_ne!(ca[32 + 1216..32 + 1216 + 33], cb[32 + 1216..32 + 1216 + 33]);
+    assert_eq!(ca[ca.len() - 1], 0, "a phone declares tier 0");
+    assert_eq!(
+        a.add_commitment(1, &cb[..cb.len() - 1]).unwrap_err(),
+        "commitment-length"
+    );
     a.add_commitment(1, &cb).unwrap();
     b.add_commitment(0, &ca).unwrap();
     assert_eq!(a.phase(), "reveal");
@@ -102,7 +116,19 @@ fn two_member_ceremony_through_bindings_agrees() {
 #[test]
 fn extra_source_changes_commitment() {
     let l = 256;
-    let a = WasmCeremony::new(2, l, "x", false, 0, &contribution(0, 256), None, &seed(0)).unwrap();
+    let a = WasmCeremony::new(
+        2,
+        l,
+        "x",
+        false,
+        0,
+        &contribution(0, 256),
+        None,
+        &seed(0),
+        &seat(0),
+        0,
+    )
+    .unwrap();
     let b = WasmCeremony::new(
         2,
         l,
@@ -112,6 +138,8 @@ fn extra_source_changes_commitment() {
         &contribution(0, 256),
         Some(contribution(5, 256)),
         &seed(0),
+        &seat(0),
+        0,
     )
     .unwrap();
     assert_ne!(a.commitment()[..32], b.commitment()[..32]);
@@ -129,23 +157,109 @@ fn extra_source_changes_commitment() {
         &contribution(0, 256),
         Some(contribution(5, 10)),
         &seed(0),
+        &seat(0),
+        0,
     )
     .is_err());
     assert_eq!(
-        WasmCeremony::new(2, l, "x", false, 0, &contribution(0, 256), None, &[1, 2])
-            .err()
-            .unwrap(),
+        WasmCeremony::new(
+            2,
+            l,
+            "x",
+            false,
+            0,
+            &contribution(0, 256),
+            None,
+            &[1, 2],
+            &seat(0),
+            0
+        )
+        .err()
+        .unwrap(),
         "kem-seed-length"
+    );
+    assert_eq!(
+        WasmCeremony::new(
+            2,
+            l,
+            "x",
+            false,
+            0,
+            &contribution(0, 256),
+            None,
+            &seed(0),
+            &[1],
+            0
+        )
+        .err()
+        .unwrap(),
+        "seat-seed-length"
+    );
+    assert_eq!(
+        WasmCeremony::new(
+            2,
+            l,
+            "x",
+            false,
+            0,
+            &contribution(0, 256),
+            None,
+            &seed(0),
+            &[0; 32],
+            0
+        )
+        .err()
+        .unwrap(),
+        "bad-seed"
+    );
+    assert_eq!(
+        WasmCeremony::new(
+            2,
+            l,
+            "x",
+            false,
+            0,
+            &contribution(0, 256),
+            None,
+            &seed(0),
+            &seat(0),
+            5
+        )
+        .err()
+        .unwrap(),
+        "bad-tier"
     );
 }
 
 #[test]
 fn circle_state_roundtrips_with_ledger() {
     let l = 512;
-    let mut a =
-        WasmCeremony::new(2, l, "s", true, 0, &contribution(0, 512), None, &seed(0)).unwrap();
-    let mut b =
-        WasmCeremony::new(2, l, "s", true, 1, &contribution(1, 512), None, &seed(1)).unwrap();
+    let mut a = WasmCeremony::new(
+        2,
+        l,
+        "s",
+        true,
+        0,
+        &contribution(0, 512),
+        None,
+        &seed(0),
+        &seat(0),
+        0,
+    )
+    .unwrap();
+    let mut b = WasmCeremony::new(
+        2,
+        l,
+        "s",
+        true,
+        1,
+        &contribution(1, 512),
+        None,
+        &seed(1),
+        &seat(1),
+        0,
+    )
+    .unwrap();
     let (ca, cb) = (a.commitment(), b.commitment());
     a.add_commitment(1, &cb).unwrap();
     b.add_commitment(0, &ca).unwrap();
@@ -162,8 +276,31 @@ fn circle_state_roundtrips_with_ledger() {
     let mut cb = b.finish("TRNG").unwrap().into_circle();
     let w1 = ca.send(0, b"one").unwrap();
     cb.receive(&w1).unwrap();
+    assert!(ca.has_seat_key() && cb.has_seat_key());
+    assert_eq!(cb.tier(), 0);
+    let id = cb.manifest_id_hex().unwrap();
+    assert_eq!(id.len(), 64);
+    assert_eq!(ca.manifest_id_hex().unwrap(), id);
     let saved = cb.export();
+    assert_eq!(saved[0], 4);
     let mut restored = Circle::import(&saved).unwrap();
+    assert!(restored.has_seat_key());
+    assert_eq!(restored.manifest_id_hex().unwrap(), id);
+    assert_eq!(restored.export(), saved);
+    // A version 3 state is the same without the trailer: it loads with no seat key.
+    let mlen = (0..saved.len() - 38)
+        .find(|&m| {
+            let at = saved.len() - m - 4;
+            u32::from_le_bytes(saved[at..at + 4].try_into().unwrap()) as usize == m
+        })
+        .unwrap();
+    let mut v3 = saved[..saved.len() - (33 + 1 + 4 + mlen)].to_vec();
+    v3[0] = 3;
+    let old = Circle::import(&v3).unwrap();
+    assert!(!old.has_seat_key());
+    assert!(old.manifest_id_hex().is_none());
+    assert_eq!(old.remaining(), cb.remaining());
+    assert_eq!(old.export()[0], 4);
     assert_eq!(restored.circle_id_hex(), cb.circle_id_hex());
     assert_eq!(restored.name(), "s");
     assert_eq!(restored.my_slice(), 1);
@@ -235,8 +372,32 @@ fn late_reveal_can_stand_in_for_its_commitment() {
             .map(|k| (k.wrapping_mul(7 + i as u32)) as u8)
             .collect()
     };
-    let mut a = WasmCeremony::new(2, 1024, "late", false, 0, &contrib(0), None, &seed(0)).unwrap();
-    let mut b = WasmCeremony::new(2, 1024, "late", false, 1, &contrib(1), None, &seed(1)).unwrap();
+    let mut a = WasmCeremony::new(
+        2,
+        1024,
+        "late",
+        false,
+        0,
+        &contrib(0),
+        None,
+        &seed(0),
+        &seat(0),
+        0,
+    )
+    .unwrap();
+    let mut b = WasmCeremony::new(
+        2,
+        1024,
+        "late",
+        false,
+        1,
+        &contrib(1),
+        None,
+        &seed(1),
+        &seat(1),
+        0,
+    )
+    .unwrap();
     // B scanned A's commitment and is already sealing. A never saw B's commitment code:
     // B's sealed reveal stands in for it, and A has every reveal in one step.
     b.add_commitment(0, &a.commitment()).unwrap();
@@ -263,7 +424,19 @@ fn hello_words_are_pairwise_and_move_with_the_counter() {
     let l = 512;
     let mut devs: Vec<WasmCeremony> = (0..3u8)
         .map(|i| {
-            WasmCeremony::new(3, l, "hi", false, i, &contribution(i, 512), None, &seed(i)).unwrap()
+            WasmCeremony::new(
+                3,
+                l,
+                "hi",
+                false,
+                i,
+                &contribution(i, 512),
+                None,
+                &seed(i),
+                &seat(i),
+                0,
+            )
+            .unwrap()
         })
         .collect();
     let commits: Vec<_> = devs.iter().map(|d| d.commitment()).collect();

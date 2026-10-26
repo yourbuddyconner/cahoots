@@ -30,9 +30,11 @@ If someone has a file of hardware randomness to mix in, they add it on their own
 
 **Step 2, Reveal.** Every screen now shows a longer animation. Scan each person's animation. Hold both phones still until the bar fills, then move to the next person. This is the slow step. When your screen has everyone, it moves on by itself.
 
-**Step 3, Check.** Every screen shows six words. One person reads them out loud. Everyone else checks that their own screen shows the same six, in the same order. If they match, everyone taps **They match**. If anyone sees different words, everyone taps **They differ** and you start again from the beginning. Do not keep a secret that did not match.
+**Step 3, Sign.** Every screen shows a short animation again: its signature on the list of seats. Show it to each person and scan theirs, as at step 1. When your screen has everyone's, it keeps showing yours for the people still scanning. Tap **They have scanned it** once they have.
 
-If someone joined late and is still scanning at step 2 after you reached step 3, your animation is one tap away: **Someone still needs my reveal**.
+**Step 4, Check.** Every screen shows six words. One person reads them out loud. Everyone else checks that their own screen shows the same six, in the same order. If they match, everyone taps **They match**. If anyone sees different words, everyone taps **They differ** and you start again from the beginning. Do not keep a secret that did not match.
+
+If someone is still scanning at step 2 after you moved on, your reveal is one tap away: **Someone still needs my reveal**. If they are still at step 3 after you reached the words, tap **Someone still needs my signature**.
 
 ## After
 
@@ -44,6 +46,7 @@ If someone joined late and is still scanning at step 2 after you reached step 3,
 
 - **Someone scanned a code for their own seat.** Two people picked the same seat. One of them leaves the ceremony from the menu and joins again with a different seat.
 - **A phone reloaded or the app was closed.** That person's ceremony is gone. Everyone starts again from the beginning. The ceremony lives only in memory until the check words match.
+- **A signature does not check out.** The scan was garbled or the code is from someone else. Ask them to show it again.
 - **The ceremony stopped on its own.** A reveal did not match its commitment. Nothing was kept. Start again. If it happens twice, one device may be faulty.
 - **No camera.** Every scan has a paste fallback in the menu. Copy the code as text on one device and paste it on the other, over any channel you like. The codes are not secret.
 

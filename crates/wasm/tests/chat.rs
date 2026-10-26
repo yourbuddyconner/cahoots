@@ -19,6 +19,8 @@ fn pair() -> (Circle, Circle) {
         &contribution(0, l as usize),
         None,
         &[7u8; 32],
+        &[0x21; 32],
+        0,
     )
     .unwrap();
     let mut b = WasmCeremony::new(
@@ -30,6 +32,8 @@ fn pair() -> (Circle, Circle) {
         &contribution(1, l as usize),
         None,
         &[9u8; 32],
+        &[0x22; 32],
+        0,
     )
     .unwrap();
     let (ca, cb) = (a.commitment(), b.commitment());

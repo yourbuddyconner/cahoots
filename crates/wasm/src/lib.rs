@@ -9,12 +9,12 @@ use base64::Engine;
 use cahoots_chat::{self as chat, ChatError, ChatSession, EpochId};
 use cahoots_core::ceremony::{Ceremony, CeremonyError, Phase};
 use cahoots_core::ledger::{MemLedger, SpentLedger};
+use cahoots_core::manifest::{Manifest, SealedManifest};
 use cahoots_core::message::{MessageError, MessageType};
 use cahoots_core::pad::{self, MemPadStorage, Pad, PadError, PadStorage};
 use cahoots_core::pairwise;
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::PUBLIC_KEY_LEN;
-use cahoots_core::seat::SeatKey;
 use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
 use wasm_bindgen::prelude::*;
 use zeroize::Zeroizing;
@@ -127,11 +127,11 @@ fn ceremony_err(e: CeremonyError) -> String {
     }
 }
 
-/// Placeholder seat seed and tier until Task 9 takes a seat seed and a tier from the app.
-/// Every member uses the same seed, so a commitment from another member carries no seat key
-/// on the wire yet and `add_commitment` rebuilds it from this seed.
-const PLACEHOLDER_SEAT_SEED: [u8; 32] = [0x11; 32];
-const PLACEHOLDER_TIER: u8 = 0;
+/// A seat public key on the wire: SEC1 compressed P-256.
+const SEAT_PUBLIC_LEN: usize = 33;
+/// `commitment()`: commitment, KEM public key, seat public key, tier. The ring's `Commit`
+/// payload after the index has the same layout.
+const COMMITMENT_LEN: usize = 32 + PUBLIC_KEY_LEN + SEAT_PUBLIC_LEN + 1;
 
 fn params_err(e: cahoots_core::params::ParamsError) -> String {
     format!("params:{e:?}").to_lowercase()
@@ -148,6 +148,8 @@ impl WasmCeremony {
     /// `contribution` is `L` bytes from `crypto.getRandomValues`. `extra` (optional) is a
     /// hardware contribution of the same length; it is XORed in.
     /// `kem_seed` is 32 more random bytes; it derives the key other members seal reveals to.
+    /// `seat_seed` is 32 more; it is this seat's signing key. If it is not a valid key the
+    /// error is `"bad-seed"`: draw another. `tier` is the device's declared tier; a phone is 0.
     #[wasm_bindgen(constructor)]
     #[allow(clippy::too_many_arguments)] // a JavaScript-facing constructor; the arguments are the ceremony's inputs
     pub fn new(
@@ -159,11 +161,16 @@ impl WasmCeremony {
         contribution: &[u8],
         extra: Option<Vec<u8>>,
         kem_seed: &[u8],
+        seat_seed: &[u8],
+        tier: u8,
     ) -> Result<WasmCeremony, String> {
         let params = CircleParams::new(n, pad_len, name, agent_seat).map_err(params_err)?;
         let seed: [u8; 32] = kem_seed
             .try_into()
             .map_err(|_| "kem-seed-length".to_string())?;
+        let seat_seed: [u8; 32] = seat_seed
+            .try_into()
+            .map_err(|_| "seat-seed-length".to_string())?;
         let inner = match extra {
             Some(x) => Ceremony::with_extra_source(
                 params,
@@ -171,17 +178,10 @@ impl WasmCeremony {
                 contribution.to_vec(),
                 &x,
                 seed,
-                PLACEHOLDER_SEAT_SEED,
-                PLACEHOLDER_TIER,
+                seat_seed,
+                tier,
             ),
-            None => Ceremony::new(
-                params,
-                index,
-                contribution.to_vec(),
-                seed,
-                PLACEHOLDER_SEAT_SEED,
-                PLACEHOLDER_TIER,
-            ),
+            None => Ceremony::new(params, index, contribution.to_vec(), seed, seat_seed, tier),
         }
         .map_err(ceremony_err)?;
         Ok(WasmCeremony { inner })
@@ -207,25 +207,31 @@ impl WasmCeremony {
         .into()
     }
 
-    /// Our commitment followed by our KEM public key: 32 + 1216 bytes. Public.
+    /// Our commitment, KEM public key, seat public key and tier: 32 + 1216 + 33 + 1 bytes. Public.
     pub fn commitment(&self) -> Vec<u8> {
-        let mut out = self.inner.my_commitment().to_vec();
+        let mut out = Vec::with_capacity(COMMITMENT_LEN);
+        out.extend_from_slice(&self.inner.my_commitment());
         out.extend_from_slice(self.inner.my_public_key());
+        out.extend_from_slice(&self.inner.my_seat_public().0);
+        out.push(
+            self.inner
+                .tier_of(self.inner.index())
+                .expect("own tier is set"),
+        );
         out
     }
 
-    /// `commitment` is the 32 + 1216 bytes another member's `commitment()` returned.
+    /// `commitment` is the bytes another member's `commitment()` returned.
     pub fn add_commitment(&mut self, from: u8, commitment: &[u8]) -> Result<(), String> {
-        if commitment.len() != 32 + PUBLIC_KEY_LEN {
+        if commitment.len() != COMMITMENT_LEN {
             return Err("commitment-length".to_string());
         }
-        let c: [u8; 32] = commitment[..32].try_into().expect("32 bytes");
-        // Task 9 carries the seat key and tier in the commitment; until then, the placeholder.
-        let seat_pk = SeatKey::from_seed(&PLACEHOLDER_SEAT_SEED)
-            .expect("placeholder seed is a valid scalar")
-            .public();
+        let (c, rest) = commitment.split_at(32);
+        let (kem_pk, rest) = rest.split_at(PUBLIC_KEY_LEN);
+        let (seat_pk, tier) = rest.split_at(SEAT_PUBLIC_LEN);
+        let c: [u8; 32] = c.try_into().expect("32 bytes");
         self.inner
-            .add_commitment(from, c, &commitment[32..], &seat_pk.0, PLACEHOLDER_TIER)
+            .add_commitment(from, c, kem_pk, seat_pk, tier[0])
             .map_err(ceremony_err)
     }
 
@@ -301,9 +307,13 @@ impl WasmCeremony {
             MemLedger::new(slices),
         )
         .map_err(pad_err)?;
+        let mut circle = Circle::from_pad_with_pairs(pad, label, r.pair_keys);
+        circle.seat_key = Some(r.seat_key.to_bytes());
+        circle.tier = r.tier;
+        circle.manifest = r.manifest.encode();
         Ok(CeremonyOutput {
             words,
-            circle: Some(Circle::from_pad_with_pairs(pad, label, r.pair_keys)),
+            circle: Some(circle),
         })
     }
 }
@@ -371,8 +381,10 @@ fn pad_err(e: PadError) -> String {
     }
 }
 
-/// State format: v1 is pad + ledger + label; v2 appends chat session state and the relay seq.
-const STATE_VERSION: u8 = 3;
+/// State format: v1 is pad + ledger + label; v2 appends chat session state and the relay seq;
+/// v3 appends the pair keys and hello counters; v4 appends the seat key seed, the tier and the
+/// sealed manifest.
+const STATE_VERSION: u8 = 4;
 
 fn chat_err(e: ChatError) -> String {
     match e {
@@ -406,6 +418,12 @@ pub struct Circle {
     pair_keys: Vec<Option<Zeroizing<[u8; 32]>>>,
     /// Where the hello words with each member currently stand.
     pair_counters: Vec<u32>,
+    /// This seat's signing key seed. `None` for a circle made before seat keys.
+    seat_key: Option<Zeroizing<[u8; 32]>>,
+    /// This device's declared tier.
+    tier: u8,
+    /// The encoded `SealedManifest`; empty for a circle made before seat keys.
+    manifest: Vec<u8>,
 }
 
 /// A decrypted chat message.
@@ -454,6 +472,9 @@ impl Circle {
             relay_seq: None,
             pair_keys,
             pair_counters: vec![0; n],
+            seat_key: None,
+            tier: 0,
+            manifest: Vec::new(),
         }
     }
     fn pad(&self) -> &Pad<MemPadStorage, MemLedger> {
@@ -581,6 +602,22 @@ impl Circle {
         self.relay_seq
     }
 
+    /// Whether this circle holds a seat key. A circle made before seat keys does not.
+    pub fn has_seat_key(&self) -> bool {
+        self.seat_key.is_some()
+    }
+
+    /// This device's declared tier.
+    pub fn tier(&self) -> u8 {
+        self.tier
+    }
+
+    /// SHA-256 of the signed manifest's body, in hex. `None` for a circle made before seat keys.
+    pub fn manifest_id_hex(&self) -> Option<String> {
+        let sealed = SealedManifest::decode(&self.manifest).ok()?;
+        Some(hex(&Manifest::decode(&sealed.body).ok()?.id()))
+    }
+
     /// Whether this circle holds a pair key with `peer` (false for yourself and for circles made
     /// before sealed reveals).
     pub fn has_pair_key(&self, peer: u8) -> bool {
@@ -702,6 +739,17 @@ impl Circle {
         for c in &self.pair_counters {
             out.extend_from_slice(&c.to_le_bytes());
         }
+        // v4 trailer: seat key seed, tier, sealed manifest.
+        match &self.seat_key {
+            Some(k) => {
+                out.push(1);
+                out.extend_from_slice(k.as_ref());
+            }
+            None => out.extend_from_slice(&[0; 33]),
+        }
+        out.push(self.tier);
+        out.extend_from_slice(&(self.manifest.len() as u32).to_le_bytes());
+        out.extend_from_slice(&self.manifest);
         out
     }
 
@@ -791,6 +839,25 @@ impl Circle {
         } else {
             (vec![None; n], vec![0; n])
         };
+        let (seat_key, tier, manifest) = if version >= 4 {
+            let present = r.u8().map_err(err)?;
+            let bytes = r.take(32).map_err(err)?;
+            let seat_key = match present {
+                0 => None,
+                1 => {
+                    let mut k = Zeroizing::new([0u8; 32]);
+                    k.copy_from_slice(bytes);
+                    Some(k)
+                }
+                _ => return Err("state".into()),
+            };
+            let tier = r.u8().map_err(err)?;
+            let mlen = r.u32().map_err(err)? as usize;
+            let manifest = r.take(mlen).map_err(err)?.to_vec();
+            (seat_key, tier, manifest)
+        } else {
+            (None, 0, Vec::new())
+        };
         if !r.0.is_empty() {
             return Err("state".into());
         }
@@ -801,6 +868,9 @@ impl Circle {
             relay_seq,
             pair_keys,
             pair_counters,
+            seat_key,
+            tier,
+            manifest,
         })
     }
 }
