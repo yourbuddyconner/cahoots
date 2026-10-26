@@ -1,0 +1,24 @@
+[package]
+name = "cahoots-objects"
+description = "The signed objects a seat emits: grants, approvals, facts and receipts, as COSE-signed canonical CBOR. no_std + alloc."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["std"]
+std = ["cahoots-core/std", "dep:serde_json"]
+
+[dependencies]
+cahoots-core = { workspace = true }
+minicbor = { version = "2.3", default-features = false, features = ["alloc", "derive"] }
+sha2 = { workspace = true }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "arithmetic"] }
+serde_json = { workspace = true, optional = true }
+
+[dev-dependencies]
+hex = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true, features = ["std"] }

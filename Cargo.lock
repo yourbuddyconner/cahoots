@@ -476,6 +476,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cahoots-objects"
+version = "0.1.0"
+dependencies = [
+ "cahoots-core",
+ "hex",
+ "minicbor",
+ "p256",
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "cahoots-provider"
 version = "0.1.0"
 dependencies = [
@@ -528,9 +540,11 @@ name = "cahoots-vectors"
 version = "0.1.0"
 dependencies = [
  "cahoots-core",
+ "cahoots-objects",
  "hex",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]

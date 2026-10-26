@@ -1,0 +1,209 @@
+{
+  "approval": {
+    "inputs": {
+      "assurance": 2,
+      "circle_id": "72cdd5cb1e305306c6ba19449d8c5ce7",
+      "fields": [
+        [
+          "Payee",
+          "Acme Ltd"
+        ],
+        [
+          "Amount",
+          "120.00 EUR"
+        ]
+      ],
+      "log": 42,
+      "nonce": "56d46f951ebbb38169bc52f1dbc53262",
+      "policy_id": "706f6c6963792d37",
+      "profile": "payment",
+      "request_digest": "34b0a463fae9ba74302f73a019b8f9860424ac6b3d83e80b61962db4e9e5a62c",
+      "seat": 1,
+      "verdict": true
+    },
+    "json": {
+      "assurance": 2,
+      "circle": "72cdd5cb1e305306c6ba19449d8c5ce7",
+      "fields": [
+        [
+          "Payee",
+          "Acme Ltd"
+        ],
+        [
+          "Amount",
+          "120.00 EUR"
+        ]
+      ],
+      "log": 42,
+      "nonce": "56d46f951ebbb38169bc52f1dbc53262",
+      "policy_id": "706f6c6963792d37",
+      "profile": "payment",
+      "request_digest": "34b0a463fae9ba74302f73a019b8f9860424ac6b3d83e80b61962db4e9e5a62c",
+      "seat": 1,
+      "verdict": true,
+      "version": 1
+    },
+    "payload": "ab0001015072cdd5cb1e305306c6ba19449d8c5ce7020103677061796d656e740482826550617965656841636d65204c74648266416d6f756e746a3132302e30302045555205582034b0a463fae9ba74302f73a019b8f9860424ac6b3d83e80b61962db4e9e5a62c0648706f6c6963792d3707f5080209182a0a5056d46f951ebbb38169bc52f1dbc53262",
+    "signed": "8446a20126044101a0588bab0001015072cdd5cb1e305306c6ba19449d8c5ce7020103677061796d656e740482826550617965656841636d65204c74648266416d6f756e746a3132302e30302045555205582034b0a463fae9ba74302f73a019b8f9860424ac6b3d83e80b61962db4e9e5a62c0648706f6c6963792d3707f5080209182a0a5056d46f951ebbb38169bc52f1dbc532625840adb544b6b4411a5ad35bcbb21ce29b8bb4a772395a59ebd0605e5a3d56b77d43eeb308b99bae714a554290922779b9ca5dc82f59b90d51e64670882f24769d3f"
+  },
+  "circle_id": "72cdd5cb1e305306c6ba19449d8c5ce7",
+  "delegate_public": "03eea1bbf11d40a876c75bb2d9cf1cb3a249bde65e4cb1133be7b1e1a681e05495",
+  "delegate_seed": "73d994aac1b5db667b85cfb142ec449a17e4cba6e0ca7213411156867161f911",
+  "delegated_grant": {
+    "inputs": {
+      "budget": 1024,
+      "circle_id": "72cdd5cb1e305306c6ba19449d8c5ce7",
+      "depth": 0,
+      "grantee": "023fe6a2d966c47bc435210f3be13e3c55b8b439318f6b28ab934ee3c47b469c1d",
+      "grantor": "03eea1bbf11d40a876c75bb2d9cf1cb3a249bde65e4cb1133be7b1e1a681e05495",
+      "nonce": "900608aa090cb87d2f909dbc52223054",
+      "not_after": 900,
+      "parent": "61b38162cf40d57931a82713d614ca175af023ad4883e0cb65c258cc665967c9",
+      "purposes": [
+        1
+      ]
+    },
+    "json": {
+      "authorization_details": [
+        {
+          "budget": 1024,
+          "circle": "72cdd5cb1e305306c6ba19449d8c5ce7",
+          "purpose": 1,
+          "type": "cahoots/purpose"
+        }
+      ],
+      "cnf": {
+        "jwk": {
+          "crv": "P-256",
+          "kty": "EC",
+          "x": "P-ai2WbEe8Q1IQ874T48Vbi0OTGPayirk07jxHtGnB0",
+          "y": "BwlBmScsWH_9cCeoAEuKRe4JttI-DzC23emeqC2KW14"
+        }
+      },
+      "depth": 0,
+      "exp_log": 900,
+      "parent": "61b38162cf40d57931a82713d614ca175af023ad4883e0cb65c258cc665967c9"
+    },
+    "payload": "aa0001015072cdd5cb1e305306c6ba19449d8c5ce702582103eea1bbf11d40a876c75bb2d9cf1cb3a249bde65e4cb1133be7b1e1a681e05495035821023fe6a2d966c47bc435210f3be13e3c55b8b439318f6b28ab934ee3c47b469c1d0481010519040006190384070008582061b38162cf40d57931a82713d614ca175af023ad4883e0cb65c258cc665967c90950900608aa090cb87d2f909dbc52223054",
+    "signed": "845826a201260458201301c6910fc7ef475b1e6bb576ded17d351ea6cfc49390b148cb21bb813a47aea0589faa0001015072cdd5cb1e305306c6ba19449d8c5ce702582103eea1bbf11d40a876c75bb2d9cf1cb3a249bde65e4cb1133be7b1e1a681e05495035821023fe6a2d966c47bc435210f3be13e3c55b8b439318f6b28ab934ee3c47b469c1d0481010519040006190384070008582061b38162cf40d57931a82713d614ca175af023ad4883e0cb65c258cc665967c90950900608aa090cb87d2f909dbc522230545840eb3189321f291c841b810a9d6f4b2737cc2acdfcdc13f0233c9014b835dd36e5e24f2aad5823ad1321686eb817eb2ff0da4aa55e7f17e7435f08643473d1b0ab"
+  },
+  "description": "The four signed objects (docs/superpowers/specs/2026-10-26-seats-manifest-objects.md section 6). Each payload is a canonical CBOR map with integer keys 0.. ascending, key 0 the version 1; each signed form is an untagged COSE_Sign1 [protected {1: -7, 4: kid}, {}, payload, signature] with ES256 (RFC 6979 deterministic, so the signatures reproduce) and external AAD the object's domain: cahoots/grant/v1, cahoots/approval/v1, cahoots/fact/v1, cahoots/receipt/v1. The manifest is a three-seat circle whose seat keys come from seat_seeds; every object is signed by seat 1 under kid [1], except the delegated grant, signed by the root grant's grantee (delegate_seed) under kid SHA-256 of its 33-byte public key. The delegated grant's parent is SHA-256 of the root's signed bytes; the receipt's grant is SHA-256 of the delegated grant's signed bytes. The fact's nonce is SHA-256(\"cahoots/fact-nonce/v1\" || circle_id || log as 8 bytes LE). json is the informative JSON projection.",
+  "fact": {
+    "inputs": {
+      "attested": true,
+      "circle_id": "72cdd5cb1e305306c6ba19449d8c5ce7",
+      "counter": 7,
+      "evidence": "3144db0f3eedaea7080a2803443168ae8f999f2476469886",
+      "log": 43,
+      "module": "sht4x/temperature",
+      "nonce": "364f8135b346bcdf34ab234b4c386d405921c9074cf889a3eb284c095c898527",
+      "reading": "09c4",
+      "seat": 1
+    },
+    "json": {
+      "attested": true,
+      "circle": "72cdd5cb1e305306c6ba19449d8c5ce7",
+      "counter": 7,
+      "evidence": "3144db0f3eedaea7080a2803443168ae8f999f2476469886",
+      "log": 43,
+      "module": "sht4x/temperature",
+      "nonce": "364f8135b346bcdf34ab234b4c386d405921c9074cf889a3eb284c095c898527",
+      "reading": "09c4",
+      "seat": 1,
+      "version": 1
+    },
+    "payload": "aa0001015072cdd5cb1e305306c6ba19449d8c5ce70201037173687434782f74656d7065726174757265044209c40507065820364f8135b346bcdf34ab234b4c386d405921c9074cf889a3eb284c095c89852707182b08f50958183144db0f3eedaea7080a2803443168ae8f999f2476469886",
+    "signed": "8446a20126044101a05873aa0001015072cdd5cb1e305306c6ba19449d8c5ce70201037173687434782f74656d7065726174757265044209c40507065820364f8135b346bcdf34ab234b4c386d405921c9074cf889a3eb284c095c89852707182b08f50958183144db0f3eedaea7080a2803443168ae8f999f24764698865840e231b3b1b1d39e9419f9693aa1e1e53102f84d2b22cbd0b6990aea5c9e23d45659b55d94bad0effe68c75d24843eead3a07f9f48c7fb600405a4d04a1fd01421"
+  },
+  "leaf_public": "023fe6a2d966c47bc435210f3be13e3c55b8b439318f6b28ab934ee3c47b469c1d",
+  "leaf_seed": "876565b6e2072f6f2cd2a79b77b72ab6b6471ebb9943b10546228828e1609faf",
+  "manifest": "a60001015072cdd5cb1e305306c6ba19449d8c5ce7024f0103c000000000076f626a656374730383a4000001582103e7cd4f5f1135394a47904f096b0d953e8bed6c18d5ed6fd1defb7f7ebb8863f102000340a4000101582103cf62d995d415e4a90e47dac78e1cc77e5c416d9e741d0e616b44f69f58398d2202010340a40002015821020c19900a6dd88ff371903d25938aa1deb28d3183824a2d073470b4317dc69416020003400486a300000102021840a300010102021840a300020102021840a300030102021840a300040102021840a3000501020218400500",
+  "receipt": {
+    "inputs": {
+      "circle_id": "72cdd5cb1e305306c6ba19449d8c5ce7",
+      "grant": "ee89ec13f53f457c2037d701e262dcc679bbb4bcc80be5ad91e17a8417db982c",
+      "len": 32,
+      "log": 44,
+      "offset": 64,
+      "purpose": 1,
+      "seat": 1,
+      "slice": 2
+    },
+    "json": {
+      "circle": "72cdd5cb1e305306c6ba19449d8c5ce7",
+      "grant": "ee89ec13f53f457c2037d701e262dcc679bbb4bcc80be5ad91e17a8417db982c",
+      "len": 32,
+      "log": 44,
+      "offset": 64,
+      "purpose": 1,
+      "seat": 1,
+      "slice": 2,
+      "version": 1
+    },
+    "payload": "a90001015072cdd5cb1e305306c6ba19449d8c5ce7020103020418400518200601075820ee89ec13f53f457c2037d701e262dcc679bbb4bcc80be5ad91e17a8417db982c08182c",
+    "signed": "8446a20126044101a05847a90001015072cdd5cb1e305306c6ba19449d8c5ce7020103020418400518200601075820ee89ec13f53f457c2037d701e262dcc679bbb4bcc80be5ad91e17a8417db982c08182c5840d7075e54302e5f1b3a79171709ddfdb69592066a36f20eebcddfea2fcc01e1fb2b7b07f340c6c7ec4be8ffeea7c7707186ac42bd8c5f56dc518f426e916a6a14"
+  },
+  "root_grant": {
+    "inputs": {
+      "budget": 4096,
+      "circle_id": "72cdd5cb1e305306c6ba19449d8c5ce7",
+      "depth": 1,
+      "grantee": "03eea1bbf11d40a876c75bb2d9cf1cb3a249bde65e4cb1133be7b1e1a681e05495",
+      "grantor": 1,
+      "nonce": "c52bb47017228d023f6a6da2b1f1237c",
+      "not_after": 1000,
+      "parent": null,
+      "purposes": [
+        0,
+        1,
+        2
+      ]
+    },
+    "json": {
+      "authorization_details": [
+        {
+          "budget": 4096,
+          "circle": "72cdd5cb1e305306c6ba19449d8c5ce7",
+          "purpose": 0,
+          "type": "cahoots/purpose"
+        },
+        {
+          "budget": 4096,
+          "circle": "72cdd5cb1e305306c6ba19449d8c5ce7",
+          "purpose": 1,
+          "type": "cahoots/purpose"
+        },
+        {
+          "budget": 4096,
+          "circle": "72cdd5cb1e305306c6ba19449d8c5ce7",
+          "purpose": 2,
+          "type": "cahoots/purpose"
+        }
+      ],
+      "cnf": {
+        "jwk": {
+          "crv": "P-256",
+          "kty": "EC",
+          "x": "7qG78R1AqHbHW7LZzxyzokm95l5MsRM757HhpoHgVJU",
+          "y": "dsXFZwXChdhn-mDqseC5xZw5vaFVHEwn08Al3PNQ4b8"
+        }
+      },
+      "depth": 1,
+      "exp_log": 1000,
+      "parent": null
+    },
+    "payload": "aa0001015072cdd5cb1e305306c6ba19449d8c5ce7020103582103eea1bbf11d40a876c75bb2d9cf1cb3a249bde65e4cb1133be7b1e1a681e05495048300010205191000061903e8070108f60950c52bb47017228d023f6a6da2b1f1237c",
+    "signed": "8446a20126044101a0585eaa0001015072cdd5cb1e305306c6ba19449d8c5ce7020103582103eea1bbf11d40a876c75bb2d9cf1cb3a249bde65e4cb1133be7b1e1a681e05495048300010205191000061903e8070108f60950c52bb47017228d023f6a6da2b1f1237c5840379dc0cd2a7215611123247dae85e688323b54f01c7815833a480c2d1de86f0996dc8680c74a1353d5cb20a1399ce77402f46575305be3d9243b85ebc5f337fc"
+  },
+  "seat": 1,
+  "seat_publics": [
+    "03e7cd4f5f1135394a47904f096b0d953e8bed6c18d5ed6fd1defb7f7ebb8863f1",
+    "03cf62d995d415e4a90e47dac78e1cc77e5c416d9e741d0e616b44f69f58398d22",
+    "020c19900a6dd88ff371903d25938aa1deb28d3183824a2d073470b4317dc69416"
+  ],
+  "seat_seeds": [
+    "2884c6e9b1cfe2126891b75846841957b4ce7cf869190c8e23d6c23e42e31c9e",
+    "34d6961f4af134cb474555400f47d42ea34215db5a63ee32eab403c7073c61f6",
+    "2f583cfc36680363f8414b967408250a860c1a3f75b710d02d42862eb5be71da"
+  ]
+}

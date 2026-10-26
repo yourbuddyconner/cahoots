@@ -9,12 +9,17 @@ use cahoots_core::commit::commit;
 use cahoots_core::control::{Control, Proto, Purpose};
 use cahoots_core::frame;
 use cahoots_core::ledger::{MemLedger, SpentLedger};
+use cahoots_core::manifest::{Manifest, Seat};
 use cahoots_core::message::{self, MessageType};
 use cahoots_core::pad::{bucket_pad, MemPadStorage, Pad, PadError, PadStorage};
 use cahoots_core::pairwise;
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::{self, randomness_len};
+use cahoots_core::seat::SeatKey;
+use cahoots_objects::grant::{self, verify_chain, Grant, Grantor};
+use cahoots_objects::{assurance, fact_nonce, Approval, Fact, Receipt};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::path::Path;
 
 /// Deterministic filler. These are test vectors, not randomness.
@@ -402,6 +407,201 @@ fn frame_vectors() -> Value {
     })
 }
 
+/// Inputs of a grant, every field, so a client can rebuild the payload.
+fn grant_inputs(g: &Grant) -> Value {
+    json!({
+        "circle_id": hex::encode(g.circle_id),
+        "grantor": match g.grantor {
+            Grantor::Seat(s) => json!(s),
+            Grantor::Key(k) => json!(hex::encode(k.0)),
+        },
+        "grantee": hex::encode(g.grantee.0),
+        "purposes": g.purposes,
+        "budget": g.budget,
+        "not_after": g.not_after,
+        "depth": g.depth,
+        "parent": g.parent.map(hex::encode),
+        "nonce": hex::encode(g.nonce),
+    })
+}
+
+fn signed_object(inputs: Value, payload: Vec<u8>, signed: &[u8], projection: Value) -> Value {
+    json!({
+        "inputs": inputs,
+        "payload": hex::encode(payload),
+        "signed": hex::encode(signed),
+        "json": projection,
+    })
+}
+
+fn object_vectors() -> Value {
+    // A small three-seat circle, built here and given as hex.
+    let params = CircleParams::new(3, 192, "objects", false).unwrap();
+    let seat_seeds: Vec<[u8; 32]> = (0..3)
+        .map(|i| fill(500 + i, 32).try_into().unwrap())
+        .collect();
+    let seat_keys: Vec<SeatKey> = seat_seeds
+        .iter()
+        .map(|s| SeatKey::from_seed(s).unwrap())
+        .collect();
+    let circle: [u8; 16] = fill(510, 16).try_into().unwrap();
+    let manifest = Manifest {
+        circle_id: circle,
+        seats: seat_keys
+            .iter()
+            .enumerate()
+            .map(|(i, k)| Seat {
+                seat: i as u8,
+                key: k.public(),
+                tier: TIERS[i],
+                evidence: Vec::new(),
+            })
+            .collect(),
+        floor: Manifest::default_floor(&params),
+        params,
+        genesis: 0,
+    };
+    // Every object is signed by seat 1.
+    let seat = 1u8;
+    let seat_key = &seat_keys[usize::from(seat)];
+    let delegate_seed: [u8; 32] = fill(520, 32).try_into().unwrap();
+    let delegate = SeatKey::from_seed(&delegate_seed).unwrap();
+    let leaf_seed: [u8; 32] = fill(521, 32).try_into().unwrap();
+    let leaf = SeatKey::from_seed(&leaf_seed).unwrap();
+
+    let root = Grant {
+        circle_id: circle,
+        grantor: Grantor::Seat(seat),
+        grantee: delegate.public(),
+        purposes: vec![
+            Purpose::WireGuard as u8,
+            Purpose::Tls as u8,
+            Purpose::Mls as u8,
+        ],
+        budget: 4096,
+        not_after: 1000,
+        depth: 1,
+        parent: None,
+        nonce: fill(530, 16).try_into().unwrap(),
+    };
+    let root_signed = root.sign(seat_key, &[seat]);
+    let delegated = Grant {
+        circle_id: circle,
+        grantor: Grantor::Key(delegate.public()),
+        grantee: leaf.public(),
+        purposes: vec![Purpose::Tls as u8],
+        budget: 1024,
+        not_after: 900,
+        depth: 0,
+        parent: Some(Sha256::digest(&root_signed).into()),
+        nonce: fill(531, 16).try_into().unwrap(),
+    };
+    let delegated_signed = delegated.sign(&delegate, &grant::key_id(&delegate.public()));
+    assert_eq!(
+        verify_chain(&[&root_signed, &delegated_signed], &manifest).unwrap(),
+        delegated
+    );
+
+    let approval = Approval {
+        circle_id: circle,
+        seat,
+        profile: "payment".into(),
+        fields: vec![
+            ("Payee".into(), "Acme Ltd".into()),
+            ("Amount".into(), "120.00 EUR".into()),
+        ],
+        request_digest: fill(540, 32).try_into().unwrap(),
+        policy_id: b"policy-7".to_vec(),
+        verdict: true,
+        assurance: assurance::PRESENT,
+        log: 42,
+        nonce: fill(541, 16).try_into().unwrap(),
+    };
+    let approval_signed = approval.sign(seat_key, &[seat]);
+    assert_eq!(
+        Approval::verify(&approval_signed, &manifest).unwrap(),
+        approval
+    );
+
+    let fact = Fact {
+        circle_id: circle,
+        seat,
+        module: "sht4x/temperature".into(),
+        reading: vec![0x09, 0xc4],
+        counter: 7,
+        nonce: fact_nonce(&circle, 43),
+        log: 43,
+        attested: true,
+        evidence: fill(550, 24),
+    };
+    let fact_signed = fact.sign(seat_key, &[seat]);
+    assert_eq!(Fact::verify(&fact_signed, &manifest).unwrap(), fact);
+
+    let receipt = Receipt {
+        circle_id: circle,
+        seat,
+        slice: 2,
+        offset: 64,
+        len: 32,
+        purpose: Purpose::Tls as u8,
+        grant: Some(Sha256::digest(&delegated_signed).into()),
+        log: 44,
+    };
+    let receipt_signed = receipt.sign(seat_key, &[seat]);
+    assert_eq!(
+        Receipt::verify(&receipt_signed, &manifest).unwrap(),
+        receipt
+    );
+
+    json!({
+        "description": "The four signed objects (docs/superpowers/specs/2026-10-26-seats-manifest-objects.md section 6). Each payload is a canonical CBOR map with integer keys 0.. ascending, key 0 the version 1; each signed form is an untagged COSE_Sign1 [protected {1: -7, 4: kid}, {}, payload, signature] with ES256 (RFC 6979 deterministic, so the signatures reproduce) and external AAD the object's domain: cahoots/grant/v1, cahoots/approval/v1, cahoots/fact/v1, cahoots/receipt/v1. The manifest is a three-seat circle whose seat keys come from seat_seeds; every object is signed by seat 1 under kid [1], except the delegated grant, signed by the root grant's grantee (delegate_seed) under kid SHA-256 of its 33-byte public key. The delegated grant's parent is SHA-256 of the root's signed bytes; the receipt's grant is SHA-256 of the delegated grant's signed bytes. The fact's nonce is SHA-256(\"cahoots/fact-nonce/v1\" || circle_id || log as 8 bytes LE). json is the informative JSON projection.",
+        "manifest": hex::encode(manifest.encode()),
+        "circle_id": hex::encode(circle),
+        "seat_seeds": seat_seeds.iter().map(hex::encode).collect::<Vec<_>>(),
+        "seat_publics": seat_keys.iter().map(|k| hex::encode(k.public().0)).collect::<Vec<_>>(),
+        "seat": seat,
+        "delegate_seed": hex::encode(delegate_seed),
+        "delegate_public": hex::encode(delegate.public().0),
+        "leaf_seed": hex::encode(leaf_seed),
+        "leaf_public": hex::encode(leaf.public().0),
+        "root_grant": signed_object(grant_inputs(&root), root.encode(), &root_signed, root.to_json()),
+        "delegated_grant": signed_object(grant_inputs(&delegated), delegated.encode(), &delegated_signed, delegated.to_json()),
+        "approval": signed_object(json!({
+            "circle_id": hex::encode(approval.circle_id),
+            "seat": approval.seat,
+            "profile": approval.profile,
+            "fields": approval.fields.iter().map(|(l, v)| json!([l, v])).collect::<Vec<_>>(),
+            "request_digest": hex::encode(approval.request_digest),
+            "policy_id": hex::encode(&approval.policy_id),
+            "verdict": approval.verdict,
+            "assurance": approval.assurance,
+            "log": approval.log,
+            "nonce": hex::encode(approval.nonce),
+        }), approval.encode(), &approval_signed, approval.to_json()),
+        "fact": signed_object(json!({
+            "circle_id": hex::encode(fact.circle_id),
+            "seat": fact.seat,
+            "module": fact.module,
+            "reading": hex::encode(&fact.reading),
+            "counter": fact.counter,
+            "nonce": hex::encode(fact.nonce),
+            "log": fact.log,
+            "attested": fact.attested,
+            "evidence": hex::encode(&fact.evidence),
+        }), fact.encode(), &fact_signed, fact.to_json()),
+        "receipt": signed_object(json!({
+            "circle_id": hex::encode(receipt.circle_id),
+            "seat": receipt.seat,
+            "slice": receipt.slice,
+            "offset": receipt.offset,
+            "len": receipt.len,
+            "purpose": receipt.purpose,
+            "grant": receipt.grant.map(hex::encode),
+            "log": receipt.log,
+        }), receipt.encode(), &receipt_signed, receipt.to_json()),
+    })
+}
+
 fn main() {
     let check = std::env::args().any(|a| a == "--check");
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -412,6 +612,7 @@ fn main() {
         ("messages.json", message_vectors()),
         ("spend.json", spend_vectors()),
         ("frames.json", frame_vectors()),
+        ("objects.json", object_vectors()),
     ];
     let mut stale = Vec::new();
     for (name, value) in files {
