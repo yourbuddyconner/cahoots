@@ -301,6 +301,7 @@ fn circle_state_roundtrips_with_ledger() {
     assert!(old.manifest_id_hex().is_none());
     assert_eq!(old.remaining(), cb.remaining());
     assert_eq!(old.export()[0], 4);
+    assert!(!Circle::import(&old.export()).unwrap().has_seat_key());
     assert_eq!(restored.circle_id_hex(), cb.circle_id_hex());
     assert_eq!(restored.name(), "s");
     assert_eq!(restored.my_slice(), 1);

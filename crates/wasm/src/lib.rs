@@ -165,23 +165,35 @@ impl WasmCeremony {
         tier: u8,
     ) -> Result<WasmCeremony, String> {
         let params = CircleParams::new(n, pad_len, name, agent_seat).map_err(params_err)?;
-        let seed: [u8; 32] = kem_seed
-            .try_into()
-            .map_err(|_| "kem-seed-length".to_string())?;
-        let seat_seed: [u8; 32] = seat_seed
-            .try_into()
-            .map_err(|_| "seat-seed-length".to_string())?;
+        // Held in `Zeroizing` so these copies are wiped; the core gets its own copies.
+        let seed: Zeroizing<[u8; 32]> = Zeroizing::new(
+            kem_seed
+                .try_into()
+                .map_err(|_| "kem-seed-length".to_string())?,
+        );
+        let seat_seed: Zeroizing<[u8; 32]> = Zeroizing::new(
+            seat_seed
+                .try_into()
+                .map_err(|_| "seat-seed-length".to_string())?,
+        );
         let inner = match extra {
             Some(x) => Ceremony::with_extra_source(
                 params,
                 index,
                 contribution.to_vec(),
                 &x,
-                seed,
-                seat_seed,
+                *seed,
+                *seat_seed,
                 tier,
             ),
-            None => Ceremony::new(params, index, contribution.to_vec(), seed, seat_seed, tier),
+            None => Ceremony::new(
+                params,
+                index,
+                contribution.to_vec(),
+                *seed,
+                *seat_seed,
+                tier,
+            ),
         }
         .map_err(ceremony_err)?;
         Ok(WasmCeremony { inner })

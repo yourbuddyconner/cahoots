@@ -38,7 +38,7 @@ const friendly = (e) => {
   if (m2 && m2[1] === 'corrupted') return 'That scan came through garbled. Scan it again.';
   if (m2 && m2[1] === 'bad-key') return `Seat ${Number(m2[2]) + 1}'s code is not valid. Ask them to show it again.`;
   if (m2 && m2[1] === 'bad-attestation') return `Seat ${Number(m2[2]) + 1}'s signature does not check out. Ask them to show it again.`;
-  if (m2 && m2[1] === 'conflicting-attestation') return `Seat ${Number(m2[2]) + 1} has shown two different signatures. Start again from the beginning.`;
+  if (m2 && m2[1] === 'conflicting-attestation') return `Seat ${Number(m2[2]) + 1} has shown two different signatures. The second one was ignored and the ceremony goes on.`;
   return s;
 };
 const CHAT_LABEL = 'End-to-end encrypted, pad-hedged';
@@ -324,7 +324,7 @@ function packAttest(i, bytes) { const out = new Uint8Array(bytes.length + 2); ou
 function parsePacked(bytes) {
   if (bytes[0] === PACK.commit) { const plen = bytes[2]; return { kind: 'commit', index: bytes[1], params: bytes.subarray(3, 3 + plen), bytes: bytes.subarray(3 + plen) }; }
   if (bytes[0] === PACK.reveal) { return { kind: 'reveal', index: bytes[2], params: null, bytes: bytes.subarray(1) }; }
-  if (bytes[0] === PACK.attest) { return { kind: 'attest', index: bytes[1], params: null, bytes: bytes.subarray(2) }; }
+  if (bytes[0] === PACK.attest) { if (bytes.length < 3) return null; return { kind: 'attest', index: bytes[1], params: null, bytes: bytes.subarray(2) }; }
   return null;
 }
 /** Our sealed reveal. Built once by the core; the randomness is only drawn the first time. */
@@ -334,6 +334,7 @@ const PHONE_TIER = 0;
 function parseTagged(text) {
   const m = text.trim().match(/^cahoots-(params|commit|reveal|attest):(?:(\d+):)?([A-Za-z0-9_-]+)(?::([A-Za-z0-9_-]+))?$/);
   if (!m) return null;
+  if ((m[1] === 'attest' || m[1] === 'reveal') && m[2] == null) return null; // these always name their seat
   return { kind: m[1], index: m[2] == null ? null : Number(m[2]), bytes: b64_decode(m[3]), params: m[4] ? b64_decode(m[4]) : null };
 }
 function paramsFromBytes(b) {
@@ -453,11 +454,17 @@ function screenPick(params) {
         const contribution = new Uint8Array(params.pad_len);
         for (let o = 0; o < contribution.length; o += 65536) crypto.getRandomValues(contribution.subarray(o, Math.min(o + 65536, contribution.length)));
         const kemSeed = crypto.getRandomValues(new Uint8Array(32));
+        const seatSeed = new Uint8Array(32);
         let c = null;
-        // A seat seed is a signing key; the rare draw that is not a valid one is drawn again.
-        while (!c) {
-          try { c = new Ceremony(params.n, params.pad_len, params.name, params.agent_seat, idx, contribution, extra ?? undefined, kemSeed, crypto.getRandomValues(new Uint8Array(32)), PHONE_TIER); }
-          catch (e) { if (e !== 'bad-seed') throw e; }
+        try {
+          // A seat seed is a signing key; the rare draw that is not a valid one is drawn again.
+          while (!c) {
+            try { c = new Ceremony(params.n, params.pad_len, params.name, params.agent_seat, idx, contribution, extra ?? undefined, kemSeed, crypto.getRandomValues(seatSeed), PHONE_TIER); }
+            catch (e) { if (e !== 'bad-seed') throw e; }
+          }
+        } finally {
+          // The ceremony holds its own copies; wipe ours.
+          kemSeed.fill(0); seatSeed.fill(0); contribution.fill(0);
         }
         ceremony = { c, params, label: extra ? 'TRNG' : 'CSPRNG', mode: 'show', attests: [] };
         go(`#/ceremony/${paramsHash(params)}/run`);
