@@ -100,6 +100,7 @@ impl Port {
 
 /// Queue one log line as a `Log` frame. Safe to call from anywhere after [`init`].
 pub fn log_line(s: String) {
+    crate::store::trace(&s);
     with(|p| {
         let f = Frame {
             kind: KIND_LOG,
@@ -171,8 +172,23 @@ impl Link for Absent {
 
 /// From the panic handler: write one last `Log` frame straight to the port, blocking.
 pub fn emergency_write(bytes: &[u8]) {
-    with(|p| {
-        let _ = p.dev.write(bytes);
-        let _ = p.dev.flush_tx();
+    // The port may already be borrowed by the code that panicked; then there is nothing to
+    // do. Writes are non-blocking with a bounded spin, so a host that is not reading cannot
+    // hang the handler.
+    critical_section::with(|cs| {
+        let Ok(mut port) = PORT.borrow(cs).try_borrow_mut() else {
+            return;
+        };
+        let Some(p) = port.as_mut() else { return };
+        for &b in bytes {
+            let mut tries = 0u32;
+            while p.dev.write_byte_nb(b).is_err() {
+                tries += 1;
+                if tries > 200_000 {
+                    return;
+                }
+            }
+        }
+        let _ = p.dev.flush_tx_nb();
     });
 }

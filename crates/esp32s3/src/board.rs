@@ -60,6 +60,9 @@ impl Board for NanoBoard {
     }
 
     fn delay_ms(&mut self, ms: u32) {
+        // Every state of the badge waits here, so this is where queued log lines leave
+        // the board even when nothing else touches the USB link.
+        let _ = <UsbLink as Link>::flush(&mut UsbLink);
         let deepest = entropy::stack_high_water();
         if deepest > self.stack_logged {
             self.stack_logged = deepest;
@@ -121,6 +124,41 @@ impl Board for NanoBoard {
 
     /// The flash line and the buttons line. The badge adds the TRNG and circle lines.
     fn selftest(&mut self) -> Vec<String> {
+        if let Some(msg) = store::take_panic(&self.flash) {
+            // Keep the file name and line, drop the directory; wrap to the screen's width.
+            let msg = msg.replace("PANIC: panicked at ", "");
+            let compact: String = msg
+                .split('\n')
+                .map(|l| l.rsplit('/').next().unwrap_or(l).trim())
+                .filter(|l| !l.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let mut lines: Vec<String> = vec!["last boot panicked:".into()];
+            let mut cur = String::new();
+            for word in compact.split_whitespace() {
+                if !cur.is_empty() && cur.len() + 1 + word.len() > 31 {
+                    lines.push(core::mem::take(&mut cur));
+                    if lines.len() == 8 {
+                        break;
+                    }
+                }
+                if !cur.is_empty() {
+                    cur.push(' ');
+                }
+                cur.push_str(word);
+            }
+            if !cur.is_empty() && lines.len() < 8 {
+                lines.push(cur);
+            }
+            lines.push("B to continue".into());
+            log!("last boot panicked: {compact}");
+            let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+            self.screen.screen("cahoots", &refs);
+            while !self.buttons.b.pressed() {
+                let _ = <UsbLink as Link>::flush(&mut UsbLink);
+                self.delay.delay_millis(10);
+            }
+        }
         let pad_in_the_way = store::load_circle(&self.flash)
             .is_some_and(|c| c.params.pad_len > store::PAD_CAP - store::SECTOR);
         let flash = if pad_in_the_way {

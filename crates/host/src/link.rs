@@ -123,7 +123,21 @@ impl Inbox {
                     }
                     self.buf.drain(..used);
                 }
-                Err(FrameError::Incomplete) if self.buf.len() < INBOX_LIMIT => break,
+                Err(FrameError::Incomplete) if self.buf.len() < INBOX_LIMIT => {
+                    // The front may be garbage whose header claims a length that never
+                    // arrives, for example the tail of a frame cut by a port reopen. If a
+                    // whole frame decodes further on, drop the bytes before it.
+                    let skip =
+                        (1..self.buf.len().min(4096)).find(|&i| decode(&self.buf[i..]).is_ok());
+                    match skip {
+                        Some(i) => {
+                            for b in self.buf.drain(..i) {
+                                through.push_back(b);
+                            }
+                        }
+                        None => break,
+                    }
+                }
                 Err(_) => {
                     if self.buf.is_empty() {
                         break;

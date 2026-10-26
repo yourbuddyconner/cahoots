@@ -48,3 +48,18 @@ fn garbage_before_a_frame_passes_through_so_the_consumer_can_resync() {
     assert_eq!(out, stream);
     assert!(logs.is_empty());
 }
+
+/// A port reopened mid-frame delivers the tail of a frame first. Its bytes can look like a
+/// header claiming a length that never comes; the inbox must still find the frames after it.
+#[test]
+fn a_garbage_header_claiming_a_huge_length_does_not_swallow_later_frames() {
+    use cahoots_host::link::Inbox;
+    let mut inbox = Inbox::default();
+    let mut through = std::collections::VecDeque::new();
+    let mut logs = Vec::new();
+    // A fake header: kind 31 (log), seq 0, len 0x0010_0000, then a real log frame.
+    let mut bytes = vec![31u8, 0, 0, 0, 0, 0x00, 0x00, 0x10, 0x00];
+    bytes.extend(frame(31, b"after"));
+    inbox.push(&bytes, &mut through, &mut logs);
+    assert_eq!(logs, vec!["after".to_string()]);
+}

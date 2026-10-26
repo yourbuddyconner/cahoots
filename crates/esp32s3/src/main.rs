@@ -41,12 +41,15 @@ const LABEL: &str = "TRNG T1";
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     let msg = format!("PANIC: {info}");
-    let f = cahoots_core::frame::Frame {
+    // Remember it in flash so the next boot can show it on the screen, through the one
+    // flash handle, unless that handle is what panicked.
+    store::save_panic_shared(msg.as_bytes());
+    let fr = cahoots_core::frame::Frame {
         kind: cahoots_hal::pile::KIND_LOG,
         seq: u32::MAX,
         payload: msg.as_bytes(),
     };
-    link::emergency_write(&cahoots_core::frame::encode(&f));
+    link::emergency_write(&cahoots_core::frame::encode(&fr));
     loop {
         core::hint::spin_loop();
     }
@@ -60,6 +63,8 @@ fn main() -> ! {
     // allocations that want speed, and the pad, reveals and queues go to the 8 MB PSRAM.
     esp_alloc::heap_allocator!(size: 96 * 1024);
     esp_alloc::psram_allocator!(p.PSRAM, esp_hal::psram);
+    let flash = store::open(p.FLASH);
+    store::trace_begin(&flash);
     link::init(p.USB_DEVICE);
     log!(
         "cahoots esp32s3 {} on an Arduino Nano ESP32",
@@ -95,7 +100,6 @@ fn main() -> ! {
         entropy::Hw::new().expect("trng"),
         HealthTests::for_min_entropy(6),
     );
-    let flash = store::open(p.FLASH);
     // The badge never names the circle to the display, so the board does: here for a
     // stored circle, and in `NanoBoard::save_circle` for a new one.
     if let Some(c) = store::load_circle(&flash) {

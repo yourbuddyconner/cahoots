@@ -61,6 +61,33 @@ The laptop runs two simulated cards, bottom first, with the serial port as the t
 
 A USB port has no detect line, so `peer_present` on the board is "a frame arrived in the last two seconds", and the host's `SerialLink` sends a `Ping` frame (kind 30) twice a second. The board's log lines travel as `Log` frames (kind 31) on the same port. Both the pile layer and the ceremony driver ignore those two kinds.
 
+## Memory
+
+Internal RAM holds the stack and a 96 KiB heap; the pad, the reveals and the link queues
+live in the Nano's 8 MB PSRAM. The post-quantum sealing in the ceremony needs well over
+100 KiB of stack, and the heap static sits directly below the stack in internal RAM, so a
+large internal heap starves the stack: with 288 KiB of heap the stack was 31 KiB and the
+ceremony hit the stack guard. The board logs its deepest stack use as it goes.
+
+## Reading a board that says nothing
+
+Three flash sectors after the circle record let a stuck board be read from the laptop
+without the screen or the USB link:
+
+| Address | What |
+|---|---|
+| `0x411000` | The last panic's message, shown on the self-test screen at the next boot and erased |
+| `0x412000` | Every log line of the current boot, written as it happens |
+
+```sh
+espflash read-flash -p /dev/cu.usbmodem101 0x412000 0x1000 /tmp/trace.bin   # then strip 0xFF
+espflash reset -p /dev/cu.usbmodem101                                       # back to the app
+```
+
+Note that `espflash monitor` and `board-info` leave the chip in download mode; `reset`
+starts the app again. A reset also drops the USB port for a moment, so a host that was
+listening loses it.
+
 ## Flash layout
 
 `partitions.csv` reserves three regions, read and written by address through `esp-storage`:

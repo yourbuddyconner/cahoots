@@ -164,6 +164,8 @@ struct Menu<B: Board> {
     /// B was pressed on the serve item: requests on the down link are answered.
     serving: bool,
     pending: Option<Pending>,
+    /// Whether the down link reported a peer on the last step, so a change is logged once.
+    peer_seen: bool,
 }
 
 enum Idle<B: Board> {
@@ -258,6 +260,7 @@ impl<B: Board> Badge<B> {
         if let Some(c) = &self.circle {
             let words = c.check_words();
             self.board.display().show_words(&words);
+            self.board.display().show_status("A for menu");
             self.board
                 .log(&format!("words from the record: {}", words.join(" ")));
         }
@@ -512,6 +515,7 @@ impl<B: Board> Badge<B> {
                     item: Item::Words,
                     serving: false,
                     pending: None,
+                    peer_seen: false,
                 }))
             }
             Err(e) => {
@@ -524,6 +528,15 @@ impl<B: Board> Badge<B> {
 
     fn menu_step(board: &mut B, c: &Circle, m: &mut Menu<B>) {
         let asked = m.pending.is_some();
+        let present = m.down.peer_present();
+        if present != m.peer_seen {
+            m.peer_seen = present;
+            board.log(if present {
+                "down link: a laptop is listening"
+            } else {
+                "down link: nothing plugged in"
+            });
+        }
         // Read a chunk and decode after each, so `rx` never holds more than one request
         // frame and one chunk, whatever arrives.
         let mut buf = [0u8; 256];
@@ -577,7 +590,10 @@ impl<B: Board> Badge<B> {
             board.display().show_status(m.item.label());
         } else if board.b_pressed() {
             match m.item {
-                Item::Words => board.display().show_words(&c.check_words()),
+                Item::Words => {
+                    board.display().show_words(&c.check_words());
+                    board.display().show_status("words . A for menu");
+                }
                 Item::KeyAsCode => match m.pad.spend(&c.circle_id, PSK_LEN) {
                     Ok((_, bytes)) => {
                         board.display().show_qr(&bytes);

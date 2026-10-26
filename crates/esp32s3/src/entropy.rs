@@ -31,8 +31,7 @@ pub fn stack_high_water() -> u32 {
     if min == u32::MAX {
         return 0;
     }
-    // SAFETY: a linker symbol; only its address is used.
-    let top = unsafe { core::ptr::addr_of!(_stack_start) as u32 };
+    let top = core::ptr::addr_of!(_stack_start) as u32;
     top.saturating_sub(min)
 }
 

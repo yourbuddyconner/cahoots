@@ -7,8 +7,11 @@ const DEBOUNCE: Duration = Duration::from_millis(30);
 
 pub struct Button {
     pin: Input<'static>,
+    /// The accepted state: true while the switch counts as closed.
     down: bool,
-    since: Instant,
+    /// What the pin has read since `candidate_since`, if it differs from `down`.
+    candidate: Option<bool>,
+    candidate_since: Instant,
 }
 
 impl Button {
@@ -17,7 +20,8 @@ impl Button {
         Button {
             pin,
             down,
-            since: Instant::now(),
+            candidate: None,
+            candidate_since: Instant::now(),
         }
     }
 
@@ -26,15 +30,30 @@ impl Button {
         self.pin.is_low()
     }
 
-    /// True once per press, on the press edge.
+    /// True once per press, on the press edge. A new state is accepted only after the pin
+    /// has read it for `DEBOUNCE` without interruption, so a single glitch, such as the
+    /// ground bounce of an e-paper refresh on a breadboard, is not a press.
     pub fn pressed(&mut self) -> bool {
         let now = self.pin.is_low();
-        if now != self.down && self.since.elapsed() > DEBOUNCE {
-            self.down = now;
-            self.since = Instant::now();
-            return now;
+        if now == self.down {
+            self.candidate = None;
+            return false;
         }
-        false
+        match self.candidate {
+            Some(c) if c == now => {
+                if self.candidate_since.elapsed() > DEBOUNCE {
+                    self.down = now;
+                    self.candidate = None;
+                    return now;
+                }
+                false
+            }
+            _ => {
+                self.candidate = Some(now);
+                self.candidate_since = Instant::now();
+                false
+            }
+        }
     }
 }
 

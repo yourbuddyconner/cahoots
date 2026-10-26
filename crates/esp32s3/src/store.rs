@@ -11,6 +11,7 @@
 //! One `FlashStorage` exists per chip, so the stores share it through an `Rc<RefCell>`.
 
 use alloc::rc::Rc;
+use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use cahoots_badge::Circle;
@@ -28,6 +29,11 @@ pub const PAD_CAP: u32 = 0x10_0000;
 pub const LEDGER_BASE: u32 = 0x40_0000;
 pub const LEDGER_CAP: u32 = 0x1_0000;
 pub const CIRCLE_BASE: u32 = 0x41_0000;
+/// One sector after the circle record: the message of the last panic, shown at the next boot.
+pub const PANIC_BASE: u32 = 0x41_1000;
+/// One sector after the panic record: every log line of the current boot, so a stuck board
+/// can be read with `espflash read-flash` when neither the screen nor USB says anything.
+pub const TRACE_BASE: u32 = 0x41_2000;
 pub const SECTOR: u32 = 4096;
 const WORD: u32 = 4;
 const CIRCLE_MAGIC: &[u8; 4] = b"CAH1";
@@ -275,4 +281,93 @@ pub fn wipe(flash: &SharedFlash, pad_len: u32) -> Result<(), ()> {
     erase_sectors(&mut f, PAD_BASE, pad_len.max(SECTOR))?;
     f.erase(LEDGER_BASE, LEDGER_BASE + LEDGER_CAP)
         .map_err(|_| ())
+}
+
+const PANIC_MAGIC: &[u8; 4] = b"CAHP";
+
+/// Record a panic message so the next boot can show it. Called from the panic handler with
+/// a flash handle of its own, since the shared one may be the thing that panicked.
+pub fn save_panic(f: &mut FlashStorage<'_>, msg: &[u8]) {
+    let msg = &msg[..msg.len().min(SECTOR as usize - 6)];
+    let mut body = Vec::with_capacity(6 + msg.len());
+    body.extend_from_slice(PANIC_MAGIC);
+    body.extend_from_slice(&(msg.len() as u16).to_le_bytes());
+    body.extend_from_slice(msg);
+    if erase_sectors(f, PANIC_BASE, SECTOR).is_ok() {
+        let _ = program_any(f, PANIC_BASE, &body);
+    }
+}
+
+/// The last panic's message, if one was recorded, erased once read.
+pub fn take_panic(flash: &SharedFlash) -> Option<String> {
+    let mut head = [0u8; 6];
+    let mut f = flash.borrow_mut();
+    read_any(&mut f, PANIC_BASE, &mut head).ok()?;
+    if &head[..4] != PANIC_MAGIC {
+        return None;
+    }
+    let len = u16::from_le_bytes([head[4], head[5]]) as usize;
+    if len == 0 || len > SECTOR as usize - 6 {
+        return None;
+    }
+    let mut body = vec![0u8; len];
+    read_any(&mut f, PANIC_BASE + 6, &mut body).ok()?;
+    let _ = erase_sectors(&mut f, PANIC_BASE, SECTOR);
+    Some(String::from_utf8_lossy(&body).into_owned())
+}
+
+static TRACE_OFF: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(u32::MAX);
+/// The board's one flash handle, for the trace and the panic record. A second handle on the
+/// flash peripheral hangs the chip, so everything goes through this one.
+static TRACE_FLASH: core::sync::atomic::AtomicPtr<RefCell<FlashStorage<'static>>> =
+    core::sync::atomic::AtomicPtr::new(core::ptr::null_mut());
+
+fn trace_flash() -> Option<&'static RefCell<FlashStorage<'static>>> {
+    let p = TRACE_FLASH.load(core::sync::atomic::Ordering::Acquire);
+    // SAFETY: set once from the Rc the board keeps for its whole life; never freed.
+    unsafe { p.as_ref() }
+}
+
+/// Erase the trace sector and remember the flash handle. `flash` must live for the rest
+/// of the program, which the board's handle does.
+pub fn trace_begin(flash: &SharedFlash) {
+    TRACE_FLASH.store(
+        Rc::as_ptr(flash) as *mut RefCell<FlashStorage<'static>>,
+        core::sync::atomic::Ordering::Release,
+    );
+    let mut f = flash.borrow_mut();
+    if erase_sectors(&mut f, TRACE_BASE, SECTOR).is_ok() {
+        TRACE_OFF.store(0, core::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Append one line to the trace sector, if `trace_begin` ran, the flash handle is free,
+/// and there is room.
+pub fn trace(line: &str) {
+    use core::sync::atomic::Ordering;
+    let off = TRACE_OFF.load(Ordering::Relaxed);
+    if off == u32::MAX {
+        return;
+    }
+    let Some(cell) = trace_flash() else { return };
+    let Ok(mut f) = cell.try_borrow_mut() else {
+        return;
+    };
+    let mut bytes: Vec<u8> = line.bytes().filter(|b| *b != 0xFF).collect();
+    bytes.push(b'\n');
+    if off as usize + bytes.len() > SECTOR as usize {
+        return;
+    }
+    if program_any(&mut f, TRACE_BASE + off, &bytes).is_ok() {
+        TRACE_OFF.store(off + bytes.len() as u32, Ordering::Relaxed);
+    }
+}
+
+/// Record a panic through the board's flash handle, if it is not the thing that panicked.
+pub fn save_panic_shared(msg: &[u8]) {
+    let Some(cell) = trace_flash() else { return };
+    let Ok(mut f) = cell.try_borrow_mut() else {
+        return;
+    };
+    save_panic(&mut f, msg);
 }

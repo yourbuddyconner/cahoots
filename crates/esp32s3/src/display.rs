@@ -8,7 +8,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 use cahoots_hal::Display;
-use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_6X10, FONT_9X15_BOLD};
+use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_6X10, FONT_8X13, FONT_9X15_BOLD};
 use embedded_graphics::mono_font::{MonoFont, MonoTextStyle};
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
@@ -37,6 +37,8 @@ pub struct Epd {
     delay: Delay,
     pub circle: String,
     pub label: &'static str,
+    /// Quick partial refreshes since the last full one; see `band`.
+    partials: u32,
 }
 
 impl Epd {
@@ -61,10 +63,17 @@ impl Epd {
             delay,
             circle: String::new(),
             label,
+            partials: 0,
         })
     }
 
     fn full(&mut self) {
+        crate::store::trace("display: full refresh");
+        // The panel keeps two images: the one to show and the previous one, which quick
+        // partial refreshes compare against. The driver writes only the first, so after a
+        // full refresh the previous image could be whatever was shown before, and a partial
+        // refresh would bring it back. Clearing both first leaves the previous image blank.
+        let _ = self.epd.clear_frame(&mut self.spi, &mut self.delay);
         let _ = self
             .epd
             .set_lut(&mut self.spi, &mut self.delay, Some(RefreshLut::Full));
@@ -74,7 +83,16 @@ impl Epd {
         let _ = self.epd.display_frame(&mut self.spi, &mut self.delay);
     }
 
+    /// A quick partial refresh of the rows `y0..y1`. Quick refreshes leave ghosts of the
+    /// previous text, so every third one is replaced by a full refresh of the whole frame,
+    /// which is slower and flashes but wipes the panel clean.
     fn band(&mut self, y0: u32, y1: u32) {
+        crate::store::trace("display: band refresh");
+        self.partials += 1;
+        if self.partials % 3 == 0 {
+            self.full();
+            return;
+        }
         let _ = self
             .epd
             .set_lut(&mut self.spi, &mut self.delay, Some(RefreshLut::Quick));
@@ -113,15 +131,36 @@ impl Epd {
         self.rule(26);
     }
 
+    /// The status line at the bottom: up to two lines of a font a person can read from
+    /// a normal distance, wrapped at word boundaries. Anything past the second line is cut.
     fn footer(&mut self, s: &str) {
+        const COLS: usize = 23;
         self.fill(0, BAND_TOP as i32, W, W - BAND_TOP, Color::White);
         self.rule(170);
-        let mut line: String = s.chars().take(30).collect();
-        if s.chars().count() > 30 {
-            line.pop();
-            line.push('~');
+        let mut lines: Vec<String> = Vec::new();
+        let mut cur = String::new();
+        for word in s.split_whitespace() {
+            let fits = cur.is_empty() || cur.chars().count() + 1 + word.chars().count() <= COLS;
+            if fits {
+                if !cur.is_empty() {
+                    cur.push(' ');
+                }
+                cur.push_str(word);
+            } else {
+                lines.push(core::mem::take(&mut cur));
+                cur.push_str(word);
+            }
+            if lines.len() == 2 {
+                break;
+            }
         }
-        self.text(8, 188, &line, &FONT_6X10, Alignment::Left);
+        if lines.len() < 2 && !cur.is_empty() {
+            lines.push(cur);
+        }
+        for (i, line) in lines.iter().take(2).enumerate() {
+            let shown: String = line.chars().take(COLS).collect();
+            self.text(8, 183 + 14 * i as i32, &shown, &FONT_8X13, Alignment::Left);
+        }
     }
 
     /// A screen of lines under a title: the self-test, errors.
@@ -147,7 +186,8 @@ impl Display for Epd {
             self.text(8, y, w[2 * r], &FONT_10X20, Alignment::Left);
             self.text(192, y, w[2 * r + 1], &FONT_10X20, Alignment::Right);
         }
-        self.footer("read aloud . B to confirm");
+        // The badge sets the footer for the state it is in; the words screen itself says nothing.
+        self.footer("");
         self.full();
     }
 
@@ -176,6 +216,7 @@ impl Display for Epd {
     /// One line goes in the footer band. Several lines (the badge's self-test, "circle
     /// forgotten") fill the screen instead, since the band holds one.
     fn show_status(&mut self, s: &str) {
+        crate::store::trace(&alloc::format!("display: status {s:?}"));
         if s.contains('\n') {
             let lines: Vec<&str> = s.lines().collect();
             self.screen("cahoots", &lines);
