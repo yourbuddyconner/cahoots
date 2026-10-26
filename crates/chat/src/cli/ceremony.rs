@@ -35,8 +35,8 @@ pub fn local_ceremony(
         let mut seat_seed = Zeroizing::new([0u8; 32]);
         getrandom::getrandom(seat_seed.as_mut()).map_err(|e| StoreError::Io(e.to_string()))?;
         devs.push(
-            // Tier 0: these simulated members are software only. No task in the seats plan
-            // changes this.
+            // Tier 0: these members run in software on a laptop, with nothing protecting
+            // the pad but the file system.
             Ceremony::new(params.clone(), i, r.to_vec(), *seed, *seat_seed, 0)
                 .map_err(|e| StoreError::Format(std::format!("ceremony: {e:?}")))?,
         );

@@ -35,16 +35,16 @@ Implementation: `crates/core/src/params.rs`.
 
 The ceremony is commit-then-reveal. Without the commit step, the last member to reveal could choose a contribution after seeing everyone else's and bias the pad.
 
-![The ceremony in five steps](diagrams/ceremony.svg)
+![The ceremony: setup, commit, reveal, combine, attest](diagrams/ceremony.svg)
 
 1. **Setup.** The leader chooses the parameters. They are sent to every device. Phones show them for confirmation; on devices, a Params frame that does not match aborts the ceremony.
 2. **Commit.** Each device generates `R_i`, a KEM keypair `(dk_i, pk_i)` from 32 more random bytes, and a seat key (section 3.4) from 32 more. It computes `C_i = SHA-256("cahoots/commit/v2" || params || i || pk_i || seat_pk_i || tier_i || R_i)`, in that order. `seat_pk_i` is the 33-byte compressed seat public key and `tier_i` is one byte, the declared device tier, 0 to 4, as on the [tiers](tiers.md) page. Every device sends `(C_i, pk_i, seat_pk_i, tier_i)` to every other device. All four are public. The seat key and the tier are in the commitment, so nobody can change either after committing. A device MUST NOT reveal until it holds all `n` commitments.
 3. **Reveal.** Each device sends its sealed reveal (section 3.2): `R_i` encrypted to every other member. Each received reveal is opened and the contribution checked against `C_j`, using the `pk_j` held with the commitment, in constant time. A reveal that fails to open is refused and nothing changes. A reveal that opens but does not match aborts the ceremony on that device. A device that holds no commitment for `j` yet MAY take a sealed reveal from `j` as both: the commitment is derived from the opened contribution and the keys and tier in the blob. That is safe because the device's own contribution was fixed before it sent anything.
 4. **Combine.** `PAD = XOR of all R_j`. A device MAY XOR a second independent source into its own `R_i` before committing. That source MUST NOT replace the device's own TRNG output.
-5. **Check words.** `check = SHA-256("cahoots/check/v1" || params || PAD)`. The first 66 bits are read as six 11-bit big-endian indices into the BIP-39 English wordlist. Every device shows the six words. Members read them aloud. A mismatch means the ceremony restarts.
-6. **Erase.** Each device erases every `R_j` and keeps only `PAD`.
-7. **Circle ID.** `circle_id = SHA-256("cahoots/circle-id/v1" || PAD)[0..16]`.
-8. **Attest.** Every member signs the manifest (sections 3.4 and 3.5). The ceremony is complete when every seat has signed.
+5. **Circle ID.** `circle_id = SHA-256("cahoots/circle-id/v1" || PAD)[0..16]`.
+6. **Attest.** Every member builds the manifest (section 3.5) and signs it (section 3.4). The ceremony is complete only when every seat has signed; a device shows no check words before then.
+7. **Check words.** `check = SHA-256("cahoots/check/v1" || params || PAD)`. The first 66 bits are read as six 11-bit big-endian indices into the BIP-39 English wordlist. Every device shows the six words. Members read them aloud. A mismatch means the ceremony restarts.
+8. **Erase.** Each device erases every `R_j` and keeps `PAD`, its seat key, the sealed manifest and its pair keys (section 3.3).
 
 Implementation: `crates/core/src/ceremony.rs`, `commit.rs`, `reveal.rs`, `combine.rs`, `checkwords.rs`, `circle_id.rs`.
 
@@ -54,7 +54,7 @@ Implementation: `crates/core/src/ceremony.rs`, `commit.rs`, `reveal.rs`, `combin
 frame = type (u8) | seq (u32) | len (u32) | payload | CRC-32
 ```
 
-The CRC is IEEE 802.3 (the same polynomial as zlib) over every byte before it. It catches transmission errors only. Commitments and check words provide integrity. Each device has one touch link per neighbour: two in a pile (down and up, the hardware design), two in a closed ring (previous and next), or one in a pair. The link carries five frame kinds: Params (1), Commit (2), Reveal (3), Abort (4), and Attest (5). A device forwards every frame it sees for the first time on every link except the one it arrived on, deduplicated by kind and member index, until all devices hold all `n` commitments, reveals, and attestations. The touch link MUST NOT use any radio.
+The CRC is IEEE 802.3 (the same polynomial as zlib) over every byte before it. It catches transmission errors only. Commitments and check words provide integrity. Each device has one touch link per neighbour: two in a pile (down and up, the hardware design), two in a closed ring (previous and next), or one in a pair. The link carries five frame kinds: Params (1), Commit (2), Reveal (3), Abort (4), and Attest (5). A device forwards every frame it sees for the first time on every link except the one it arrived on, by its body (section 3.4), until all devices hold all `n` commitments, reveals, and attestations. The touch link MUST NOT use any radio.
 
 Implementation: `crates/core/src/frame.rs`.
 

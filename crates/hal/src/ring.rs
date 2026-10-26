@@ -3,9 +3,11 @@
 //! Every device has one or more [`Link`]s, one per cable: two in a pile (down and up) or in a
 //! closed ring (previous and next), one in a pair. Each device originates its own params,
 //! commitment, reveal, and attest frames on every link, and forwards every frame it sees for
-//! the first time on every link except the one it arrived on, keyed by (kind, member index).
-//! Copies that come back round, or arrive from both sides, are dropped by that dedupe, so the
-//! same driver is correct on a line, a ring, or a pair.
+//! the first time on every link except the one it arrived on: params and commitments keyed by
+//! (kind, member index), reveals and attestations by the hash of their body, with at most
+//! four bodies tried per seat and kind (see below). Copies that come back round, or arrive
+//! from both sides, are dropped by that dedupe, so the same driver is correct on a line, a
+//! ring, or a pair.
 //!
 //! A device sends its reveal only once it holds all `n` commitments, and its attestation of
 //! the manifest only once every reveal is in. Hops deliver bytes in order, so a reveal never

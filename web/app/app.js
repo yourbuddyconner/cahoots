@@ -25,6 +25,8 @@ const ERRORS = {
   version: 'Not a chat message.',
   length: 'Malformed message.',
   'wrong-phase': 'Not yet. Every commitment has to be in first.',
+  'bad-tier': 'A member declared a device tier this app does not know. Ask them to update.',
+  'bad-seed': 'This phone drew an unusable signing key. Try again.',
   aborted: 'This ceremony was stopped.',
 };
 const friendly = (e) => {

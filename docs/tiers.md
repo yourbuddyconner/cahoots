@@ -25,7 +25,7 @@ Our badge targets T3 at launch and T4 for anyone willing to look.
 ## What each tier changes in the software
 
 - **The ceremony screen** (planned) shows each member's tier and the resulting circle tier, next to the randomness label and the agent-seat warning. Members confirm all three.
-- **The manifest** records each seat's declared tier, and the commitment binds it, so it cannot change after the ceremony. It is a claim, like the sender index. T3 and T4 devices can back the claim with a boot attestation posted as a control message (planned); T0 to T2 cannot.
+- **The manifest** records each seat's declared tier, and the commitment binds it, so it cannot change after committing. It is a claim, like the sender index. T3 and T4 devices can back the claim with a boot attestation posted as a control message (planned); T0 to T2 cannot.
 - **The UI claim** follows the circle tier. A T0 circle says "erasure is best effort". A T2 or higher circle may say "a stolen device does not expose the pad without the PIN". No tier changes the confidentiality claim, which comes from the randomness label.
 - **The burn procedure** (`docs/use-cases.md`) applies to every tier. Higher tiers make it needed less often.
 
