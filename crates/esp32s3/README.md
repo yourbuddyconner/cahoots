@@ -22,7 +22,7 @@ Two buttons give three gestures: A alone is Left, B alone is Right, and both pre
 1. **Self-test** on the screen and in the log: the random source through the SP 800-90B health tests, a flash sector erased, programmed and read back, the buttons, and whether a circle is stored. Both skips the rest of the wait. To forget the stored circle, hold A from before power-on until the self-test ends; a Both never forgets it. If the last boot panicked, the panic message comes first, and Both continues.
 2. **If a circle is stored**, it shows the six words from the circle record and goes to the menu (step 5).
 3. **Pile.** The board waits for a pile below it on the USB link. A laptop running `cahoots-host pile --serial` stands in for the other cards. The board is the top card: when its seat appears on the screen, press Both and it counts the pile.
-4. **Ceremony.** The screen shows commits and reveals arriving; the six words appear with the question "keep this circle?". Both keeps the circle, writing the pad to flash with the ledger and the circle record (params, seat, circle id and the six words); Left or Right discards it.
+4. **Ceremony.** The screen shows commits and reveals arriving; the six words appear with the question "keep this circle?". Both keeps the circle, writing the pad to flash with the ledger and the circle record (params, seat, circle id, the six words, the seat key, the tier and the encoded manifest); Left or Right discards it.
 5. **Menu**, once a circle is stored. Left and Right move between the pages and Both chooses one: `words` shows the six words again; `key as code` spends 32 bytes of pad as a key and shows them as a code; `serve a laptop` answers custodian requests from the laptop on the USB link, and each request that spends pad asks first, Both to allow and Left or Right to refuse.
 
 Every screen is a full refresh, so each change flashes once. Each screen's text also goes to the trace sector (see below) until the sector is full.
@@ -100,9 +100,9 @@ listening loses it.
 |---|---|---|---|
 | pad | 0x300000 | 1 MiB | the pad, written once onto erased sectors; spent ranges are programmed to zero in place |
 | ledger | 0x400000 | 64 KiB | `hal::ledger` records, 16 bytes each, appended onto erased flash |
-| circle | 0x410000 | 4 KiB | params, seat, circle id and the six check words |
+| circle | 0x410000 | 4 KiB | `CAH2`: params, seat, circle id, the six check words, the seat key (32 bytes, plaintext like the pad), the tier and the encoded manifest; under 2.5 KiB for n = 8, and a record over 4 KiB is refused |
 
-A circle record written by firmware from before the words were stored loads as no circle, so the board goes to the pile; keeping a new circle overwrites the old record, pad and ledger.
+A circle record from older firmware (`CAH1`, before the seat key and the manifest) loads as no circle, so the board goes to the pile; keeping a new circle overwrites the old record, pad and ledger.
 
 The pad is plaintext on flash. Flash encryption and secure boot are one-way eFuse operations and wait for Conner's sign-off, so the board is tier 1: a hardware random source with health tests, no radio during a ceremony because no radio code is linked, and a pad that a reader with physical access can copy.
 
