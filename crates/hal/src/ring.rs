@@ -220,6 +220,12 @@ impl<L: Link> RingCeremony<L> {
             loop {
                 let (kind, index, body, used) = match frame::decode(&self.rx[k]) {
                     Ok((f, used)) => {
+                        if f.kind >= crate::pile::KIND_FIRST {
+                            // The pile layer, or a laptop's keep-alive ping, talking during
+                            // the ceremony. Not ours; a ping has no payload at all.
+                            self.rx[k].drain(..used);
+                            continue;
+                        }
                         if f.payload.is_empty() {
                             return Err(self.abort(RingError::Protocol));
                         }

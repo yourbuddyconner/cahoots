@@ -247,3 +247,42 @@ fn a_frame_is_not_echoed_on_the_link_it_arrived_on() {
         "link 1 carries ours and the forwarded copy"
     );
 }
+
+/// A laptop standing in for the rest of a pile keeps sending `Ping` frames, which carry no
+/// payload, and the pile layer may talk too. The ring ignores those kinds instead of
+/// treating an empty payload as a protocol violation.
+#[test]
+fn pile_layer_and_ping_frames_during_the_ceremony_are_ignored() {
+    let links = ring(2);
+    let mut it = links.into_iter();
+    let l0 = it.next().unwrap();
+    let l1 = it.next().unwrap();
+    let p = CircleParams::new(2, 256, "two", false).unwrap();
+    let mut a = RingCeremony::new(p.clone(), 0, &mut Det(1), vec![l0]).unwrap();
+    let mut b = RingCeremony::new(p, 1, &mut Det(2), vec![l1]).unwrap();
+    a.start();
+    b.start();
+    let ping = cahoots_core::frame::encode(&cahoots_core::frame::Frame {
+        kind: cahoots_hal::pile::KIND_PING,
+        seq: 1,
+        payload: &[],
+    });
+    let hello = cahoots_core::frame::encode(&cahoots_core::frame::Frame {
+        kind: cahoots_hal::pile::KIND_HELLO,
+        seq: 2,
+        payload: &[],
+    });
+    for _ in 0..50 {
+        // Pings and pile frames land on a's inbox between every poll.
+        a.links()[0].rx.borrow_mut().extend(ping.iter().copied());
+        a.links()[0].rx.borrow_mut().extend(hello.iter().copied());
+        let sa = a.poll().expect("a ignores pile-layer frames");
+        let sb = b.poll().expect("b runs");
+        if sa == Step::Complete && sb == Step::Complete {
+            break;
+        }
+    }
+    let (ra, _) = a.finish().unwrap();
+    let (rb, _) = b.finish().unwrap();
+    assert_eq!(ra.circle_id, rb.circle_id);
+}

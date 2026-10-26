@@ -6,7 +6,35 @@
 //! byte until the source has been estimated.
 
 use cahoots_hal::{Entropy, HealthError};
+use core::sync::atomic::{AtomicU32, Ordering};
 use esp_hal::rng::Trng;
+
+/// The lowest stack pointer seen in [`Hw::fill`], which the ceremony's sealing calls from
+/// deep inside the post-quantum code. `stack_high_water` turns it into bytes used.
+static MIN_SP: AtomicU32 = AtomicU32::new(u32::MAX);
+
+unsafe extern "C" {
+    static _stack_start: u32;
+}
+
+fn note_stack_depth() {
+    // The address of a local is within a few words of the stack pointer, which is close
+    // enough for a high-water mark.
+    let marker = 0u8;
+    let sp = core::ptr::addr_of!(marker) as u32;
+    MIN_SP.fetch_min(sp, Ordering::Relaxed);
+}
+
+/// Bytes of stack used at the deepest point seen so far, or 0 before any sample.
+pub fn stack_high_water() -> u32 {
+    let min = MIN_SP.load(Ordering::Relaxed);
+    if min == u32::MAX {
+        return 0;
+    }
+    // SAFETY: a linker symbol; only its address is used.
+    let top = unsafe { core::ptr::addr_of!(_stack_start) as u32 };
+    top.saturating_sub(min)
+}
 
 pub struct Hw(Trng);
 
@@ -20,6 +48,7 @@ impl Hw {
 
 impl Entropy for Hw {
     fn fill(&mut self, buf: &mut [u8]) -> Result<(), HealthError> {
+        note_stack_depth();
         self.0.read(buf);
         Ok(())
     }

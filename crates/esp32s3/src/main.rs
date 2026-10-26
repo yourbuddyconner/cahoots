@@ -55,7 +55,11 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 #[esp_hal::main]
 fn main() -> ! {
     let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
-    esp_alloc::heap_allocator!(size: 200 * 1024);
+    // Internal RAM is shared by this heap and the stack, and the post-quantum sealing in the
+    // ceremony needs well over 100 KiB of stack. So the internal heap stays small, for the
+    // allocations that want speed, and the pad, reveals and queues go to the 8 MB PSRAM.
+    esp_alloc::heap_allocator!(size: 96 * 1024);
+    esp_alloc::psram_allocator!(p.PSRAM, esp_hal::psram);
     link::init(p.USB_DEVICE);
     log!(
         "cahoots esp32s3 {} on an Arduino Nano ESP32",
@@ -78,6 +82,7 @@ fn main() -> ! {
     let busy = Input::new(p.GPIO10, InputConfig::default());
     let mut screen = display::Epd::new(spi, cs, dc, rst, busy, delay, LABEL).expect("e-paper");
     log!("e-paper up");
+    log!("heap: {}", esp_alloc::HEAP.stats());
 
     let pull_up = InputConfig::default().with_pull(Pull::Up);
     let btn = Buttons {
@@ -103,6 +108,7 @@ fn main() -> ! {
         entropy,
         flash,
         delay,
+        stack_logged: 0,
     });
     badge.boot();
     loop {

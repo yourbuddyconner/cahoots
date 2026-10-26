@@ -27,6 +27,9 @@ pub struct NanoBoard {
     pub entropy: Tested<entropy::Hw>,
     pub flash: SharedFlash,
     pub delay: Delay,
+    /// The deepest stack use already written to the log, so each new high-water mark is
+    /// logged once.
+    pub stack_logged: u32,
 }
 
 impl Board for NanoBoard {
@@ -57,6 +60,11 @@ impl Board for NanoBoard {
     }
 
     fn delay_ms(&mut self, ms: u32) {
+        let deepest = entropy::stack_high_water();
+        if deepest > self.stack_logged {
+            self.stack_logged = deepest;
+            log!("stack: {deepest} bytes used at the deepest point so far");
+        }
         self.delay.delay_millis(ms);
     }
 
