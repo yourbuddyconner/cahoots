@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/core",
     "crates/vectors",
+    "crates/custodian",
     "crates/provider",
     "crates/hal",
     "crates/host",
@@ -29,6 +30,7 @@ repository = "https://github.com/yourbuddyconner/cahoots"
 [workspace.dependencies]
 cahoots-core = { path = "crates/core", default-features = false }
 cahoots-hal = { path = "crates/hal" }
+cahoots-custodian = { path = "crates/custodian", default-features = false }
 cahoots-provider = { path = "crates/provider" }
 cahoots-chat = { path = "crates/chat", default-features = false }
 cahoots-station = { path = "crates/station" }

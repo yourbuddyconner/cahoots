@@ -1,6 +1,6 @@
 //! One circle's pad, slice, and ledger, with the spend ordering from handoff 3.5/3.6.
 
-use crate::{CircleId, PadError, PskHandle, LOW_PAD_PERCENT};
+use crate::{CircleId, CircleInfo, PadError, PskHandle, LOW_PAD_PERCENT};
 use cahoots_core::ledger::SpentLedger;
 use cahoots_core::pad::PadStorage;
 use cahoots_core::params::CircleParams;
@@ -32,6 +32,16 @@ impl<S: PadStorage, L: SpentLedger> Circle<S, L> {
             storage,
             ledger,
         })
+    }
+
+    pub(crate) fn info(&self) -> CircleInfo {
+        CircleInfo {
+            circle_id: self.circle_id,
+            seat: self.my_slice,
+            n: self.params.n,
+            name: self.params.name.clone(),
+            tier: 0,
+        }
     }
 
     pub(crate) fn remaining(&self) -> u32 {
