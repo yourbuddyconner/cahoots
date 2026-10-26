@@ -90,3 +90,27 @@ fn both_ends_the_self_test_early_and_one_button_does_not() {
     );
     assert!(b.elapsed_ms > 0, "Left and Right did not");
 }
+
+#[test]
+fn both_to_skip_the_self_test_does_not_forget_the_circle() {
+    // A chord holds A down when Both ends the wait. That is not "A held at power-on".
+    let (mut board, _, _) = FakeBoard::with_circle();
+    board.a_down = true;
+    board.presses.push_back(Press::Both);
+    let mut badge = Badge::new(board);
+    badge.boot();
+    assert!(badge.circle().is_some());
+    assert!(badge.board().load_circle().is_some());
+    assert!(badge.board().pad.iter().any(|&b| b != 0));
+}
+
+#[test]
+fn a_pressed_after_power_on_does_not_forget_the_circle() {
+    let (mut board, _, _) = FakeBoard::with_circle();
+    board.hold_a_at_ms = Some(100);
+    let mut badge = Badge::new(board);
+    badge.boot();
+    assert!(badge.circle().is_some());
+    assert!(badge.board().load_circle().is_some());
+    assert!(badge.board().pad.iter().any(|&b| b != 0));
+}

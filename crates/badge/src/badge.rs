@@ -252,16 +252,23 @@ impl<B: Board> Badge<B> {
         for l in &lines {
             self.board.log(l);
         }
+        // A must already be held at power-on to mean "forget the circle". Sample it before
+        // the wait: a Both that ends the wait holds A down too, and must not wipe.
+        let held_at_power_on = self.board.a_down();
         show(&mut self.board, screens::self_test(&lines));
+        let mut skipped = false;
         for _ in 0..SELF_TEST_MS / POLL_MS {
             if self.board.press() == Press::Both {
+                skipped = true;
                 break;
             }
             self.board.delay_ms(POLL_MS);
         }
 
-        // A held through the self-test forgets the circle: record, ledger and pad.
-        self.circle = if circle.is_some() && self.board.a_down() {
+        // A held from power-on through the whole self-test forgets the circle: record,
+        // ledger and pad. A Both that ended the wait early never does.
+        let wipe = held_at_power_on && !skipped && self.board.a_down();
+        self.circle = if circle.is_some() && wipe {
             let pad_len = circle.as_ref().map_or(0, |c| c.params.pad_len);
             match self.board.wipe(pad_len) {
                 Ok(()) => {

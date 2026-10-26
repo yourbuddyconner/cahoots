@@ -126,6 +126,23 @@ fn both_keeps_the_circle_and_a_single_press_discards() {
 }
 
 #[test]
+fn left_or_right_in_the_pile_does_nothing() {
+    let (mut b1, mut b2) = pile_of_two();
+    drive(&mut b1, &mut b2, |b1, b2, _, _| {
+        has_seat(b1) && has_seat(b2)
+    });
+    let drawn = b2.board().screens.len();
+    b2.board().presses.extend([Press::Left, Press::Right]);
+    for _ in 0..50 {
+        assert_eq!(b1.step(), Step::InPile);
+        assert_eq!(b2.step(), Step::InPile);
+    }
+    assert!(b2.board().presses.is_empty(), "both gestures were read");
+    assert_eq!(b2.board().screens.len(), drawn, "nothing drawn");
+    assert!(!b2.board().log.iter().any(|l| l.contains("counting")));
+}
+
+#[test]
 fn a_gesture_during_the_ceremony_is_not_an_answer() {
     let (mut b1, _b2) = to_the_prompt_with(|b1, _| b1.board().presses.push_back(Press::Both));
     for _ in 0..10 {

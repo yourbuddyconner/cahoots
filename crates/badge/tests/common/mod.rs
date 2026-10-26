@@ -162,6 +162,8 @@ pub struct FakeBoard {
     pub a_down: bool,
     /// A is released once this many milliseconds have passed in `delay_ms`.
     pub release_at_ms: u32,
+    /// A goes down once this many milliseconds have passed, if set (and before release).
+    pub hold_a_at_ms: Option<u32>,
     /// The milliseconds passed in `delay_ms` so far.
     pub elapsed_ms: u32,
     pub log: Vec<String>,
@@ -185,6 +187,7 @@ impl FakeBoard {
             presses: VecDeque::new(),
             a_down: false,
             release_at_ms: 3000,
+            hold_a_at_ms: None,
             elapsed_ms: 0,
             log: Vec::new(),
             selftest_lines: vec!["fake: ok".into()],
@@ -265,6 +268,9 @@ impl Board for FakeBoard {
     }
     fn delay_ms(&mut self, ms: u32) {
         self.elapsed_ms += ms;
+        if self.hold_a_at_ms.is_some_and(|t| self.elapsed_ms >= t) {
+            self.a_down = true;
+        }
         if self.elapsed_ms >= self.release_at_ms {
             self.a_down = false;
         }

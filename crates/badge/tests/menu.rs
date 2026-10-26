@@ -152,9 +152,20 @@ fn both_on_the_key_page_spends_32_bytes_and_shows_the_code() {
     // Any gesture on the code screen goes back to the Key page, not to a neighbour.
     press(&mut badge, Press::Right);
     assert!(on_page(&mut badge, 2, "key as code"));
+    assert_eq!(
+        badge.board().codes().len(),
+        1,
+        "Right on the code spends nothing"
+    );
     press(&mut badge, Press::Both);
+    assert_eq!(badge.board().codes().len(), 2);
     press(&mut badge, Press::Both);
     assert!(on_page(&mut badge, 2, "key as code"));
+    assert_eq!(
+        badge.board().codes().len(),
+        2,
+        "Both on the code spends nothing"
+    );
     let codes = badge.board().codes();
     assert_eq!(codes.len(), 2);
     assert_ne!(codes[0], codes[1]);
@@ -168,6 +179,20 @@ fn both_on_the_key_page_spends_32_bytes_and_shows_the_code() {
     press(&mut badge, Press::Right);
     press(&mut badge, Press::Both);
     assert_eq!(remaining(&mut badge, &mut laptop, id), before - 2 * 32);
+}
+
+#[test]
+fn both_on_the_words_page_spends_nothing() {
+    let (mut badge, mut laptop, id) = serving();
+    let before = remaining(&mut badge, &mut laptop, id);
+    press(&mut badge, Press::Right);
+    assert!(on_page(&mut badge, 1, "words"));
+    press(&mut badge, Press::Both);
+    press(&mut badge, Press::Both);
+    assert!(badge.board().codes().is_empty());
+    press(&mut badge, Press::Left);
+    press(&mut badge, Press::Both);
+    assert_eq!(remaining(&mut badge, &mut laptop, id), before);
 }
 
 #[test]
