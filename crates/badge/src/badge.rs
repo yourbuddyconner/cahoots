@@ -231,7 +231,7 @@ impl<B: Board> Badge<B> {
         for l in &lines {
             self.board.log(l);
         }
-        self.board.display().show_status(&lines.join("\n"));
+        show_status(&mut self.board, &lines.join("\n"));
         self.board.delay_ms(2500);
 
         // A held through the self-test forgets the circle: record, ledger and pad.
@@ -240,9 +240,7 @@ impl<B: Board> Badge<B> {
             match self.board.wipe(pad_len) {
                 Ok(()) => {
                     self.board.log("A held at boot: circle forgotten");
-                    self.board
-                        .display()
-                        .show_status("circle forgotten\nrelease A");
+                    show_status(&mut self.board, "circle forgotten\nrelease A");
                     while self.board.a_down() {
                         self.board.delay_ms(10);
                     }
@@ -259,8 +257,8 @@ impl<B: Board> Badge<B> {
 
         if let Some(c) = &self.circle {
             let words = c.check_words();
-            self.board.display().show_words(&words);
-            self.board.display().show_status("A for menu");
+            show_words(&mut self.board, &words);
+            show_status(&mut self.board, "A for menu");
             self.board
                 .log(&format!("words from the record: {}", words.join(" ")));
         }
@@ -293,9 +291,7 @@ impl<B: Board> Badge<B> {
     fn advance(&mut self, state: State<B::Link>) -> Result<(State<B::Link>, Step), String> {
         match state {
             State::Idle => {
-                self.board
-                    .display()
-                    .show_status("plug into a pile. B on top starts");
+                show_status(&mut self.board, "plug into a pile. B on top starts");
                 let (down, up) = self.board.links();
                 let (name, pad_len) = self.board.proposal();
                 let pile = Pile::new(down, up, &name, pad_len, false);
@@ -312,15 +308,14 @@ impl<B: Board> Badge<B> {
                         "pile counted: seat {seat} of {}, circle {}",
                         params.n, params.name
                     ));
-                    self.board
-                        .display()
-                        .show_status(&format!("seat {seat} of {}: {}", params.n, params.name));
+                    show_status(
+                        &mut self.board,
+                        &format!("seat {seat} of {}: {}", params.n, params.name),
+                    );
                     let mut ring = pile
                         .into_ceremony(ready, self.board.entropy())
                         .map_err(|e| format!("ceremony: {e:?}"))?;
-                    self.board
-                        .display()
-                        .show_status("ceremony: waiting for the others");
+                    show_status(&mut self.board, "ceremony: waiting for the others");
                     ring.start();
                     let state = State::Ceremony {
                         ring: Box::new(ring),
@@ -334,20 +329,19 @@ impl<B: Board> Badge<B> {
                     shown = pile.seat();
                     if let Some(s) = shown {
                         self.board.log(&format!("seat {s}"));
-                        self.board
-                            .display()
-                            .show_status(&format!("seat {s}. B when the pile is whole"));
+                        show_status(
+                            &mut self.board,
+                            &format!("seat {s}. B when the pile is whole"),
+                        );
                     }
                 }
                 if self.board.b_pressed() {
                     match pile.start() {
                         Ok(()) => {
                             self.board.log("B: counting the pile");
-                            self.board.display().show_status("counting the pile...");
+                            show_status(&mut self.board, "counting the pile...");
                         }
-                        Err(PileError::NoSeat) => {
-                            self.board.display().show_status("nothing below yet")
-                        }
+                        Err(PileError::NoSeat) => show_status(&mut self.board, "nothing below yet"),
                         Err(e) => self.board.log(&format!("start: {e:?}")),
                     }
                 }
@@ -361,16 +355,19 @@ impl<B: Board> Badge<B> {
                 seat,
             } => {
                 let step = ring.poll().map_err(|e| {
-                    self.board.display().show_status("ceremony: ABORTED");
+                    show_status(&mut self.board, "ceremony: ABORTED");
                     format!("ceremony: {e:?}")
                 })?;
                 let now = (ring.commitments_held(), ring.reveals_held());
                 if now != last {
                     last = now;
-                    self.board.display().show_status(&format!(
-                        "commits {}/{}  reveals {}/{}",
-                        now.0, params.n, now.1, params.n
-                    ));
+                    show_status(
+                        &mut self.board,
+                        &format!(
+                            "commits {}/{}  reveals {}/{}",
+                            now.0, params.n, now.1, params.n
+                        ),
+                    );
                 }
                 if step != RingStep::Complete {
                     let state = State::Ceremony {
@@ -416,17 +413,15 @@ impl<B: Board> Badge<B> {
                     return Ok((state, Step::InCeremony));
                 }
                 drop(links);
-                self.board.display().show_words(&result.check_words);
+                show_words(&mut self.board, &result.check_words);
                 self.board
                     .log(&format!("words: {}", result.check_words.join(" ")));
-                self.board
-                    .display()
-                    .show_status("B keep this circle . A discard");
+                show_status(&mut self.board, "B keep this circle . A discard");
                 Ok((State::Prompt { result, seat }, Step::Prompt))
             }
             State::Prompt { result, seat } => {
                 if self.board.b_pressed() {
-                    self.board.display().show_status("saving...");
+                    show_status(&mut self.board, "saving...");
                     self.board
                         .write_pad(&result.pad)
                         .map_err(|_| "flash: pad write failed")?;
@@ -446,9 +441,7 @@ impl<B: Board> Badge<B> {
                         .map_err(|_| "flash: circle record failed")?;
                     self.board
                         .log(&format!("saved: {} seat {seat}", circle.params.name));
-                    self.board
-                        .display()
-                        .show_status("saved. read the words aloud");
+                    show_status(&mut self.board, "saved. read the words aloud");
                     self.circle = Some(circle);
                     self.idle = Idle::Off;
                     return Ok((State::Idle, Step::Kept));
@@ -456,7 +449,7 @@ impl<B: Board> Badge<B> {
                 if self.board.a_pressed() {
                     drop(result);
                     self.board.log("discarded");
-                    self.board.display().show_status("discarded");
+                    show_status(&mut self.board, "discarded");
                     return Ok((State::Idle, Step::Discarded));
                 }
                 Ok((State::Prompt { result, seat }, Step::Prompt))
@@ -507,7 +500,7 @@ impl<B: Board> Badge<B> {
         match pad {
             Ok(pad) => {
                 let (down, _up) = self.board.links();
-                self.board.display().show_status(Item::Words.label());
+                show_status(&mut self.board, Item::Words.label());
                 Idle::On(Box::new(Menu {
                     pad,
                     down,
@@ -520,7 +513,7 @@ impl<B: Board> Badge<B> {
             }
             Err(e) => {
                 self.board.log(&e);
-                self.board.display().show_status(&e);
+                show_status(&mut self.board, &e);
                 Idle::Broken
             }
         }
@@ -575,11 +568,14 @@ impl<B: Board> Badge<B> {
                 } else {
                     "spend refused"
                 });
-                board.display().show_status(if yes {
-                    "sent. A for menu"
-                } else {
-                    "refused. A for menu"
-                });
+                show_status(
+                    board,
+                    if yes {
+                        "sent. A for menu"
+                    } else {
+                        "refused. A for menu"
+                    },
+                );
             }
             return;
         }
@@ -587,23 +583,23 @@ impl<B: Board> Badge<B> {
         if board.a_pressed() {
             m.item = m.item.next();
             m.serving = false;
-            board.display().show_status(m.item.label());
+            show_status(board, m.item.label());
         } else if board.b_pressed() {
             match m.item {
                 Item::Words => {
-                    board.display().show_words(&c.check_words());
-                    board.display().show_status("words . A for menu");
+                    show_words(board, &c.check_words());
+                    show_status(board, "words . A for menu");
                 }
                 Item::KeyAsCode => match m.pad.spend(&c.circle_id, PSK_LEN) {
                     Ok((_, bytes)) => {
-                        board.display().show_qr(&bytes);
-                        board.display().show_status("shown. A for menu");
+                        show_code(board, &bytes);
+                        show_status(board, "shown. A for menu");
                     }
-                    Err(e) => board.display().show_status(&format!("key: {e:?}")),
+                    Err(e) => show_status(board, &format!("key: {e:?}")),
                 },
                 Item::Serve => {
                     m.serving = true;
-                    board.display().show_status("serving. A for menu");
+                    show_status(board, "serving. A for menu");
                 }
             }
         }
@@ -645,9 +641,10 @@ impl<B: Board> Badge<B> {
             }
             match Request::decode(&payload).ok().as_ref().and_then(spends) {
                 Some(n) => {
-                    board
-                        .display()
-                        .show_status(&format!("spend {n} for {}? B yes . A no", c.params.name));
+                    show_status(
+                        board,
+                        &format!("spend {n} for {}? B yes . A no", c.params.name),
+                    );
                     m.pending = Some(Pending {
                         seq,
                         request: payload,
@@ -679,4 +676,42 @@ fn respond<L: Link>(link: &mut L, seq: u32, response: &[u8]) {
         seq,
         payload: response,
     }));
+}
+
+// The screens below are temporary: each one notes its lines on the board and draws a
+// placeholder frame. The rendered screens replace them.
+
+fn show_status<B: Board>(board: &mut B, s: &str) {
+    let lines: Vec<&str> = s.split('\n').collect();
+    show_lines(board, &lines);
+}
+
+fn show_words<B: Board>(board: &mut B, words: &[&str; 6]) {
+    show_lines(board, words);
+}
+
+fn show_code<B: Board>(board: &mut B, bytes: &[u8]) {
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    show_lines(board, &[&hex]);
+}
+
+fn show_lines<B: Board>(board: &mut B, lines: &[&str]) {
+    let owned: Vec<String> = lines.iter().map(|l| String::from(*l)).collect();
+    board.note_screen(&owned);
+    board.display().draw(&text_frame(lines));
+}
+
+/// A placeholder frame: one short bar per line, as long as the line, so a screen is not
+/// blank. It draws no letters.
+fn text_frame(lines: &[&str]) -> cahoots_hal::Frame {
+    let mut f = cahoots_hal::Frame::blank();
+    for (i, line) in lines.iter().enumerate() {
+        let y = 4 + 12 * i;
+        let len = (line.chars().count() * 6).min(cahoots_hal::Frame::WIDTH - 8);
+        for x in 4..4 + len {
+            f.set(x, y, true);
+            f.set(x, y + 1, true);
+        }
+    }
+    f
 }

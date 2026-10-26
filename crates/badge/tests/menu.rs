@@ -33,7 +33,7 @@ fn serving() -> (Badge<FakeBoard>, FakeLink, CircleId) {
     let (mut badge, laptop, id) = in_the_menu();
     press(&mut badge, Button::A);
     press(&mut badge, Button::A);
-    assert_eq!(badge.board().display.status.last().unwrap(), "serve . B");
+    assert_eq!(badge.board().statuses().last().unwrap(), "serve . B");
     press(&mut badge, Button::B);
     (badge, laptop, id)
 }
@@ -82,19 +82,16 @@ fn remaining(badge: &mut Badge<FakeBoard>, laptop: &mut FakeLink, id: CircleId) 
 fn key_as_code_spends_32_and_shows_a_qr() {
     let (mut badge, _laptop, _) = in_the_menu();
     press(&mut badge, Button::A);
-    assert_eq!(
-        badge.board().display.status.last().unwrap(),
-        "key as code . B"
-    );
+    assert_eq!(badge.board().statuses().last().unwrap(), "key as code . B");
     press(&mut badge, Button::B);
-    assert_eq!(badge.board().display.qr.len(), 1);
-    assert_eq!(badge.board().display.qr[0].len(), 32);
+    assert_eq!(badge.board().codes().len(), 1);
+    assert_eq!(badge.board().codes()[0].len(), 32);
     assert_eq!(
-        badge.board().display.status.last().unwrap(),
+        badge.board().statuses().last().unwrap(),
         "shown. A for menu"
     );
     press(&mut badge, Button::B);
-    let qr = &badge.board().display.qr;
+    let qr = &badge.board().codes();
     assert_eq!(qr.len(), 2);
     assert_ne!(qr[0], qr[1]);
 }
@@ -102,27 +99,27 @@ fn key_as_code_spends_32_and_shows_a_qr() {
 #[test]
 fn words_shows_the_six_words() {
     let (mut badge, _laptop, _) = in_the_menu();
-    let at_boot = badge.board().display.words.clone();
+    let at_boot = badge.board().words().clone();
     assert_eq!(at_boot.len(), 1);
-    assert_eq!(badge.board().display.status.last().unwrap(), "words");
+    assert_eq!(badge.board().statuses().last().unwrap(), "words");
     press(&mut badge, Button::B);
-    assert_eq!(badge.board().display.words.len(), 2);
-    assert_eq!(badge.board().display.words[1], at_boot[0]);
+    assert_eq!(badge.board().words().len(), 2);
+    assert_eq!(badge.board().words()[1], at_boot[0]);
 }
 
 #[test]
 fn words_are_the_same_after_a_spend() {
     let (mut badge, _laptop, _) = in_the_menu();
     press(&mut badge, Button::B);
-    let before = badge.board().display.words.last().unwrap().clone();
+    let before = badge.board().words().last().unwrap().clone();
     press(&mut badge, Button::A);
     press(&mut badge, Button::B);
-    assert_eq!(badge.board().display.qr.len(), 1);
+    assert_eq!(badge.board().codes().len(), 1);
     press(&mut badge, Button::A);
     press(&mut badge, Button::A);
-    assert_eq!(badge.board().display.status.last().unwrap(), "words");
+    assert_eq!(badge.board().statuses().last().unwrap(), "words");
     press(&mut badge, Button::B);
-    assert_eq!(badge.board().display.words.last().unwrap(), &before);
+    assert_eq!(badge.board().words().last().unwrap(), &before);
 }
 
 #[test]
@@ -162,7 +159,7 @@ fn serve_psk_waits_for_b() {
     }
     assert!(responses(&mut laptop).is_empty());
     assert_eq!(
-        badge.board().display.status.last().unwrap(),
+        badge.board().statuses().last().unwrap(),
         "spend 32 for fakes? B yes . A no"
     );
     press(&mut badge, Button::B);
@@ -213,7 +210,7 @@ fn spend_prompt_names_the_length() {
     );
     badge.idle_step();
     assert_eq!(
-        badge.board().display.status.last().unwrap(),
+        badge.board().statuses().last().unwrap(),
         "spend 12 for fakes? B yes . A no"
     );
 }
@@ -299,7 +296,7 @@ fn a_press_before_the_prompt_is_not_consent() {
     assert!(responses(&mut laptop).is_empty());
     assert!(badge.board().buttons.is_empty(), "the early press is spent");
     assert_eq!(
-        badge.board().display.status.last().unwrap(),
+        badge.board().statuses().last().unwrap(),
         "spend 32 for fakes? B yes . A no"
     );
     press(&mut badge, Button::B);

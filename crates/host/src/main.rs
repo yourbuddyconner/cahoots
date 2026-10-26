@@ -27,6 +27,7 @@ use cahoots_hal::Display;
 use cahoots_hal::{Entropy, HealthError};
 use cahoots_host::board::HostBoard;
 use cahoots_host::device::Device;
+use cahoots_host::display::status_frame;
 use cahoots_host::link::SocketLink;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
@@ -208,7 +209,8 @@ fn main() {
                 if badge.circle().is_none() {
                     if let Err(e) = badge.run_once() {
                         badge.board().log(&e);
-                        badge.board().display().show_status(&e);
+                        badge.board().note_screen(std::slice::from_ref(&e));
+                        badge.board().display().draw(&status_frame(&[&e]));
                         badge.board().delay_ms(1500);
                     }
                 } else {

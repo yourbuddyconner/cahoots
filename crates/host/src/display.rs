@@ -1,17 +1,15 @@
 //! A 200x200 monochrome display rendered to PNG, matching the 1.54" e-paper panel.
 
 use crate::font;
-use cahoots_hal::Display;
+use cahoots_hal::{Display, Frame};
 use std::path::{Path, PathBuf};
 
 pub const SIZE: usize = 200;
 
+/// Writes every frame it is asked to draw to a PNG, one image pixel per frame pixel.
 pub struct PngDisplay {
     path: PathBuf,
     name: String,
-    status: String,
-    words: Option<[String; 6]>,
-    qr_bytes: usize,
 }
 
 impl PngDisplay {
@@ -19,27 +17,27 @@ impl PngDisplay {
         PngDisplay {
             path: path.to_path_buf(),
             name: name.to_string(),
-            status: String::new(),
-            words: None,
-            qr_bytes: 0,
         }
     }
 
-    fn render(&self) {
+    /// Log `lines` and draw them under the device name with [`status_frame`].
+    pub fn show_lines(&mut self, lines: &[&str]) {
+        eprintln!("[{}] {}", self.name, lines.join(" "));
+        let mut all = vec![self.name.as_str()];
+        all.extend_from_slice(lines);
+        self.draw(&status_frame(&all));
+    }
+}
+
+impl Display for PngDisplay {
+    fn draw(&mut self, frame: &Frame) {
         let mut px = vec![255u8; SIZE * SIZE];
-        draw_text(&mut px, 4, 4, &self.name, 1);
-        draw_text(&mut px, 4, 16, &self.status, 1);
-        for x in 0..SIZE {
-            px[28 * SIZE + x] = 0;
-        }
-        if let Some(words) = &self.words {
-            for (i, w) in words.iter().enumerate() {
-                let col = i / 3;
-                let row = i % 3;
-                draw_text(&mut px, 8 + col * 96, 44 + row * 40, w, 2);
+        for y in 0..SIZE {
+            for x in 0..SIZE {
+                if frame.get(x, y) {
+                    px[y * SIZE + x] = 0;
+                }
             }
-        } else if self.qr_bytes > 0 {
-            draw_text(&mut px, 4, 44, &format!("QR {} B", self.qr_bytes), 2);
         }
         let file = match std::fs::File::create(&self.path) {
             Ok(f) => f,
@@ -61,45 +59,26 @@ impl PngDisplay {
     }
 }
 
-fn draw_text(px: &mut [u8], x0: usize, y0: usize, text: &str, scale: usize) {
+/// A plain text frame: one line of the 5x7 font every 10 pixels, from the top.
+pub fn status_frame(lines: &[&str]) -> Frame {
+    let mut f = Frame::blank();
+    for (i, line) in lines.iter().enumerate() {
+        draw_text(&mut f, 4, 4 + i * 10, line);
+    }
+    f
+}
+
+fn draw_text(f: &mut Frame, x0: usize, y0: usize, text: &str) {
     let mut x = x0;
     for c in text.chars() {
         let g = font::glyph(c);
         for (cx, col) in g.iter().enumerate() {
             for cy in 0..font::HEIGHT {
                 if col >> cy & 1 == 1 {
-                    for sx in 0..scale {
-                        for sy in 0..scale {
-                            let (px_x, px_y) = (x + cx * scale + sx, y0 + cy * scale + sy);
-                            if px_x < SIZE && px_y < SIZE {
-                                px[px_y * SIZE + px_x] = 0;
-                            }
-                        }
-                    }
+                    f.set(x + cx, y0 + cy, true);
                 }
             }
         }
-        x += (font::WIDTH + 1) * scale;
-    }
-}
-
-impl Display for PngDisplay {
-    fn show_words(&mut self, w: &[&str; 6]) {
-        eprintln!("[{}] check words: {}", self.name, w.join(" "));
-        self.words = Some(w.map(String::from));
-        self.render();
-    }
-
-    fn show_qr(&mut self, data: &[u8]) {
-        eprintln!("[{}] qr: {} bytes", self.name, data.len());
-        self.qr_bytes = data.len();
-        self.words = None;
-        self.render();
-    }
-
-    fn show_status(&mut self, s: &str) {
-        eprintln!("[{}] {s}", self.name);
-        self.status = s.to_string();
-        self.render();
+        x += font::WIDTH + 1;
     }
 }

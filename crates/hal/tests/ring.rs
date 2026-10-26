@@ -118,7 +118,6 @@ fn entropy_failure_aborts_before_anything_is_sent() {
 
 #[test]
 fn run_flushes_the_link_before_finishing() {
-    use cahoots_hal::Display;
     /// A link whose writes sit in a queue until flushed.
     struct Lazy {
         inner: QLink,
@@ -148,12 +147,6 @@ fn run_flushes_the_link_before_finishing() {
             self.queued.is_empty()
         }
     }
-    struct NoDisplay;
-    impl Display for NoDisplay {
-        fn show_words(&mut self, _: &[&str; 6]) {}
-        fn show_qr(&mut self, _: &[u8]) {}
-        fn show_status(&mut self, _: &str) {}
-    }
     let links = ring(2);
     let mut it = links.into_iter();
     let p = CircleParams::new(2, 256, "two", false).unwrap();
@@ -168,11 +161,17 @@ fn run_flushes_the_link_before_finishing() {
     // Drive b from a helper thread is not possible with Rc; interleave by hand instead:
     // a.run needs b to answer, so pump b inside a's idle callback.
     b.start();
+    let mut lines: Vec<String> = Vec::new();
     let (_result, links) = a
-        .run(&mut NoDisplay, || {
-            let _ = b.poll();
-        })
+        .run(
+            |s| lines.push(s.to_string()),
+            || {
+                let _ = b.poll();
+            },
+        )
         .unwrap();
+    assert_eq!(lines[0], "ceremony: waiting for the others");
+    assert_eq!(lines.last().unwrap(), "commits 2/2  reveals 2/2");
     let link = &links[0];
     assert!(
         link.queued.is_empty(),

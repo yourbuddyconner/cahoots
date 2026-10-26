@@ -82,4 +82,9 @@ pub trait Board {
     /// Board-specific self-test lines. The badge adds the common ones.
     fn selftest(&mut self) -> Vec<String>;
     fn log(&mut self, line: &str);
+    /// The text of the screen the badge is about to draw, top line first. A board that
+    /// keeps a text copy of the screen (a test fake, the host simulator) records it here.
+    fn note_screen(&mut self, lines: &[String]) {
+        let _ = lines;
+    }
 }

@@ -14,11 +14,14 @@
 
 extern crate alloc;
 
+pub mod frame;
 pub mod health;
 pub mod ledger;
 pub mod pile;
 pub mod ring;
 pub mod store;
+
+pub use frame::Frame;
 
 /// Raised when a TRNG health test fails. The ceremony MUST abort.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,10 +65,9 @@ pub trait PadStore {
     fn erase_unit(&self) -> u32;
 }
 
+/// A screen. `draw` shows the whole frame with a full refresh.
 pub trait Display {
-    fn show_words(&mut self, w: &[&str; 6]);
-    fn show_qr(&mut self, data: &[u8]);
-    fn show_status(&mut self, s: &str);
+    fn draw(&mut self, frame: &Frame);
 }
 
 /// A touch link: a byte channel over one cable or one set of contacts to one neighbour.

@@ -21,7 +21,7 @@
 //! Reveals are sealed to every member, so the wire never carries a contribution in the clear.
 //! | `Abort`  | `index u8 \| reason u8` |
 
-use crate::{Display, Entropy, HealthError, Link};
+use crate::{Entropy, HealthError, Link};
 use alloc::vec;
 use alloc::vec::Vec;
 use cahoots_core::ceremony::{Ceremony, CeremonyError, CeremonyResult, Phase};
@@ -337,21 +337,22 @@ impl<L: Link> RingCeremony<L> {
         Ok((r, self.links))
     }
 
-    /// Drive the ceremony to completion, reporting progress on `display` and calling
-    /// `idle` between polls (sleep, yield, or feed a watchdog).
-    pub fn run<D: Display>(
+    /// Drive the ceremony to completion, reporting progress lines through `status` and
+    /// calling `idle` between polls (sleep, yield, or feed a watchdog). The caller shows
+    /// the check words from the result.
+    pub fn run(
         mut self,
-        display: &mut D,
+        mut status: impl FnMut(&str),
         mut idle: impl FnMut(),
     ) -> Result<(CeremonyResult, Vec<L>), RingError> {
         let mut last = (0u8, 0u8);
-        display.show_status("ceremony: waiting for the others");
+        status("ceremony: waiting for the others");
         self.start();
         loop {
             let step = match self.poll() {
                 Ok(s) => s,
                 Err(e) => {
-                    display.show_status("ceremony: ABORTED");
+                    status("ceremony: ABORTED");
                     return Err(e);
                 }
             };
@@ -367,7 +368,7 @@ impl<L: Link> RingCeremony<L> {
                 s.push_num(now.1);
                 s.push("/");
                 s.push_num(self.n);
-                display.show_status(s.as_str());
+                status(s.as_str());
             }
             if step == Step::Complete {
                 break;
@@ -389,9 +390,7 @@ impl<L: Link> RingCeremony<L> {
             self.drain_links();
             idle();
         }
-        let (result, links) = self.finish()?;
-        display.show_words(&result.check_words);
-        Ok((result, links))
+        self.finish()
     }
 }
 

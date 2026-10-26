@@ -6,6 +6,7 @@ use cahoots_core::message::MessageType;
 use cahoots_core::params::CircleParams;
 use cahoots_hal::{Entropy, HealthError};
 use cahoots_host::device::Device;
+use cahoots_host::display::status_frame;
 use cahoots_host::link::SocketLink;
 use std::os::unix::net::UnixStream;
 
@@ -64,6 +65,23 @@ fn four_devices_ring_ceremony_then_message() {
     for d in &devices {
         assert_eq!(d.check_words(), words);
         assert_eq!(d.circle_id(), cahoots_core::circle_id::circle_id(&expected));
+    }
+    // The ceremony drew its progress and then the words on each device's screen.
+    for i in 0..4 {
+        let png = tmp.path().join(format!("dev{i}/display.png"));
+        let mut reader = png::Decoder::new(std::fs::File::open(&png).unwrap())
+            .read_info()
+            .unwrap();
+        let mut px = vec![0; reader.output_buffer_size()];
+        reader.next_frame(&mut px).unwrap();
+        let name = format!("dev{i}");
+        let mut lines = vec![name.as_str(), "check words:"];
+        lines.extend_from_slice(&words);
+        let frame = status_frame(&lines);
+        assert!(
+            (0..200 * 200).all(|p| (px[p] == 0) == frame.get(p % 200, p / 200)),
+            "device {i} shows its words"
+        );
     }
 
     let wire = devices[0]

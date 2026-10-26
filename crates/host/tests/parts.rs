@@ -1,5 +1,5 @@
-use cahoots_hal::{Display, Link, PadStore};
-use cahoots_host::display::PngDisplay;
+use cahoots_hal::{Display, Frame, Link, PadStore};
+use cahoots_host::display::{status_frame, PngDisplay};
 use cahoots_host::link::SocketLink;
 use cahoots_host::store::FilePadStore;
 use std::os::unix::net::UnixStream;
@@ -51,8 +51,9 @@ fn png_display_writes_a_200x200_image() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("display.png");
     let mut d = PngDisplay::new(&path, "dev0");
-    d.show_status("commits 2/4");
-    d.show_words(&["sunset", "valve", "present", "raven", "curtain", "pudding"]);
+    let mut frame = status_frame(&["dev0", "commits 2/4"]);
+    frame.set(199, 0, true);
+    d.draw(&frame);
     let decoder = png::Decoder::new(std::fs::File::open(&path).unwrap());
     let mut reader = decoder.read_info().unwrap();
     let info = reader.info();
@@ -62,4 +63,10 @@ fn png_display_writes_a_200x200_image() {
     let px = &buf[..out.buffer_size()];
     assert!(px.contains(&0), "some black pixels drawn");
     assert!(px.contains(&255), "white background");
+    // One image pixel per frame pixel.
+    for y in 0..Frame::HEIGHT {
+        for x in 0..Frame::WIDTH {
+            assert_eq!(px[y * 200 + x] == 0, frame.get(x, y), "({x}, {y})");
+        }
+    }
 }

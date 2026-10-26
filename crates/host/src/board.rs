@@ -5,8 +5,8 @@
 //! - `pad.bin`, `ledger.bin` and `circle.txt`: the same files [`crate::device::Device`]
 //!   keeps, so `Device::open` (and `cahoots-host status`, `send`, `recv`) work on a
 //!   directory a `HostBoard` kept.
-//! - `display.png`: the screen. `status.txt` holds the latest status line, so a script or
-//!   a test can follow the badge without reading the image.
+//! - `display.png`: the screen. `status.txt` holds the text of the latest screen, so a
+//!   script or a test can follow the badge without reading the image.
 //! - `buttons.txt`: the buttons. Each line `A` or `B` is one press. The board reads the
 //!   file in `delay_ms` and removes it, so each press is delivered once. Write it in one go
 //!   (for example `echo B > buttons.txt`, or write a side file and rename it in).
@@ -19,7 +19,7 @@ use cahoots_badge::{word_indices, Board, BoardError, Circle};
 use cahoots_core::checkwords::WORDLIST;
 use cahoots_core::params::CircleParams;
 use cahoots_hal::health::{HealthTests, Tested};
-use cahoots_hal::{Display, Entropy, HealthError, Link, PadStore};
+use cahoots_hal::{Display, Entropy, Frame, HealthError, Link, PadStore};
 use std::collections::VecDeque;
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -94,7 +94,7 @@ impl Entropy for HostEntropy {
     }
 }
 
-/// [`PngDisplay`] that also writes each status line to `status.txt`.
+/// [`PngDisplay`] plus `status.txt`, the text of the latest screen.
 pub struct HostDisplay {
     png: PngDisplay,
     status_path: PathBuf,
@@ -109,20 +109,20 @@ impl HostDisplay {
     }
 }
 
-impl Display for HostDisplay {
-    fn show_words(&mut self, w: &[&str; 6]) {
-        self.png.show_words(w);
-    }
-    fn show_qr(&mut self, data: &[u8]) {
-        self.png.show_qr(data);
-    }
-    fn show_status(&mut self, s: &str) {
-        self.png.show_status(s);
-        // Write a side file and rename it in, so a reader never sees half a line.
+impl HostDisplay {
+    /// Write the screen's lines to `status.txt`, one per line.
+    fn note(&mut self, lines: &[String]) {
+        // Write a side file and rename it in, so a reader never sees half a screen.
         let tmp = self.status_path.with_extension("tmp");
-        if std::fs::write(&tmp, s).is_ok() {
+        if std::fs::write(&tmp, lines.join("\n")).is_ok() {
             let _ = std::fs::rename(&tmp, &self.status_path);
         }
+    }
+}
+
+impl Display for HostDisplay {
+    fn draw(&mut self, frame: &Frame) {
+        self.png.draw(frame);
     }
 }
 
@@ -379,6 +379,11 @@ impl Board for HostBoard {
 
     fn log(&mut self, line: &str) {
         eprintln!("[{}] {line}", self.name);
+    }
+
+    fn note_screen(&mut self, lines: &[String]) {
+        eprintln!("[{}] {}", self.name, lines.join("\n"));
+        self.display.note(lines);
     }
 }
 

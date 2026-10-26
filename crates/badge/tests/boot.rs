@@ -9,11 +9,16 @@ fn boot_without_a_circle_shows_the_selftest_and_waits() {
     let mut badge = Badge::new(FakeBoard::new());
     badge.boot();
     let b = badge.board();
-    let screen = &b.display.status[0];
+    let screen = &b.statuses()[0];
     assert!(screen.contains("trng: health tests pass"));
     assert!(screen.contains("fake: ok"));
     assert!(screen.contains("circle: none yet"));
-    assert!(b.display.words.is_empty());
+    assert!(b.words().is_empty());
+    assert_eq!(
+        b.display.frames.len(),
+        b.screens.len(),
+        "a frame per screen"
+    );
     assert!(badge.circle().is_none());
 }
 
@@ -24,12 +29,9 @@ fn boot_with_a_circle_shows_its_words() {
     badge.boot();
     assert!(badge.circle().is_some());
     let b = badge.board();
-    assert!(b.display.status[0].contains("circle: fakes seat 1 of 3"));
-    assert_eq!(b.display.words.len(), 1);
-    assert_eq!(
-        b.display.words[0],
-        check_words(&params, &pad).map(String::from)
-    );
+    assert!(b.statuses()[0].contains("circle: fakes seat 1 of 3"));
+    assert_eq!(b.words().len(), 1);
+    assert_eq!(b.words()[0], check_words(&params, &pad).map(String::from));
 }
 
 #[test]
@@ -41,11 +43,10 @@ fn a_held_at_boot_forgets_the_circle() {
     assert!(badge.circle().is_none());
     assert!(badge.board().load_circle().is_none());
     assert!(badge.board().pad.iter().all(|&b| b == 0));
-    assert!(badge.board().display.words.is_empty());
+    assert!(badge.board().words().is_empty());
     assert!(badge
         .board()
-        .display
-        .status
+        .statuses()
         .last()
         .unwrap()
         .contains("release A"));
@@ -60,7 +61,7 @@ fn boot_shows_the_recorded_words_after_bytes_are_spent() {
     let mut badge = Badge::new(board);
     badge.boot();
     assert_eq!(
-        badge.board().display.words[0],
+        badge.board().words()[0],
         check_words(&params, &pad).map(String::from)
     );
 }

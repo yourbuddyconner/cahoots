@@ -54,6 +54,13 @@ pub struct Device {
     words: [&'static str; 6],
 }
 
+/// Show the check words at the end of a ceremony, as the ring driver used to.
+pub(crate) fn show_words(display: &mut PngDisplay, words: &[&str; 6]) {
+    let mut lines = vec!["check words:"];
+    lines.extend_from_slice(words);
+    display.show_lines(&lines);
+}
+
 impl Device {
     /// Run a ceremony over `links` (one per neighbour) and persist the result under `dir`.
     pub fn ceremony<L: Link>(
@@ -69,10 +76,12 @@ impl Device {
         let ring =
             RingCeremony::new(params.clone(), index, entropy, links).map_err(DeviceError::Ring)?;
         let (result, _links) = ring
-            .run(&mut display, || {
-                std::thread::sleep(std::time::Duration::from_millis(1))
-            })
+            .run(
+                |s| display.show_lines(&[s]),
+                || std::thread::sleep(std::time::Duration::from_millis(1)),
+            )
             .map_err(DeviceError::Ring)?;
+        show_words(&mut display, &result.check_words);
         Self::from_result(dir, params, index, &result)
     }
 

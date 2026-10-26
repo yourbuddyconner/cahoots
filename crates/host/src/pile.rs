@@ -11,7 +11,7 @@ use crate::display::PngDisplay;
 use crate::link::{Absent, SerialLink, SocketLink};
 use cahoots_hal::health::{HealthTests, Tested};
 use cahoots_hal::pile::{Pile, PileError};
-use cahoots_hal::{Display, Entropy, HealthError, Link};
+use cahoots_hal::{Entropy, HealthError, Link};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -94,17 +94,19 @@ pub fn run_card(card: Card) -> Result<Device, DeviceError> {
         }
         std::thread::sleep(Duration::from_millis(1));
     };
-    display.show_status(&format!("seat {} of {}", ready.seat, ready.params.n));
+    display.show_lines(&[&format!("seat {} of {}", ready.seat, ready.params.n)]);
     let seat = ready.seat;
     let params = ready.params.clone();
     let ring = pile
         .into_ceremony(ready, entropy.as_mut())
         .map_err(DeviceError::Ring)?;
     let (result, _links) = ring
-        .run(&mut display, || {
-            std::thread::sleep(Duration::from_millis(1))
-        })
+        .run(
+            |s| display.show_lines(&[s]),
+            || std::thread::sleep(Duration::from_millis(1)),
+        )
         .map_err(DeviceError::Ring)?;
+    crate::device::show_words(&mut display, &result.check_words);
     Device::from_result(&dir, params, seat, &result)
 }
 

@@ -76,7 +76,7 @@ The state directory holds the files `Device` keeps (`pad.bin`, `ledger.bin`, `ci
 | File | What it does |
 |---|---|
 | `display.png` | The screen |
-| `status.txt` | The latest status line, so a script can follow the card |
+| `status.txt` | The text of the latest screen, so a script can follow the card |
 | `buttons.txt` | Each line `A` or `B` is one press. The card reads the file and removes it. |
 | `a_down` | While this file exists, button A is held. Create it before boot to forget the circle. |
 

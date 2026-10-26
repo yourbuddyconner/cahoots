@@ -1,12 +1,12 @@
 #![allow(dead_code)]
 
 use cahoots_badge::{word_indices, Board, BoardError, Circle};
-use cahoots_core::checkwords::check_words;
+use cahoots_core::checkwords::{check_words, WORDLIST};
 use cahoots_core::circle_id::circle_id;
 use cahoots_core::params::CircleParams;
 use cahoots_hal::health::{HealthTests, Tested};
 use cahoots_hal::ledger::RecordStore;
-use cahoots_hal::{Display, Entropy, EraseError, HealthError, Link, PadStore, StoreError};
+use cahoots_hal::{Display, Entropy, EraseError, Frame, HealthError, Link, PadStore, StoreError};
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -30,21 +30,33 @@ impl Entropy for Xorshift {
     }
 }
 
+/// Every frame drawn, in order.
 #[derive(Default)]
 pub struct FakeDisplay {
-    pub status: Vec<String>,
-    pub words: Vec<[String; 6]>,
-    pub qr: Vec<Vec<u8>>,
+    pub frames: Vec<Frame>,
 }
 impl Display for FakeDisplay {
-    fn show_words(&mut self, w: &[&str; 6]) {
-        self.words.push(w.map(String::from));
+    fn draw(&mut self, frame: &Frame) {
+        self.frames.push(frame.clone());
     }
-    fn show_qr(&mut self, data: &[u8]) {
-        self.qr.push(data.to_vec());
-    }
-    fn show_status(&mut self, s: &str) {
-        self.status.push(s.to_string());
+}
+
+/// A noted screen that is six words from the word list.
+fn as_words(lines: &[String]) -> Option<[String; 6]> {
+    let words: [String; 6] = lines.to_vec().try_into().ok()?;
+    words
+        .iter()
+        .all(|w| WORDLIST.contains(&w.as_str()))
+        .then_some(words)
+}
+
+/// A noted screen that is one line of 32 bytes in hex: a key shown as a code.
+fn as_code(lines: &[String]) -> Option<Vec<u8>> {
+    match lines {
+        [l] if l.len() == 64 && l.bytes().all(|b| b.is_ascii_hexdigit()) => (0..32)
+            .map(|i| u8::from_str_radix(&l[2 * i..2 * i + 2], 16).ok())
+            .collect(),
+        _ => None,
     }
 }
 
@@ -140,6 +152,8 @@ pub const FAKE_TIER: u8 = 1;
 pub struct FakeBoard {
     pub entropy: Tested<Xorshift>,
     pub display: FakeDisplay,
+    /// The lines of every screen the badge noted, in order.
+    pub screens: Vec<Vec<String>>,
     pub pad: Vec<u8>,
     pub records: Vec<u8>,
     pub circle: Option<Circle>,
@@ -162,6 +176,7 @@ impl FakeBoard {
                 HealthTests::for_min_entropy(6),
             ),
             display: FakeDisplay::default(),
+            screens: Vec::new(),
             pad: Vec::new(),
             records: vec![0xFF; 4096],
             circle: None,
@@ -180,6 +195,25 @@ impl FakeBoard {
         let mut b = Self::new();
         b.entropy = Tested::new(Xorshift(seed), HealthTests::for_min_entropy(6));
         b
+    }
+
+    /// The status screens, each one's lines joined by newlines.
+    pub fn statuses(&self) -> Vec<String> {
+        self.screens
+            .iter()
+            .filter(|l| as_words(l).is_none() && as_code(l).is_none())
+            .map(|l| l.join("\n"))
+            .collect()
+    }
+
+    /// The word screens.
+    pub fn words(&self) -> Vec<[String; 6]> {
+        self.screens.iter().filter_map(|l| as_words(l)).collect()
+    }
+
+    /// The keys shown as codes.
+    pub fn codes(&self) -> Vec<Vec<u8>> {
+        self.screens.iter().filter_map(|l| as_code(l)).collect()
     }
 
     /// Pre-loaded with a 3-member circle and a 192-byte pad.
@@ -279,5 +313,8 @@ impl Board for FakeBoard {
     }
     fn log(&mut self, line: &str) {
         self.log.push(line.to_string());
+    }
+    fn note_screen(&mut self, lines: &[String]) {
+        self.screens.push(lines.to_vec());
     }
 }
