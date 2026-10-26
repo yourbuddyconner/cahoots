@@ -121,7 +121,7 @@ def ceremony():
     steps = [
         ("Set up", "One person names the group and its size. Every screen shows it. Everyone confirms."),
         ("Draw", "Each device makes random bytes and seals a fingerprint of them before it sees anyone else's."),
-        ("Touch", "Devices link in a ring. Fingerprints go around first, then the bytes. No radio."),
+        ("Swap", "Phones scan each other's codes. Badges pass them up and down the pile. Fingerprints first, then the bytes."),
         ("Mix", "Every device combines all the bytes into one secret. One honest member makes it random."),
         ("Say the words", "Six words appear on every screen. Read them aloud. If they match, you're in cahoots."),
     ]
@@ -152,14 +152,16 @@ def ceremony():
             s.rect(lx - 7, ly, 14, 11, fill=AMBER, stroke="none", r=2)
             s.path(f"M{lx - 4} {ly} v-4 a4 4 0 0 1 8 0 v4", stroke=AMBER, sw=1.8)
         elif i == 2:
-            # four badges in a ring, linked by amber segments
-            r = 34
-            pts = [(cx, by - r), (cx + r, by), (cx, by + r), (cx - r, by)]
-            for (ax, ay), (bx, by2) in zip(pts, pts[1:] + pts[:1]):
-                s.line(ax, ay, bx, by2, color=AMBER, sw=1.5)
-            for px, py in pts:
-                s.rect(px - 11, py - 14, 22, 28, fill=BG2, stroke=LINE, r=4)
-                s.rect(px - 7, py - 10, 14, 13, fill=PAPER, stroke="none", r=1.5)
+            # a pile of four cards, each resting on the one below, pads touching
+            cw_, ch_, step = 64, 11, 15
+            for k in range(4):
+                yy = by + 28 - k * step
+                xx = cx - cw_ / 2
+                s.rect(xx, yy, cw_, ch_, fill=BG2, stroke=LINE, r=3)
+                s.rect(xx + 6, yy + 3, 16, 5, fill=PAPER, stroke="none", r=1)
+                for j in range(4):
+                    s.circle(xx + cw_ - 22 + j * 5, yy + ch_ - 2.5, 1.4, fill=AMBER, stroke="none")
+            s.text(cx, by - 40, "pile", size=9.5, fill=FG3, anchor="middle", mono=True)
         elif i == 3:
             # four short bars fold into one
             for k in range(4):
