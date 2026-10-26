@@ -126,8 +126,15 @@ fn ping_and_log_frames_are_ignored_by_the_pile() {
     ];
     settle(&mut cards);
     assert_eq!(cards[1].seat(), Some(1));
-    for (kind, body) in [(KIND_PING, &b""[..]), (KIND_LOG, &b"hello from a board"[..])] {
-        let bytes = encode(&Frame { kind, seq: 7, payload: body });
+    for (kind, body) in [
+        (KIND_PING, &b""[..]),
+        (KIND_LOG, &b"hello from a board"[..]),
+    ] {
+        let bytes = encode(&Frame {
+            kind,
+            seq: 7,
+            payload: body,
+        });
         inject_into_card0.borrow_mut().extend(bytes.iter().copied());
         inject_into_card1.borrow_mut().extend(bytes.iter().copied());
     }

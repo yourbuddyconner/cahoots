@@ -172,7 +172,11 @@ fn main() {
             cahoots_host::pile::run_pile(cards, args.get("--serial"), &name, pad_len, &state, seed)
                 .map(|devices| {
                     for (i, d) in devices.iter().enumerate() {
-                        println!("card{i} seat {i} circle_id {} words {}", hex(&d.circle_id()), d.check_words().join(" "));
+                        println!(
+                            "card{i} seat {i} circle_id {} words {}",
+                            hex(&d.circle_id()),
+                            d.check_words().join(" ")
+                        );
                     }
                 })
                 .map_err(|e| e.to_string())

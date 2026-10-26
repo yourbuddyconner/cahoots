@@ -6,7 +6,11 @@ use cahoots_host::link::Inbox;
 use std::collections::VecDeque;
 
 fn frame(kind: u8, payload: &[u8]) -> Vec<u8> {
-    encode(&Frame { kind, seq: 1, payload })
+    encode(&Frame {
+        kind,
+        seq: 1,
+        payload,
+    })
 }
 
 #[test]

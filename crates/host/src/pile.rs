@@ -58,7 +58,15 @@ fn pile_err(e: PileError) -> DeviceError {
 
 /// Run one card to completion: find the seat, wait for the count, run the ceremony, persist.
 pub fn run_card(card: Card) -> Result<Device, DeviceError> {
-    let Card { down, up, name, pad_len, press, dir, seed } = card;
+    let Card {
+        down,
+        up,
+        name,
+        pad_len,
+        press,
+        dir,
+        seed,
+    } = card;
     let mut pile = Pile::new(down, up, &name, pad_len, false);
     let mut display = PngDisplay::new(&dir.join("display.png"), &name);
     std::fs::create_dir_all(&dir)?;
@@ -93,7 +101,9 @@ pub fn run_card(card: Card) -> Result<Device, DeviceError> {
         .into_ceremony(ready, entropy.as_mut())
         .map_err(DeviceError::Ring)?;
     let (result, _links) = ring
-        .run(&mut display, || std::thread::sleep(Duration::from_millis(1)))
+        .run(&mut display, || {
+            std::thread::sleep(Duration::from_millis(1))
+        })
         .map_err(DeviceError::Ring)?;
     Device::from_result(&dir, params, seat, &result)
 }
@@ -130,7 +140,11 @@ pub fn run_pile(
         let card = Card {
             down: downs[i].take().unwrap_or_else(|| Box::new(Absent)),
             up: ups[i].take().unwrap_or_else(|| Box::new(Absent)),
-            name: if i == 0 { name.to_string() } else { format!("card{i}") },
+            name: if i == 0 {
+                name.to_string()
+            } else {
+                format!("card{i}")
+            },
             pad_len,
             press: serial.is_none() && i == simulated - 1,
             dir: state.join(format!("card{i}")),
@@ -140,6 +154,9 @@ pub fn run_pile(
     }
     handles
         .into_iter()
-        .map(|h| h.join().map_err(|_| DeviceError::State("card thread panicked".into()))?)
+        .map(|h| {
+            h.join()
+                .map_err(|_| DeviceError::State("card thread panicked".into()))?
+        })
         .collect()
 }
