@@ -414,6 +414,121 @@ def roadmap():
     s.save("roadmap.svg")
 
 
+# 7. Pico 2 on the bench --------------------------------------------------------
+PICO_LEFT = ["GP0", "GP1", "GND", "GP2", "GP3", "GP4", "GP5", "GND", "GP6", "GP7", "GP8", "GP9", "GND", "GP10", "GP11", "GP12", "GP13", "GND", "GP14", "GP15"]
+PICO_RIGHT = ["VBUS", "VSYS", "GND", "3V3_EN", "3V3", "ADC_REF", "GP28", "GND", "GP27", "GP26", "RUN", "GP22", "GND", "GP21", "GP20", "GP19", "GP18", "GND", "GP17", "GP16"]  # pins 40 down to 21
+
+
+def pico(s, x, y, used, pitch=19):
+    """A Pico 2 seen component side up, USB at the top, pin labels inside the outline so wires leave clear of them.
+    Returns {pin number: (x, y)} of each pin's pad. `used` maps a pin number to a colour for its pad and label."""
+    w, h = 190, 52 + pitch * 20
+    s.rect(x, y, w, h, fill=BG2, stroke=LINE, r=6)
+    s.rect(x + w / 2 - 14, y - 6, 28, 16, fill=FG3, stroke="none", r=3)  # the USB plug
+    s.text(x + w / 2 - 22, y + h - 10, "Pico 2", size=12, fill=FG, anchor="middle", weight=600)
+    s.text(x + w / 2 + 26, y + h - 10, "RP2350", size=9, fill=FG3, anchor="middle", mono=True)
+    pads = {}
+    for i in range(20):
+        yy = y + 24 + i * pitch
+        for n, px, name, side in ((i + 1, x + 8, PICO_LEFT[i], -1), (40 - i, x + w - 8, PICO_RIGHT[i], 1)):
+            c = used.get(n)
+            s.circle(px, yy, 3.2, fill=c or BG, stroke=c or LINE, sw=1)
+            pads[n] = (px, yy)
+            fg = c or (FG3 if name == "GND" else FG2)
+            anchor = "start" if side < 0 else "end"
+            lx = px + 9 if side < 0 else px - 9
+            s.text(lx, yy + 3.5, f"{n}", size=8, fill=FG3, anchor=anchor, mono=True)
+            lx2 = lx + 18 if side < 0 else lx - 18
+            s.text(lx2, yy + 3.5, name, size=9.5, fill=fg, anchor=anchor, mono=True, weight=500 if c else 400)
+    return pads
+
+
+def wire(s, a, b, color, bend):
+    """A wire from pad a to pad b: straight to x = bend, a short diagonal, then straight to b."""
+    (x1, y1), (x2, y2) = a, b
+    d = 20 if x2 > x1 else -20
+    s.path(f"M{x1} {y1} H{bend} L{bend + d} {y2} H{x2}", stroke=color, sw=1.8)
+
+
+def pico2_wiring():
+    """One Pico 2 with the Waveshare module and the two buttons, on V1's pin map."""
+    s = Svg(960, 500, "Wiring a Pico 2 for the badge")
+    s.text(480, 24, "A Pico 2 on the bench: the Waveshare 1.54″ module and two buttons, on V1’s pin map", size=13, fill=FG, anchor="middle", weight=600)
+    SIG, PWR, GNDC = AMBER, PAPER, FG2
+    used = {36: PWR, 38: GNDC, 27: SIG, 26: SIG, 25: SIG, 24: SIG, 22: SIG, 21: SIG, 19: SIG, 20: SIG, 18: GNDC}
+    bx0 = 390
+    pads = pico(s, bx0, 48, used)
+    # the module: eight wires, in the order that keeps them from crossing
+    mx, my = 790, 70
+    s.rect(mx, my, 150, 240, fill=BG2, stroke=LINE, r=8)
+    s.text(mx + 75, my + 20, "e-paper module", size=11, fill=FG, anchor="middle", weight=600)
+    s.text(mx + 75, my + 34, "Waveshare 1.54″ V2", size=9, fill=FG3, anchor="middle", mono=True)
+    header = [("GND", 38, GNDC), ("VCC", 36, PWR), ("BUSY", 27, SIG), ("RST", 26, SIG), ("DIN", 25, SIG), ("CLK", 24, SIG), ("CS", 22, SIG), ("DC", 21, SIG)]
+    for i, (name, pin, c) in enumerate(header):
+        yy = my + 60 + i * 22
+        s.circle(mx, yy, 3.2, fill=c, stroke="none")
+        s.text(mx + 10, yy + 3.5, name, size=10, fill=c, mono=True, weight=500)
+        wire(s, pads[pin], (mx, yy), c, 690)
+    # the buttons, on the rows of pins 19 and 20, each between its pin and ground; one wire takes the ground to pin 18
+    sx = 250
+    _, y18 = pads[18]
+    _, y20 = pads[20]
+    for name, pin, py in (("A  left", 19, pads[19][1]), ("B  right", 20, y20 + 34)):
+        s.line(sx - 30, py, sx - 10, py, color=SIG, sw=1.8)
+        s.line(sx - 10, py, sx + 10, py - 10, color=SIG, sw=1.8)  # the open contact
+        s.circle(sx - 10, py, 2.2, fill=BG, stroke=SIG, sw=1.2)
+        s.circle(sx + 10, py, 2.2, fill=BG, stroke=SIG, sw=1.2)
+        s.line(sx + 10, py, sx + 40, py, color=SIG, sw=1.8)
+        wire(s, (sx + 40, py), pads[pin], SIG, 330)
+        s.text(sx, py + 16, name, size=10, fill=SIG, anchor="middle", mono=True, weight=500)
+    s.line(sx - 30, y18, sx - 30, y20 + 34, color=GNDC, sw=1.8)  # the ground bus joining both switches
+    s.line(sx - 30, y18, pads[18][0], y18, color=GNDC, sw=1.8)
+    s.text(sx - 38, y18 + 3.5, "GND", size=10, fill=GNDC, anchor="end", mono=True)
+    s.lines(20, 70, ["Physical pins count from 1 at the", "USB end, down the left side, then", "up the right side to 40.", "", "Signals: amber. 3.3 V: white.", "Ground: grey. The firmware enables", "the button pull-ups, so a button", "needs no resistor. Any GND pin", "will do for either ground wire."], size=11, fill=FG2, lh=16)
+    s.save("pico2-wiring.svg")
+
+
+def pico2_pile():
+    """Three Pico 2s chained over UART as a pile, with the laptop below the bottom one."""
+    s = Svg(960, 420, "Three Pico 2s as a pile")
+    s.text(480, 24, "A bench pile: each board’s UART0 is its link up and its UART1 its link down, crossed to the next board", size=13, fill=FG, anchor="middle", weight=600)
+    UP, DOWN, GNDC = AMBER, PAPER, FG2  # a wire's colour is the direction its data travels
+    rows = (("GP0  TX", 1, UP), ("GP1  RX", 2, DOWN), ("GP4  TX", 6, DOWN), ("GP5  RX", 7, UP), ("GND", 3, GNDC))
+    ys = (150, 174, 228, 252, 292)
+    boards = []
+    for i in range(3):
+        x = 80 + i * 300
+        s.rect(x, 70, 180, 250, fill=BG2, stroke=LINE, r=8)
+        s.rect(x + 90 - 14, 64, 28, 14, fill=FG3, stroke="none", r=3)
+        s.text(x + 90, 100, f"card {i + 1}", size=13, fill=FG, anchor="middle", weight=600)
+        s.text(x + 90, 116, "bottom" if i == 0 else "top" if i == 2 else "middle", size=10, fill=FG3, anchor="middle", mono=True)
+        s.text(x + 90, 138, "UART0: link up", size=8.5, fill=FG3, anchor="middle", mono=True)
+        s.text(x + 90, 216, "UART1: link down", size=8.5, fill=FG3, anchor="middle", mono=True)
+        pins = {}
+        for (name, pin, c), yy in zip(rows, ys):
+            lx, rx_ = x + 10, x + 170
+            s.circle(lx, yy, 3.2, fill=c, stroke="none")
+            s.circle(rx_, yy, 3.2, fill=c, stroke="none")
+            s.text(x + 90, yy + 3.5, f"{name}  pin {pin}", size=9.5, fill=c, anchor="middle", mono=True)
+            pins[pin] = (lx, rx_, yy)
+        boards.append(pins)
+    for i in range(2):
+        a, b = boards[i], boards[i + 1]
+        # the lower board's link up meets the upper board's link down: TX to RX each way, ground to ground
+        for pa, pb, c in ((1, 7, UP), (2, 6, DOWN), (3, 3, GNDC)):
+            (_, x1, y1), (x2, _, y2) = a[pa], b[pb]
+            mid = (x1 + x2) / 2
+            s.path(f"M{x1} {y1} H{mid - 10} L{mid + 10} {y2} H{x2}", stroke=c, sw=1.8)
+    # the laptop below card 1, over USB, standing in for the pile below it
+    s.rect(100, 350, 140, 44, fill="none", stroke=LINE, r=6)
+    s.text(170, 369, "laptop", size=11, fill=FG, anchor="middle", weight=600)
+    s.text(170, 384, "cahoots-host pile --serial", size=8.5, fill=FG3, anchor="middle", mono=True)
+    s.line(170, 350, 170, 320, color=FG3, sw=1.8, dash="4 3")
+    s.text(182, 338, "USB", size=9, fill=FG3, mono=True)
+    s.text(560, 380, "Amber carries data up the pile, white carries it down, grey is ground.", size=11, fill=FG2, anchor="middle")
+    s.text(560, 398, "Every board keeps its own USB for power and flashing. Join all the grounds.", size=11, fill=FG2, anchor="middle")
+    s.save("pico2-pile.svg")
+
 if __name__ == "__main__":
     ceremony()
     pad()
@@ -421,3 +536,5 @@ if __name__ == "__main__":
     station()
     tiers()
     roadmap()
+    pico2_wiring()
+    pico2_pile()
