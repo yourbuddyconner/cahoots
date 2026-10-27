@@ -2,7 +2,7 @@
 
 How to run a ceremony with a group, using the app on phones. One person hosts. It takes about five minutes for four people.
 
-![The ceremony in five steps](diagrams/ceremony.svg)
+![The ceremony in six steps](diagrams/ceremony.svg)
 
 ## What you need
 

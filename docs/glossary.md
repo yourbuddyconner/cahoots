@@ -4,7 +4,7 @@ The words these documents use, in plain terms. Where a term has a precise defini
 
 **Cahoot, circle.** A group of people who made one secret together at a ceremony. The code says circle. The app says cahoot.
 
-**Ceremony.** The in-person meeting where a group makes its secret. Five steps: set up, draw, swap, mix, say the words. In the app, set up is the New ceremony and Join screens, draw and swap happen on the Commit and Reveal screens, and mix and say the words are the Check screen. See the [ceremony guide](ceremony-guide.md).
+**Ceremony.** The in-person meeting where a group makes its secret. Six steps: set up, draw, swap, mix, sign, say the words. In the app, set up is the New ceremony and Join screens, draw and swap happen on the Commit and Reveal screens, sign is the Sign screen, and mix and say the words are the Check screen. See the [ceremony guide](ceremony-guide.md).
 
 **Pad.** The secret itself: a file of random bytes, 16 KiB to 256 KiB in the app, that every member holds in full. Also called a one-time pad. Each byte is used once and then erased.
 
@@ -54,7 +54,17 @@ The words these documents use, in plain terms. Where a term has a precise defini
 
 **TRNG, CSPRNG.** The two randomness labels. TRNG means every device made its contribution from a hardware random number generator. CSPRNG means at least one device used software randomness. The label decides which security claim the group can make.
 
-**Manifest.** Planned. A record written at the ceremony that names who may spend which bytes, for what. It will replace the fixed slice layout.
+**Seat key.** A signing key (P-256) a device makes for one circle at the ceremony. It is bound into the device's commitment, so it cannot change after the group has seen it, and it signs everything that device says afterwards. One key per circle, never shared across circles. See [protocol section 3.4](protocol.md).
+
+**Manifest.** The circle's root document, written at the ceremony and signed by every seat: the seat keys and device tiers, the parameters, and the floor. An outside system that wants to trust a circle registers its manifest. See [protocol section 3.5](protocol.md).
+
+**Floor.** The table in the manifest that says, for each purpose a request can name, whether the device may serve it under a grant alone, only with its owner present, or never, and how many pad bytes it may spend on it. It is the one rule no policy outside the circle can loosen.
+
+**Grant, approval, fact, receipt.** The four things a seat signs, as CBOR with a COSE signature, defined in [protocol section 8](protocol.md). A grant lets another key ask for named purposes in this circle until a log position, and can be passed on only narrower. An approval is one seat's yes or no to one exact operation, over the fields the device showed. A fact is an attested reading in an envelope. A receipt records a spend.
+
+**Assurance.** How sure a verifier can be that an owner meant one act, on a four-level scale from claimed, through key and present, to present with a PIN. A policy asks for a level and never for a method. See [device tiers](tiers.md).
+
+**Log position.** The place in the circle's feed that every grant, approval and fact names as its time, instead of a clock. Checkpoints that make it checkable from outside are planned (roadmap C6).
 
 **Test vectors.** Published example inputs and outputs. Every implementation must reproduce them so that different devices agree.
 

@@ -1,114 +1,136 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 364" width="960" height="364" role="img" aria-labelledby="t">
-<title id="t">The ceremony in five steps</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 400" width="960" height="400" role="img" aria-labelledby="t">
+<title id="t">The ceremony in six steps</title>
 <defs>
 <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#a1a1aa"/></marker>
 <marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#e5a33a"/></marker>
 <pattern id="hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#6b6b74" stroke-width="1.5"/></pattern>
 </defs>
-<rect width="960" height="364" rx="16" fill="#0e0e10"/>
-<line x1="109.6" y1="44" x2="850.4" y2="44" stroke="rgba(255,255,255,0.14)" stroke-width="1.5"/>
-<circle cx="109.6" cy="44" r="13" fill="#0e0e10" stroke="#e5a33a" stroke-width="1.5"/>
-<text x="109.6" y="48.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="500" fill="#e5a33a" text-anchor="middle">1</text>
-<rect x="24.0" y="76" width="171.2" height="118" rx="12" fill="#151518" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-<rect x="85.6" y="108.0" width="48" height="54" rx="6" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
-<rect x="91.6" y="115.0" width="36" height="32" rx="2" fill="#e6e2d8" stroke="none" stroke-width="1"/>
-<text x="109.6" y="125.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="6.5" font-weight="400" fill="#17191b" text-anchor="middle">meetup</text>
-<text x="109.6" y="133.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="6.5" font-weight="400" fill="#17191b" text-anchor="middle">4 of 4</text>
-<circle cx="101.6" cy="156.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="109.6" cy="156.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="117.6" cy="156.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<text x="109.6" y="175.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9.5" font-weight="400" fill="#6b6b74" text-anchor="middle">confirm</text>
-<text x="109.6" y="228" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#f4f4f5" text-anchor="middle">Set up</text>
-<text x="109.6" y="252" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">One person names the group</text>
-<text x="109.6" y="270" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">and its size. Every screen</text>
-<text x="109.6" y="288" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">shows it. Everyone</text>
-<text x="109.6" y="306" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">confirms.</text>
-<circle cx="294.79999999999995" cy="44" r="13" fill="#0e0e10" stroke="#e5a33a" stroke-width="1.5"/>
-<text x="294.79999999999995" y="48.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="500" fill="#e5a33a" text-anchor="middle">2</text>
-<rect x="209.2" y="76" width="171.2" height="118" rx="12" fill="#151518" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-<rect x="270.79999999999995" y="108.0" width="48" height="54" rx="6" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
-<rect x="276.79999999999995" y="115.0" width="36" height="32" rx="2" fill="#e6e2d8" stroke="none" stroke-width="1"/>
-<text x="294.79999999999995" y="125.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="6.5" font-weight="400" fill="#17191b" text-anchor="middle">7f3a91</text>
-<text x="294.79999999999995" y="133.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="6.5" font-weight="400" fill="#17191b" text-anchor="middle">c0e2b8</text>
-<circle cx="286.79999999999995" cy="156.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="294.79999999999995" cy="156.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="302.79999999999995" cy="156.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<rect x="323.79999999999995" y="129.0" width="14" height="11" rx="2" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<path d="M326.79999999999995 129.0 v-4 a4 4 0 0 1 8 0 v4" stroke="#e5a33a" fill="none" stroke-width="1.8"/>
-<text x="294.79999999999995" y="228" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#f4f4f5" text-anchor="middle">Draw</text>
-<text x="294.79999999999995" y="252" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">Each device makes random</text>
-<text x="294.79999999999995" y="270" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">bytes and seals a</text>
-<text x="294.79999999999995" y="288" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">fingerprint of them before</text>
-<text x="294.79999999999995" y="306" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">it sees anyone else's.</text>
-<circle cx="480.0" cy="44" r="13" fill="#0e0e10" stroke="#e5a33a" stroke-width="1.5"/>
-<text x="480.0" y="48.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="500" fill="#e5a33a" text-anchor="middle">3</text>
-<rect x="394.4" y="76" width="171.2" height="118" rx="12" fill="#151518" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-<rect x="448.0" y="163.0" width="64" height="11" rx="3" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
-<rect x="454.0" y="166.0" width="16" height="5" rx="1" fill="#e6e2d8" stroke="none" stroke-width="1"/>
-<circle cx="490.0" cy="171.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="495.0" cy="171.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="500.0" cy="171.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="505.0" cy="171.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<rect x="448.0" y="148.0" width="64" height="11" rx="3" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
-<rect x="454.0" y="151.0" width="16" height="5" rx="1" fill="#e6e2d8" stroke="none" stroke-width="1"/>
-<circle cx="490.0" cy="156.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="495.0" cy="156.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="500.0" cy="156.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="505.0" cy="156.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<rect x="448.0" y="133.0" width="64" height="11" rx="3" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
-<rect x="454.0" y="136.0" width="16" height="5" rx="1" fill="#e6e2d8" stroke="none" stroke-width="1"/>
-<circle cx="490.0" cy="141.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="495.0" cy="141.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="500.0" cy="141.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="505.0" cy="141.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<rect x="448.0" y="118.0" width="64" height="11" rx="3" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
-<rect x="454.0" y="121.0" width="16" height="5" rx="1" fill="#e6e2d8" stroke="none" stroke-width="1"/>
-<circle cx="490.0" cy="126.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="495.0" cy="126.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="500.0" cy="126.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="505.0" cy="126.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<text x="480.0" y="95.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9.5" font-weight="400" fill="#6b6b74" text-anchor="middle">pile</text>
-<text x="480.0" y="228" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#f4f4f5" text-anchor="middle">Swap</text>
-<text x="480.0" y="252" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">Phones scan each other's</text>
-<text x="480.0" y="270" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">codes. Badges pass them up</text>
-<text x="480.0" y="288" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">and down the pile.</text>
-<text x="480.0" y="306" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">Fingerprints first, then</text>
-<text x="480.0" y="324" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">the bytes.</text>
-<circle cx="665.1999999999999" cy="44" r="13" fill="#0e0e10" stroke="#e5a33a" stroke-width="1.5"/>
-<text x="665.1999999999999" y="48.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="500" fill="#e5a33a" text-anchor="middle">4</text>
-<rect x="579.5999999999999" y="76" width="171.2" height="118" rx="12" fill="#151518" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-<rect x="603.1999999999999" y="105.0" width="36" height="7" rx="2" fill="#6b6b74" stroke="none" stroke-width="1"/>
-<path d="M639.1999999999999 108.5 C 657.1999999999999 108.5, 657.1999999999999 131.5, 671.1999999999999 131.5" stroke="rgba(255,255,255,0.14)" fill="none" stroke-width="1"/>
-<rect x="603.1999999999999" y="119.0" width="36" height="7" rx="2" fill="#6b6b74" stroke="none" stroke-width="1"/>
-<path d="M639.1999999999999 122.5 C 657.1999999999999 122.5, 657.1999999999999 131.5, 671.1999999999999 131.5" stroke="rgba(255,255,255,0.14)" fill="none" stroke-width="1"/>
-<rect x="603.1999999999999" y="133.0" width="36" height="7" rx="2" fill="#6b6b74" stroke="none" stroke-width="1"/>
-<path d="M639.1999999999999 136.5 C 657.1999999999999 136.5, 657.1999999999999 131.5, 671.1999999999999 131.5" stroke="rgba(255,255,255,0.14)" fill="none" stroke-width="1"/>
-<rect x="603.1999999999999" y="147.0" width="36" height="7" rx="2" fill="#6b6b74" stroke="none" stroke-width="1"/>
-<path d="M639.1999999999999 150.5 C 657.1999999999999 150.5, 657.1999999999999 131.5, 671.1999999999999 131.5" stroke="rgba(255,255,255,0.14)" fill="none" stroke-width="1"/>
-<text x="651.1999999999999" y="137.0" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">⊕</text>
-<rect x="671.1999999999999" y="128.0" width="52" height="14" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<text x="697.1999999999999" y="138.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="8.5" font-weight="500" fill="#17191b" text-anchor="middle">secret</text>
-<text x="665.1999999999999" y="228" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#f4f4f5" text-anchor="middle">Mix</text>
-<text x="665.1999999999999" y="252" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">Every device combines all</text>
-<text x="665.1999999999999" y="270" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">the bytes into one secret.</text>
-<text x="665.1999999999999" y="288" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">One honest member makes it</text>
-<text x="665.1999999999999" y="306" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">random.</text>
-<circle cx="850.4" cy="44" r="13" fill="#0e0e10" stroke="#e5a33a" stroke-width="1.5"/>
-<text x="850.4" y="48.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="500" fill="#e5a33a" text-anchor="middle">5</text>
-<rect x="764.8" y="76" width="171.2" height="118" rx="12" fill="#151518" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-<rect x="810.4" y="101.0" width="80" height="68" rx="6" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
-<rect x="816.4" y="108.0" width="68" height="46" rx="2" fill="#e6e2d8" stroke="none" stroke-width="1"/>
-<text x="850.4" y="118.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="6.5" font-weight="400" fill="#17191b" text-anchor="middle">sunset  valve</text>
-<text x="850.4" y="126.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="6.5" font-weight="400" fill="#17191b" text-anchor="middle">present  raven</text>
-<text x="850.4" y="134.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="6.5" font-weight="400" fill="#17191b" text-anchor="middle">curtain  pudding</text>
-<circle cx="842.4" cy="163.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="850.4" cy="163.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<circle cx="858.4" cy="163.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<text x="850.4" y="183.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9.5" font-weight="400" fill="#6b6b74" text-anchor="middle">“match”</text>
-<text x="850.4" y="228" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#f4f4f5" text-anchor="middle">Say the words</text>
-<text x="850.4" y="252" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">Six words appear on every</text>
-<text x="850.4" y="270" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">screen. Read them aloud. If</text>
-<text x="850.4" y="288" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">they match, you're in</text>
-<text x="850.4" y="306" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">cahoots.</text>
-<text x="480.0" y="344" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#6b6b74" text-anchor="middle">Steps 2 and 3 are what stop anyone from choosing their bytes after seeing everyone else’s.</text>
+<rect width="960" height="400" rx="16" fill="#0e0e10"/>
+<line x1="94.16666666666667" y1="44" x2="865.8333333333334" y2="44" stroke="rgba(255,255,255,0.14)" stroke-width="1.5"/>
+<circle cx="94.16666666666667" cy="44" r="13" fill="#0e0e10" stroke="#e5a33a" stroke-width="1.5"/>
+<text x="94.16666666666667" y="48.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="500" fill="#e5a33a" text-anchor="middle">1</text>
+<rect x="24.0" y="76" width="140.33333333333334" height="118" rx="12" fill="#151518" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+<rect x="70.16666666666667" y="108.0" width="48" height="54" rx="6" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<rect x="76.16666666666667" y="115.0" width="36" height="32" rx="2" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<text x="94.16666666666667" y="125.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="6.5" font-weight="400" fill="#17191b" text-anchor="middle">meetup</text>
+<text x="94.16666666666667" y="133.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="6.5" font-weight="400" fill="#17191b" text-anchor="middle">4 of 4</text>
+<circle cx="86.16666666666667" cy="156.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="94.16666666666667" cy="156.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="102.16666666666667" cy="156.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<text x="94.16666666666667" y="175.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9.5" font-weight="400" fill="#6b6b74" text-anchor="middle">confirm</text>
+<text x="94.16666666666667" y="228" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#f4f4f5" text-anchor="middle">Set up</text>
+<text x="94.16666666666667" y="252" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">One person names the</text>
+<text x="94.16666666666667" y="270" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">group and its size.</text>
+<text x="94.16666666666667" y="288" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">Every screen shows it.</text>
+<text x="94.16666666666667" y="306" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">Everyone confirms.</text>
+<circle cx="248.5" cy="44" r="13" fill="#0e0e10" stroke="#e5a33a" stroke-width="1.5"/>
+<text x="248.5" y="48.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="500" fill="#e5a33a" text-anchor="middle">2</text>
+<rect x="178.33333333333334" y="76" width="140.33333333333334" height="118" rx="12" fill="#151518" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+<rect x="224.5" y="108.0" width="48" height="54" rx="6" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<rect x="230.5" y="115.0" width="36" height="32" rx="2" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<text x="248.5" y="125.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="6.5" font-weight="400" fill="#17191b" text-anchor="middle">7f3a91</text>
+<text x="248.5" y="133.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="6.5" font-weight="400" fill="#17191b" text-anchor="middle">c0e2b8</text>
+<circle cx="240.5" cy="156.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="248.5" cy="156.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="256.5" cy="156.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="277.5" y="129.0" width="14" height="11" rx="2" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<path d="M280.5 129.0 v-4 a4 4 0 0 1 8 0 v4" stroke="#e5a33a" fill="none" stroke-width="1.8"/>
+<text x="248.5" y="228" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#f4f4f5" text-anchor="middle">Draw</text>
+<text x="248.5" y="252" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">Each device makes</text>
+<text x="248.5" y="270" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">random bytes and seals</text>
+<text x="248.5" y="288" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">a fingerprint of them</text>
+<text x="248.5" y="306" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">before it sees anyone</text>
+<text x="248.5" y="324" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">else's.</text>
+<circle cx="402.83333333333337" cy="44" r="13" fill="#0e0e10" stroke="#e5a33a" stroke-width="1.5"/>
+<text x="402.83333333333337" y="48.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="500" fill="#e5a33a" text-anchor="middle">3</text>
+<rect x="332.6666666666667" y="76" width="140.33333333333334" height="118" rx="12" fill="#151518" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+<rect x="370.83333333333337" y="163.0" width="64" height="11" rx="3" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<rect x="376.83333333333337" y="166.0" width="16" height="5" rx="1" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<circle cx="412.83333333333337" cy="171.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="417.83333333333337" cy="171.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="422.83333333333337" cy="171.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="427.83333333333337" cy="171.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="370.83333333333337" y="148.0" width="64" height="11" rx="3" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<rect x="376.83333333333337" y="151.0" width="16" height="5" rx="1" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<circle cx="412.83333333333337" cy="156.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="417.83333333333337" cy="156.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="422.83333333333337" cy="156.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="427.83333333333337" cy="156.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="370.83333333333337" y="133.0" width="64" height="11" rx="3" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<rect x="376.83333333333337" y="136.0" width="16" height="5" rx="1" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<circle cx="412.83333333333337" cy="141.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="417.83333333333337" cy="141.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="422.83333333333337" cy="141.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="427.83333333333337" cy="141.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<rect x="370.83333333333337" y="118.0" width="64" height="11" rx="3" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<rect x="376.83333333333337" y="121.0" width="16" height="5" rx="1" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<circle cx="412.83333333333337" cy="126.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="417.83333333333337" cy="126.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="422.83333333333337" cy="126.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="427.83333333333337" cy="126.5" r="1.4" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<text x="402.83333333333337" y="95.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9.5" font-weight="400" fill="#6b6b74" text-anchor="middle">pile</text>
+<text x="402.83333333333337" y="228" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#f4f4f5" text-anchor="middle">Swap</text>
+<text x="402.83333333333337" y="252" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">Phones scan each</text>
+<text x="402.83333333333337" y="270" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">other's codes. Badges</text>
+<text x="402.83333333333337" y="288" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">pass them up and down</text>
+<text x="402.83333333333337" y="306" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">the pile. Fingerprints</text>
+<text x="402.83333333333337" y="324" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">first, then the bytes.</text>
+<circle cx="557.1666666666666" cy="44" r="13" fill="#0e0e10" stroke="#e5a33a" stroke-width="1.5"/>
+<text x="557.1666666666666" y="48.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="500" fill="#e5a33a" text-anchor="middle">4</text>
+<rect x="487.0" y="76" width="140.33333333333334" height="118" rx="12" fill="#151518" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+<rect x="495.16666666666663" y="105.0" width="36" height="7" rx="2" fill="#6b6b74" stroke="none" stroke-width="1"/>
+<path d="M531.1666666666666 108.5 C 549.1666666666666 108.5, 549.1666666666666 131.5, 563.1666666666666 131.5" stroke="rgba(255,255,255,0.14)" fill="none" stroke-width="1"/>
+<rect x="495.16666666666663" y="119.0" width="36" height="7" rx="2" fill="#6b6b74" stroke="none" stroke-width="1"/>
+<path d="M531.1666666666666 122.5 C 549.1666666666666 122.5, 549.1666666666666 131.5, 563.1666666666666 131.5" stroke="rgba(255,255,255,0.14)" fill="none" stroke-width="1"/>
+<rect x="495.16666666666663" y="133.0" width="36" height="7" rx="2" fill="#6b6b74" stroke="none" stroke-width="1"/>
+<path d="M531.1666666666666 136.5 C 549.1666666666666 136.5, 549.1666666666666 131.5, 563.1666666666666 131.5" stroke="rgba(255,255,255,0.14)" fill="none" stroke-width="1"/>
+<rect x="495.16666666666663" y="147.0" width="36" height="7" rx="2" fill="#6b6b74" stroke="none" stroke-width="1"/>
+<path d="M531.1666666666666 150.5 C 549.1666666666666 150.5, 549.1666666666666 131.5, 563.1666666666666 131.5" stroke="rgba(255,255,255,0.14)" fill="none" stroke-width="1"/>
+<text x="543.1666666666666" y="137.0" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">⊕</text>
+<rect x="563.1666666666666" y="128.0" width="52" height="14" rx="3" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<text x="589.1666666666666" y="138.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="8.5" font-weight="500" fill="#17191b" text-anchor="middle">secret</text>
+<text x="557.1666666666666" y="228" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#f4f4f5" text-anchor="middle">Mix</text>
+<text x="557.1666666666666" y="252" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">Every device combines</text>
+<text x="557.1666666666666" y="270" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">all the bytes into one</text>
+<text x="557.1666666666666" y="288" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">secret. One honest</text>
+<text x="557.1666666666666" y="306" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">member makes it</text>
+<text x="557.1666666666666" y="324" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">random.</text>
+<circle cx="711.5" cy="44" r="13" fill="#0e0e10" stroke="#e5a33a" stroke-width="1.5"/>
+<text x="711.5" y="48.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="500" fill="#e5a33a" text-anchor="middle">5</text>
+<rect x="641.3333333333334" y="76" width="140.33333333333334" height="118" rx="12" fill="#151518" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+<rect x="677.5" y="109.0" width="40" height="8" rx="2" fill="#6b6b74" stroke="none" stroke-width="1"/>
+<path d="M725.5 113.0 l3 3 l6 -7" stroke="#e5a33a" fill="none" stroke-width="1.8"/>
+<rect x="677.5" y="124.0" width="40" height="8" rx="2" fill="#6b6b74" stroke="none" stroke-width="1"/>
+<path d="M725.5 128.0 l3 3 l6 -7" stroke="#e5a33a" fill="none" stroke-width="1.8"/>
+<rect x="677.5" y="139.0" width="40" height="8" rx="2" fill="#6b6b74" stroke="none" stroke-width="1"/>
+<path d="M725.5 143.0 l3 3 l6 -7" stroke="#e5a33a" fill="none" stroke-width="1.8"/>
+<rect x="677.5" y="154.0" width="40" height="8" rx="2" fill="#6b6b74" stroke="none" stroke-width="1"/>
+<path d="M725.5 158.0 l3 3 l6 -7" stroke="#e5a33a" fill="none" stroke-width="1.8"/>
+<text x="711.5" y="181.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9.5" font-weight="400" fill="#6b6b74" text-anchor="middle">signed</text>
+<text x="711.5" y="228" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#f4f4f5" text-anchor="middle">Sign</text>
+<text x="711.5" y="252" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">Every device signs the</text>
+<text x="711.5" y="270" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">list of seats with a</text>
+<text x="711.5" y="288" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">key it made for this</text>
+<text x="711.5" y="306" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">group, and collects</text>
+<text x="711.5" y="324" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">the others'</text>
+<text x="711.5" y="342" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">signatures.</text>
+<circle cx="865.8333333333334" cy="44" r="13" fill="#0e0e10" stroke="#e5a33a" stroke-width="1.5"/>
+<text x="865.8333333333334" y="48.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="500" fill="#e5a33a" text-anchor="middle">6</text>
+<rect x="795.6666666666667" y="76" width="140.33333333333334" height="118" rx="12" fill="#151518" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+<rect x="825.8333333333334" y="101.0" width="80" height="68" rx="6" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<rect x="831.8333333333334" y="108.0" width="68" height="46" rx="2" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<text x="865.8333333333334" y="118.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="6.5" font-weight="400" fill="#17191b" text-anchor="middle">sunset  valve</text>
+<text x="865.8333333333334" y="126.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="6.5" font-weight="400" fill="#17191b" text-anchor="middle">present  raven</text>
+<text x="865.8333333333334" y="134.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="6.5" font-weight="400" fill="#17191b" text-anchor="middle">curtain  pudding</text>
+<circle cx="857.8333333333334" cy="163.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="865.8333333333334" cy="163.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<circle cx="873.8333333333334" cy="163.0" r="1.8" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<text x="865.8333333333334" y="183.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9.5" font-weight="400" fill="#6b6b74" text-anchor="middle">“match”</text>
+<text x="865.8333333333334" y="228" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#f4f4f5" text-anchor="middle">Say the words</text>
+<text x="865.8333333333334" y="252" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">Six words appear on</text>
+<text x="865.8333333333334" y="270" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">every screen. Read</text>
+<text x="865.8333333333334" y="288" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">them aloud. If they</text>
+<text x="865.8333333333334" y="306" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">match, you're in</text>
+<text x="865.8333333333334" y="324" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#a1a1aa" text-anchor="middle">cahoots.</text>
+<text x="480.0" y="380" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#6b6b74" text-anchor="middle">Steps 2 and 3 are what stop anyone from choosing their bytes after seeing everyone else’s.</text>
 </svg>

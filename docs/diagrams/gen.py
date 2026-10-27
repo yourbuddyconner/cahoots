@@ -123,6 +123,7 @@ def ceremony():
         ("Draw", "Each device makes random bytes and seals a fingerprint of them before it sees anyone else's."),
         ("Swap", "Phones scan each other's codes. Badges pass them up and down the pile. Fingerprints first, then the bytes."),
         ("Mix", "Every device combines all the bytes into one secret. One honest member makes it random."),
+        ("Sign", "Every device signs the list of seats with a key it made for this group, and collects the others' signatures."),
         ("Say the words", "Six words appear on every screen. Read them aloud. If they match, you're in cahoots."),
     ]
     W, n, gap, m = 960, len(steps), 14, 24
@@ -130,7 +131,7 @@ def ceremony():
     rail_y, box_y, box_h = 44, 76, 118
     title_y = box_y + box_h + 34
     body_y = title_y + 24
-    s = Svg(W, body_y + 4 * 18 + 40, "The ceremony in five steps")
+    s = Svg(W, body_y + 6 * 18 + 40, "The ceremony in six steps")
     # the rail
     s.line(m + cw / 2, rail_y, W - m - cw / 2, rail_y, color=LINE, sw=1.5)
     for i, (name, body) in enumerate(steps):
@@ -171,11 +172,18 @@ def ceremony():
             s.text(cx - 14, by + 2, "⊕", size=12, fill=FG2, anchor="middle")
             s.rect(cx + 6, by - 7, 52, 14, fill=AMBER, stroke="none", r=3)
             s.text(cx + 32, by + 3.5, "secret", size=8.5, fill=INK, anchor="middle", mono=True, weight=500)
+        elif i == 4:
+            # the roster, one tick per seat
+            for k in range(4):
+                yy = by - 26 + k * 15
+                s.rect(cx - 34, yy, 40, 8, fill=FG3, stroke="none", r=2)
+                s.path(f"M{cx + 14} {yy + 4} l3 3 l6 -7", stroke=AMBER, sw=1.8)
+            s.text(cx, by + 46, "signed", size=9.5, fill=FG3, anchor="middle", mono=True)
         else:
             mini_badge(s, cx - 40, by - 34, w=80, h=68, screen=["sunset  valve", "present  raven", "curtain  pudding"])
             s.text(cx, by + 48, "\u201cmatch\u201d", size=9.5, fill=FG3, anchor="middle", mono=True)
         s.text(cx, title_y, name, size=16, fill=FG, anchor="middle", weight=600)
-        s.lines(cx, body_y, wrap(body, 27), size=12, fill=FG2, anchor="middle", lh=18)
+        s.lines(cx, body_y, wrap(body, 22), size=12, fill=FG2, anchor="middle", lh=18)
     # the one thing to remember
     s.text(W / 2, s.h - 20, "Steps 2 and 3 are what stop anyone from choosing their bytes after seeing everyone else\u2019s.", size=12, fill=FG3, anchor="middle")
     s.save("ceremony.svg")

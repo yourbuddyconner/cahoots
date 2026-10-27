@@ -12,9 +12,10 @@ The hard part is getting the same random file to every member without anyone els
 2. Each device generates random bytes from its hardware random number generator.
 3. The devices swap those bytes over a wired touch link, or by showing each other animated codes. Each contribution is encrypted to the other members before it leaves the device, so a camera or an antenna in the room learns nothing.
 4. Every device XORs all contributions into one shared pad.
-5. The members read six check words aloud to confirm every device holds the same pad.
+5. Every device signs the list of seats with a key it made for this group, so the group has a signed roster and every member a key to sign with later.
+6. The members read six check words aloud to confirm every device holds the same pad.
 
-![The ceremony in five steps](docs/diagrams/ceremony.svg)
+![The ceremony in six steps](docs/diagrams/ceremony.svg)
 
 The group is now a **cahoot** (a circle). The pad is a key budget. Spending 32 bytes seeds a session of any size in WireGuard, HPKE, age, or the pad-seeded chat. An attacker then has to break both the math and the pad. Spending one byte per byte encrypts a short message that nothing can break. The device records every spend in a ledger and erases the bytes, so no key is ever used twice.
 

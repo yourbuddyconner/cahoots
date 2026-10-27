@@ -24,7 +24,9 @@ This is the meetup demo. Members post encrypted messages to the public feed (the
 
 ### 2.2 Approvals that do not depend on public-key crypto
 
-An `approve` message carries the hash of an action, such as a transaction. The message type exists; the verifier is a design. A verifier that holds the pad checks the seal. A policy engine can require one of these next to a passkey or a signature. If signatures are ever broken, the approval still stands, because it never relied on one.
+An approval is one seat's yes or no to one exact operation: the fields the device showed its owner, a digest of the full request, the verdict, the seat, and the assurance level, signed with the seat's key and checked against the circle's manifest. The object and its verifier exist ([protocol section 8](protocol.md)); the adapter a policy engine calls is roadmap S2. A policy engine can require one of these next to a passkey or a login, and ask for it at a level a login cannot give: the owner was present, on a device, pressing two buttons on a screen that showed what was being approved.
+
+The signature is ordinary P-256, so an approval on its own does not outlast public-key cryptography. Sent inside the circle it also carries the pad's seal, which does. The original `approve` message, a hash sealed with pad bytes and nothing else, is still in the message format for a circle that wants that guarantee alone.
 
 ### 2.3 Encrypting files to a circle
 
