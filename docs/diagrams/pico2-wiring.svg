@@ -131,33 +131,41 @@
 <circle cx="572" cy="433" r="3.2" fill="#e5a33a" stroke="#e5a33a" stroke-width="1"/>
 <text x="563" y="436.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="8" font-weight="400" fill="#6b6b74" text-anchor="end">21</text>
 <text x="545" y="436.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9.5" font-weight="500" fill="#e5a33a" text-anchor="end">GP16</text>
-<rect x="790" y="70" width="150" height="240" rx="8" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
-<text x="865" y="90" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#f4f4f5" text-anchor="middle">e-paper module</text>
-<text x="865" y="104" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9" font-weight="400" fill="#6b6b74" text-anchor="middle">Waveshare 1.54″ V2</text>
-<circle cx="790" cy="130" r="3.2" fill="#a1a1aa" stroke="none" stroke-width="1"/>
-<text x="800" y="133.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="500" fill="#a1a1aa" text-anchor="start">GND</text>
-<path d="M572 110 H690 L710 130 H790" stroke="#a1a1aa" fill="none" stroke-width="1.8"/>
-<circle cx="790" cy="152" r="3.2" fill="#e6e2d8" stroke="none" stroke-width="1"/>
-<text x="800" y="155.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="500" fill="#e6e2d8" text-anchor="start">VCC</text>
-<path d="M572 148 H690 L710 152 H790" stroke="#e6e2d8" fill="none" stroke-width="1.8"/>
-<circle cx="790" cy="174" r="3.2" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<text x="800" y="177.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="500" fill="#e5a33a" text-anchor="start">BUSY</text>
-<path d="M572 319 H690 L710 174 H790" stroke="#e5a33a" fill="none" stroke-width="1.8"/>
-<circle cx="790" cy="196" r="3.2" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<text x="800" y="199.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="500" fill="#e5a33a" text-anchor="start">RST</text>
-<path d="M572 338 H690 L710 196 H790" stroke="#e5a33a" fill="none" stroke-width="1.8"/>
-<circle cx="790" cy="218" r="3.2" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<text x="800" y="221.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="500" fill="#e5a33a" text-anchor="start">DIN</text>
-<path d="M572 357 H690 L710 218 H790" stroke="#e5a33a" fill="none" stroke-width="1.8"/>
-<circle cx="790" cy="240" r="3.2" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<text x="800" y="243.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="500" fill="#e5a33a" text-anchor="start">CLK</text>
-<path d="M572 376 H690 L710 240 H790" stroke="#e5a33a" fill="none" stroke-width="1.8"/>
-<circle cx="790" cy="262" r="3.2" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<text x="800" y="265.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="500" fill="#e5a33a" text-anchor="start">CS</text>
-<path d="M572 414 H690 L710 262 H790" stroke="#e5a33a" fill="none" stroke-width="1.8"/>
-<circle cx="790" cy="284" r="3.2" fill="#e5a33a" stroke="none" stroke-width="1"/>
-<text x="800" y="287.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="500" fill="#e5a33a" text-anchor="start">DC</text>
-<path d="M572 433 H690 L710 284 H790" stroke="#e5a33a" fill="none" stroke-width="1.8"/>
+<rect x="760" y="66" width="180" height="389" rx="8" fill="#151518" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+<text x="850" y="84" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#f4f4f5" text-anchor="middle">e-paper module</text>
+<text x="850" y="98" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9" font-weight="400" fill="#6b6b74" text-anchor="middle">Waveshare 1.54″ V2</text>
+<line x1="572" y1="110" x2="760" y2="110" stroke="#a1a1aa" stroke-width="1.8"/>
+<circle cx="760" cy="110" r="3.2" fill="#a1a1aa" stroke="none" stroke-width="1"/>
+<text x="772" y="113.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="500" fill="#a1a1aa" text-anchor="start">GND</text>
+<text x="928" y="113.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="8.5" font-weight="400" fill="#6b6b74" text-anchor="end">pin 38</text>
+<line x1="572" y1="148" x2="760" y2="148" stroke="#e6e2d8" stroke-width="1.8"/>
+<circle cx="760" cy="148" r="3.2" fill="#e6e2d8" stroke="none" stroke-width="1"/>
+<text x="772" y="151.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="500" fill="#e6e2d8" text-anchor="start">VCC</text>
+<text x="928" y="151.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="8.5" font-weight="400" fill="#6b6b74" text-anchor="end">pin 36</text>
+<line x1="572" y1="319" x2="760" y2="319" stroke="#e5a33a" stroke-width="1.8"/>
+<circle cx="760" cy="319" r="3.2" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<text x="772" y="322.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="500" fill="#e5a33a" text-anchor="start">BUSY</text>
+<text x="928" y="322.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="8.5" font-weight="400" fill="#6b6b74" text-anchor="end">pin 27</text>
+<line x1="572" y1="338" x2="760" y2="338" stroke="#e5a33a" stroke-width="1.8"/>
+<circle cx="760" cy="338" r="3.2" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<text x="772" y="341.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="500" fill="#e5a33a" text-anchor="start">RST</text>
+<text x="928" y="341.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="8.5" font-weight="400" fill="#6b6b74" text-anchor="end">pin 26</text>
+<line x1="572" y1="357" x2="760" y2="357" stroke="#e5a33a" stroke-width="1.8"/>
+<circle cx="760" cy="357" r="3.2" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<text x="772" y="360.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="500" fill="#e5a33a" text-anchor="start">DIN</text>
+<text x="928" y="360.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="8.5" font-weight="400" fill="#6b6b74" text-anchor="end">pin 25</text>
+<line x1="572" y1="376" x2="760" y2="376" stroke="#e5a33a" stroke-width="1.8"/>
+<circle cx="760" cy="376" r="3.2" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<text x="772" y="379.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="500" fill="#e5a33a" text-anchor="start">CLK</text>
+<text x="928" y="379.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="8.5" font-weight="400" fill="#6b6b74" text-anchor="end">pin 24</text>
+<line x1="572" y1="414" x2="760" y2="414" stroke="#e5a33a" stroke-width="1.8"/>
+<circle cx="760" cy="414" r="3.2" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<text x="772" y="417.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="500" fill="#e5a33a" text-anchor="start">CS</text>
+<text x="928" y="417.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="8.5" font-weight="400" fill="#6b6b74" text-anchor="end">pin 22</text>
+<line x1="572" y1="433" x2="760" y2="433" stroke="#e5a33a" stroke-width="1.8"/>
+<circle cx="760" cy="433" r="3.2" fill="#e5a33a" stroke="none" stroke-width="1"/>
+<text x="772" y="436.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="500" fill="#e5a33a" text-anchor="start">DC</text>
+<text x="928" y="436.5" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="8.5" font-weight="400" fill="#6b6b74" text-anchor="end">pin 21</text>
 <line x1="220" y1="414" x2="240" y2="414" stroke="#e5a33a" stroke-width="1.8"/>
 <line x1="240" y1="414" x2="260" y2="404" stroke="#e5a33a" stroke-width="1.8"/>
 <circle cx="240" cy="414" r="2.2" fill="#0e0e10" stroke="#e5a33a" stroke-width="1.2"/>

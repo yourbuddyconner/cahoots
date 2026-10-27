@@ -458,17 +458,20 @@ def pico2_wiring():
     used = {36: PWR, 38: GNDC, 27: SIG, 26: SIG, 25: SIG, 24: SIG, 22: SIG, 21: SIG, 19: SIG, 20: SIG, 18: GNDC}
     bx0 = 390
     pads = pico(s, bx0, 48, used)
-    # the module: eight wires, in the order that keeps them from crossing
-    mx, my = 790, 70
-    s.rect(mx, my, 150, 240, fill=BG2, stroke=LINE, r=8)
-    s.text(mx + 75, my + 20, "e-paper module", size=11, fill=FG, anchor="middle", weight=600)
-    s.text(mx + 75, my + 34, "Waveshare 1.54″ V2", size=9, fill=FG3, anchor="middle", mono=True)
+    # the module: its header drawn with each pin on the row of the Pico pin it goes to,
+    # so every wire is one straight line and reads without tracing it
     header = [("GND", 38, GNDC), ("VCC", 36, PWR), ("BUSY", 27, SIG), ("RST", 26, SIG), ("DIN", 25, SIG), ("CLK", 24, SIG), ("CS", 22, SIG), ("DC", 21, SIG)]
-    for i, (name, pin, c) in enumerate(header):
-        yy = my + 60 + i * 22
-        s.circle(mx, yy, 3.2, fill=c, stroke="none")
-        s.text(mx + 10, yy + 3.5, name, size=10, fill=c, mono=True, weight=500)
-        wire(s, pads[pin], (mx, yy), c, 690)
+    mx = 760
+    my0, my1 = pads[38][1] - 44, pads[21][1] + 22
+    s.rect(mx, my0, 180, my1 - my0, fill=BG2, stroke=LINE, r=8)
+    s.text(mx + 90, my0 + 18, "e-paper module", size=11, fill=FG, anchor="middle", weight=600)
+    s.text(mx + 90, my0 + 32, "Waveshare 1.54\u2033 V2", size=9, fill=FG3, anchor="middle", mono=True)
+    for name, pin, c in header:
+        px, py = pads[pin]
+        s.line(px, py, mx, py, color=c, sw=1.8)
+        s.circle(mx, py, 3.2, fill=c, stroke="none")
+        s.text(mx + 12, py + 3.5, name, size=10, fill=c, mono=True, weight=500)
+        s.text(mx + 168, py + 3.5, f"pin {pin}", size=8.5, fill=FG3, anchor="end", mono=True)
     # the buttons, on the rows of pins 19 and 20, each between its pin and ground; one wire takes the ground to pin 18
     sx = 250
     _, y18 = pads[18]
