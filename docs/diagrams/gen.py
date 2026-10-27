@@ -355,15 +355,29 @@ def tiers():
 # 6. Roadmap ------------------------------------------------------------------
 def roadmap():
     tracks = [
-        ("Hardware", [("M0", "Repo", "done"), ("M1", "Core", "done"), ("M1b", "Sealed reveals", "done"), ("M2", "Phone app", "done"), ("M4a", "Simulator", "done"), ("M4b", "V1 board", "next"), ("M4d", "Badge over USB", "later"), ("M3", "Hosted seat", "later"), ("M5", "V2 card", "later"), ("M7", "Meetup kit", "later")]),
-        ("Toolkit", [("S1", "File and tunnel keys", "done"), ("S4", "More tunnels", "part"), ("S2", "Approvals", "later"), ("S3", "Recovery", "later"), ("S5", "Hosted keys", "later")]),
+        ("Hardware", [("M0", "Repo", "done"), ("M1", "Core", "done"), ("M1b", "Sealed reveals", "done"), ("M2", "Phone app", "done"), ("M1c", "Seats and manifest", "done"), ("M4a", "Simulator", "done"), ("M4e", "Custodian", "done"), ("M4b", "V1 board", "next"), ("M4f", "Key store", "next"), ("M4h", "Grants from the badge", "next"), ("M4g", "Attested readings", "later"), ("M4d", "Badge over USB", "later"), ("M3", "Hosted seat", "later"), ("M4c", "Badge OS, hosted", "later"), ("M5", "V2 card", "later"), ("M6", "Approvals from a badge", "later"), ("M7", "Meetup kit", "later")]),
+        ("Toolkit", [("S1", "File and tunnel keys", "done"), ("S4", "More tunnels", "part"), ("S2", "Approvals", "part"), ("S6", "Grants as web tokens", "later"), ("S7", "Sealed objects", "later"), ("S3", "Recovery", "later"), ("S5", "Hosted keys", "later")]),
         ("Networks", [("N1", "WireGuard", "done"), ("N2", "Control messages", "done"), ("N3", "Headless nodes", "later"), ("N5", "Federation", "later")]),
-        ("Chat", [("C1", "Chat crate", "done"), ("C2", "The feed", "done"), ("C3", "CLI demo", "done"), ("C4", "Chat in the app", "done"), ("C5", "Hosted feed", "later")]),
-        ("Apps", [("A1", "Property demos", "later"), ("A2", "App distribution", "later"), ("A3", "Runtime", "later"), ("A4", "Protocol v2", "later")]),
+        ("Chat", [("C1", "Chat crate", "done"), ("C2", "The feed", "done"), ("C3", "CLI demo", "done"), ("C4", "Chat in the app", "done"), ("C6", "Checkpoints", "next"), ("C5", "Hosted feed", "later")]),
+        ("Apps", [("A1", "Property demos", "part"), ("A2", "App distribution", "later"), ("A3", "Runtime", "later"), ("A4", "Protocol v2", "later")]),
     ]
     colors = {"done": (AMBER, INK, AMBER), "part": ("rgba(229,163,58,0.18)", AMBER, AMBER), "next": (BG2, FG, FG2), "later": ("none", FG3, LINE)}
     rowh = 58
-    s = Svg(960, 40 + rowh * len(tracks) + 36 + 70, "Roadmap by track")
+
+    def width(k, label):
+        return 7.2 * len(label) + 7.2 * len(k) + 30
+
+    # a track whose pills overflow the line wraps onto another; count those lines first so the legend lands below the last one
+    extra = 0
+    for _, items in tracks:
+        x = 120
+        for k, label, _ in items:
+            w = width(k, label)
+            if x + w > 940:
+                x = 120
+                extra += 1
+            x += w + 8
+    s = Svg(960, 40 + rowh * len(tracks) + 36 * extra + 36 + 70, "Roadmap by track")
     y = 40
     for name, items in tracks:
         s.text(20, y + 24, name, size=13, fill=FG, weight=600)
@@ -372,7 +386,7 @@ def roadmap():
         y0 = y
         for k, label, st in items:
             fill, fg, stroke = colors[st]
-            w = 7.2 * len(label) + 7.2 * len(k) + 30
+            w = width(k, label)
             if x + w > 940:
                 x = 120
                 y += 36
