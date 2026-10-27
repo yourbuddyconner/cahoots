@@ -85,7 +85,7 @@ Each button goes between its GPIO and a GND pin. The firmware enables the pull-u
 
 Physical pin numbers count from pin 1 at the USB end, down the left column with the USB at the top and the component side up, then up the right column. GP16 to GP21 sit together at the bottom of the right column, 3V3 and a GND near its top, and the two button pins at the bottom of the left column, so the whole build takes one short run of jumpers. On a breadboard, put the Pico across the centre channel with the USB hanging off one end, so every pin lands on its own row.
 
-**The first board.** Before the pile, check one Pico and one panel. Wire only the module and the buttons. The Nano's bring-up sketch does not build for the Pico, because its QR code generator comes from the ESP32 board package, so use the `GxEPD2_HelloWorld` example that ships with the GxEPD2 library instead, with the Pico core (`arduino-cli core install rp2040:rp2040`, board `rp2040:rp2040:rpipico2`) and this display line, which is the pin table in code: `GxEPD2_BW<GxEPD2_154_D67, GxEPD2_154_D67::HEIGHT> display(GxEPD2_154_D67(17, 16, 20, 21));`. The core's SPI0 defaults are GP18 for CLK and GP19 for DIN, the same as the table. Keep SPI at 1 MHz on jumper wires, as the Nano notes say. If the panel draws the hello text, the panel side of the wiring is right; the buttons are checked by the Rust firmware once the port lands, or by any sketch that reads GP14 and GP15 with `INPUT_PULLUP`.
+**The first board.** Before the pile, check one Pico and one panel. Wire only the module and the buttons. The Nano's bring-up sketch does not build for the Pico, because its QR code generator comes from the ESP32 board package, so use the `GxEPD2_HelloWorld` example that ships with the GxEPD2 library instead, with the Pico core (`arduino-cli core install rp2040:rp2040`, board `rp2040:rp2040:rpipico2`) and this display line, which is the pin table in code: `GxEPD2_BW<GxEPD2_154_D67, GxEPD2_154_D67::HEIGHT> display(GxEPD2_154_D67(17, 16, 20, 21));`. The core's SPI0 defaults are GP18 for CLK and GP19 for DIN, the same as the table. Keep SPI at 1 MHz on jumper wires, as the Nano notes say. If the panel draws the hello text, the panel side of the wiring is right. Then flash the Rust firmware from [`crates/rp2350`](../crates/rp2350/README.md): hold BOOTSEL while plugging in, `cargo run --release`. Its self-test screen shows the buttons' state, and `cahoots-host pile --serial` on the laptop stands in for the rest of the pile for a first ceremony on one board.
 
 Any Qwiic or STEMMA QT board plugs into V1's socket, and on the breadboard into GP8 and GP9 with 3V3 and GND, so a peripheral tried here works on V1 unchanged.
 
@@ -93,7 +93,7 @@ Any Qwiic or STEMMA QT board plugs into V1's socket, and on the breadboard into 
 
 ![Three Pico 2s as a pile: each board's UART0 crossed to the next board's UART1, grounds joined, the laptop on the bottom board's USB](diagrams/pico2-pile.svg)
 
-Firmware: the Pico 2 port of the four board modules (`display.rs`, `link.rs`, `store.rs`, `entropy.rs`) is the next step on the roadmap, after the Nano ceremony, and it is not started. Until it lands, this build is the hardware half: the wiring is final because it is V1's, and the panel can be checked with the bring-up sketch as above or any SSD1681 example that uses the same pins. When the port lands, flashing is the usual Pico way: hold BOOTSEL while plugging in and drag the `.uf2` onto the drive that appears.
+Firmware: [`crates/rp2350`](../crates/rp2350/README.md), the four board modules (`display.rs`, `link.rs`, `store.rs`, `entropy.rs`) under the same badge code as the Nano and the simulator, on V1's pins. It builds; it has not yet run on a board. Flashing is the usual Pico way: hold BOOTSEL while plugging in, then `cargo run --release` in the crate, or drag the `.uf2` it can make onto the drive that appears.
 
 What the Pico build adds over the Nano: no radio on the chip, a flash chip that holds the pad, and the exact pin map of the board you can order.
 
@@ -105,7 +105,7 @@ On the board: the raw 1.54" panel (Good Display GDEY0154D67) on its 24-pin flex 
 
 V1 has no secure element and no flash encryption. Those are V2's questions. V1 is T1.
 
-The design, the pin map, the case and the review list before ordering are in [hardware/v1](../hardware/v1/README.md). The plan it belongs to, with the costs and the order of work, is [docs/manufacturing.md](manufacturing.md). The firmware port is the four trait implementations from `crates/esp32s3`; the display driver and the pile and ceremony code are shared.
+The design, the pin map, the case and the review list before ordering are in [hardware/v1](../hardware/v1/README.md). The plan it belongs to, with the costs and the order of work, is [docs/manufacturing.md](manufacturing.md). The firmware is [`crates/rp2350`](../crates/rp2350/README.md), already on V1's pin map; the display driver and the pile and ceremony code are shared with the Nano and the simulator.
 
 ## V2: the card
 

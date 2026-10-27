@@ -1,0 +1,172 @@
+//! Cahoots badge firmware for the RP2350 on a Raspberry Pi Pico 2, wired as V1.
+//!
+//! The badge's behaviour is `cahoots-badge`, the same code the simulator and the Nano run;
+//! this crate is the board under it ([`board::PicoBoard`]) and the peripheral setup here.
+//! See the README for the wiring, the build and the flashing steps.
+#![no_std]
+#![no_main]
+
+extern crate alloc;
+
+#[macro_use]
+mod link;
+mod board;
+mod buttons;
+mod clock;
+mod display;
+mod entropy;
+mod store;
+
+use alloc::format;
+use board::PicoBoard;
+use buttons::{Button, Buttons};
+use cahoots_badge::{screens, Badge, Board as _};
+use cahoots_hal::health::{HealthTests, Tested};
+use cahoots_hal::Display as _;
+use embedded_alloc::LlffHeap as Heap;
+use rp235x_hal as hal;
+use rp235x_hal::fugit::RateExtU32;
+use rp235x_hal::uart::{DataBits, StopBits, UartConfig, UartPeripheral};
+use rp235x_hal::Clock;
+
+/// Tell the boot ROM about the program.
+#[link_section = ".start_block"]
+#[used]
+pub static IMAGE_DEF: hal::block::ImageDef = hal::block::ImageDef::secure_exe();
+
+/// The Pico 2's crystal.
+const XTAL_FREQ_HZ: u32 = 12_000_000;
+/// The pile UARTs. Short cables on a bench or V1's pogo pair; the laptop link is USB and
+/// ignores this.
+const PILE_BAUD: u32 = 921_600;
+
+#[global_allocator]
+static HEAP: Heap = Heap::empty();
+/// The ceremony's post-quantum sealing wants well over 100 KiB of stack, and the stack
+/// grows down from the top of the 512 KiB; this leaves it about 280 KiB.
+const HEAP_SIZE: usize = 200 * 1024;
+
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    let msg = format!("PANIC: {info}");
+    store::save_panic(msg.as_bytes());
+    let fr = cahoots_core::frame::Frame {
+        kind: cahoots_hal::pile::KIND_LOG,
+        seq: u32::MAX,
+        payload: msg.as_bytes(),
+    };
+    link::emergency_write(&cahoots_core::frame::encode(&fr));
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+unsafe extern "C" {
+    static mut __ebss: u32;
+}
+
+#[hal::entry]
+fn main() -> ! {
+    // The stack grows down towards `.bss`, where the heap arena is. A limit just above it
+    // turns an overflow into a fault instead of a silently corrupted heap.
+    // SAFETY: the symbol is cortex-m-rt's end of `.bss`; the limit sits a little above it.
+    unsafe { cortex_m::register::msplim::write(core::ptr::addr_of!(__ebss) as u32 + 256) };
+    {
+        use core::mem::MaybeUninit;
+        static mut ARENA: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+        // SAFETY: called once, before any allocation.
+        unsafe { HEAP.init(core::ptr::addr_of_mut!(ARENA) as usize, HEAP_SIZE) }
+    }
+    let mut pac = hal::pac::Peripherals::take().unwrap();
+    let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
+    let clocks = hal::clocks::init_clocks_and_plls(
+        XTAL_FREQ_HZ,
+        pac.XOSC,
+        pac.CLOCKS,
+        pac.PLL_SYS,
+        pac.PLL_USB,
+        &mut pac.RESETS,
+        &mut watchdog,
+    )
+    .unwrap();
+    let timer = hal::Timer::new_timer0(pac.TIMER0, &mut pac.RESETS, &clocks);
+    clock::init(timer);
+    let sio = hal::Sio::new(pac.SIO);
+    let pins = hal::gpio::Pins::new(
+        pac.IO_BANK0,
+        pac.PADS_BANK0,
+        sio.gpio_bank0,
+        &mut pac.RESETS,
+    );
+
+    // USB to the laptop, and the two pile UARTs.
+    link::init_usb(hal::usb::UsbBus::new(
+        pac.USB,
+        pac.USB_DPRAM,
+        clocks.usb_clock,
+        true,
+        &mut pac.RESETS,
+    ));
+    let uart0_pins: link::Uart0Pins = (pins.gpio0.reconfigure(), pins.gpio1.reconfigure());
+    let uart1_pins: link::Uart1Pins = (pins.gpio4.reconfigure(), pins.gpio5.reconfigure());
+    let cfg = || UartConfig::new(PILE_BAUD.Hz(), DataBits::Eight, None, StopBits::One);
+    let up = UartPeripheral::new(pac.UART0, uart0_pins, &mut pac.RESETS)
+        .enable(cfg(), clocks.peripheral_clock.freq())
+        .expect("uart0")
+        .split();
+    let down = UartPeripheral::new(pac.UART1, uart1_pins, &mut pac.RESETS)
+        .enable(cfg(), clocks.peripheral_clock.freq())
+        .expect("uart1")
+        .split();
+    link::init_uarts(up, down);
+    log!(
+        "cahoots rp2350 {} on a Raspberry Pi Pico 2",
+        env!("CARGO_PKG_VERSION")
+    );
+
+    // The e-paper on SPI0, V1's pins: CLK GP18, DIN GP19, CS GP17, DC GP16, RST GP20, BUSY GP21.
+    let spi_pins: display::SpiPins = (pins.gpio19.reconfigure(), pins.gpio18.reconfigure());
+    let spi = hal::spi::Spi::<_, _, _, 8>::new(pac.SPI0, spi_pins).init(
+        &mut pac.RESETS,
+        clocks.peripheral_clock.freq(),
+        1.MHz(),
+        embedded_hal::spi::MODE_0,
+    );
+    let cs = pins.gpio17.into_push_pull_output_in_state(hal::gpio::PinState::High);
+    let dc = pins.gpio16.into_push_pull_output();
+    let rst = pins.gpio20.into_push_pull_output_in_state(hal::gpio::PinState::High);
+    let busy = pins.gpio21.into_pull_down_input();
+    let screen = display::Epd::new(spi, cs, dc, rst, busy, timer).expect("e-paper");
+    log!("e-paper up");
+
+    // The buttons: A on GP14, B on GP15, each to ground, pulled up here.
+    let _a = pins.gpio14.into_pull_up_input();
+    let _b = pins.gpio15.into_pull_up_input();
+    let btn = Buttons::new(Button::new(14), Button::new(15));
+
+    let entropy = Tested::new(
+        entropy::Hw::new(pac.TRNG, &mut pac.RESETS),
+        HealthTests::for_min_entropy(6),
+    );
+    let mut badge = Badge::new(PicoBoard {
+        screen,
+        buttons: btn,
+        entropy,
+        delay: timer,
+        stack_logged: 0,
+    });
+    badge.boot();
+    loop {
+        if badge.circle().is_none() {
+            if let Err(e) = badge.run_once() {
+                log!("{e}");
+                let screen = screens::status(&[&e]);
+                badge.board().note_screen(&screen.lines, screen.secret);
+                badge.board().display().draw(&screen.frame);
+                badge.board().delay_ms(1500);
+            }
+        } else {
+            badge.idle_step();
+        }
+    }
+}

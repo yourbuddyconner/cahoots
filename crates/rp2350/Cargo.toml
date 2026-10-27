@@ -1,0 +1,33 @@
+[package]
+name = "cahoots-rp2350"
+description = "Cahoots badge firmware for the RP2350: a Raspberry Pi Pico 2 with the Waveshare 1.54\" e-paper and two buttons, on V1's pin map."
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+cahoots-core = { path = "../core", default-features = false }
+cahoots-hal = { path = "../hal" }
+cahoots-badge = { path = "../badge", default-features = false }
+cortex-m = "0.7.7"
+cortex-m-rt = "0.7.5"
+critical-section = "1.2.0"
+embedded-alloc = { version = "0.6.0", features = ["llff"] }
+embedded-hal = "1.0.0"
+embedded-hal-bus = "0.3.0"
+epd-waveshare = "0.6.0"
+nb = "1.1.0"
+rp235x-hal = { version = "0.4.0", features = ["binary-info", "critical-section-impl", "rt"] }
+usb-device = "0.3.2"
+usbd-serial = "0.2.2"
+
+[profile.release]
+opt-level = "s"
+debug = true
+codegen-units = 1
+lto = "fat"
+
+[profile.dev]
+opt-level = "s"
+debug = true

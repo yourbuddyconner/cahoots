@@ -2,7 +2,7 @@
 
 The Cahoots badge on an Arduino Nano ESP32: the ESP32-S3 with 16 MB of flash, the Waveshare 1.54" V2 e-paper, two tactile switches, and the USB-C port as the link to a laptop. It runs the same `cahoots-badge` code as the desktop simulator; this crate is `NanoBoard`, the `Board` under it (`src/board.rs`), and the peripheral setup in `main.rs`. The design is in [docs/superpowers/specs/2026-10-23-esp32s3-firmware-design.md](../../docs/superpowers/specs/2026-10-23-esp32s3-firmware-design.md).
 
-This is the first firmware board because it is the one on the bench. V1, the Pico 2 board in [Build a badge](../../docs/diy-badge.md), comes next as a port of `board.rs` and the drivers under it.
+This was the first firmware board because it was the one on the bench. The Pico 2 port, V1's chip, is [`crates/rp2350`](../rp2350/README.md): the same `board.rs` shape with its own drivers.
 
 ## Wiring
 

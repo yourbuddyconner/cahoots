@@ -17,8 +17,8 @@ members = [
     "crates/station",
     "crates/relay",
 ]
-exclude = ["crates/fuzz", "crates/esp32s3", "crates/dabao"]
-# Not workspace members: crates/esp32s3 (needs the esp toolchain), crates/dabao (built with
+exclude = ["crates/fuzz", "crates/esp32s3", "crates/rp2350", "crates/dabao"]
+# Not workspace members: crates/esp32s3 (needs the esp toolchain), crates/rp2350 (thumbv8m target, own config), crates/dabao (built with
 # `cargo xtask dabao` inside xous-core), crates/fuzz (cargo-fuzz, nightly), web/app (static PWA).
 # The station ships as an OCI image for Turnkey Verifiable Cloud (https://docs.turnkey.com/features/verifiable-cloud/overview). Each has its own README.
 
