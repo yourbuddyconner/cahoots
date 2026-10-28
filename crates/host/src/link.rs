@@ -275,3 +275,33 @@ impl Link for SerialLink {
         self.pending.is_empty() || self.broken
     }
 }
+
+/// Open a board's serial port and print its `Log` frames until the port goes away. Sends
+/// nothing, so the board keeps whatever idea it has of what is plugged into it.
+pub fn tail_logs(path: &str, label: &str) -> io::Result<()> {
+    let mut port = serialport::new(path, 115_200)
+        .timeout(std::time::Duration::from_millis(50))
+        .open()
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    let _ = port.write_request_to_send(false);
+    let _ = port.write_data_terminal_ready(false);
+    let mut inbox = Inbox::default();
+    let mut through = VecDeque::new();
+    let mut buf = [0u8; 4096];
+    loop {
+        match port.read(&mut buf) {
+            Ok(0) => {}
+            Ok(n) => {
+                let mut logs = Vec::new();
+                inbox.push(&buf[..n], &mut through, &mut logs);
+                through.clear();
+                for line in logs {
+                    println!("[{label}] {line}");
+                }
+            }
+            Err(e) if e.kind() == io::ErrorKind::TimedOut => {}
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+            Err(e) => return Err(e),
+        }
+    }
+}

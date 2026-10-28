@@ -59,7 +59,17 @@ cargo run -p cahoots-host -- pile --cards 3 --serial /dev/cu.usbmodem* --name be
 
 As on the Nano: the laptop runs two simulated cards and the board is card 3. Wait for "seat 2" on the screen, press both buttons, watch the commits and reveals count up, read the words, press both to keep the circle.
 
-With two or more boards wired as a pile, run the same command on the bottom board's port with `--cards` set to the laptop's cards plus the boards. The boards above the bottom one need no USB except for power.
+## Two boards, no laptop in the pile
+
+Wire the top board's UART1 to the bottom board's UART0, crossed, with the grounds joined: top GP5 to bottom GP0, top GP4 to bottom GP1. The bottom board names the circle and the top board's Both starts the count; the laptop is not a card. Each board can still be on USB for power and its log, read with the quiet reader, which sends nothing and so does not make a board think a laptop is below it:
+
+```sh
+cargo run -p cahoots-host -- logs --serial /dev/cu.usbmodem* --label bottom
+```
+
+A Pico 2 W runs this firmware unchanged: it is the same RP2350 on the pins the badge uses, and its radio exists only once firmware turns it on, which this never does. A Pico 1 is an RP2040 and would need its own port.
+
+With the laptop as part of a longer pile instead, run `pile` on the bottom board's port with `--cards` set to the laptop's cards plus the boards; `pile` pings, which is how a board knows the laptop is below it.
 
 ## Flash layout
 

@@ -95,7 +95,7 @@ fn connect_ring(listen: &str, next: &str) -> std::io::Result<(SocketLink, Socket
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let Some(cmd) = argv.first().cloned() else {
-        eprintln!("usage: cahoots-host <ceremony|pile|badge|send|recv|status> ...");
+        eprintln!("usage: cahoots-host <ceremony|pile|badge|logs|send|recv|status> ...");
         std::process::exit(2);
     };
     let args = Args(argv[1..].to_vec());
@@ -217,6 +217,14 @@ fn main() {
                     badge.idle_step();
                 }
             }
+        }
+        "logs" => {
+            // Print a board's log lines and nothing else: no pings, so the board does not
+            // take the laptop for a card below it, which matters when it is the bottom of
+            // a real pile.
+            let path = args.req("--serial");
+            let label = args.get("--label").unwrap_or("board").to_string();
+            cahoots_host::link::tail_logs(&path, &label).map_err(|e| e.to_string())
         }
         "status" => {
             let state = PathBuf::from(args.req("--state"));
