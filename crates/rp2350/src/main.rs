@@ -41,14 +41,40 @@ const XTAL_FREQ_HZ: u32 = 12_000_000;
 const PILE_BAUD: u32 = 921_600;
 
 #[global_allocator]
-static HEAP: Heap = Heap::empty();
-/// The ceremony's post-quantum sealing wants well over 100 KiB of stack, and the stack
-/// grows down from the top of the 512 KiB; this leaves it about 280 KiB.
-const HEAP_SIZE: usize = 200 * 1024;
+pub static HEAP: Heap = Heap::empty();
+/// A three-member ceremony with 16 KiB contributions ran out of a 200 KiB heap while the
+/// sealed reveals were in flight. The post-quantum sealing wants well over 100 KiB of
+/// stack, and the stack grows down from the top of the 512 KiB; this leaves it about
+/// 185 KiB. The board logs both as it goes.
+const HEAP_SIZE: usize = 320 * 1024;
+
+/// A fault that no handler caught: record where, as the panic handler does, so the next
+/// boot shows it and the host's log sees it. A stack overflow lands here through the stack
+/// limit, so the limit is dropped first to give this handler room.
+#[cortex_m_rt::exception]
+unsafe fn HardFault(ef: &cortex_m_rt::ExceptionFrame) -> ! {
+    // SAFETY: lowering the limit only gives the handler the guard band to run in.
+    unsafe { cortex_m::register::msplim::write(core::ptr::addr_of!(__ebss) as u32) };
+    // SAFETY: reads of status registers.
+    let scb = unsafe { &*cortex_m::peripheral::SCB::PTR };
+    let msg = format!(
+        "PANIC: hard fault: pc={:#010x} lr={:#010x} sp={:#010x} cfsr={:#010x} hfsr={:#010x} heap used {}",
+        ef.pc(),
+        ef.lr(),
+        cortex_m::register::msp::read(),
+        scb.cfsr.read(),
+        scb.hfsr.read(),
+        HEAP.used()
+    );
+    die(msg)
+}
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    let msg = format!("PANIC: {info}");
+    die(format!("PANIC: {info} (heap used {})", HEAP.used()))
+}
+
+fn die(msg: alloc::string::String) -> ! {
     store::save_panic(msg.as_bytes());
     let fr = cahoots_core::frame::Frame {
         kind: cahoots_hal::pile::KIND_LOG,
@@ -70,7 +96,7 @@ fn main() -> ! {
     // The stack grows down towards `.bss`, where the heap arena is. A limit just above it
     // turns an overflow into a fault instead of a silently corrupted heap.
     // SAFETY: the symbol is cortex-m-rt's end of `.bss`; the limit sits a little above it.
-    unsafe { cortex_m::register::msplim::write(core::ptr::addr_of!(__ebss) as u32 + 256) };
+    unsafe { cortex_m::register::msplim::write(core::ptr::addr_of!(__ebss) as u32 + 4096) };
     {
         use core::mem::MaybeUninit;
         static mut ARENA: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
@@ -120,8 +146,10 @@ fn main() -> ! {
         .split();
     link::init_uarts(up, down);
     log!(
-        "cahoots rp2350 {} on a Raspberry Pi Pico 2",
-        env!("CARGO_PKG_VERSION")
+        "cahoots rp2350 {} on a Raspberry Pi Pico 2; heap {} KiB, stack to {:#x}",
+        env!("CARGO_PKG_VERSION"),
+        HEAP_SIZE / 1024,
+        core::ptr::addr_of!(__ebss) as u32 + 4096
     );
 
     // The e-paper on SPI0, V1's pins: CLK GP18, DIN GP19, CS GP17, DC GP16, RST GP20, BUSY GP21.
@@ -154,6 +182,7 @@ fn main() -> ! {
         entropy,
         delay: timer,
         stack_logged: 0,
+        heap_logged: 0,
     });
     badge.boot();
     loop {

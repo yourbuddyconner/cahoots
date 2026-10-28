@@ -107,10 +107,10 @@ fn two_fake_cards_complete_a_ceremony_and_keep_it() {
 }
 
 #[test]
-fn both_keeps_the_circle_and_a_single_press_discards() {
+fn both_keeps_the_circle_and_a_single_press_then_both_discards() {
     for single in [Press::Left, Press::Right] {
         let (mut b1, mut b2) = to_the_prompt();
-        b1.board().presses.push_back(single);
+        b1.board().presses.extend([single, Press::Both]);
         b2.board().presses.push_back(Press::Both);
         let mut out = (false, false);
         drive(&mut b1, &mut b2, |_, _, s1, s2| {
@@ -125,6 +125,24 @@ fn both_keeps_the_circle_and_a_single_press_discards() {
         assert!(b2.circle().is_some());
         assert_eq!(b2.board().load_circle().as_ref(), b2.circle());
     }
+}
+
+#[test]
+fn a_single_press_asks_again_and_another_goes_back() {
+    let (mut b1, _b2) = to_the_prompt();
+    let drawn = b1.board().screens.len();
+    b1.board().presses.push_back(Press::Left);
+    assert_eq!(b1.step(), Step::Prompt);
+    assert_eq!(b1.board().screens.len(), drawn + 1, "the discard question is drawn");
+    assert!(b1.board().screens.last().unwrap().join(" ").contains("discard this circle?"));
+    b1.board().presses.push_back(Press::Right);
+    assert_eq!(b1.step(), Step::Prompt);
+    assert!(b1.board().screens.last().unwrap().join(" ").contains("keep this circle?"));
+    for _ in 0..5 {
+        assert_eq!(b1.step(), Step::Prompt);
+    }
+    assert!(b1.circle().is_none());
+    assert!(!b1.board().log.iter().any(|l| l == "discarded"));
 }
 
 #[test]
@@ -157,7 +175,7 @@ fn a_gesture_during_the_ceremony_is_not_an_answer() {
 fn run_once_returns_after_the_prompt() {
     // Both cards wait at the prompt, so each one's run_once can finish its pass alone.
     let (mut b1, mut b2) = to_the_prompt();
-    b1.board().presses.push_back(Press::Left);
+    b1.board().presses.extend([Press::Left, Press::Both]);
     assert_eq!(b1.run_once(), Ok(()));
     assert_eq!(b1.board().statuses().last().unwrap(), "discarded");
     b2.board().presses.push_back(Press::Both);

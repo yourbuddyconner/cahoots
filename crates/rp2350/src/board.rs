@@ -29,6 +29,8 @@ pub struct PicoBoard {
     pub delay: Timer<CopyableTimer0>,
     /// The deepest stack use already written to the log.
     pub stack_logged: u32,
+    /// The most heap use already written to the log.
+    pub heap_logged: usize,
 }
 
 impl Board for PicoBoard {
@@ -62,6 +64,11 @@ impl Board for PicoBoard {
         if deepest > self.stack_logged {
             self.stack_logged = deepest;
             log!("stack: {deepest} bytes used at the deepest point so far");
+        }
+        let used = crate::HEAP.used();
+        if used > self.heap_logged + 16 * 1024 {
+            self.heap_logged = used;
+            log!("heap: {used} bytes in use, {} free", crate::HEAP.free());
         }
         self.delay.delay_ms(ms);
     }
@@ -150,22 +157,21 @@ impl Board for PicoBoard {
             state(self.buttons.b.is_down())
         );
         self.buttons.clear();
-        vec![flash, buttons]
+        vec![flash, buttons, link::links_selftest()]
     }
 
     fn log(&mut self, line: &str) {
         log!("{line}");
     }
 
-    /// Each line of the screen goes to the trace sector. A key screen is not copied.
+    /// Each line of the screen goes to the log and the trace, so the host sees what the
+    /// panel shows. A key screen is not copied.
     fn note_screen(&mut self, lines: &[String], secret: bool) {
         if secret {
             store::trace("screen: a key, not traced");
             return;
         }
-        for line in lines {
-            store::trace(&format!("screen: {line}"));
-        }
+        log!("screen: {}", lines.join(" | "));
     }
 }
 

@@ -33,8 +33,8 @@ pub enum Step {
     InPile,
     /// The ceremony is running.
     InCeremony,
-    /// The ceremony is done and the badge asks: Both keeps the circle, Left or Right
-    /// discards it.
+    /// The ceremony is done and the badge asks: Both keeps the circle. Left or Right asks
+    /// again, "discard this circle?", where Both discards and Left or Right goes back.
     Prompt,
     /// The circle is saved. The pass is over.
     Kept,
@@ -66,6 +66,12 @@ enum State<L: Link> {
         seat: u8,
     },
     Prompt {
+        result: CeremonyResult,
+        seat: u8,
+    },
+    /// A single press on the prompt: the words are a circle's whole life, so discarding
+    /// takes a second question answered with Both.
+    ConfirmDiscard {
         result: CeremonyResult,
         seat: u8,
     },
@@ -491,13 +497,24 @@ impl<B: Board> Badge<B> {
                     return Ok((State::Idle, Step::Kept));
                 }
                 if matches!(gesture, Press::Left | Press::Right) {
-                    drop(result);
-                    self.board.log("discarded");
-                    show_status(&mut self.board, "discarded");
-                    return Ok((State::Idle, Step::Discarded));
+                    show(&mut self.board, screens::discard_prompt());
+                    return Ok((State::ConfirmDiscard { result, seat }, Step::Prompt));
                 }
                 Ok((State::Prompt { result, seat }, Step::Prompt))
             }
+            State::ConfirmDiscard { result, seat } => match self.board.press() {
+                Press::Both => {
+                    drop(result);
+                    self.board.log("discarded");
+                    show_status(&mut self.board, "discarded");
+                    Ok((State::Idle, Step::Discarded))
+                }
+                Press::Left | Press::Right => {
+                    show(&mut self.board, screens::keep_prompt(&result.check_words));
+                    Ok((State::Prompt { result, seat }, Step::Prompt))
+                }
+                Press::None => Ok((State::ConfirmDiscard { result, seat }, Step::Prompt)),
+            },
         }
     }
 

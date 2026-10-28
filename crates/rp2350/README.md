@@ -37,7 +37,7 @@ The crate is outside the workspace because it has its own target and linker setu
 
 ## Flash
 
-Hold BOOTSEL while plugging the Pico in. It appears as a drive named `RP2350`. Then either:
+The first time, hold BOOTSEL while plugging the Pico in; it appears as a drive named `RP2350`. Once this firmware runs, `picotool reboot -f -u` does that from the laptop, since the firmware carries picotool's reset interface. Then either:
 
 ```sh
 cargo run --release                    # picotool loads the ELF over USB and starts it
@@ -49,7 +49,7 @@ or make a UF2 and drag it onto the drive:
 picotool uf2 convert target/thumbv8m.main-none-eabihf/release/cahoots-rp2350 -t elf cahoots-rp2350.uf2
 ```
 
-After it starts, the Mac sees a serial port `/dev/cu.usbmodem*`, which is the badge's USB link. Flashing again needs BOOTSEL again, or `picotool reboot -f -u` while the firmware runs.
+After it starts, the Mac sees a serial port `/dev/cu.usbmodem*`, which is the badge's USB link. Flashing again leaves the pad, the ledger and the circle record in place: only the program region is rewritten.
 
 ## Run a ceremony with the laptop as the pile
 
@@ -81,10 +81,12 @@ The pad is plaintext on flash. The key store chip (roadmap M4f) is what changes 
 
 ## Memory
 
-520 KiB of SRAM holds a 200 KiB heap and the stack, which the ceremony's post-quantum sealing takes well over 100 KiB of. The board logs its deepest stack use as it goes. There is no PSRAM, so the pad and the reveals live in the heap, which is why the pad proposal is 16 KiB.
+520 KiB of SRAM holds a 320 KiB heap and the stack. A three-member ceremony with 16 KiB contributions peaked at 152 KB of heap and 41 KB of stack; the first build's 200 KiB heap ran out while the sealed reveals were in flight. The board logs its heap and its deepest stack use as it goes, and a stack limit register set at boot turns an overflow into a recorded hard fault instead of a corrupted heap. There is no PSRAM, so the pad and the reveals live in the heap, which is why the pad proposal is 16 KiB.
 
-## Not yet
+## Done and not yet
 
-Running on a board: this crate is build-verified. PIN entry, the key store chip, and the QR screen are the same open items as on the Nano.
+On 2026-10-27 a Pico 2 on a breadboard ran a three-member ceremony with the laptop as the two cards below it, showed the same six words as the laptop, kept the circle, and read it back from flash after a reflash. PIN entry, the key store chip, and the QR screen are the same open items as on the Nano.
+
+Twice in seven runs the count the top card sends down after Both never reached the laptop, and the ceremony waited at one commit. The log now says when the USB host is taken for absent (no byte for two seconds, after which frames down are dropped on purpose) and how many bytes each frame down was, so the next time it happens the log says why.
 
 The UARTs receive by interrupt into a queue, and interrupts are off during every flash erase and program. Those happen at boot (the self-test sector), when a circle is kept (the pad, the ledger, the record) and on every spend (a ledger record, the spent bytes), not during the pile or the ceremony traffic, so a neighbour's frame is safe in practice. A frame that does land in those milliseconds loses bytes and is dropped by its CRC. Receiving by DMA, which runs while the flash is busy, is the proper fix and is not done.

@@ -26,7 +26,8 @@ use rp235x_hal::gpio::{FunctionUart, Pin, PullDown};
 use rp235x_hal::pac::{interrupt, UART0, UART1};
 use rp235x_hal::uart::{Reader, Writer};
 use rp235x_hal::usb::UsbBus;
-use usb_device::class_prelude::UsbBusAllocator;
+use usb_device::class_prelude::{ControlOut, DescriptorWriter, InterfaceNumber, UsbBusAllocator, UsbClass};
+use usb_device::control::{Recipient, RequestType};
 use usb_device::device::UsbDevice;
 use usbd_serial::SerialPort;
 
@@ -120,20 +121,58 @@ fn UART1_IRQ() {
     });
 }
 
-/// Whether a peer's TX holds an RX pin: high when idle, and high again within one byte
-/// time whenever it is sending, since every byte ends in a stop bit. A single low sample
-/// is a data bit, not an empty connector, so the pin is watched for a little over a byte
-/// at `PILE_BAUD` before the peer is called absent.
+/// Whether a peer's TX holds an RX pin. An idle UART line is high all the time, and one
+/// carrying bytes is high for the stop bit of every byte and most data bits, so a peer is
+/// a line that is high for a good share of a window a little over a byte long at
+/// `PILE_BAUD`. An empty connector sits on its pull-down and reads low, with at most the
+/// odd glitch, so a single high sample is not a peer and a single low one is not an
+/// absence.
 fn line_present(gpio: u8) -> bool {
-    let start = Instant::now();
-    loop {
+    line_highs(gpio) >= NEEDED
+}
+
+const SAMPLES: u32 = 64;
+const NEEDED: u32 = 24;
+
+/// How many of `SAMPLES` reads of the pin, 4 µs apart, were high.
+pub fn line_highs(gpio: u8) -> u32 {
+    let mut highs = 0;
+    for _ in 0..SAMPLES {
         if gpio_high(gpio) {
-            return true;
+            highs += 1;
         }
-        if start.elapsed() > Duration::from_micros(200) {
-            return false;
-        }
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_micros(4) {}
     }
+    highs
+}
+
+/// The self-test line for the pile links: how each detect line reads.
+pub fn links_selftest() -> String {
+    alloc::format!(
+        "links: up GP1 {}/{} high, down GP5 {}/{} high",
+        line_highs(1),
+        SAMPLES,
+        line_highs(5),
+        SAMPLES
+    )
+}
+
+static DOWN_WAS_UART: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+static USB_WAS_PRESENT: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Whether the laptop is there, logging each change, since a frame sent while it is not is
+/// dropped on purpose and that must be visible.
+fn usb_present() -> bool {
+    let now = with_usb(|p| p.present()).unwrap_or(false);
+    let was = USB_WAS_PRESENT.swap(now, core::sync::atomic::Ordering::Relaxed);
+    if now != was {
+        log_line(alloc::format!(
+            "usb host: {}",
+            if now { "present" } else { "absent for 2 s, frames down are dropped" }
+        ));
+    }
+    now
 }
 
 /// The pile link up: UART0.
@@ -194,15 +233,59 @@ fn take(q: &mut VecDeque<u8>, buf: &mut [u8]) -> usize {
     n
 }
 
+/// Logs each time the link down changes between the cable and USB.
 fn uart_down_present() -> bool {
-    line_present(5)
+    let now = line_present(5);
+    let was = DOWN_WAS_UART.swap(now, core::sync::atomic::Ordering::Relaxed);
+    if now != was {
+        log_line(alloc::format!(
+            "down link: {}",
+            if now { "UART1, a card below" } else { "USB" }
+        ));
+    }
+    now
 }
 
 // ---- USB ----
 
+/// The interface picotool looks for to reboot a running board into BOOTSEL (`picotool
+/// reboot -f -u`), so reflashing needs no hands on the board: a vendor-specific interface
+/// taking one class request.
+struct ResetClass {
+    intf: InterfaceNumber,
+}
+
+impl<B: usb_device::bus::UsbBus> UsbClass<B> for ResetClass {
+    fn get_configuration_descriptors(&self, w: &mut DescriptorWriter) -> usb_device::Result<()> {
+        w.interface(self.intf, 0xFF, 0x00, 0x01)
+    }
+
+    fn control_out(&mut self, xfer: ControlOut<B>) {
+        let req = *xfer.request();
+        if req.request_type != RequestType::Class
+            || req.recipient != Recipient::Interface
+            || req.index != u16::from(u8::from(self.intf))
+        {
+            return;
+        }
+        if req.request == 0x01 {
+            let _ = xfer.accept();
+            rp235x_hal::reboot::reboot(
+                rp235x_hal::reboot::RebootKind::BootSel {
+                    picoboot_disabled: false,
+                    msd_disabled: false,
+                },
+                rp235x_hal::reboot::RebootArch::Normal,
+            );
+        }
+        let _ = xfer.reject();
+    }
+}
+
 struct UsbPort {
     dev: UsbDevice<'static, UsbBus>,
     serial: SerialPort<'static, UsbBus>,
+    reset: ResetClass,
     pending: VecDeque<u8>,
     inbox: VecDeque<u8>,
     logs: VecDeque<Vec<u8>>,
@@ -227,6 +310,9 @@ pub fn init_usb(bus: UsbBus) {
         USB_BUS.as_ref().unwrap()
     };
     let serial = SerialPort::new(alloc);
+    let reset = ResetClass {
+        intf: alloc.interface(),
+    };
     let dev = UsbDeviceBuilder::new(alloc, UsbVidPid(0x2E8A, 0x000A))
         .strings(&[StringDescriptors::default()
             .manufacturer("Cahoots")
@@ -235,12 +321,13 @@ pub fn init_usb(bus: UsbBus) {
         .unwrap()
         .max_packet_size_0(64)
         .unwrap()
-        .device_class(2)
+        .composite_with_iads()
         .build();
     critical_section::with(|cs| {
         *USB.borrow_ref_mut(cs) = Some(UsbPort {
             dev,
             serial,
+            reset,
             pending: VecDeque::new(),
             inbox: VecDeque::new(),
             logs: VecDeque::new(),
@@ -264,7 +351,7 @@ impl UsbPort {
 
     /// Run the device, take what arrived, push what is queued.
     fn service(&mut self) {
-        let _ = self.dev.poll(&mut [&mut self.serial]);
+        let _ = self.dev.poll(&mut [&mut self.serial, &mut self.reset]);
         let mut buf = [0u8; 64];
         loop {
             match self.serial.read(&mut buf) {
@@ -353,6 +440,7 @@ impl Link for DownLink {
                 p.queue_logs();
                 p.service();
             });
+            log_line(alloc::format!("usb: sent {} bytes down", frame.len()));
         }
     }
 
@@ -375,7 +463,7 @@ impl Link for DownLink {
     }
 
     fn peer_present(&self) -> bool {
-        uart_down_present() || with_usb(|p| p.present()).unwrap_or(false)
+        uart_down_present() || usb_present()
     }
 
     fn flush(&mut self) -> bool {

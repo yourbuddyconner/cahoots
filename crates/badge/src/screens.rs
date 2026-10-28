@@ -2,8 +2,11 @@
 //!
 //! A [`Screen`] is the frame plus the text it shows, so a test or the host can read the
 //! screen without decoding pixels. A screen with a circle has a header: the circle name on
-//! the left, the tier label on the right, and a rule under them. Main text is the 10 by 20
-//! font and secondary text the 8 by 13 font. Emphasis is white text on a black box. A menu
+//! the left, the tier label on the right, and a rule under them. A screen that asks or tells
+//! has a title bar: white bold text on a black band across the top. Body text is the 10 by
+//! 20 font, the bold 9 by 18 for the one line that matters, and the 8 by 13 for the rest. A
+//! screen that waits for a button has a footer under a rule: what A does on the left, what
+//! both do in the middle, what B does on the right, in the places the buttons are. A menu
 //! page shows `<` and `>` at the edges of the middle row when there is a page on that side.
 
 use alloc::format;
@@ -11,7 +14,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use cahoots_hal::Frame;
 use core::convert::Infallible;
-use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_8X13};
+use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_6X13, FONT_6X13_BOLD, FONT_7X13_BOLD, FONT_8X13, FONT_9X18_BOLD};
 use embedded_graphics::mono_font::{MonoFont, MonoTextStyle};
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
@@ -35,41 +38,53 @@ pub struct Screen {
 const RULE_Y: i32 = 26;
 /// The y of the middle row, where the page arrows sit.
 const MID_Y: i32 = 100;
+/// The y of the rule above the footer, which names what the buttons do.
+const FOOT_Y: i32 = 177;
 const W: i32 = Frame::WIDTH as i32;
 
 /// The boot self-test: its lines under the title "self-test".
 pub fn self_test(lines: &[String]) -> Screen {
     let body: Vec<&str> = lines.iter().map(String::as_str).collect();
-    titled("self-test", &body)
+    let mut s = titled("self-test", &body);
+    s.footer(None, Some("A+B  skip the wait"), None);
+    s.done()
 }
 
 /// The panic recorded on the last run.
 pub fn panic(msg: &str) -> Screen {
-    titled("last panic", &[msg])
-}
-
-/// The pile: "stack the cards", and the seat once this card knows it.
-pub fn pile(seat: Option<u8>) -> Screen {
-    let mut s = Draw::new();
-    s.centered(&FONT_10X20, 40, "stack the cards");
-    if let Some(seat) = seat {
-        s.inverted_centered(&FONT_10X20, 80, &format!("seat {seat}"));
-    }
-    s.centered(&FONT_8X13, 140, "Both on top starts");
+    let mut s = titled("last panic", &[msg]);
+    s.footer(None, Some("A+B  continue"), None);
     s.done()
 }
 
-/// The ceremony's counter: commitments, reveals and attestations held, out of `n`.
+/// The pile: "stack the cards", and the seat once this card knows it, large.
+pub fn pile(seat: Option<u8>) -> Screen {
+    let mut s = Draw::new();
+    s.title("stack the cards");
+    match seat {
+        Some(seat) => {
+            s.centered(&FONT_8X13, 52, "this card is");
+            s.centered(&PROFONT_24_POINT, 76, &format!("seat {seat}"));
+            s.centered(&FONT_8X13, 130, "seat 0 is at the bottom");
+        }
+        None => {
+            s.centered(&FONT_10X20, 80, "looking for");
+            s.centered(&FONT_10X20, 104, "the pile...");
+        }
+    }
+    s.footer(None, Some("A+B on the top card  start"), None);
+    s.done()
+}
+
+/// The ceremony's counter: commitments, reveals and attestations held, out of `n`, each as a
+/// bar that fills.
 pub fn ceremony(commits: u8, reveals: u8, attestations: u8, n: u8) -> Screen {
     let mut s = Draw::new();
-    s.inverted_centered(&FONT_10X20, 30, "ceremony");
-    s.centered(&FONT_10X20, 80, &format!("commits {commits}/{n}"));
-    s.centered(&FONT_10X20, 110, &format!("reveals {reveals}/{n}"));
-    s.centered(
-        &FONT_10X20,
-        140,
-        &format!("attestations {attestations}/{n}"),
-    );
+    s.title("ceremony");
+    s.bar(40, "commits", commits, n);
+    s.bar(86, "reveals", reveals, n);
+    s.bar(132, "signatures", attestations, n);
+    s.lines.push(format!("attestations {attestations}/{n}"));
     s.done()
 }
 
@@ -108,17 +123,27 @@ pub fn words_page(
 /// The question after a ceremony: the words, and keep or discard.
 pub fn keep_prompt(words: &[&str; 6]) -> Screen {
     let mut s = Draw::new();
-    s.inverted_centered(&FONT_10X20, 4, "keep this circle?");
+    s.title("keep this circle?");
     for (i, w) in words.iter().enumerate() {
-        s.centered(&PROFONT_18_POINT, 30 + 23 * i as i32, w);
+        s.centered(&PROFONT_18_POINT, 32 + 23 * i as i32, w);
     }
-    s.centered(&FONT_8X13, 172, "Both to keep");
-    s.centered(&FONT_8X13, 186, "one button discards");
+    s.footer(Some("no"), Some("A+B  keep"), Some("no"));
     s.done()
 }
 
-/// A page of the menu: the header, "page/pages" under it, the title inverted, the body, and
-/// an arrow on each side that has a neighbouring page.
+/// The second question after a single press on the keep prompt.
+pub fn discard_prompt() -> Screen {
+    let mut s = Draw::new();
+    s.title("discard this circle?");
+    s.centered(&FONT_9X18_BOLD, 62, "the words and");
+    s.centered(&FONT_9X18_BOLD, 86, "the pad are lost");
+    s.centered(&FONT_8X13, 124, "nothing is saved yet");
+    s.footer(Some("back"), Some("A+B  discard"), Some("back"));
+    s.done()
+}
+
+/// A page of the menu: the header, "page/pages" under it, the title, the body, and an
+/// arrow on each side that has a neighbouring page.
 #[allow(clippy::too_many_arguments)]
 pub fn menu_page(
     circle: &str,
@@ -132,11 +157,14 @@ pub fn menu_page(
 ) -> Screen {
     let mut s = Draw::new();
     s.header(circle, tier);
-    s.centered(&FONT_8X13, 30, &format!("{page}/{pages}"));
-    s.inverted_centered(&FONT_10X20, 50, title);
-    let mut y = 120;
+    s.centered(&FONT_8X13, 34, &format!("{page}/{pages}"));
+    s.centered(&FONT_9X18_BOLD, 56, title);
+    // Each body line is kept whole in `lines` and drawn wrapped, narrower than the screen
+    // so the rows clear the arrows.
+    let mut y = 90;
     for line in body {
-        y = s.wrapped(&FONT_8X13, y, line);
+        y = s.wrapped_centered_cols(&FONT_8X13, y, line, cols(&FONT_8X13) - 2, false);
+        s.lines.push(String::from(*line));
     }
     if left {
         s.arrow(2, "<");
@@ -144,19 +172,20 @@ pub fn menu_page(
     if right {
         s.arrow(190, ">");
     }
+    s.footer(Some("page"), Some("A+B  choose"), Some("page"));
     s.done()
 }
 
 /// Bytes shown as hex under the inverted title "code": eight bytes per row, in groups of two.
 pub fn code(bytes: &[u8]) -> Screen {
     let mut s = Draw::new();
-    s.inverted_centered(&FONT_10X20, 4, "code");
+    s.title("code");
     for (i, row) in bytes.chunks(8).enumerate() {
         let groups: Vec<String> = row
             .chunks(2)
             .map(|g| g.iter().map(|b| format!("{b:02x}")).collect())
             .collect();
-        s.centered(&FONT_10X20, 40 + 26 * i as i32, &groups.join(" "));
+        s.centered(&FONT_10X20, 44 + 28 * i as i32, &groups.join(" "));
     }
     let mut s = s.done();
     s.secret = true;
@@ -166,10 +195,10 @@ pub fn code(bytes: &[u8]) -> Screen {
 /// The question a spending request asks: spend `len` bytes for `circle`?
 pub fn consent(len: u32, circle: &str) -> Screen {
     let mut s = Draw::new();
-    s.inverted_centered(&FONT_10X20, 4, &format!("spend {len} bytes"));
-    s.wrapped(&FONT_10X20, 60, &format!("for {circle}?"));
-    s.centered(&FONT_8X13, 140, "Both to allow");
-    s.centered(&FONT_8X13, 158, "one button refuses");
+    s.title(&format!("spend {len} bytes"));
+    s.centered(&FONT_8X13, 54, "a laptop asks for a key");
+    s.wrapped_centered(&FONT_9X18_BOLD, 84, &format!("for {circle}?"));
+    s.footer(Some("refuse"), Some("A+B  allow"), Some("refuse"));
     s.done()
 }
 
@@ -183,24 +212,28 @@ pub fn status(lines: &[&str]) -> Screen {
     } else {
         &FONT_8X13
     };
-    let mut y = 6;
-    for line in lines {
-        y = s.wrapped_unrecorded(font, y, line);
+    let pitch = font.character_size.height as i32 + 2;
+    let all: Vec<String> = lines.iter().flat_map(|l| wrap(l, cols(font))).collect();
+    // The block of text sits in the middle of the screen, each row centred.
+    let mut y = ((Frame::HEIGHT as i32) - all.len() as i32 * pitch).max(6) / 2;
+    for row in &all {
+        s.text(font, Point::new(W / 2, y), Alignment::Center, BinaryColor::On, row);
+        y += pitch;
     }
     s.lines = lines.iter().map(|l| String::from(*l)).collect();
     s.done()
 }
 
-/// A screen with an inverted title and secondary lines under it, wrapped in the frame.
-fn titled(title: &str, body: &[&str]) -> Screen {
+/// A screen with a title bar and secondary lines under it, wrapped in the frame.
+fn titled(title: &str, body: &[&str]) -> Draw {
     let mut s = Draw::new();
-    s.inverted_centered(&FONT_10X20, 4, title);
+    s.title(title);
     let mut y = 34;
     for line in body {
-        y = s.wrapped_unrecorded(&FONT_8X13, y, line);
+        y = s.wrapped_unrecorded(&FONT_6X13, y, line);
         s.lines.push(String::from(*line));
     }
-    s.done()
+    s
 }
 
 /// How many characters of `font` fit across the screen, with a 4 pixel margin each side.
@@ -322,23 +355,76 @@ impl Draw {
         self.lines.push(String::from(s));
     }
 
-    /// `s` in white on a black box as wide as the screen, with its top at `y`.
-    fn inverted_centered(&mut self, font: &MonoFont, y: i32, s: &str) {
-        let h = font.character_size.height;
-        self.fill(Point::new(0, y - 2), Size::new(Frame::WIDTH as u32, h + 4));
-        let at = Point::new(W / 2, y);
-        self.text(font, at, Alignment::Center, BinaryColor::Off, s);
+    /// The title bar: `s` in white on a black band across the top of the screen.
+    fn title(&mut self, s: &str) {
+        self.fill(Point::new(0, 0), Size::new(Frame::WIDTH as u32, 26));
+        let at = Point::new(W / 2, 4);
+        self.text(&FONT_9X18_BOLD, at, Alignment::Center, BinaryColor::Off, s);
         self.lines.push(String::from(s));
     }
 
-    /// `s` wrapped to the screen's width, left-aligned from `y`. Returns the y after it.
-    fn wrapped(&mut self, font: &MonoFont, y: i32, s: &str) -> i32 {
-        let rows = wrap(s, cols(font));
-        self.lines.extend(rows.iter().cloned());
-        self.rows(font, y, &rows)
+    /// The footer: a rule, then what A alone, both buttons, and B alone do, in the places
+    /// the buttons are. A missing side means that button does nothing here.
+    fn footer(&mut self, left: Option<&str>, both: Option<&str>, right: Option<&str>) {
+        let _ = Line::new(Point::new(0, FOOT_Y), Point::new(W - 1, FOOT_Y))
+            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+            .draw(&mut Canvas(&mut self.frame));
+        let y = FOOT_Y + 6;
+        let on = BinaryColor::On;
+        if let Some(l) = left {
+            let s = format!("< {l}");
+            self.text(&FONT_6X13_BOLD, Point::new(3, y), Alignment::Left, on, &s);
+        }
+        if let Some(r) = right {
+            let s = format!("{r} >");
+            self.text(&FONT_6X13_BOLD, Point::new(W - 3, y), Alignment::Right, on, &s);
+        }
+        if let Some(b) = both {
+            self.text(&FONT_6X13_BOLD, Point::new(W / 2, y), Alignment::Center, on, b);
+        }
+        let legend: Vec<String> = [left, both, right].iter().flatten().map(|s| String::from(*s)).collect();
+        self.lines.push(legend.join("  "));
     }
 
-    /// As [`Draw::wrapped`], without adding the rows to `lines`.
+    /// A labelled progress bar with its top at `y`: the label on the left, `have/n` on
+    /// the right, and under them a box that fills from the left.
+    fn bar(&mut self, y: i32, label: &str, have: u8, n: u8) {
+        let on = BinaryColor::On;
+        self.text(&FONT_7X13_BOLD, Point::new(10, y), Alignment::Left, on, label);
+        let count = format!("{have}/{n}");
+        self.text(&FONT_7X13_BOLD, Point::new(W - 10, y), Alignment::Right, on, &count);
+        let (x0, x1, top) = (10, W - 10, y + 17);
+        let _ = Rectangle::new(Point::new(x0, top), Size::new((x1 - x0) as u32, 12))
+            .into_styled(PrimitiveStyle::with_stroke(on, 1))
+            .draw(&mut Canvas(&mut self.frame));
+        if n > 0 && have > 0 {
+            let w = (x1 - x0 - 4) * i32::from(have.min(n)) / i32::from(n);
+            self.fill(Point::new(x0 + 2, top + 2), Size::new(w as u32, 8));
+        }
+        self.lines.push(format!("{label} {have}/{n}"));
+    }
+
+    /// `s` wrapped to the screen's width, each row centred, from `y`. Returns the y after.
+    fn wrapped_centered(&mut self, font: &MonoFont, y: i32, s: &str) -> i32 {
+        self.wrapped_centered_cols(font, y, s, cols(font), true)
+    }
+
+    /// As [`Draw::wrapped_centered`], wrapped at `cols` characters, narrower than the screen
+    /// where something sits at the edges, and recording the rows in `lines` only if `record`.
+    fn wrapped_centered_cols(&mut self, font: &MonoFont, mut y: i32, s: &str, cols: usize, record: bool) -> i32 {
+        let pitch = font.character_size.height as i32 + 2;
+        for row in wrap(s, cols) {
+            self.text(font, Point::new(W / 2, y), Alignment::Center, BinaryColor::On, &row);
+            if record {
+                self.lines.push(row);
+            }
+            y += pitch;
+        }
+        y
+    }
+
+    /// `s` wrapped to the screen's width, left-aligned from `y`, without adding the rows to
+    /// `lines`. Returns the y after it.
     fn wrapped_unrecorded(&mut self, font: &MonoFont, y: i32, s: &str) -> i32 {
         self.rows(font, y, &wrap(s, cols(font)))
     }
