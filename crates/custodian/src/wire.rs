@@ -7,6 +7,7 @@
 use crate::contract::{CircleInfo, PadError, PskHandle};
 use alloc::string::String;
 use alloc::vec::Vec;
+use cahoots_chip::Attested;
 use cahoots_core::CircleId;
 use minicbor::decode::Error as DecodeError;
 use minicbor::{Decode, Decoder, Encode, Encoder};
@@ -15,9 +16,13 @@ use minicbor::{Decode, Decoder, Encode, Encoder};
 pub const KIND_REQUEST: u8 = 40;
 /// Frame kind for a response.
 pub const KIND_RESPONSE: u8 = 41;
-/// The longest request payload a custodian reads, in bytes. A request is a few fields and a
-/// short context label, far under this. A request frame that claims more is not a request.
-pub const MAX_REQUEST_LEN: usize = 4096;
+/// The longest request payload a custodian reads, in bytes. A request frame that claims more
+/// is not a request. Only an `SshSign` request, which can carry the text of a commit, is
+/// allowed to be this long.
+pub const MAX_REQUEST_LEN: usize = 16 * 1024;
+/// The longest any other request may be once decoded. A request is a few fields and a short
+/// context label, far under this; `serve` refuses a longer one as it refuses an oversize frame.
+pub const MAX_SMALL_REQUEST_LEN: usize = 4096;
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
 #[cbor(array)]
@@ -57,6 +62,116 @@ pub enum Request {
         #[cbor(n(0), with = "minicbor::bytes")]
         circle: CircleId,
     },
+    /// Something a badge does with the keys of its seat in `circle`.
+    #[n(6)]
+    Chip {
+        #[cbor(n(0), with = "minicbor::bytes")]
+        circle: CircleId,
+        #[n(1)]
+        op: ChipRequest,
+    },
+}
+
+/// The operations of the `Chip` request family.
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+#[cbor(array)]
+pub enum ChipRequest {
+    /// The seat's public key and what holds it.
+    #[n(0)]
+    Describe,
+    /// The chip's attestation of the seat key.
+    #[n(1)]
+    Attest {
+        #[cbor(n(0), with = "minicbor::bytes")]
+        freshness: [u8; 16],
+    },
+    /// Sign the bytes OpenSSH asks an agent to sign.
+    #[n(2)]
+    SshSign {
+        #[cbor(n(0), with = "minicbor::bytes")]
+        data: Vec<u8>,
+        #[n(1)]
+        host: Option<SshHost>,
+        /// For git: the text that `data`'s hash covers.
+        #[cbor(n(2), with = "minicbor::bytes")]
+        content: Option<Vec<u8>>,
+    },
+    /// Sign a contact card.
+    #[n(3)]
+    Card {
+        #[cbor(n(0), with = "minicbor::bytes")]
+        card: Vec<u8>,
+    },
+    /// Sign a grant.
+    #[n(4)]
+    GrantSign {
+        #[cbor(n(0), with = "minicbor::bytes")]
+        grant: Vec<u8>,
+    },
+    /// Release the key that seals things for the circle under `label`.
+    #[n(5)]
+    SealKey {
+        #[n(0)]
+        label: String,
+    },
+}
+
+impl ChipRequest {
+    /// True when the badge asks its holder before answering.
+    pub fn needs_consent(&self) -> bool {
+        !matches!(self, ChipRequest::Describe | ChipRequest::Attest { .. })
+    }
+}
+
+/// What the laptop learned from OpenSSH's `session-bind@openssh.com` message, plus the
+/// name it found for the host key in `known_hosts`. None of it is trusted until the badge
+/// checks it.
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+#[cbor(array)]
+pub struct SshHost {
+    #[cbor(n(0), with = "minicbor::bytes")]
+    pub host_key: Vec<u8>,
+    #[cbor(n(1), with = "minicbor::bytes")]
+    pub session_id: Vec<u8>,
+    #[cbor(n(2), with = "minicbor::bytes")]
+    pub host_sig: Vec<u8>,
+    #[n(3)]
+    pub name: String,
+    #[n(4)]
+    pub user: String,
+}
+
+/// The answers of the `Chip` request family.
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+#[cbor(array)]
+pub enum ChipResponse {
+    #[n(0)]
+    Description {
+        #[cbor(n(0), with = "minicbor::bytes")]
+        public: Vec<u8>,
+        #[n(1)]
+        curve: u8,
+        #[n(2)]
+        in_chip: bool,
+        #[n(3)]
+        can_attest: bool,
+    },
+    #[n(1)]
+    Attested {
+        #[n(0)]
+        attested: Attested,
+    },
+    /// SSH wire format for `SshSign`; COSE_Sign1 bytes for `Card` and `GrantSign`.
+    #[n(2)]
+    Signature {
+        #[cbor(n(0), with = "minicbor::bytes")]
+        signature: Vec<u8>,
+    },
+    #[n(3)]
+    Key {
+        #[cbor(n(0), with = "minicbor::bytes")]
+        key: [u8; 32],
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -70,6 +185,9 @@ pub enum Response {
         tier: u8,
         #[n(2)]
         name: String,
+        /// True when the badge keeps its seat keys in a chip.
+        #[n(3)]
+        chip: bool,
     },
     #[n(1)]
     Psk {
@@ -103,6 +221,11 @@ pub enum Response {
         #[n(0)]
         code: ErrorCode,
     },
+    #[n(6)]
+    Chip {
+        #[n(0)]
+        result: ChipResponse,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode)]
@@ -126,6 +249,15 @@ pub enum ErrorCode {
     Denied,
     #[n(8)]
     Busy,
+    /// The badge has no chip to do this with.
+    #[n(9)]
+    NoChip,
+    /// The chip failed or refused.
+    #[n(10)]
+    ChipError,
+    /// The bytes to sign are not something the badge will sign.
+    #[n(11)]
+    Unparseable,
 }
 
 impl From<PadError> for ErrorCode {
@@ -149,6 +281,9 @@ impl Request {
     /// Strict: the input must be exactly one canonical encoding. Trailing bytes, extra
     /// fields (such as another message type's) and truncation are all `Malformed`.
     pub fn decode(bytes: &[u8]) -> Result<Request, ErrorCode> {
+        if bytes.len() > MAX_REQUEST_LEN {
+            return Err(ErrorCode::Malformed);
+        }
         let msg: Request = minicbor::decode(bytes).map_err(|_| ErrorCode::Malformed)?;
         if msg.encode() != bytes {
             return Err(ErrorCode::Malformed);

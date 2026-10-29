@@ -8,17 +8,18 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use cahoots_chip::{Curve, KeyId, KeyKind};
+use cahoots_chip::{Attested, Curve, KeyId, KeyKind};
 use cahoots_core::ceremony::CeremonyResult;
-use cahoots_core::seat::SeatPublic;
 use cahoots_core::frame::{self, Frame, FrameError};
 use cahoots_core::pad::Pad;
 use cahoots_core::params::CircleParams;
+use cahoots_core::seat::SeatPublic;
 use cahoots_custodian::wire::{
-    ErrorCode, Request, Response, KIND_REQUEST, KIND_RESPONSE, MAX_REQUEST_LEN,
+    ErrorCode, Request, Response, SshHost, KIND_REQUEST, KIND_RESPONSE, MAX_REQUEST_LEN,
 };
 use cahoots_custodian::{
-    serve, CircleId, CircleInfo, Consent, Custodian, PadError, PskHandle, PSK_LEN,
+    serve, ChipApps, ChipInfo, CircleId, CircleInfo, Consent, Custodian, PadError, PskHandle,
+    PSK_LEN,
 };
 use cahoots_hal::ledger::PersistentLedger;
 use cahoots_hal::pile::{Pile, PileError};
@@ -205,6 +206,34 @@ enum Idle<B: Board> {
     Broken,
     /// Boxed: the menu holds the custodian and the link, and lives beside the pass state.
     On(Box<Menu<B>>),
+}
+
+/// The badge does not yet answer chip requests: every operation says there is no chip.
+impl<C> ChipApps for Tiered<C> {
+    fn describe(&mut self, _: &CircleId) -> Result<ChipInfo, ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+    fn attest(&mut self, _: &CircleId, _: &[u8; 16]) -> Result<Attested, ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+    fn ssh_sign(
+        &mut self,
+        _: &CircleId,
+        _: &[u8],
+        _: Option<&SshHost>,
+        _: Option<&[u8]>,
+    ) -> Result<Vec<u8>, ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+    fn card_sign(&mut self, _: &CircleId, _: &[u8]) -> Result<Vec<u8>, ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+    fn grant_sign(&mut self, _: &CircleId, _: &[u8]) -> Result<Vec<u8>, ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+    fn seal_key(&mut self, _: &CircleId, _: &str) -> Result<[u8; 32], ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
 }
 
 /// The answer the holder gave with the buttons, handed to `serve`.
@@ -408,7 +437,12 @@ impl<B: Board> Badge<B> {
 
     /// At the keep: the root and the epoch counter go into the chip beside the seat key, and
     /// the chip record learns the slot.
-    fn keep_in_chip(&mut self, slot: u8, circle_id: &CircleId, root: &[u8; 32]) -> Result<(), String> {
+    fn keep_in_chip(
+        &mut self,
+        slot: u8,
+        circle_id: &CircleId,
+        root: &[u8; 32],
+    ) -> Result<(), String> {
         let chip = self.board.chip().ok_or("chip: not found")?;
         chip.put_hmac_key(KeyId::new(KeyKind::Root, slot), root)
             .map_err(|e| format!("chip: root not stored: {e:?}"))?;
@@ -907,10 +941,12 @@ impl<B: Board> Badge<B> {
     }
 }
 
-/// The bytes a request would spend, or `None` if it spends nothing.
+/// The bytes a request would spend, or `None` if it spends nothing. A chip request spends no
+/// pad. Until the badge answers them, `serve` is given a refusal for the ones that need
+/// consent, and the rest get `NoChip`.
 fn spends(req: &Request) -> Option<u32> {
     match req {
-        Request::Identify | Request::Remaining { .. } => None,
+        Request::Identify | Request::Remaining { .. } | Request::Chip { .. } => None,
         Request::Psk { .. } | Request::PskFor { .. } => Some(PSK_LEN),
         Request::Spend { len, .. } | Request::SpendFor { len, .. } => Some(*len),
     }

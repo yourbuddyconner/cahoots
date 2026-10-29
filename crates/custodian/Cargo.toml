@@ -12,6 +12,7 @@ std = ["cahoots-core/std"]
 
 [dependencies]
 cahoots-core = { workspace = true }
+cahoots-chip = { workspace = true }
 zeroize = { workspace = true, features = ["alloc"] }
 minicbor = { version = "2.3", default-features = false, features = ["alloc", "derive"] }
 

@@ -1,9 +1,11 @@
 //! The custodian trait and the types it speaks, plus the impl for a core `Pad`.
 
+use crate::wire::{ErrorCode, SshHost};
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use cahoots_chip::Attested;
 use cahoots_core::ledger::SpentLedger;
 use cahoots_core::pad::{Pad, PadStorage};
 use cahoots_core::CircleId;
@@ -211,5 +213,60 @@ fn core_err(e: cahoots_core::pad::PadError) -> PadError {
         E::Exhausted => PadError::Exhausted,
         E::Config => PadError::Config,
         other => PadError::Storage(format!("{other:?}")),
+    }
+}
+
+/// What a badge says about a seat key.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChipInfo {
+    pub public: Vec<u8>,
+    pub curve: u8,
+    pub in_chip: bool,
+    pub can_attest: bool,
+}
+
+/// What a badge does with the keys of its seats. Errors are wire error codes: `NoChip`,
+/// `ChipError`, `Unparseable`, `UnknownCircle`, `Denied`. `serve` has asked for consent
+/// before it calls any signing method.
+pub trait ChipApps {
+    fn describe(&mut self, circle: &CircleId) -> Result<ChipInfo, ErrorCode>;
+    fn attest(&mut self, circle: &CircleId, freshness: &[u8; 16]) -> Result<Attested, ErrorCode>;
+    fn ssh_sign(
+        &mut self,
+        circle: &CircleId,
+        data: &[u8],
+        host: Option<&SshHost>,
+        content: Option<&[u8]>,
+    ) -> Result<Vec<u8>, ErrorCode>;
+    fn card_sign(&mut self, circle: &CircleId, card: &[u8]) -> Result<Vec<u8>, ErrorCode>;
+    fn grant_sign(&mut self, circle: &CircleId, grant: &[u8]) -> Result<Vec<u8>, ErrorCode>;
+    fn seal_key(&mut self, circle: &CircleId, label: &str) -> Result<[u8; 32], ErrorCode>;
+}
+
+/// A bare pad has no chip: every operation says so.
+impl<S: PadStorage, L: SpentLedger> ChipApps for Pad<S, L> {
+    fn describe(&mut self, _: &CircleId) -> Result<ChipInfo, ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+    fn attest(&mut self, _: &CircleId, _: &[u8; 16]) -> Result<Attested, ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+    fn ssh_sign(
+        &mut self,
+        _: &CircleId,
+        _: &[u8],
+        _: Option<&SshHost>,
+        _: Option<&[u8]>,
+    ) -> Result<Vec<u8>, ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+    fn card_sign(&mut self, _: &CircleId, _: &[u8]) -> Result<Vec<u8>, ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+    fn grant_sign(&mut self, _: &CircleId, _: &[u8]) -> Result<Vec<u8>, ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+    fn seal_key(&mut self, _: &CircleId, _: &str) -> Result<[u8; 32], ErrorCode> {
+        Err(ErrorCode::NoChip)
     }
 }

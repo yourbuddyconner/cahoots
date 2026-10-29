@@ -458,6 +458,7 @@ dependencies = [
 name = "cahoots-custodian"
 version = "0.1.0"
 dependencies = [
+ "cahoots-chip",
  "cahoots-core",
  "minicbor",
  "zeroize",

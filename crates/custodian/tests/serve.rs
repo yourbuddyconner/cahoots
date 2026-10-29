@@ -27,11 +27,13 @@ fn identify_lists_the_circle() {
             circles,
             tier,
             name,
+            chip,
         } => {
             assert_eq!(circles.len(), 1);
             assert_eq!(circles[0].name, "vectors");
             assert_eq!(tier, 0);
             assert_eq!(name, "");
+            assert!(!chip);
         }
         other => panic!("{other:?}"),
     }

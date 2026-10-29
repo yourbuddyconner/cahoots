@@ -218,16 +218,34 @@ Messages are CBOR (RFC 8949), array-encoded. A request travels in a frame of kin
 
 | Request | Fields | Response |
 |---|---|---|
-| `Identify` | none | `Identity { circles, tier, name }` |
+| `Identify` | none | `Identity { circles, tier, name, chip }` |
 | `Psk` | `circle`, `context` | `Psk { handle, key }` |
 | `PskFor` | `handle`, `context` | `Key { key }` |
 | `Spend` | `circle`, `len` | `Bytes { handle, bytes }` |
 | `SpendFor` | `handle`, `len` | `Bytes { handle, bytes }` |
 | `Remaining` | `circle` | `Remaining { bytes, low }` |
+| `Chip` | `circle`, `op` | `Chip { result }` |
 
-Any request can get `Error { code }` as its response. The codes are `UnknownCircle`, `Exhausted`, `AlreadySpent`, `OutOfRange`, `Config`, `Storage`, `Malformed`, `Denied` and `Busy`.
+`Chip` is the family of things a badge does with its seat keys. `op` is one of:
 
-A custodian MUST obtain its owner's consent before it answers any request except `Identify` and `Remaining`. A custodian that is refused answers `Denied`. A badge asks for consent with a line on its screen, and its owner allows the request with the B button.
+| `op` | Fields | `result` |
+|---|---|---|
+| `Describe` | none | `Description { public, curve, in_chip, can_attest }` |
+| `Attest` | `freshness` (16 bytes) | `Attested(..)`, the chip's attestation of the seat key |
+| `SshSign` | `data`, `host` (optional), `content` (optional) | `Signature`, in SSH wire format |
+| `Card` | `card` | `Signature`, a COSE_Sign1 |
+| `GrantSign` | `grant` | `Signature`, a COSE_Sign1 |
+| `SealKey` | `label` | `Key { key }` |
+
+`host` is `{ host_key, session_id, host_sig, name, user }`, what the laptop learned from OpenSSH. The badge checks it before it trusts it. `content` is the text a git signature covers.
+
+Any request can get `Error { code }` as its response. The codes are `UnknownCircle`, `Exhausted`, `AlreadySpent`, `OutOfRange`, `Config`, `Storage`, `Malformed`, `Denied`, `Busy`, `NoChip` (the badge has no chip to do this with), `ChipError` (the chip failed) and `Unparseable` (the bytes to sign are not something the badge signs).
+
+A request is at most 16 KiB. Only `SshSign` may be longer than 4 KiB; any other request over 4 KiB is `Malformed`.
+
+The laptop program and the badge firmware must come from the same release. `Identity` gained the field `chip`, and a decoder rejects any message that does not re-encode to the same bytes, so a laptop program from before it calls a new badge's `Identity` malformed.
+
+A custodian MUST obtain its owner's consent before it answers any request except `Identify`, `Remaining`, and the `Chip` operations `Describe` and `Attest`. A custodian that is refused answers `Denied`. A badge asks for consent with a line on its screen, and its owner allows the request with the B button.
 
 A badge answers `Busy` to a request that arrives on the words screen or on any menu item other than Serve, and ignores a request that arrives during the pile or the ceremony, so the laptop retries.
 
