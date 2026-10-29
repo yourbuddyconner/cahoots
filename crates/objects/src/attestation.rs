@@ -74,10 +74,7 @@ pub fn verify(att: &Attested, freshness: &[u8; 16], roots: &[&str]) -> Result<Ve
     // The software chip signs raw r || s; a real chip may return DER.
     let sig = match Signature::from_slice(&att.signature) {
         Ok(s) => s,
-        Err(_) => DerSignature::from_bytes(&att.signature)
-            .ok()
-            .and_then(|d| Signature::try_from(d.as_bytes()).ok())
-            .ok_or(AttestError::Signature)?,
+        Err(_) => Signature::from_der(&att.signature).map_err(|_| AttestError::Signature)?,
     };
     key.verify(&attested_payload(att), &sig).map_err(|_| AttestError::Signature)?;
 

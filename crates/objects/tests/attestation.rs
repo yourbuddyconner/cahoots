@@ -126,3 +126,44 @@ fn base64(b: &[u8]) -> String {
     }
     s
 }
+
+// A leaf certificate (key 0x43..43) issued by the test CA, built once with another tool.
+const LEAF_DER: &[u8] = include_bytes!("fixtures/leaf.der");
+const LEAF_KEY: [u8; 32] = [0x43; 32];
+
+fn leaf_attested(cert: &[u8]) -> cahoots_chip::Attested {
+    use p256::ecdsa::signature::Signer;
+    let mut att = attested();
+    let key = p256::ecdsa::SigningKey::from_slice(&LEAF_KEY).unwrap();
+    att.attest_public = key.verifying_key().to_encoded_point(false).as_bytes().to_vec();
+    att.attest_cert_der = cert.to_vec();
+    let mut body = att.public.clone();
+    body.extend_from_slice(&att.uid);
+    body.extend_from_slice(&att.freshness);
+    body.extend_from_slice(&att.timestamp);
+    let sig: p256::ecdsa::Signature = key.sign(&body);
+    att.signature = sig.to_bytes().to_vec();
+    att
+}
+
+#[test]
+fn certificate_issued_by_a_root_verifies() {
+    let att = leaf_attested(LEAF_DER);
+    assert!(verify(&att, &FRESH, &[ROOT_PEM]).is_ok());
+}
+
+#[test]
+fn leaf_with_tampered_issuer_signature_fails_chain() {
+    let mut der = LEAF_DER.to_vec();
+    let n = der.len();
+    der[n - 1] ^= 1;
+    assert_eq!(verify(&leaf_attested(&der), &FRESH, &[ROOT_PEM]), Err(AttestError::Chain));
+}
+
+#[test]
+fn der_encoded_signature_verifies() {
+    let mut att = attested();
+    let sig = p256::ecdsa::Signature::from_slice(&att.signature).unwrap();
+    att.signature = sig.to_der().as_bytes().to_vec();
+    assert!(verify(&att, &FRESH, &[ROOT_PEM]).is_ok());
+}
