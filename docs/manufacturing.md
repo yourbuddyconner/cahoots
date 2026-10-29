@@ -45,6 +45,16 @@ Why the RP2350 and not the ESP32-S3 the firmware runs on today: it has no radio,
 
 Cost for ten: about $35 to $50 a badge, plus the mechanical prototypes. Time: a week to design, three weeks per spin, two spins. The schematic, the bill of materials and the layout are drawn in KiCad and pass its checks (hardware/v1). Next, you review, order and build the first one on the bench. What it buys: a meetup with ten real badges, the pile ritual tested with magnets and pads, and the whole process learned on something forgiving.
 
+## V1, second spin
+
+Decided 2026-10-28, after the first five boards were quoted and before they arrived; to be drawn once they have been handled. The aim is a badge that stacks with nothing but copper and springs, and that is as thin as the Pico allows.
+
+- **The pile connector on the board, no pigtail.** The Adafruit 5413 pad half moves to the board's front at the top end, its face flush with a lid thinned to 1.8 mm there. Five individual through-hole spring pins, the test-probe kind, stand on the board's back behind the pads, long enough to sit about 1 mm proud of the floor, with a printed sleeve in the floor supporting them. The four corner magnets hold the stack; a 1 mm ridge around the pins drops into a groove around the pads so five pins land on five pads. The pads carry the link up, the pins the link down, the same nets the floor pads carried over the pigtail; the DN cable socket stays. Pin lengths come in half-millimetre steps and are chosen to the case.
+- **The cell.** A thin pouch cell, about 3 mm, in the cavity beside the Pico, charged from the Pico's own USB through a one-chip charger with the cell's protection circuit. The CR2032 holder goes, and with it 1.4 mm of thickness. The first five boards measure what a ceremony draws; the pouch cell's size follows from that.
+- **Thinner everywhere.** A low-profile 0.5 mm flex connector (about 1 mm tall) brings the front cavity to 1.7 mm; the lid and the floor to 1.5 mm; the back cavity to 4.2 mm, set by the Pico's USB socket. The badge lands around 10.5 mm from 13.4. Below that needs the bare chip, which is V2.
+- **A second NFC loop for a tag chip.** The SE051's contactless side speaks to the phone app. A phone with no app wants a plain tag: an NFC Forum tag chip with an I2C side, about a dollar, that the Pico rewrites so the tag carries the badge's contact card or a link. It gets its own small loop; the two loops are kept apart.
+- **Keep from the first spin.** The SE051 with its loop and switch, the Qwiic socket, the expansion socket, the taped panel, the switch openings in the floor.
+
 ## V2: the card
 
 This is the product. It is designed once the power and chip questions are answered, around the Baochip-1x, on a four-layer board the size of a credit card, with the e-paper's glass as the top surface, dome buttons under a sheet, a thin cell, the pads and magnets from V1. This is a job for a contract hardware engineer and a mechanical designer: a few weeks of work and a five-figure fee, with three spins planned. Small batches of the tray are machined or cast; a mould is justified at five hundred units.
