@@ -16,7 +16,7 @@ const CLAIM = {
 const ERRORS = {
   reuse: 'Possible pad reuse: this range was already spent. Refused, nothing changed.',
   tag: 'Integrity check failed. Refused, nothing spent.',
-  'wrong-circle': 'This message belongs to a different cahoot.',
+  'wrong-circle': 'This message belongs to a different circle.',
   'out-of-range': 'The message points outside the pad.',
   exhausted: 'Your share of the pad is used up. Hold a new ceremony.',
   base64url: 'That is not a Cahoots message.',
@@ -365,7 +365,7 @@ async function screenHome() {
   screen({
     title: 'Cahoots',
     menu: aboutSheet,
-    body: [rows.length ? h('div', {}, h('p', { class: 'eyebrow' }, 'Your cahoots'), h('div', { class: 'rows' }, ...rows.map(row))) : empty],
+    body: [rows.length ? h('div', {}, h('p', { class: 'eyebrow' }, 'Your circles'), h('div', { class: 'rows' }, ...rows.map(row))) : empty],
     actions: [btn('Start a ceremony', () => go('#/new'), 'primary'), btn('Join one', () => go('#/join')), rows.length ? null : link('What is this?', aboutSheet)],
   });
 }
@@ -379,18 +379,18 @@ function screenNew() {
     title: 'New ceremony', back: '#/',
     body: [
       h('div', {},
-        h('h1', {}, 'Set up the cahoot.'),
+        h('h1', {}, 'Set up the circle.'),
         h('p', { class: 'lead' }, 'Everyone will see these on their own screen.'),
         field('Name', name),
         field('People in the room', stepper(2, 8, params.n, (v) => { params.n = v; }), 'Count every device that will hold the secret, including yours.'),
         h('div', { class: 'field' }, h('label', {}, 'Secret size'), seg(SIZES.map(([v, l]) => [v, l]), params.pad_len, (v) => { params.pad_len = v; sizeHint.textContent = SIZES.find((s) => s[0] === v)[2]; }), sizeHint),
         h('details', { class: 'more' }, h('summary', {}, 'Advanced'),
-          h('label', { class: 'toggle' }, h('span', {}, h('b', {}, 'Invite a hosted software member'), h('br'), h('span', { class: 'muted' }, 'A program in a secure enclave gets a seat and a copy of the secret. Leave off for a people-only cahoot.')), h('input', { type: 'checkbox', onchange: (e) => { params.agent_seat = e.target.checked; } }))),
+          h('label', { class: 'toggle' }, h('span', {}, h('b', {}, 'Invite a hosted software member'), h('br'), h('span', { class: 'muted' }, 'A program in a secure enclave gets a seat and a copy of the secret. Leave off for a people-only circle.')), h('input', { type: 'checkbox', onchange: (e) => { params.agent_seat = e.target.checked; } }))),
         err),
     ],
     actions: [btn('Continue', () => {
       const n = params.name.trim();
-      if (!n) { err.textContent = 'Give the cahoot a name.'; name.focus(); return; }
+      if (!n) { err.textContent = 'Give the circle a name.'; name.focus(); return; }
       go(`#/ceremony/${paramsHash({ ...params, name: n })}/pick`);
     }, 'primary')],
   });
@@ -425,7 +425,7 @@ function screenPick(params) {
   let idx = [...Array(params.n).keys()].find((i) => !taken.has(i)) ?? 0;
   let src = 'csprng', extra = null;
   const err = status();
-  const srcLine = h('span', { class: 'hint' }, 'Randomness: this device. The cahoot is labelled CSPRNG.');
+  const srcLine = h('span', { class: 'hint' }, 'Randomness: this device. The circle is labelled CSPRNG.');
   const seats = seg(Array.from({ length: params.n }, (_, i) => [i, i === 0 ? '1 · leader' : String(i + 1), taken.has(i)]), idx, (v) => { idx = Number(v); });
   const hardwareSheet = () => sheet((close) => {
     const file = h('input', { type: 'file', style: 'display:none', onchange: async (e) => {
@@ -439,7 +439,7 @@ function screenPick(params) {
       h('p', { class: 'muted' }, `Optional. A ${kib(params.pad_len)} file of random bytes from a hardware source is mixed in with this device's own randomness, never used alone. It earns this device the TRNG label.`),
       file, btn('Load a file', () => file.click()),
       h('p', { class: 'muted' }, 'Or scan an animation of the bytes shown on another screen:'), r.el,
-      extra ? btn('Remove hardware randomness', () => { extra = null; src = 'csprng'; srcLine.textContent = 'Randomness: this device. The cahoot is labelled CSPRNG.'; close(); }, 'danger') : null);
+      extra ? btn('Remove hardware randomness', () => { extra = null; src = 'csprng'; srcLine.textContent = 'Randomness: this device. The circle is labelled CSPRNG.'; close(); }, 'danger') : null);
   });
   screen({
     title: params.name, sub: `${params.n} people · ${kib(params.pad_len)}`, back: '#/',
@@ -449,7 +449,7 @@ function screenPick(params) {
         h('h1', {}, 'Which seat are you?'),
         h('p', { class: 'lead' }, taken.size ? `Seat ${[...taken].map((i) => i + 1).join(', ')} is taken by the person you scanned. Pick a free one, and make sure nobody else picks the same.` : 'Each person takes a different seat. The person who set this up is seat 1.'),
         field('Your seat', seats),
-        params.agent_seat ? notice('This cahoot invites a hosted software member. It will hold a copy of the secret in a secure enclave.') : null,
+        params.agent_seat ? notice('This circle invites a hosted software member. It will hold a copy of the secret in a secure enclave.') : null,
         srcLine, err),
     ],
     actions: [btn('Make my contribution', async () => {
@@ -663,7 +663,7 @@ const budget = (circle) => {
 };
 async function screenCircle(id) {
   const circle = await openCircle(id);
-  if (!circle) { screen({ title: 'Cahoots', body: [h('div', { class: 'empty' }, h('h1', {}, 'This cahoot is not on this device.'))], actions: [btn('Home', () => go('#/'), 'primary')] }); return; }
+  if (!circle) { screen({ title: 'Cahoots', body: [h('div', { class: 'empty' }, h('h1', {}, 'This circle is not on this device.'))], actions: [btn('Home', () => go('#/'), 'primary')] }); return; }
   const label = circle.label();
   const low = circle.remaining() < circle.slice_len() / 10;
   screen({
@@ -671,9 +671,9 @@ async function screenCircle(id) {
     menu: () => sheet(
       h('h2', {}, circle.name()),
       h('p', { class: 'muted' }, CLAIM[label]),
-      h('p', { class: 'muted' }, 'Inside the cahoot, a message proves a member wrote it, not which member.'),
+      h('p', { class: 'muted' }, 'Inside the circle, a message proves a member wrote it, not which member.'),
       h('p', { class: 'muted' }, 'History stays on this device. Secret bytes are erased as they are used, but erasure on phone storage is best effort.'),
-      btn('Delete this cahoot from this device', async () => { if (confirm('Delete? The secret and the history on this device are removed. Other members keep theirs.')) { live.delete(id); await deleteCircle(id); go('#/'); } }, 'danger')),
+      btn('Delete this circle from this device', async () => { if (confirm('Delete? The secret and the history on this device are removed. Other members keep theirs.')) { live.delete(id); await deleteCircle(id); go('#/'); } }, 'danger')),
     body: [
       h('div', {},
         budget(circle),
@@ -705,7 +705,7 @@ async function screenSend(id) {
     body: [
       h('div', {},
         h('h1', {}, 'Write it.'),
-        h('p', { class: 'lead' }, 'It is encrypted with secret bytes that are then erased. Nothing can read it except your cahoot.'),
+        h('p', { class: 'lead' }, 'It is encrypted with secret bytes that are then erased. Nothing can read it except your circle.'),
         field('Message', text, count),
         err),
     ],
@@ -727,7 +727,7 @@ function screenShowWire(id, circle, wire, spent) {
   screen({
     title: 'Encrypted', sub: `${spent} bytes of the secret used · ${kib(circle.remaining())} left`, back: `#/c/${id}`,
     menu: () => sheet(h('h2', {}, 'Share another way'), copyBtn(wire), downloadBtn('message.txt', wire)),
-    body: [next('Let them scan this, or send it as text. Post it anywhere: only your cahoot can read it.'), panelQr(wire, circle.name(), 'scan with Read a message')],
+    body: [next('Let them scan this, or send it as text. Post it anywhere: only your circle can read it.'), panelQr(wire, circle.name(), 'scan with Read a message')],
     actions: [btn('Done', () => go(`#/c/${id}`), 'primary'), link('Copy as text', async () => { await navigator.clipboard.writeText(wire); toast('Copied'); })],
   });
 }
@@ -780,7 +780,7 @@ async function screenHello(id, peerStr) {
   const others = [...Array(circle.members()).keys()].filter((s) => s !== me);
   const tooOld = () => screen({
     title: 'Hello words', sub: circle.name(), back: `#/c/${id}`,
-    body: [h('div', { class: 'empty' }, h('h1', {}, 'This cahoot is from before hello words.'), h('p', { class: 'lead' }, 'The words come from keys made during the ceremony. Run a new ceremony and they will be there.'))],
+    body: [h('div', { class: 'empty' }, h('h1', {}, 'This circle is from before hello words.'), h('p', { class: 'lead' }, 'The words come from keys made during the ceremony. Run a new ceremony and they will be there.'))],
     actions: [btn('Back', () => go(`#/c/${id}`), 'primary')],
   });
   if (!others.some((s) => circle.has_pair_key(s))) return tooOld();
@@ -869,7 +869,7 @@ async function screenChat(id) {
     const relayIn = input({ type: 'url', value: settings.relay, placeholder: 'https://relay.example.com', autocapitalize: 'off', autocomplete: 'off' });
     return h('div', { class: 'stack' },
       h('h2', {}, 'Relay'),
-      h('p', { class: 'muted' }, `Messages travel through a relay that every member can reach. It only ever sees encrypted messages. The app ships with ${DEFAULT_RELAY.replace('https://', '')}. Every member of this cahoot must use the same relay, so change it together.`),
+      h('p', { class: 'muted' }, `Messages travel through a relay that every member can reach. It only ever sees encrypted messages. The app ships with ${DEFAULT_RELAY.replace('https://', '')}. Every member of this circle must use the same relay, so change it together.`),
       field('Relay address', relayIn),
       btn('Save and connect', async () => { settings.relay = relayIn.value.trim() || DEFAULT_RELAY; await saveSettings({ id, relay: settings.relay }); close(); chatRun++; screenChat(id); }, 'primary'),
       settings.relay !== DEFAULT_RELAY ? btn('Use the default relay', async () => { settings.relay = DEFAULT_RELAY; await saveSettings({ id, relay: settings.relay }); close(); chatRun++; screenChat(id); }) : null);

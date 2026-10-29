@@ -44,13 +44,13 @@ Messages are base64url text shown as a QR and as copyable text. Reads take a sca
 
 ## Hello words
 
-**Hello words** on a cahoot's screen is for a phone or video call. Pick the person (the only other member is picked for you in a two-person cahoot). The screen shows two words you say and two words they say back, with a hello number. Both devices show the same four words for the same number. Tap **Next hello** on both devices to move on, which you do whenever a call feels wrong: the person who cannot say the new words is not the person from the ceremony. The menu lets you name the person on this device, which the chat then uses instead of a seat number, and set the hello number by hand if the two of you drift apart.
+**Hello words** on a circle's screen is for a phone or video call. Pick the person (the only other member is picked for you in a two-person cahoot). The screen shows two words you say and two words they say back, with a hello number. Both devices show the same four words for the same number. Tap **Next hello** on both devices to move on, which you do whenever a call feels wrong: the person who cannot say the new words is not the person from the ceremony. The menu lets you name the person on this device, which the chat then uses instead of a seat number, and set the hello number by hand if the two of you drift apart.
 
-The words come from the pair keys made during the sealed reveal step, so a cahoot made before that step has none and the screen says so. The hello number is saved with the cahoot. Nothing about hello words touches the pad or the network.
+The words come from the pair keys made during the sealed reveal step, so a circle made before that step has none and the screen says so. The hello number is saved with the cahoot. Nothing about hello words touches the pad or the network.
 
 ## Chat (pad-seeded, over a relay)
 
-**Chat** on a cahoot's screen opens the chat for that circle. The header reads "End-to-end encrypted, pad-hedged": the pad seeds the keys and ChaCha20-Poly1305 encrypts, per `docs/chat.md`. The relay sees ciphertext and traffic shape only.
+**Chat** on a circle's screen opens the chat for that circle. The header reads "End-to-end encrypted, pad-hedged": the pad seeds the keys and ChaCha20-Poly1305 encrypts, per `docs/chat.md`. The relay sees ciphertext and traffic shape only.
 
 - **Relay.** The app ships pointing at `https://relay.cahoots.network` (`DEFAULT_RELAY` in `app.js`). **Relay address** in the menu sets another one per circle, stored in IndexedDB, and **Use the default relay** switches back; a circle saved before the default existed gets it on load. For a local relay: `cargo run -p cahoots-station -- --listen 127.0.0.1:8080 --log station.jsonl`. The screen long-polls `GET /v1/circles/{id}/messages?after=<seq>&wait=25000` while open and posts sealed messages as raw bytes.
 - **Epochs.** The first send spends 32 pad bytes to start an epoch. **Start a new epoch** in the menu spends 32 more. Peers switch to the newest epoch they see; the subtitle under the circle name shows the current one. Rotation also happens on its own after 1000 of your own messages in an epoch.

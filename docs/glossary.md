@@ -4,7 +4,9 @@ Terms used in the guides. For exact formats and requirements, use the [protocol 
 
 ## People and devices
 
-**Circle / cahoot:** the group created by a ceremony, together with its shared secret and membership record. “Cahoot” is the name used in the app.
+**Circle:** the group created by a ceremony, together with its shared secret and membership record.
+
+**Cahoot:** the pixel face a badge draws from its own randomness and shows at rest, so people know a badge at a glance. It is a picture, not a credential. See [Cahoots, the faces](cahoots.md).
 
 **Ceremony:** the exchange that creates a circle. Devices commit to their contributions, exchange encrypted reveals, sign the membership record, and show check words. See [Create a circle](ceremony-guide.md).
 

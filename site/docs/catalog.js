@@ -9,6 +9,7 @@ export const DOCS = [
   { group: 'Guides' },
   { id: 'station', title: 'Run a relay', file: 'relay.md', src: 'docs/relay.md' },
   { id: 'hardware', title: 'Hardware', file: 'hardware.md', src: 'docs/hardware.md' },
+  { id: 'cahoots', title: 'Cahoots, the faces', file: 'cahoots.md', src: 'docs/cahoots.md' },
   { id: 'security', title: 'Security and limits', file: 'security.md', src: 'docs/security.md' },
   { group: 'Reference' },
   { id: 'glossary', title: 'Glossary', file: 'glossary.md', src: 'docs/glossary.md' },

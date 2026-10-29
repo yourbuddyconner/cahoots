@@ -2,7 +2,7 @@
 
 Cahoots creates a private network between people who meet in person. You exchange information between your devices, compare six words, and save a shared secret. After the meeting, that secret protects your group’s messages.
 
-The group is called a **circle**. The app also calls it a **cahoot**. Each device in the circle has a numbered **seat**.
+The group is called a **circle**. Each device in the circle has a numbered **seat**. A badge wears a **cahoot**, a pixel face of its own ([the faces](cahoots.md)).
 
 Cahoots is experimental software and hardware. Start with a test circle and messages you can afford to lose.
 

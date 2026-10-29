@@ -227,10 +227,10 @@ await J.paste(wire);
 await J.page.waitForSelector("text=Possible pad reuse");
 await J.snap("replay-refused");
 
-// Home shows the cahoot with its budget.
+// Home shows the circle with its budget.
 await L.page.goto(base);
 await L.page.waitForSelector(".row-item");
-await L.snap("home-with-cahoot");
+await L.snap("home-with-circle");
 
 await browser.close();
 server.close();

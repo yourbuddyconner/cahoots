@@ -1002,6 +1002,8 @@ def main():
         write(ASSETS / "icons" / f"{name}.svg", icon(name))
     write(ASSETS / "sigil.svg", punk(b"cahoots"))
     write(ASSETS / "punks.svg", punks(PUNK_SEEDS))
+    # The same twelve for the docs page about the faces.
+    write(HERE.parent.parent / "docs" / "diagrams" / "cahoots.svg", punks(PUNK_SEEDS))
     write(
         ASSETS / "screen-words.svg",
         words_screen("rooftop", "TRNG · T1", ["orbit", "maple", "fossil", "drum", "velvet", "harbor"]),
