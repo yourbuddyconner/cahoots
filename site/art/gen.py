@@ -19,49 +19,11 @@ from pathlib import Path
 HERE = Path(__file__).parent
 ASSETS = HERE.parent / "assets"
 
-# The theme tokens from site/style.css :root.
-BG = "#0a0a0b"
-BG2 = "#101012"
-FG = "#f4f4f5"
-FG2 = "#a1a1aa"
-FG3 = "#6b6b74"
+# The amber from site/style.css :root, used for the icons and the poster's lights.
 AMBER = "#e5a33a"
-# The two hues the spec adds: a cold blue for the night outside, a green for one screen.
-NIGHT = "#2a4a86"
-GREEN = "#6fcf7c"
-
-
-def mix(a, b, t):
-    """The colour a fraction t of the way from hex a to hex b."""
-    ca = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
-    cb = [int(b[i:i + 2], 16) for i in (1, 3, 5)]
-    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(ca, cb))
-
-
-def palette():
-    """The sixteen pixel colours, by the character that stands for each in a map.
-
-    They were drawn up for the old back-room scene; the punks and the words
-    screen use its ink (".") and warm white ("c").
-    """
-    return {
-        ".": BG,                    # the darkest shadow, black hair, the e-paper's ink
-        ",": BG2,                   # deep shadow, the far buildings
-        "-": mix(BG2, FG3, 0.22),   # the wall away from the lamp, dark floorboards
-        "=": mix(BG2, FG3, 0.5),    # light floorboards, the window and door frames
-        "3": FG3,                   # a grey jacket, a bottle
-        "2": FG2,                   # grey hair, a light jacket, the window sill
-        "W": FG,                    # the screens, the bulb, the stars, white hair
-        "c": mix(FG, AMBER, 0.3),   # warm white: a cream jumper, the moon, the e-paper
-        "a": AMBER,                 # the cards, lit windows, ginger hair
-        "A": mix(AMBER, FG, 0.45),  # the cards' faces, faces in the light, light under the door
-        "o": mix(AMBER, BG, 0.45),  # the table top, a brown jacket, faces in shade
-        "u": mix(AMBER, BG, 0.72),  # the door, the chairs, the lamp shade, dark wood
-        "h": mix(BG2, AMBER, 0.16), # the wall in the lamp's light
-        "b": mix(BG, NIGHT, 0.55),  # the night sky, a blue jacket's shade
-        "B": NIGHT,                 # a blue jacket, the sky over the city
-        "g": GREEN,                 # the phone's screen
-    }
+# The punks and the words screen: ink on the e-paper's warm white.
+INK = "#0a0a0b"
+PAPER = "#f0dcbd"
 
 
 def render(map_text, palette_keys, cell, title=None, background=None):
@@ -973,8 +935,7 @@ def punk_pixels(seed):
 
 def punk(seed):
     """A one-bit punk from SHA-256 of seed: ink on the e-paper's warm white."""
-    pal = palette()
-    return render("\n".join(punk_pixels(seed)), {"#": pal["."], ".": pal["c"]}, PUNK_CELL, background=".")
+    return render("\n".join(punk_pixels(seed)), {"#": INK, ".": PAPER}, PUNK_CELL, background=".")
 
 
 # The grid of twelve on the landing page: six by two, a four-cell gap between
@@ -999,8 +960,7 @@ def punks(seeds):
         for y, row in enumerate(punk_pixels(seed)):
             for x, ch in enumerate(row):
                 grid[oy + y][ox + x] = ch
-    pal = palette()
-    return render("\n".join("".join(r) for r in grid), {"#": pal["."], ".": pal["c"]}, GRID_CELL, background=".")
+    return render("\n".join("".join(r) for r in grid), {"#": INK, ".": PAPER}, GRID_CELL, background=".")
 
 
 # The badge's words screen, after words() in crates/badge/src/screens.rs: the
@@ -1010,8 +970,7 @@ MONO = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
 
 
 def words_screen(circle, tier, words):
-    pal = palette()
-    paper, ink = pal["c"], pal["."]
+    paper, ink = PAPER, INK
     out = [
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" '
         f'role="img" font-family="{MONO}">',
@@ -1045,7 +1004,7 @@ def main():
     write(ASSETS / "punks.svg", punks(PUNK_SEEDS))
     write(
         ASSETS / "screen-words.svg",
-        words_screen("back room", "TRNG · T1", ["orbit", "maple", "fossil", "drum", "velvet", "harbor"]),
+        words_screen("rooftop", "TRNG · T1", ["orbit", "maple", "fossil", "drum", "velvet", "harbor"]),
     )
 
 

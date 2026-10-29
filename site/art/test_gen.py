@@ -87,8 +87,7 @@ class Punk(unittest.TestCase):
             self.assertEqual(ink, {(x, y) for y, r in enumerate(rows) for x, c in enumerate(r) if c == "#"})
 
     def test_punk_one_bit(self):
-        pal = gen.palette()
-        self.assertEqual(fills(gen.punk(b"cahoots")), {pal["."], pal["c"]})
+        self.assertEqual(fills(gen.punk(b"cahoots")), {gen.INK, gen.PAPER})
 
     def test_each_layer_draws_within_its_bounds(self):
         self.assertEqual(
@@ -159,8 +158,7 @@ class Punk(unittest.TestCase):
         self.assertIn(f'viewBox="0 0 {w} {h}"', svg)
         self.assertGreater(w, h * 2)
         self.assertIn('shape-rendering="crispEdges"', svg)
-        pal = gen.palette()
-        self.assertEqual(fills(svg), {pal["."], pal["c"]})
+        self.assertEqual(fills(svg), {gen.INK, gen.PAPER})
 
 
 class Icons(unittest.TestCase):
@@ -177,9 +175,9 @@ class Icons(unittest.TestCase):
 class WordsScreen(unittest.TestCase):
     def test_words_screen_has_six_rows(self):
         words = ["orbit", "maple", "fossil", "drum", "velvet", "harbor"]
-        svg = gen.words_screen("back room", "TRNG · T1", words)
+        svg = gen.words_screen("rooftop", "TRNG · T1", words)
         self.assertIn('viewBox="0 0 200 200"', svg)
-        self.assertIn(">back room<", svg)
+        self.assertIn(">rooftop<", svg)
         self.assertIn(">TRNG · T1<", svg)
         rows = re.findall(r'<text class="word"[^>]* y="(\d+)"[^>]*>([^<]+)<', svg)
         self.assertEqual([w for _, w in rows], words)

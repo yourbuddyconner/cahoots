@@ -98,7 +98,7 @@ main { display: block; }
 .band { padding: clamp(72px, 10vh, 120px) var(--gutter); }
 .band + .band { border-top: 1px solid var(--line); }
 .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 0; }
-.steps li { counter-increment: s; display: grid; grid-template-columns: 40px 1fr; gap: 14px; align-items: start; padding: 16px 0; border-top: 1px solid var(--line); color: var(--fg-2); font-size: 15px; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 40px 1fr; gap: 14px; align-items: start; padding: 16px 0; border-top: 1px solid var(--line); color: var(--fg-2); font-size: 15.5px; }
 .steps li::before { content: counter(s, decimal-leading-zero); font-family: var(--mono); font-size: 12px; color: var(--fg-3); padding-top: 4px; }
 .steps b { font-weight: 500; color: var(--fg); }
 
@@ -108,7 +108,7 @@ h3 { font-family: var(--display); font-weight: 600; font-size: 17px; letter-spac
 .note a { color: var(--fg-2); text-decoration: none; white-space: nowrap; }
 .note a:hover { color: var(--fg); }
 
-/* What members can do */
+/* What your circle can do */
 .apps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 40px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
 .app { background: var(--bg-2); padding: 24px 20px 22px; display: flex; flex-direction: column; }
 .app .icon { width: 32px; height: 32px; margin-bottom: 18px; }
@@ -118,7 +118,6 @@ h3 { font-family: var(--display); font-weight: 600; font-size: 17px; letter-spac
 
 /* How you join */
 .how { display: grid; grid-template-columns: 1fr 320px; gap: 64px; align-items: start; margin-top: 40px; }
-.steps li { font-size: 15.5px; }
 .steps li:last-child { border-bottom: 1px solid var(--line); }
 .more { margin: 20px 0 0; font-size: 15px; }
 .more a { color: var(--fg); text-decoration: none; border-bottom: 1px solid var(--line-2); padding-bottom: 2px; }
