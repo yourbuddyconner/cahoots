@@ -130,7 +130,8 @@ REPO="$STATE/repo"; rm -rf "$REPO"; mkdir -p "$REPO"
 if [ "$GITHUB" = 1 ]; then
   say "github: adding the key and logging in"
   gh ssh-key add "$STATE/bench.pub" --title "cahoots bench $(date +%F)" --type authentication >>"$LOG" 2>&1 || say "gh ssh-key add (authentication) failed or exists"
-  gh ssh-key add "$STATE/bench.pub" --title "cahoots bench $(date +%F)" --type signing >>"$LOG" 2>&1 || say "gh ssh-key add (signing) failed or exists"
+  # Needs the admin:ssh_signing_key scope: gh auth refresh -h github.com -s admin:ssh_signing_key
+  gh ssh-key add "$STATE/bench.pub" --title "cahoots bench $(date +%F)" --type signing >>"$LOG" 2>&1 || say "gh ssh-key add (signing) failed or exists; for verified commits on GitHub, run: gh auth refresh -h github.com -s admin:ssh_signing_key, then add it"
   ssh -o StrictHostKeyChecking=accept-new -T git@github.com >>"$LOG" 2>&1
   tail -1 "$LOG" | grep -q "successfully authenticated" && say "ssh -T git@github.com: authenticated with the chip's key" || say "FAILED: ssh -T git@github.com; see $LOG"
 fi
