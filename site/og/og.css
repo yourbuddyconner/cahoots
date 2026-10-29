@@ -13,14 +13,11 @@ h1 { font-family: "Inter Tight", sans-serif; font-weight: 600; font-size: 104px;
 h1.sm { font-size: 84px; }
 .lede { font-size: 27px; line-height: 1.4; color: var(--fg-2); max-width: 640px; margin: 0; }
 .foot { display: flex; justify-content: space-between; align-items: flex-end; font-family: "JetBrains Mono", monospace; font-size: 17px; color: var(--fg-3); letter-spacing: 0.04em; }
-.screen { position: absolute; right: 72px; top: 150px; width: 330px; height: 330px; background: var(--paper); color: var(--ink); border-radius: 14px; padding: 22px; font-family: "JetBrains Mono", monospace; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 30px 80px rgba(0,0,0,0.5); transform: rotate(-4deg); }
-.screen-top { display: flex; justify-content: space-between; font-size: 14px; border-bottom: 2px solid var(--ink); padding-bottom: 10px; }
-.screen-words { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 10px; font-size: 27px; font-weight: 500; }
-.screen-bottom { font-size: 13px; color: #4a4f54; }
-.feed { position: absolute; right: 72px; top: 160px; width: 420px; font-family: "JetBrains Mono", monospace; color: var(--amber); font-size: 24px; line-height: 2; letter-spacing: 0.1em; opacity: 0.9; }
-.feed span { color: var(--fg-3); margin-right: 18px; letter-spacing: 0; font-size: 16px; }
-.phone { position: absolute; right: 110px; top: 70px; width: 240px; height: 470px; border: 2px solid rgba(255,255,255,0.18); border-radius: 36px; background: #101012; padding: 22px 18px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 30px 80px rgba(0,0,0,0.5); }
-.phone .bar { display: flex; justify-content: space-between; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--fg-3); }
-.phone .title { font-family: "Inter Tight", sans-serif; font-weight: 600; font-size: 20px; letter-spacing: -0.02em; }
-.phone .panel { background: var(--paper); color: var(--ink); border-radius: 12px; padding: 16px; font-family: "JetBrains Mono", monospace; font-size: 17px; font-weight: 500; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.phone .btn { margin-top: auto; background: var(--fg); color: var(--bg); border-radius: 12px; padding: 14px; text-align: center; font-weight: 500; font-size: 15px; }
+/* The three site cards: the back room scene sits low, the headline above the heads. */
+body.scene { background: var(--bg) url("../assets/place.png") no-repeat center 44px / 1200px 700px; image-rendering: pixelated; }
+body.scene::before { content: ""; position: absolute; inset: 0; background: linear-gradient(to bottom, var(--bg) 0, var(--bg) 150px, rgba(10,10,11,0.82) 230px, rgba(10,10,11,0.3) 300px, rgba(10,10,11,0) 360px, rgba(10,10,11,0) 540px, rgba(10,10,11,0.7) 630px); }
+body.scene .card { padding: 38px 72px 34px; justify-content: flex-start; gap: 22px; }
+body.scene .lede { max-width: 1000px; font-size: 24px; line-height: 1.4; color: var(--fg); opacity: 0.82; }
+body.scene h1 { font-size: 84px; margin-bottom: 14px; max-width: none; }
+body.scene h1.sm { font-size: 76px; }
+body.scene .foot { margin-top: auto; text-shadow: 0 1px 8px var(--bg), 0 0 3px var(--bg); color: var(--fg-2); }
