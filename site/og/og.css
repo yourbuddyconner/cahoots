@@ -16,8 +16,8 @@ h1.sm { font-size: 84px; }
 /* The three site cards: the poster of the rooftop fills the card, the headline in Fraunces over the sky. */
 body.scene { background: var(--sky-low) url("../assets/place.png") no-repeat center 72% / 1200px 675px; }
 body.scene .card { padding: 58px 72px 0; justify-content: flex-start; align-items: center; gap: 22px; text-align: center; }
-body.scene h1 { font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: 104px; line-height: 1; letter-spacing: -0.02em; margin: 0; max-width: none; color: var(--on-sky); text-shadow: 0 2px 28px rgba(30, 47, 79, 0.3); }
-body.scene h1.sm { font-size: 74px; line-height: 1.02; }
+body.scene h1 { font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: 88px; line-height: 1; letter-spacing: -0.02em; margin: 0; max-width: none; color: var(--on-sky); text-shadow: 0 2px 10px rgba(30, 47, 79, 0.45), 0 2px 36px rgba(30, 47, 79, 0.35); }
+body.scene h1.sm { font-size: 66px; line-height: 1.02; }
 body.scene .brand { color: var(--on-sky); font-size: 28px; }
 body.scene .brand svg { width: 34px; height: 34px; }
 body.scene .brand .sub { color: var(--on-sky); opacity: 0.85; }

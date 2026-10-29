@@ -3,7 +3,7 @@
 A 54 x 86 mm two-layer board that a Raspberry Pi Pico 2 solders onto. On the front: the raw
 1.54" e-paper (GDEY0154D67) on its 24-pin flex, two tactile switches, the pin half of a
 magnetic pogo pair for the card above, two JST-SH pile sockets and a Qwiic socket at the
-bottom edge, and a four-turn NFC loop around the panel. On the back: the Pico 2, the coin cell,
+bottom edge, and a three-turn NFC loop around the board's edge. On the back: the Pico 2, the coin cell,
 a power switch, the panel's boost circuit, a 10-pin expansion socket, the SE051 secure element
 with a switch that opens its antenna loop, and four magnet pockets.
 
@@ -193,7 +193,7 @@ part("C15", "Device:C", "Capacitor_SMD:C_0603_1608Metric", "39pF C0G", "C107049 
 part("C16", "Device:C", "Capacitor_SMD:C_0603_1608Metric", "27pF C0G", "C107045 not fitted: antenna trim", "back", (15.5, 33.0), 0, {"1": "LA", "2": "LB"})
 part("SW4", "Switch:SW_SPDT", "Button_Switch_SMD:SW_SPDT_Shouhan_MSK12C02", "antenna", "C431540 MSK-12C02", "back", (21.0, 25.5), 0, {"1": "LA", "2": "ANT"})
 _ap = antenna_path()
-part("ANT1", "Device:Antenna_Loop", "cahoots:NFC_loop", "NFC loop, 4 turns", "board copper", "front", _ap[0], 0, {"1": "ANT", "2": "LB"})
+part("ANT1", "Device:Antenna_Loop", "cahoots:NFC_loop", "NFC loop, 3 turns", "board copper", "front", _ap[0], 0, {"1": "ANT", "2": "LB"})
 
 # ---- magnet pockets: holes, no copper ----
 for i, (x, y) in enumerate(MAGNETS):

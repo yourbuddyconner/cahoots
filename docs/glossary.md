@@ -50,7 +50,7 @@ The words these documents use, in plain terms. Where a term has a precise defini
 
 **Card.** The badge in its wallet form. V1 is a board in a printed case; V2 is the card.
 
-**Sigil.** The picture a badge draws from its own randomness and shows at rest, so people recognise each other's at a glance. It is being built (roadmap item M4i in [the plan](plan.md)).
+**Punk.** The picture a badge draws from its own randomness and shows at rest: a one-bit pixel face with its own hat, glasses or hair, the same on every circle, so people recognise each other's at a glance. It is being built (roadmap item M4i in [the plan](plan.md)).
 
 **Contact card.** A page on the badge with a code that a phone camera reads. It is part of the idle screen being built (roadmap item M4i in [the plan](plan.md)); a tag on the board is also planned to carry it, or a link, for a phone with no app ([manufacturing](manufacturing.md)).
 
