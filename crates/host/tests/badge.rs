@@ -65,9 +65,9 @@ fn two_host_boards_complete_a_ceremony_through_the_badge_crate() {
     let h_bottom = spawn(bottom.clone(), "-".into(), sock.clone(), 11);
     let h_top = spawn(top.clone(), sock, "-".into(), 22);
 
-    // Both on top once it has a seat, then Both on each card at the keep prompt.
+    // A+B (Both) on the top card once it has a seat, then Both on each card at the keep prompt.
     wait_screen(&top, |s| {
-        s.contains("seat 1") && s.contains("Both on top starts")
+        s.contains("seat 1") && s.contains("A+B on the top card")
     });
     press(&top, "B");
     for dir in [&bottom, &top] {
