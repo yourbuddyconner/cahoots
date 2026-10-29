@@ -320,7 +320,7 @@ impl WasmCeremony {
         )
         .map_err(pad_err)?;
         let mut circle = Circle::from_pad_with_pairs(pad, label, r.pair_keys);
-        circle.seat_key = Some(r.seat_key.to_bytes());
+        circle.seat_key = r.seat_key.as_ref().map(|k| k.to_bytes());
         circle.tier = r.tier;
         circle.manifest = r.manifest.encode();
         Ok(CeremonyOutput {

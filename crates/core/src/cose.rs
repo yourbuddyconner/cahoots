@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use minicbor::data::Type;
 use minicbor::{Decoder, Encoder};
 
-use crate::seat::{SeatKey, SeatPublic};
+use crate::seat::{SeatPublic, SeatSigner};
 
 /// COSE header label `alg`.
 const LABEL_ALG: i64 = 1;
@@ -53,9 +53,10 @@ fn sig_structure(protected: &[u8], external_aad: &[u8], payload: &[u8]) -> Vec<u
 }
 
 /// Sign `payload` as a COSE_Sign1 with key id `kid`. With `detached`, the payload slot is nil and
-/// the verifier supplies the payload.
-pub fn sign1(
-    key: &SeatKey,
+/// the verifier supplies the payload. `key` is any seat signer: `&seat_key`, `&mut chip_seat`, or
+/// a borrowed `&mut dyn SeatSigner`.
+pub fn sign1<S: SeatSigner>(
+    mut key: S,
     kid: &[u8],
     payload: &[u8],
     external_aad: &[u8],

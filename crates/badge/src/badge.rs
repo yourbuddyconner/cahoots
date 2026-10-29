@@ -482,7 +482,12 @@ impl<B: Board> Badge<B> {
                         seat,
                         circle_id: result.circle_id,
                         words,
-                        seat_key: *result.seat_key.to_bytes(),
+                        // This ceremony was built from a seed, so it holds the key.
+                        seat_key: *result
+                            .seat_key
+                            .as_ref()
+                            .ok_or("ceremony: no seat key")?
+                            .to_bytes(),
                         tier: result.tier,
                         manifest: result.manifest.encode(),
                     };

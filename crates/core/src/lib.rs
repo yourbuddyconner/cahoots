@@ -19,6 +19,7 @@ pub mod pad;
 pub mod pairwise;
 pub mod params;
 pub mod reveal;
+pub mod root;
 pub mod seat;
 
 pub use circle_id::CircleId;

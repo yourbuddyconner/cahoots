@@ -828,8 +828,9 @@ fn the_result_carries_the_seat_key_whose_public_is_in_the_roster() {
         let r = d.finish().unwrap();
         assert_eq!(r.tier, tier(i));
         let m = r.manifest.verify().unwrap();
-        assert_eq!(m.seat_key(i), Some(&r.seat_key.public()));
-        assert_eq!(r.seat_key.public(), seat(i));
+        let key = r.seat_key.as_ref().expect("built from a seed");
+        assert_eq!(m.seat_key(i), Some(&key.public()));
+        assert_eq!(key.public(), seat(i));
     }
 }
 

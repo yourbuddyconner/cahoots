@@ -185,7 +185,11 @@ pub fn seal(
         )
         .expect("encryption cannot fail");
     out.extend_from_slice(&body);
-    Ok(Sealed { blob: out, secrets })
+    Ok(Sealed {
+        blob: out,
+        secrets,
+        content_key,
+    })
 }
 
 /// A sealed reveal and the shared secret established with each recipient.
@@ -193,6 +197,9 @@ pub fn seal(
 pub struct Sealed {
     pub blob: Vec<u8>,
     pub secrets: Vec<(u8, Zeroizing<[u8; 32]>)>,
+    /// The key the contribution is encrypted under, wrapped to every recipient. Every member
+    /// learns it, so it is input to the circle root (see `crate::root`).
+    pub content_key: Zeroizing<[u8; CONTENT_KEY_LEN]>,
 }
 
 /// Who sealed this blob, read without decrypting anything.
@@ -211,6 +218,8 @@ pub struct Opened {
     pub contribution: Zeroizing<Vec<u8>>,
     /// The X-Wing shared secret the sender encapsulated to us. Input to the pair key.
     pub shared: Zeroizing<[u8; 32]>,
+    /// The key the sender's contribution is encrypted under. Input to the circle root.
+    pub content_key: Zeroizing<[u8; CONTENT_KEY_LEN]>,
 }
 
 /// Open a sealed reveal as member `me` with decapsulation key `dk`.
@@ -246,7 +255,7 @@ pub fn open(
     let mut shared_out = Zeroizing::new([0u8; 32]);
     shared_out.copy_from_slice(&shared);
     let cipher = ChaCha20Poly1305::new(Key::from_slice(wk.as_ref()));
-    let content_key = Zeroizing::new(
+    let content_key_bytes = Zeroizing::new(
         cipher
             .decrypt(
                 Nonce::from_slice(&[0u8; 12]),
@@ -257,7 +266,13 @@ pub fn open(
             )
             .map_err(|_| RevealError::Corrupted)?,
     );
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(&content_key));
+    // The wrap is a fixed 48 bytes, so an authentic one always opens to 32.
+    let mut content_key = Zeroizing::new([0u8; CONTENT_KEY_LEN]);
+    if content_key_bytes.len() != CONTENT_KEY_LEN {
+        return Err(RevealError::Malformed);
+    }
+    content_key.copy_from_slice(&content_key_bytes);
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(content_key.as_ref()));
     let contribution = Zeroizing::new(
         cipher
             .decrypt(
@@ -279,5 +294,6 @@ pub fn open(
         tier,
         contribution,
         shared: shared_out,
+        content_key,
     })
 }

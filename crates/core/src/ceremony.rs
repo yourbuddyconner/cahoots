@@ -8,6 +8,17 @@
 //!
 //! Once every reveal is in, every member builds the same manifest (see [`crate::manifest`])
 //! and signs it with its seat key; the ceremony is complete when all `n` attestations are held.
+//! Every member then also holds every reveal's content key, from which it derives the circle
+//! root (see [`crate::root`]), the same on every card.
+//!
+//! Two ways to hold the seat key:
+//!
+//! - [`Ceremony::new`] takes a seed; the ceremony holds the software key, signs the manifest
+//!   the moment it is built, and hands the key over in [`CeremonyResult::seat_key`].
+//! - [`Ceremony::with_seat_public`] takes only the public key; the key stays where it is (a
+//!   chip). When the phase reaches `Attest`, [`Ceremony::my_attestation`] is `None` until the
+//!   caller signs with [`Ceremony::sign_manifest`], passing the signer as a
+//!   `&mut dyn SeatSigner`. The ceremony never keeps the signer.
 
 use crate::checkwords::check_words;
 use crate::circle_id::{circle_id, CircleId};
@@ -18,7 +29,8 @@ use crate::manifest::{Manifest, SealedManifest, Seat, MANIFEST_AAD};
 use crate::pairwise::pair_key;
 use crate::params::CircleParams;
 use crate::reveal::{self, RevealError, KEM_SEED_LEN, PUBLIC_KEY_LEN};
-use crate::seat::{SeatKey, SeatPublic};
+use crate::root;
+use crate::seat::{SeatKey, SeatPublic, SeatSigner};
 use alloc::vec;
 use alloc::vec::Vec;
 use x_wing::DecapsulationKey;
@@ -73,8 +85,12 @@ pub struct CeremonyResult {
     /// One key per other member, derived from the two X-Wing secrets exchanged with it.
     /// `None` for our own index. See `crate::pairwise`.
     pub pair_keys: Vec<Option<Zeroizing<[u8; 32]>>>,
-    /// Our seat's signing key for this circle. Zeroized on drop.
-    pub seat_key: SeatKey,
+    /// Our seat's signing key for this circle, when the ceremony was built from a seed. `None`
+    /// when it was built from a seat public key: the key lives in a chip. Zeroized on drop.
+    pub seat_key: Option<SeatKey>,
+    /// The circle root, the same for every member (see `crate::root`). `None` only if our own
+    /// reveal was never sealed, which a completed ceremony cannot reach in practice.
+    pub root: Option<Zeroizing<[u8; 32]>>,
     /// Our declared device tier.
     pub tier: u8,
     /// The manifest body and every seat's attestation, in seat order.
@@ -88,7 +104,8 @@ pub struct Ceremony {
     contribution: Zeroizing<Vec<u8>>,
     dk: DecapsulationKey,
     pk: [u8; PUBLIC_KEY_LEN],
-    seat_key: SeatKey,
+    /// The software seat key, when built from a seed. `None` when the key is held outside.
+    seat_key: Option<SeatKey>,
     tier: u8,
     commitments: Vec<Option<Commitment>>,
     public_keys: Vec<Option<[u8; PUBLIC_KEY_LEN]>>,
@@ -105,6 +122,8 @@ pub struct Ceremony {
     /// Shared secrets: what we encapsulated to each member, and what each encapsulated to us.
     sent: Vec<Option<Zeroizing<[u8; 32]>>>,
     received: Vec<Option<Zeroizing<[u8; 32]>>>,
+    /// Every seat's reveal content key: ours from sealing, the others' from opening.
+    content_keys: Vec<Option<Zeroizing<[u8; 32]>>>,
     /// Set when the phase becomes `Attest`: the circle ID and the canonical manifest bytes.
     circle_id: Option<CircleId>,
     manifest: Option<Vec<u8>>,
@@ -126,15 +145,69 @@ impl Ceremony {
         seat_seed: [u8; 32],
         tier: u8,
     ) -> Result<Self, CeremonyError> {
+        Self::check_args(&params, index, &contribution, tier)?;
+        let seat_key = SeatKey::from_seed(&seat_seed).map_err(|_| CeremonyError::BadSeed)?;
+        let seat_public = seat_key.public();
+        Self::build(
+            params,
+            index,
+            contribution,
+            kem_seed,
+            seat_public,
+            Some(seat_key),
+            tier,
+        )
+    }
+
+    /// Like `new`, but the seat key is held outside the ceremony (a chip) and only its public
+    /// key comes in: ask the signer for `public()` before calling this, since the commitment
+    /// binds it. Once the phase is `Attest`, sign the manifest with `sign_manifest`.
+    pub fn with_seat_public(
+        params: CircleParams,
+        index: u8,
+        contribution: Vec<u8>,
+        kem_seed: [u8; KEM_SEED_LEN],
+        seat_public: SeatPublic,
+        tier: u8,
+    ) -> Result<Self, CeremonyError> {
+        Self::check_args(&params, index, &contribution, tier)?;
+        let seat_public =
+            SeatPublic::parse(&seat_public.0).map_err(|_| CeremonyError::BadKey(index))?;
+        Self::build(
+            params,
+            index,
+            contribution,
+            kem_seed,
+            seat_public,
+            None,
+            tier,
+        )
+    }
+
+    fn check_args(
+        params: &CircleParams,
+        index: u8,
+        contribution: &[u8],
+        tier: u8,
+    ) -> Result<(), CeremonyError> {
         if index >= params.n {
             return Err(CeremonyError::BadIndex(index));
         }
         if contribution.len() != params.pad_len as usize {
             return Err(CeremonyError::ContributionLength);
         }
-        check_tier(tier)?;
-        let seat_key = SeatKey::from_seed(&seat_seed).map_err(|_| CeremonyError::BadSeed)?;
-        let seat_public = seat_key.public();
+        check_tier(tier)
+    }
+
+    fn build(
+        params: CircleParams,
+        index: u8,
+        contribution: Vec<u8>,
+        kem_seed: [u8; KEM_SEED_LEN],
+        seat_public: SeatPublic,
+        seat_key: Option<SeatKey>,
+        tier: u8,
+    ) -> Result<Self, CeremonyError> {
         let n = usize::from(params.n);
         let (dk, pk) = reveal::keypair(&kem_seed);
         let my_commit = commit(&params, index, &pk, &seat_public, tier, &contribution);
@@ -167,6 +240,7 @@ impl Ceremony {
             sealed: None,
             sent: vec![None; n],
             received: vec![None; n],
+            content_keys: vec![None; n],
             circle_id: None,
             manifest: None,
             attestations: vec![None; n],
@@ -210,7 +284,7 @@ impl Ceremony {
 
     /// Our seat public key. Public; travels with the commitment.
     pub fn my_seat_public(&self) -> SeatPublic {
-        self.seat_key.public()
+        self.seat_publics[usize::from(self.index)].expect("own seat key is set")
     }
 
     /// Random bytes `my_reveal` needs the first time it is called.
@@ -251,6 +325,7 @@ impl Ceremony {
             for (to, s) in sealed.secrets {
                 self.sent[usize::from(to)] = Some(s);
             }
+            self.content_keys[usize::from(self.index)] = Some(sealed.content_key);
             self.sealed = Some(sealed.blob);
         }
         self.sealed.as_deref()
@@ -361,7 +436,8 @@ impl Ceremony {
         }
     }
 
-    /// Every reveal is in: build the manifest, sign it, and collect the others' signatures.
+    /// Every reveal is in: build the manifest, sign it if we hold the seat key, and collect the
+    /// others' signatures.
     fn enter_attest(&mut self) {
         let id = circle_id(&self.pad);
         let seats = (0..self.params.n)
@@ -380,8 +456,10 @@ impl Ceremony {
             genesis: 0,
         }
         .encode();
-        let mine = cose::sign1(&self.seat_key, &[self.index], &body, MANIFEST_AAD, true);
-        self.attestations[usize::from(self.index)] = Some(mine);
+        self.attestations[usize::from(self.index)] = self
+            .seat_key
+            .as_ref()
+            .map(|key| cose::sign1(key, &[self.index], &body, MANIFEST_AAD, true));
         self.circle_id = Some(id);
         self.manifest = Some(body);
         self.phase = Phase::Attest;
@@ -394,13 +472,65 @@ impl Ceremony {
         }
     }
 
+    /// Our attestation of the manifest, signed by a seat key held outside the ceremony (built
+    /// with `with_seat_public`). The signature is checked against our seat public key before it
+    /// is kept: a signer with another key is `BadAttestation(index)` and changes nothing.
+    /// `WrongPhase` before `Attest`. Once our attestation is held, later calls do nothing and
+    /// do not ask the signer.
+    pub fn sign_manifest(&mut self, signer: &mut dyn SeatSigner) -> Result<(), CeremonyError> {
+        if self.phase == Phase::Aborted {
+            return Err(CeremonyError::Aborted);
+        }
+        let Some(body) = self.manifest.as_deref() else {
+            return Err(CeremonyError::WrongPhase);
+        };
+        let i = usize::from(self.index);
+        if self.attestations[i].is_some() {
+            return Ok(());
+        }
+        let mine = cose::sign1(&mut *signer, &[self.index], body, MANIFEST_AAD, true);
+        let public = self.my_seat_public();
+        cose::verify1(&public, &mine, Some(body), MANIFEST_AAD)
+            .map_err(|_| CeremonyError::BadAttestation(self.index))?;
+        self.attestations[i] = Some(mine);
+        self.complete_if_all_attested();
+        Ok(())
+    }
+
+    /// The circle ID. `None` before `Attest`.
+    pub fn circle_id(&self) -> Option<CircleId> {
+        self.circle_id
+    }
+
+    /// Every seat's reveal content key, in seat order: the input to the circle root (see
+    /// `crate::root`). Every member holds the same list. `None` until every reveal is in and
+    /// our own has been sealed.
+    pub fn reveal_secrets(&self) -> Option<Zeroizing<Vec<[u8; 32]>>> {
+        if self.phase == Phase::Aborted {
+            return None;
+        }
+        let mut out = Zeroizing::new(Vec::with_capacity(self.content_keys.len()));
+        for k in &self.content_keys {
+            out.push(**k.as_ref()?);
+        }
+        Some(out)
+    }
+
+    /// The circle root: `root::derive(reveal_secrets, circle_id)`. `None` before `Attest`.
+    pub fn circle_root(&self) -> Option<Zeroizing<[u8; 32]>> {
+        let id = self.circle_id?;
+        let secrets = self.reveal_secrets()?;
+        Some(Zeroizing::new(root::derive(&secrets, &id)))
+    }
+
     /// The canonical manifest bytes every member signs. `None` before `Attest`.
     pub fn manifest(&self) -> Option<&[u8]> {
         self.manifest.as_deref()
     }
 
     /// Our seat's detached COSE_Sign1 over the manifest, key id `[index]`, external AAD
-    /// `cahoots/manifest/v1`. `None` before `Attest`. Built once, with the manifest.
+    /// `cahoots/manifest/v1`. `None` before `Attest`. Built once: with the manifest when the
+    /// ceremony holds the seat key, or by `sign_manifest` when it does not.
     pub fn my_attestation(&self) -> Option<Vec<u8>> {
         if self.phase == Phase::Aborted {
             return None;
@@ -461,6 +591,7 @@ impl Ceremony {
         self.sealed = None;
         self.sent.iter_mut().for_each(|s| *s = None);
         self.received.iter_mut().for_each(|s| *s = None);
+        self.content_keys.iter_mut().for_each(|s| *s = None);
     }
 
     /// Open a sealed reveal from `from` and fold it in.
@@ -521,6 +652,7 @@ impl Ceremony {
             }
         }
         self.received[i] = Some(opened.shared.clone());
+        self.content_keys[i] = Some(opened.content_key.clone());
         if self.phase == Phase::Commit {
             if !self.pending.iter().any(|(j, _)| *j == from) {
                 self.pending.push((from, opened.contribution));
@@ -532,13 +664,14 @@ impl Ceremony {
         Ok(())
     }
 
-    /// Erase the contribution and hand over the pad, check words, circle ID, seat key, and
-    /// the sealed manifest.
+    /// Erase the contribution and hand over the pad, check words, circle ID, seat key (when
+    /// held), circle root, and the sealed manifest.
     pub fn finish(self) -> Result<CeremonyResult, CeremonyError> {
         if self.phase != Phase::Complete {
             return Err(CeremonyError::WrongPhase);
         }
         let words = check_words(&self.params, &self.pad);
+        let root = self.circle_root();
         let id = self.circle_id.expect("set when the phase became Attest");
         let pair_keys = (0..self.params.n)
             .map(|j| {
@@ -571,6 +704,7 @@ impl Ceremony {
             params: self.params,
             pair_keys,
             seat_key: self.seat_key,
+            root,
             tier: self.tier,
             manifest,
         })

@@ -136,6 +136,7 @@ dependencies = [
  "chacha20poly1305",
  "crc",
  "hkdf",
+ "hmac",
  "hybrid-array",
  "minicbor",
  "p256",

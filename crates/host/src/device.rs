@@ -117,7 +117,11 @@ impl Device {
         let ledger = PersistentLedger::open(records, params.slices())
             .map_err(|e| DeviceError::State(format!("ledger: {e:?}")))?;
         let seat = Seat {
-            key: result.seat_key.to_bytes(),
+            key: result
+                .seat_key
+                .as_ref()
+                .ok_or_else(|| DeviceError::State("seat_key".into()))?
+                .to_bytes(),
             tier: result.tier,
             manifest: result.manifest.encode(),
         };

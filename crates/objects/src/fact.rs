@@ -19,7 +19,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use cahoots_core::cose;
 use cahoots_core::manifest::Manifest;
-use cahoots_core::seat::SeatKey;
+use cahoots_core::seat::SeatSigner;
 use cahoots_core::CircleId;
 use sha2::{Digest, Sha256};
 
@@ -101,7 +101,7 @@ impl Fact {
     }
 
     /// Sign as a COSE_Sign1 with the payload embedded; `kid` is `[seat]`.
-    pub fn sign(&self, key: &SeatKey, kid: &[u8]) -> Vec<u8> {
+    pub fn sign<S: SeatSigner>(&self, key: S, kid: &[u8]) -> Vec<u8> {
         cose::sign1(key, kid, &self.encode(), DOMAIN, false)
     }
 

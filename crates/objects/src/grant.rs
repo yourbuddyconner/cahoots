@@ -20,7 +20,7 @@
 use alloc::vec::Vec;
 use cahoots_core::cose::{self, CoseError};
 use cahoots_core::manifest::Manifest;
-use cahoots_core::seat::{SeatKey, SeatPublic};
+use cahoots_core::seat::{SeatPublic, SeatSigner};
 use cahoots_core::CircleId;
 use minicbor::data::Type;
 use sha2::{Digest, Sha256};
@@ -166,7 +166,7 @@ impl Grant {
 
     /// Sign as a COSE_Sign1 with the payload embedded. `kid` is `[seat]` for a root grant and
     /// [`key_id`] of the signer for a delegated one.
-    pub fn sign(&self, key: &SeatKey, kid: &[u8]) -> Vec<u8> {
+    pub fn sign<S: SeatSigner>(&self, key: S, kid: &[u8]) -> Vec<u8> {
         cose::sign1(key, kid, &self.encode(), DOMAIN, false)
     }
 }

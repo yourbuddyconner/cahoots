@@ -4,7 +4,7 @@
 //! of the message, as raw `r || s`. Public keys travel as 33-byte SEC1 compressed points.
 
 use p256::ecdsa::signature::{Signer, Verifier};
-use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
+use p256::ecdsa::{Signature as EcdsaSignature, SigningKey, VerifyingKey};
 use zeroize::{Zeroize, Zeroizing};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -13,6 +13,50 @@ pub enum SeatError {
     BadSeed,
     /// The bytes are not a valid SEC1 compressed P-256 point.
     BadPublic,
+}
+
+/// A seat signature: ECDSA P-256 over SHA-256 of the message, raw `r || s`.
+pub type Signature = [u8; 64];
+
+/// Something that signs as a seat: a software `SeatKey`, or a key held in a chip that never
+/// leaves it. `public` takes `&mut self` because a chip answers it over a bus, and may make the
+/// key the first time it is asked.
+///
+/// Every core and objects function that signs takes a `S: SeatSigner`. `&SeatKey`, `&mut S`
+/// and `&mut dyn SeatSigner` all are one, so callers pass `&key`, `&mut chip_seat` or a
+/// borrowed `&mut dyn SeatSigner` alike.
+pub trait SeatSigner {
+    fn public(&mut self) -> SeatPublic;
+    /// Deterministic or not, the signature must verify under `public()`.
+    fn sign(&mut self, msg: &[u8]) -> Signature;
+}
+
+impl SeatSigner for SeatKey {
+    fn public(&mut self) -> SeatPublic {
+        SeatKey::public(self)
+    }
+    fn sign(&mut self, msg: &[u8]) -> Signature {
+        SeatKey::sign(self, msg)
+    }
+}
+
+/// A software key signs through a shared reference, so `&key` is a signer too.
+impl SeatSigner for &SeatKey {
+    fn public(&mut self) -> SeatPublic {
+        SeatKey::public(self)
+    }
+    fn sign(&mut self, msg: &[u8]) -> Signature {
+        SeatKey::sign(self, msg)
+    }
+}
+
+impl<T: SeatSigner + ?Sized> SeatSigner for &mut T {
+    fn public(&mut self) -> SeatPublic {
+        (**self).public()
+    }
+    fn sign(&mut self, msg: &[u8]) -> Signature {
+        (**self).sign(msg)
+    }
 }
 
 /// A seat's secret signing key. The scalar is zeroized on drop.
@@ -54,8 +98,8 @@ impl SeatKey {
     }
 
     /// Deterministic ECDSA (RFC 6979) over SHA-256 of `msg`, raw `r || s`.
-    pub fn sign(&self, msg: &[u8]) -> [u8; 64] {
-        let sig: Signature = self.0.sign(msg);
+    pub fn sign(&self, msg: &[u8]) -> Signature {
+        let sig: EcdsaSignature = self.0.sign(msg);
         sig.to_bytes().into()
     }
 }
@@ -77,7 +121,7 @@ impl SeatPublic {
         let Ok(key) = VerifyingKey::from_sec1_bytes(&self.0) else {
             return false;
         };
-        let Ok(sig) = Signature::from_slice(sig) else {
+        let Ok(sig) = EcdsaSignature::from_slice(sig) else {
             return false;
         };
         key.verify(msg, &sig).is_ok()
