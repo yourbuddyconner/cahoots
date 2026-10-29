@@ -31,4 +31,6 @@ cahoots-objects = { workspace = true, features = ["std"] }
 ssh-key = { version = "0.6", default-features = false, features = ["alloc", "ecdsa", "ed25519", "p256", "rand_core", "getrandom"] }
 ssh-encoding = { version = "0.2", default-features = false, features = ["alloc"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
+serde_json = { workspace = true }
+hex = { workspace = true }
 signature = "2"

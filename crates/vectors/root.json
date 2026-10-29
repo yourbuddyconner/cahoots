@@ -1,0 +1,39 @@
+{
+  "chat_keys": [
+    {
+      "epoch": 0,
+      "key": "15ce979fd1ba200c019ec689306af97c117577f40cf7f32896af9d0b8f783eae"
+    },
+    {
+      "epoch": 1,
+      "key": "dc2a9ba8cf14bf8fde2b68393b4796957af10d2decf74abe21cbda122377d601"
+    },
+    {
+      "epoch": 7,
+      "key": "f05a38b03032a8b0211332f1863fcd53f7d52dcb3007d5c8346553972c7c8734"
+    },
+    {
+      "epoch": 4294967296,
+      "key": "b9d8e1c0abbc9c79562113d0534ffca76c967da724509600061ecf1d90d770e0"
+    }
+  ],
+  "circle_id": "6f8648f8add6df732cae1325a1fe798f",
+  "content_keys": [
+    "783b1416caaf82a6d7a90cd80c10c892ca9816591a2effb38b542adf2666225b",
+    "7087acf0185097783655de05993f0b4d4204280ca1c79b699735781695a62309",
+    "349e9960410b824f20f0b26619601129fa6ea844140160ddcb39c6b054b69992"
+  ],
+  "description": "The circle root and the keys derived from it (crates/core/src/root.rs, docs/superpowers/specs/2026-10-28-chip-apps-design.md section 2). content_keys are the reveal content keys of the ceremony in ceremony.json, in seat order, and circle_id is that ceremony's circle id. root = HKDF-SHA256(ikm = content_keys concatenated in seat order, salt = circle_id, info = \"cahoots/root/v1\"), 32 bytes. A chat key is HMAC-SHA256(root, \"chat\" || circle_id || epoch as 8 bytes big-endian). A seal key is HMAC-SHA256(root, label || circle_id); the card seal key is the one labelled seal/card.",
+  "root": "46698fd55ab2a5a50e36dbb17f6fe7bc394a77928305cb194e5cae0b2da9ea2a",
+  "seal_keys": [
+    {
+      "key": "d85d9fb5739170bb8a864431d91976432ab11356deb3248d464b5fc8d0177cf1",
+      "label": "seal/card"
+    },
+    {
+      "key": "f75c0f4c29dda0e8649e040becfce79fcf4da9bc9fe2ed5796eadfef61543e46",
+      "label": "seal/notes"
+    }
+  ],
+  "source": "ceremony.json"
+}

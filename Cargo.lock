@@ -387,10 +387,12 @@ dependencies = [
  "cahoots-objects",
  "ed25519-dalek",
  "embedded-graphics",
+ "hex",
  "minicbor",
  "p256",
  "profont",
  "rand_core 0.6.4",
+ "serde_json",
  "sha2 0.10.9",
  "signature",
  "ssh-encoding",
@@ -591,7 +593,9 @@ dependencies = [
 name = "cahoots-vectors"
 version = "0.1.0"
 dependencies = [
+ "cahoots-badge",
  "cahoots-core",
+ "cahoots-custodian",
  "cahoots-objects",
  "hex",
  "serde",

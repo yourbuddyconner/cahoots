@@ -39,7 +39,15 @@ fn fill(seed: u64, len: usize) -> Vec<u8> {
 /// The tier each member declares; the middle one differs so a swap shows.
 const TIERS: [u8; 3] = [0, 1, 0];
 
-fn ceremony_vectors() -> Value {
+/// What the ceremony vectors' run gives the circle root vectors: the circle id, every seat's
+/// reveal content key in seat order, and the root every member derived.
+struct RootCase {
+    circle_id: [u8; 16],
+    content_keys: Vec<[u8; 32]>,
+    root: [u8; 32],
+}
+
+fn ceremony_vectors() -> (Value, RootCase) {
     let params = CircleParams::new(3, 192, "vectors", false).unwrap();
     let contributions: Vec<Vec<u8>> = (0..3).map(|i| fill(100 + i, 192)).collect();
     let seeds: Vec<[u8; 32]> = (0..3)
@@ -102,7 +110,20 @@ fn ceremony_vectors() -> Value {
         assert_eq!(d.phase(), Phase::Complete);
     }
     let manifest = devs[0].manifest().unwrap().to_vec();
+    // The circle root: every member holds the same content keys and derives the same root.
+    let root_case = RootCase {
+        circle_id: devs[0].circle_id().unwrap(),
+        content_keys: devs[0].reveal_secrets().unwrap().to_vec(),
+        root: *devs[0].circle_root().unwrap(),
+    };
+    for d in &devs {
+        assert_eq!(*d.reveal_secrets().unwrap(), root_case.content_keys);
+        assert_eq!(*d.circle_root().unwrap(), root_case.root);
+    }
     let results: Vec<_> = devs.into_iter().map(|d| d.finish().unwrap()).collect();
+    for r in &results {
+        assert_eq!(r.root.as_deref(), Some(&root_case.root));
+    }
     let result = &results[2];
     let mut expected = vec![0u8; 192];
     for c in &contributions {
@@ -181,7 +202,7 @@ fn ceremony_vectors() -> Value {
     );
     assert_eq!(victim.phase(), Phase::Reveal);
 
-    json!({
+    let value = json!({
         "description": "Commit-then-reveal ceremony for n=3, L=192. commit_i = SHA-256(\"cahoots/commit/v2\" || params || i || pk_i || seat_pk_i || tier_i || R_i), where pk_i is the X-Wing encapsulation key derived from kem_seed_i, seat_pk_i is the 33-byte SEC1 compressed P-256 public key of the seat seed (from seat_seeds[i]) and tier_i is one byte (tiers[i]: 0, 1, 0). Sealed reveals are version 2: version || from || pk_from || seat_pk || tier || k || entries || content. Reveals are sealed to every other member (crates/core/src/reveal.rs): content key K_i, per recipient X-Wing encapsulation with the 64 bytes of randomness given, wrap = ChaCha20-Poly1305(HKDF-SHA256(salt \"cahoots/reveal-wrap/v1\", ikm shared, info params||from||to), nonce 0, aad from||to, K_i), content = ChaCha20-Poly1305(K_i, nonce 0, aad \"cahoots/reveal/v1\"||params||from||pk_from||seat_pk||tier, R_i). pad = XOR of all R_i. After the reveals every member builds the same canonical manifest body (docs/superpowers/specs/2026-10-26-seats-manifest-objects.md sections 4 and 5), signs it with its seat key as a detached COSE_Sign1 (attestations[i]), and collects every attestation. sealed_manifest is SealedManifest::encode(); manifest_id is Manifest::id of the body.",
         "params": {
             "n": params.n, "pad_len": params.pad_len, "name": params.name, "agent_seat": params.agent_seat,
@@ -235,7 +256,8 @@ fn ceremony_vectors() -> Value {
             "contribution": hex::encode(&contributions[0]),
             "commitment": hex::encode(commit(&params, 0, &commits[0].1, &seat_pks[0], TIERS[0], &contributions[0])),
         }
-    })
+    });
+    (value, root_case)
 }
 
 fn control_vectors() -> Value {
@@ -657,11 +679,198 @@ fn object_vectors() -> Value {
     })
 }
 
+/// The circle root from the ceremony vectors' content keys, the chat key per epoch and the seal
+/// keys named by a label.
+fn root_vectors(case: &RootCase) -> Value {
+    use cahoots_core::root;
+    let derived = root::derive(&case.content_keys, &case.circle_id);
+    assert_eq!(derived, case.root);
+    let chat: Vec<Value> = [0u64, 1, 7, 1 << 32]
+        .iter()
+        .map(|&epoch| {
+            json!({
+                "epoch": epoch,
+                "key": hex::encode(root::chat_key(&case.root, &case.circle_id, epoch)),
+            })
+        })
+        .collect();
+    let seal: Vec<Value> = [root::SEAL_CARD, b"seal/notes".as_slice()]
+        .iter()
+        .map(|label| {
+            json!({
+                "label": std::str::from_utf8(label).unwrap(),
+                "key": hex::encode(root::seal_key(&case.root, label, &case.circle_id)),
+            })
+        })
+        .collect();
+    json!({
+        "description": "The circle root and the keys derived from it (crates/core/src/root.rs, docs/superpowers/specs/2026-10-28-chip-apps-design.md section 2). content_keys are the reveal content keys of the ceremony in ceremony.json, in seat order, and circle_id is that ceremony's circle id. root = HKDF-SHA256(ikm = content_keys concatenated in seat order, salt = circle_id, info = \"cahoots/root/v1\"), 32 bytes. A chat key is HMAC-SHA256(root, \"chat\" || circle_id || epoch as 8 bytes big-endian). A seal key is HMAC-SHA256(root, label || circle_id); the card seal key is the one labelled seal/card.",
+        "source": "ceremony.json",
+        "circle_id": hex::encode(case.circle_id),
+        "content_keys": case.content_keys.iter().map(hex::encode).collect::<Vec<_>>(),
+        "root": hex::encode(case.root),
+        "chat_keys": chat,
+        "seal_keys": seal,
+    })
+}
+
+/// Append `b` as an SSH string.
+fn ssh_string(out: &mut Vec<u8>, b: &[u8]) {
+    out.extend_from_slice(&(b.len() as u32).to_be_bytes());
+    out.extend_from_slice(b);
+}
+
+/// The userauth request OpenSSH asks an agent to sign.
+fn userauth(session_id: &[u8], user: &str, method: &str, key: &[u8], host_key: Option<&[u8]>) -> Vec<u8> {
+    let mut v = Vec::new();
+    ssh_string(&mut v, session_id);
+    v.push(50);
+    ssh_string(&mut v, user.as_bytes());
+    ssh_string(&mut v, b"ssh-connection");
+    ssh_string(&mut v, method.as_bytes());
+    v.push(1);
+    ssh_string(&mut v, b"ecdsa-sha2-nistp256");
+    ssh_string(&mut v, key);
+    if let Some(h) = host_key {
+        ssh_string(&mut v, h);
+    }
+    v
+}
+
+/// Requests to sign for ssh and git, with the badge's screen for each and the signature it
+/// returns, from a software seat key.
+fn ssh_vectors() -> Value {
+    use cahoots_badge::apps::BadgeApps;
+    use cahoots_badge::{ssh, Circle};
+    use cahoots_custodian::contract::ChipApps;
+    use cahoots_custodian::wire::{ChipRequest, SshHost};
+
+    let seat_seed: [u8; 32] = fill(600, 32).try_into().unwrap();
+    let seat = SeatKey::from_seed(&seat_seed).unwrap();
+    let circle_id: [u8; 16] = fill(610, 16).try_into().unwrap();
+    let circle = Circle {
+        params: CircleParams::new(2, 192, "bench", false).unwrap(),
+        seat: 0,
+        circle_id,
+        words: [0; 6],
+        seat_key: seat_seed,
+        chip_slot: None,
+        root: None,
+        tier: 0,
+        manifest: Vec::new(),
+    };
+    let host_seed: [u8; 32] = fill(620, 32).try_into().unwrap();
+    let host_key = SeatKey::from_seed(&host_seed).unwrap();
+    let host_blob = ssh::public_key_blob(&host_key.public());
+    let session_id = fill(630, 32);
+    let binding = SshHost {
+        host_key: host_blob.clone(),
+        session_id: session_id.clone(),
+        host_sig: ssh::encode_signature(&host_key.sign(&session_id)),
+        name: "git.example.com".into(),
+        user: "git".into(),
+    };
+    let seat_blob = ssh::public_key_blob(&seat.public());
+
+    let commit = "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n\
+author Ada Lovelace <ada@example.com> 1700000000 +0000\n\
+committer Ada Lovelace <ada@example.com> 1700000000 +0000\n\
+\n\
+Fix the parser for long names\n\
+\n\
+Names longer than 64 bytes were cut.\n";
+    let mut sshsig = b"SSHSIG".to_vec();
+    ssh_string(&mut sshsig, b"git");
+    ssh_string(&mut sshsig, b"");
+    ssh_string(&mut sshsig, b"sha512");
+    ssh_string(&mut sshsig, &sha2::Sha512::digest(commit.as_bytes()));
+
+    let cases: Vec<(&str, Vec<u8>, Option<SshHost>, Option<Vec<u8>>)> = vec![
+        (
+            "login bound to a P-256 host key: the host is verified and still the laptop's name",
+            userauth(&session_id, "git", "publickey", &seat_blob, None),
+            Some(binding.clone()),
+            None,
+        ),
+        (
+            "login with the server's key in the request (publickey-hostbound-v00@openssh.com)",
+            userauth(&session_id, "git", "publickey-hostbound-v00@openssh.com", &seat_blob, Some(&host_blob)),
+            Some(binding.clone()),
+            None,
+        ),
+        (
+            "login with no binding: host not named",
+            userauth(&session_id, "root", "publickey", &seat_blob, None),
+            None,
+            None,
+        ),
+        (
+            "login bound to another session: host not named",
+            userauth(&fill(631, 32), "git", "publickey", &seat_blob, None),
+            Some(binding.clone()),
+            None,
+        ),
+        (
+            "git commit: an SSHSIG envelope over SHA-512 of the commit text, which the laptop sends as content",
+            sshsig,
+            None,
+            Some(commit.as_bytes().to_vec()),
+        ),
+    ];
+    let host_json = |h: &SshHost| {
+        json!({
+            "host_key": hex::encode(&h.host_key),
+            "session_id": hex::encode(&h.session_id),
+            "host_sig": hex::encode(&h.host_sig),
+            "name": h.name,
+            "user": h.user,
+        })
+    };
+    let circles = [circle];
+    let out: Vec<Value> = cases
+        .into_iter()
+        .map(|(what, data, host, content)| {
+            let op = ChipRequest::SshSign {
+                data: data.clone(),
+                host: host.clone(),
+                content: content.clone(),
+            };
+            let mut apps = BadgeApps::new(&circles, None);
+            let screen = apps.prompt(&circle_id, &op).unwrap().unwrap();
+            let signature = apps
+                .ssh_sign(&circle_id, &data, host.as_ref(), content.as_deref())
+                .unwrap();
+            json!({
+                "case": what,
+                "data": hex::encode(&data),
+                "host": host.as_ref().map(host_json),
+                "content": content.as_ref().map(hex::encode),
+                "screen": screen.lines,
+                "signature": hex::encode(&signature),
+            })
+        })
+        .collect();
+    json!({
+        "description": "Requests to sign for ssh and git (docs/superpowers/specs/2026-10-28-chip-apps-design.md section 5, docs/protocol.md). A badge with one circle, bench, seat 0, whose seat key comes from seat_seed, receives a Chip SshSign request for each case: data is the exact bytes OpenSSH asks an agent to sign, host the session binding the laptop learned from session-bind@openssh.com (host_key and host_sig are SSH wire blobs; the host key comes from host_seed) and content the commit text for git. screen is the text of the consent screen the badge shows, line by line, footer last; a host name is always marked (laptop). signature is the SSH signature blob the badge returns: ecdsa-sha2-nistp256 with r and s as mpints, ECDSA P-256 over SHA-256(data), RFC 6979 deterministic.",
+        "seat_seed": hex::encode(seat_seed),
+        "seat_public": hex::encode(seat.public().0),
+        "seat_blob": hex::encode(&seat_blob),
+        "circle_id": hex::encode(circle_id),
+        "circle": "bench",
+        "seat": 0,
+        "host_seed": hex::encode(host_seed),
+        "cases": out,
+    })
+}
+
 fn main() {
     let check = std::env::args().any(|a| a == "--check");
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let (ceremony, root_case) = ceremony_vectors();
     let files = [
-        ("ceremony.json", ceremony_vectors()),
+        ("ceremony.json", ceremony),
+        ("root.json", root_vectors(&root_case)),
+        ("ssh.json", ssh_vectors()),
         ("control.json", control_vectors()),
         ("checkwords.json", checkword_vectors()),
         ("messages.json", message_vectors()),

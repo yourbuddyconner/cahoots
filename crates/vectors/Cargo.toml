@@ -10,6 +10,8 @@ publish = false
 [dependencies]
 cahoots-core = { workspace = true, features = ["std"] }
 cahoots-objects = { workspace = true, features = ["std"] }
+cahoots-badge = { workspace = true }
+cahoots-custodian = { workspace = true }
 serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true }
 hex = { workspace = true, features = ["std"] }

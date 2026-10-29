@@ -422,3 +422,36 @@ fn a_second_different_reveal_from_one_sender_is_refused_and_the_root_does_not_mo
         "pair key 0<->1 agrees"
     );
 }
+
+/// Rebuilds `crates/vectors/root.json`: the root from the ceremony's content keys, the chat
+/// keys and the seal keys.
+#[test]
+fn the_root_vectors_are_reproduced() {
+    let v: serde_json::Value =
+        serde_json::from_str(include_str!("../../vectors/root.json")).unwrap();
+    let bytes = |x: &serde_json::Value| hex::decode(x.as_str().unwrap()).unwrap();
+    let circle_id: CircleId = bytes(&v["circle_id"]).try_into().unwrap();
+    // The circle id is the one in the ceremony vectors the content keys come from.
+    let ceremony: serde_json::Value =
+        serde_json::from_str(include_str!("../../vectors/ceremony.json")).unwrap();
+    assert_eq!(v["circle_id"], ceremony["circle_id"]);
+    let keys: Vec<[u8; 32]> = v["content_keys"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|k| bytes(k).try_into().unwrap())
+        .collect();
+    assert_eq!(keys.len(), 3);
+    let root: [u8; 32] = bytes(&v["root"]).try_into().unwrap();
+    assert_eq!(root::derive(&keys, &circle_id), root);
+    for c in v["chat_keys"].as_array().unwrap() {
+        let epoch = c["epoch"].as_u64().unwrap();
+        assert_eq!(root::chat_key(&root, &circle_id, epoch).to_vec(), bytes(&c["key"]));
+    }
+    let seal = v["seal_keys"].as_array().unwrap();
+    assert_eq!(seal[0]["label"], "seal/card");
+    for c in seal {
+        let label = c["label"].as_str().unwrap().as_bytes();
+        assert_eq!(root::seal_key(&root, label, &circle_id).to_vec(), bytes(&c["key"]));
+    }
+}
