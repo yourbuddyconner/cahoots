@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
 
 const here = resolve(fileURLToPath(import.meta.url), "..");
 const { chromium } = createRequire(join(here, "package.json"))("playwright");
-const siteDir = resolve(here, "..", "site");
+// SITE_DIR points the check at another copy of site/, for example an older commit's.
+const siteDir = resolve(process.env.SITE_DIR || join(here, "..", "site"));
 
 const types = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png", ".ico": "image/x-icon" };
 const server = createServer((req, res) => {
@@ -39,6 +40,11 @@ try {
   page.on("requestfailed", (r) => errors.push(`request failed: ${r.url()}`));
   page.on("response", (r) => { if (r.status() >= 400 && r.url().startsWith(base)) errors.push(`${r.status()} ${r.url()}`); });
   await page.goto(base, { waitUntil: "load" });
+  // Load every image, lazy ones included, so the image assertion checks all of them.
+  await page.evaluate(async () => {
+    for (const i of document.images) i.loading = "eager";
+    await Promise.all([...document.images].map((i) => i.decode().catch(() => {})));
+  });
   await page.waitForTimeout(300);
 
   const facts = await page.evaluate(() => {
@@ -54,7 +60,8 @@ try {
       soon: q(".soon").map((e) => e.textContent.trim()),
       three: q('script[src*="three"]').length + q('script[type="importmap"]').filter((s) => s.textContent.includes("three")).length,
       ids: ["what", "how", "ways", "card", "feed", "open"].filter((id) => !document.getElementById(id)),
-      broken: q("img").filter((i) => i.complete && i.naturalWidth === 0).map((i) => i.getAttribute("src")),
+      images: q("img").length,
+      broken: q("img").filter((i) => !i.complete || i.naturalWidth === 0).map((i) => i.getAttribute("src")),
     };
   });
   check("no console errors or failed requests at 1280 px", errors.length === 0, errors.join("; "));
@@ -67,7 +74,7 @@ try {
   check('every .soon label reads "being built"', facts.soon.length > 0 && facts.soon.every((t) => t === "being built"), JSON.stringify(facts.soon));
   check("no three.js script or import map", facts.three === 0, `found ${facts.three}`);
   check("sections what, how, ways, card, feed, open exist", facts.ids.length === 0, `missing ${facts.ids.join(", ")}`);
-  check("every image loads", facts.broken.length === 0, facts.broken.join(", "));
+  check(`every image loads (${facts.images} checked)`, facts.broken.length === 0, facts.broken.join(", "));
   await ctx.close();
 
   // Phone.
