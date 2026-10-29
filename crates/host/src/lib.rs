@@ -11,11 +11,13 @@
 //! - [`badge_client::BadgeClient`]: a laptop's requests to a badge, real or simulated.
 //! - [`agent`], [`gitsign`], [`roster`], [`attest`]: SSH logins and git signatures with a
 //!   badge's seat key, the circle as `authorized_keys`, and the chip's attestation.
+//! - [`card`]: contact cards and grants the badge signs.
 
 pub mod agent;
 pub mod attest;
 pub mod badge_client;
 pub mod board;
+pub mod card;
 pub mod device;
 pub mod display;
 mod font;

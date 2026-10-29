@@ -817,20 +817,20 @@ fn a_badge_with_a_chip_describes_and_attests_its_seat_key() {
 #[test]
 fn other_chip_requests_are_answered_without_a_prompt() {
     let (mut badge, mut laptop, id, _) = serving(true);
-    for op in [
-        ChipRequest::Card { card: vec![1] },
-        ChipRequest::GrantSign { grant: vec![1] },
-        ChipRequest::SealKey {
-            label: "card".into(),
-        },
+    // A card or grant the badge cannot read, and a seal key from a chip slot with no root:
+    // refused before anyone is asked (crates/badge/tests/card_grant.rs has the rest).
+    for (op, code) in [
+        (ChipRequest::Card { card: vec![1] }, ErrorCode::Unparseable),
+        (ChipRequest::GrantSign { grant: vec![1] }, ErrorCode::Unparseable),
+        (
+            ChipRequest::SealKey {
+                label: "card".into(),
+            },
+            ErrorCode::ChipError,
+        ),
     ] {
         let r = ask_now(&mut badge, &mut laptop, id, op);
-        assert_eq!(
-            r,
-            Response::Error {
-                code: ErrorCode::NoChip
-            }
-        );
+        assert_eq!(r, Response::Error { code });
     }
     // A circle the badge does not hold.
     for op in [

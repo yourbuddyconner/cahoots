@@ -253,11 +253,11 @@ A custodian MUST accept only the canonical encoding of a message. It answers `Ma
 
 ## 7. Test vectors
 
-`crates/vectors/*.json` are generated from `cahoots-core` and `cahoots-objects` by `cargo run -p cahoots-vectors`, except `chat.json`, written by `crates/chat/tests/vectors.rs`, and `psk.json`, written by `crates/provider/tests/psk_vectors.rs`. They cover the ceremony (KEM seeds, public keys, sealing randomness, seat seeds and public keys, tiers, version 2 commitments and sealed reveals, each member's attestation, the manifest body and ID, the sealed manifest, a mismatch abort, and a garbled reveal), pair keys and hello words (`pair_keys` and `hello_words` in `ceremony.json`), control messages, check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. `objects.json` holds the four signed objects of section 8: a root grant and a delegated grant, an approval, a fact, and a receipt, each with its inputs, canonical payload, COSE_Sign1, and JSON projection, against a three-seat manifest. Every client MUST reproduce them.
+`crates/vectors/*.json` are generated from `cahoots-core` and `cahoots-objects` by `cargo run -p cahoots-vectors`, except `chat.json`, written by `crates/chat/tests/vectors.rs`, and `psk.json`, written by `crates/provider/tests/psk_vectors.rs`. They cover the ceremony (KEM seeds, public keys, sealing randomness, seat seeds and public keys, tiers, version 2 commitments and sealed reveals, each member's attestation, the manifest body and ID, the sealed manifest, a mismatch abort, and a garbled reveal), pair keys and hello words (`pair_keys` and `hello_words` in `ceremony.json`), control messages, check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. `objects.json` holds the signed objects of section 8: a root grant and a delegated grant in both versions, an approval, a fact, a receipt, and a contact card with its sealed form, each with its inputs, canonical payload, COSE_Sign1, and JSON projection, against a three-seat manifest. Every client MUST reproduce them.
 
 ## 8. Signed objects
 
-A seat emits four kinds of signed object: a grant, an approval, a fact, and a receipt. Each is a canonical CBOR map signed as a COSE_Sign1. A signed object is a byte string. Anyone who holds the circle's signed manifest can verify one.
+A seat emits five kinds of signed object: a grant, an approval, a fact, a receipt, and a contact card. Each is a canonical CBOR map signed as a COSE_Sign1. A signed object is a byte string. Anyone who holds the circle's signed manifest can verify one.
 
 ### 8.1 COSE profile
 
@@ -303,6 +303,30 @@ Domain `cahoots/grant/v1`. A seat lets a key spend pad on some purposes, up to a
 | 9 | nonce, bstr 16 |
 
 A root grant is signed by a seat key with kid `[seat]`. A delegated grant is signed by the parent's grantee key with kid the SHA-256 of that key. A chain is checked root first. The root's signer is a seat in the manifest, it names that seat as grantor, and it has no parent. Each later link names the previous grantee as grantor and is signed by it. Its `parent` is the SHA-256 of the previous link's exact signed bytes. Its purposes are a subset. Its budget and `not_after` are no greater. Its depth is exactly one less than the previous depth, and the previous depth was not zero. Every link is in the manifest's circle. The result is the leaf grant.
+
+#### Version 2: a CBOR Web Token
+
+A version 2 grant has the same meaning and the same chain rules. Its payload is a CBOR Web Token claims set (RFC 8392), a canonical CBOR map, signed the same way under the same domain `cahoots/grant/v1`. A chain can mix the two versions. A verifier tells them apart by the first key: version 1 starts with key 0, which a CWT never has.
+
+| Key | Claim | Value |
+|---|---|---|
+| 1 | `iss` (RFC 8392) | tstr `cahoots:circle:<circle_id as lowercase hex>` |
+| 2 | `sub` (RFC 8392) | tstr `cahoots:key:<SHA-256 of the grantee key, lowercase hex>`, the grantee's key id |
+| 7 | `cti` (RFC 8392) | nonce, bstr 16 |
+| 8 | `cnf` (RFC 8747) | `{1: COSE_Key}`: the grantee key as `{1: 2, -1: 1, -2: x, -3: y}` (EC2, P-256, 32-byte coordinates) |
+| -65537 | `cahoots-log` (private) | not_after, uint, a log position |
+| -65538 | `cahoots-parent` (private) | parent, bstr 32; absent for a root grant |
+| -65539 | `authorization_details` (RFC 9396, private key) | array of detail maps, below |
+| -65540 | `cahoots-depth` (private) | depth, uint |
+| -65541 | `cahoots-grantor` (private) | grantor: uint seat, or bstr 33 key for a delegated grant |
+
+IANA's CWT Claims registry has no key for `authorization_details` (RFC 9396 registers it for JWT only), so it takes the private key -65539. The keys are in canonical order: the positive ones, then the negative ones from -65537 down.
+
+Each detail is a map with text keys. `type` is `cahoots:<purpose>` for a purpose (`cahoots:wireguard` 0, `cahoots:tls` 1, `cahoots:mls` 2, `cahoots:wifi` 3, `cahoots:meshtastic` 4, `cahoots:other` 5), or `cahoots:purpose-<n>` for a purpose byte with no name. The purposes come first, in ascending order, with no repeats. The last detail is `{"type": "cahoots:pad", "budget": uint}`, the bytes of pad. Only that detail has a `budget`.
+
+A decoder MUST refuse a claims set with an unknown claim or detail type, a missing claim, an `iss` that does not name a circle, a `sub` that is not the key id of the `cnf` key, a named purpose written as a number, or a non-canonical encoding. The `cnf` key is the grantee: the next link in a chain must be signed by it, under its key id.
+
+The badge signs root grants of either version for its own seat. Its screen shows the purposes, the budget and whether the grantee may delegate, all read from the grant. It marks two values with "(laptop)" because it cannot check them: the short key id of the grantee, and `not_after`, a log position the badge does not track.
 
 ### 8.4 Approval
 
@@ -363,6 +387,24 @@ Signed by the seat with kid `[seat]`.
 
 ### 8.7 JSON projection
 
-With the `std` feature, each object has a JSON form. It is informative: nothing verifies it, and the signed CBOR is the object. A grant becomes `{"authorization_details": [{"type": "cahoots/purpose", "purpose", "circle", "budget"}], "cnf": {"jwk": ...}, "exp_log", "depth", "parent"}`, with one authorization detail per purpose and the grantee key as a P-256 JWK. An approval, a fact, and a receipt become flat objects with the field names of the tables, byte strings as lowercase hex, and `seat` and `circle` fields.
+With the `std` feature, each object has a JSON form. It is informative: nothing verifies it, and the signed CBOR is the object. A grant becomes `{"authorization_details": [{"type": "cahoots/purpose", "purpose", "circle", "budget"}], "cnf": {"jwk": ...}, "exp_log", "depth", "parent"}`, with one authorization detail per purpose and the grantee key as a P-256 JWK. A version 2 grant's claims become `{"iss", "sub", "cti", "cnf": {"jwk": ...}, "authorization_details", "cahoots-log", "cahoots-parent", "cahoots-depth", "cahoots-grantor"}`. An approval, a fact, a receipt and a contact card become flat objects with the field names of the tables, byte strings as lowercase hex, and `seat` and `circle` fields.
+
+### 8.8 Contact card
+
+Domain `cahoots/card/v1`. A seat's profile for its circle: a name, handles, and endpoints.
+
+| Key | Value |
+|---|---|
+| 0 | version, 1 |
+| 1 | circle_id, bstr 16 |
+| 2 | seat, uint |
+| 3 | name, tstr, 1 to 64 bytes |
+| 4 | handles: array of `[kind tstr, value tstr]`, at most 16 |
+| 5 | endpoints: array of `[purpose uint, value tstr]`, at most 16 |
+| 6 | log, uint, the log position the laptop names |
+
+A handle's kind is a short text such as `email`, `github`, `nostr` or `x`, 1 to 16 bytes. An endpoint's purpose is a purpose byte 0 to 5, 6 for ssh, or 7 for chat. Its value is a text the laptop knows how to use: an address, a host, a chat address. Values are 1 to 256 bytes. Signed by the seat with kid `[seat]`.
+
+A signed card travels sealed for the circle, as a file for now. The sealed form is a random 12-byte nonce, then AES-256-GCM of the signed card under the card seal key, with additional data `cahoots/card/v1`. The card seal key is `HMAC-SHA256(root, "seal/card" || circle_id)`. The badge computes it from the circle root, in the chip when the root is there, and gives it to the laptop only after its holder presses both buttons. The screen shows "key for seal/card". The badge never seals. Before it signs a card, the badge checks that the card names the requested circle and the badge's own seat. Its screen then shows the name and how many handles and endpoints the card has.
 
 Implementation: `crates/objects`.

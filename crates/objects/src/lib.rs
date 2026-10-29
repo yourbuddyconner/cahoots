@@ -8,6 +8,10 @@
 //! - [`approval::Approval`]: a seat's verdict on a request, with the lines the person saw.
 //! - [`fact::Fact`]: a reading a seat took from a module, tied to a log position.
 //! - [`receipt::Receipt`]: a record that a seat spent a range of the pad.
+//! - [`card::Card`]: a seat's contact card, sealed for its circle.
+//!
+//! A grant's payload has two versions: version 1 below, and version 2, the same grant as a
+//! CBOR Web Token ([`cwt::Claims`]).
 //!
 //! Each has `encode`, `decode` (which refuses anything non-canonical), `sign`, and a `verify`
 //! that checks the signature against the circle's manifest.
@@ -19,6 +23,8 @@ extern crate alloc;
 pub mod approval;
 pub mod assurance;
 pub mod attestation;
+pub mod card;
+pub mod cwt;
 pub mod fact;
 pub mod grant;
 #[cfg(feature = "std")]
@@ -26,6 +32,7 @@ mod json;
 pub mod receipt;
 
 pub use approval::Approval;
+pub use card::Card;
 pub use fact::{fact_nonce, Fact};
 pub use grant::{verify_chain, Grant, GrantError, Grantor};
 pub use receipt::Receipt;
@@ -63,6 +70,8 @@ pub enum ObjectError {
     Circle,
     /// A fact whose nonce is not `fact_nonce(circle_id, log)`.
     Nonce,
+    /// No randomness for a nonce.
+    Random,
 }
 
 pub(crate) type Enc = Encoder<Vec<u8>>;

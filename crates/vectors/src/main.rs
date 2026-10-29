@@ -17,6 +17,7 @@ use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::{self, randomness_len};
 use cahoots_core::seat::SeatKey;
 use cahoots_objects::grant::{self, verify_chain, Grant, Grantor};
+use cahoots_objects::card::{self, Card, PURPOSE_CHAT, PURPOSE_SSH};
 use cahoots_objects::{assurance, fact_nonce, Approval, Fact, Receipt};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -553,7 +554,61 @@ fn object_vectors() -> Value {
         receipt
     );
 
+    // Version 2 grants: the same root as a CWT, and a delegation below it, also version 2.
+    let root_v2_signed = root.sign_v2(seat_key, &[seat]);
+    let delegated_v2 = Grant {
+        parent: Some(Sha256::digest(&root_v2_signed).into()),
+        ..delegated.clone()
+    };
+    let delegated_v2_signed = delegated_v2.sign_v2(&delegate, &grant::key_id(&delegate.public()));
+    assert_eq!(
+        verify_chain(&[&root_v2_signed, &delegated_v2_signed], &manifest).unwrap(),
+        delegated_v2
+    );
+
+    // A contact card, and the card sealed under the card seal key of a given root.
+    let contact = Card {
+        circle_id: circle,
+        seat,
+        name: "Ada Lovelace".into(),
+        handles: vec![
+            ("email".into(), "ada@example.com".into()),
+            ("github".into(), "ada".into()),
+        ],
+        endpoints: vec![
+            (Purpose::WireGuard as u8, "203.0.113.7:51820".into()),
+            (PURPOSE_SSH, "ada.example.com".into()),
+            (PURPOSE_CHAT, "cahoots:chat:ada".into()),
+        ],
+        log: 45,
+    };
+    let card_signed = contact.sign(seat_key, &[seat]);
+    assert_eq!(Card::verify(&card_signed, &manifest).unwrap(), contact);
+    let circle_root: [u8; 32] = fill(560, 32).try_into().unwrap();
+    let seal_key = cahoots_core::root::seal_key(&circle_root, cahoots_core::root::SEAL_CARD, &circle);
+    let seal_nonce: [u8; 12] = fill(561, 12).try_into().unwrap();
+    let sealed = card::seal_with_nonce(&card_signed, &seal_key, seal_nonce);
+    assert_eq!(card::open(&sealed, &seal_key).unwrap(), card_signed);
+    let mut card_vector = signed_object(json!({
+        "circle_id": hex::encode(contact.circle_id),
+        "seat": contact.seat,
+        "name": contact.name,
+        "handles": contact.handles.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
+        "endpoints": contact.endpoints.iter().map(|(p, v)| json!([p, v])).collect::<Vec<_>>(),
+        "log": contact.log,
+    }), contact.encode(), &card_signed, contact.to_json());
+    card_vector["seal"] = json!({
+        "root": hex::encode(circle_root),
+        "key": hex::encode(seal_key),
+        "nonce": hex::encode(seal_nonce),
+        "sealed": hex::encode(&sealed),
+    });
+
     json!({
+        "description_v2": "Contact cards and version 2 grants (docs/superpowers/specs/2026-10-28-chip-apps-design.md sections 6 and 8). grant_v2_root is root_grant's inputs as a CBOR Web Token claims set (crates/objects/src/cwt.rs, docs/protocol.md section 8), signed by seat 1 under kid [1] with the same external AAD cahoots/grant/v1; grant_v2_delegated is delegated_grant's inputs with parent SHA-256 of grant_v2_root's signed bytes, as a CWT signed by the delegate. card is a contact card signed by seat 1 under kid [1] with external AAD cahoots/card/v1; card.seal gives a circle root, the card seal key HMAC-SHA256(root, \"seal/card\" || circle_id), a nonce, and the sealed card nonce || AES-256-GCM(key, nonce, aad cahoots/card/v1, signed card).",
+        "grant_v2_root": signed_object(grant_inputs(&root), root.encode_v2(), &root_v2_signed, root.to_v2().to_json()),
+        "grant_v2_delegated": signed_object(grant_inputs(&delegated_v2), delegated_v2.encode_v2(), &delegated_v2_signed, delegated_v2.to_v2().to_json()),
+        "card": card_vector,
         "description": "The four signed objects (docs/superpowers/specs/2026-10-26-seats-manifest-objects.md section 6). Each payload is a canonical CBOR map with integer keys 0.. ascending, key 0 the version 1; each signed form is an untagged COSE_Sign1 [protected {1: -7, 4: kid}, {}, payload, signature] with ES256 (RFC 6979 deterministic, so the signatures reproduce) and external AAD the object's domain: cahoots/grant/v1, cahoots/approval/v1, cahoots/fact/v1, cahoots/receipt/v1. The manifest is a three-seat circle whose seat keys come from seat_seeds; every object is signed by seat 1 under kid [1], except the delegated grant, signed by the root grant's grantee (delegate_seed) under kid SHA-256 of its 33-byte public key. The delegated grant's parent is SHA-256 of the root's signed bytes; the receipt's grant is SHA-256 of the delegated grant's signed bytes. The fact's nonce is SHA-256(\"cahoots/fact-nonce/v1\" || circle_id || log as 8 bytes LE). json is the informative JSON projection.",
         "manifest": hex::encode(manifest.encode()),
         "circle_id": hex::encode(circle),

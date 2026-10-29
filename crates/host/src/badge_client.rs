@@ -231,7 +231,7 @@ pub fn describe_error(code: ErrorCode) -> &'static str {
             "the badge is busy: it is not serving (choose Serve and press both buttons) or is asking about another request"
         }
         ErrorCode::UnknownCircle => "the badge does not hold that circle",
-        ErrorCode::NoChip => "the badge cannot do this: the key is not in a chip, or this is not built yet",
+        ErrorCode::NoChip => "the badge cannot do this: the key is not in a chip, or the circle keeps no root",
         ErrorCode::ChipError => "the badge's chip failed",
         ErrorCode::Unparseable => "the badge will not sign this: it cannot show what it is",
         ErrorCode::Malformed => "the badge could not read the request",

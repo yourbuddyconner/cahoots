@@ -308,6 +308,93 @@ pub fn git_signature(author: &str, subject: &str, verified: bool, circle: &str) 
     s.done()
 }
 
+/// `n` and a noun, in plain words: "no handles", "1 handle", "2 handles".
+fn count(n: usize, one: &str, many: &str) -> String {
+    match n {
+        0 => format!("no {many}"),
+        1 => format!("1 {one}"),
+        _ => format!("{n} {many}"),
+    }
+}
+
+/// The question a request to sign a contact card asks: the name on the card and how many
+/// handles and endpoints it has, all read by the badge from the card itself, and the circle.
+pub fn card_sign(name: &str, handles: usize, endpoints: usize, circle: &str) -> Screen {
+    let mut s = Draw::new();
+    s.title("sign your card");
+    s.centered(&FONT_9X18_BOLD, 46, &fit("", name, "", cols(&FONT_9X18_BOLD)));
+    let w = cols(&FONT_8X13);
+    let counts = format!(
+        "{}, {}",
+        count(handles, "handle", "handles"),
+        count(endpoints, "endpoint", "endpoints")
+    );
+    s.centered(&FONT_8X13, 84, &counts);
+    s.centered(&FONT_8X13, 130, &fit("", circle, "", w));
+    s.footer(Some("refuse"), Some("A+B  allow"), Some("refuse"));
+    s.done()
+}
+
+/// The question a request for a key derived from the circle's root asks: the label it is
+/// derived for, which is what the badge computes it from, and the circle.
+pub fn seal_key(label: &str, circle: &str) -> Screen {
+    let mut s = Draw::new();
+    s.title("release a key");
+    let w = cols(&FONT_8X13);
+    s.two_rows(&FONT_8X13, 46, &fit("key for ", label, "", 2 * w));
+    s.centered(&FONT_8X13, 84, "a laptop asks for it");
+    s.centered(&FONT_8X13, 130, &fit("", circle, "", w));
+    s.footer(Some("refuse"), Some("A+B  allow"), Some("refuse"));
+    s.done()
+}
+
+/// The question a request to sign a grant asks. The badge read every value from the grant;
+/// it cannot tell whose key `grantee` (a short form of its key id) is, nor what log position
+/// `until` is, so both are marked "(laptop)". `types` are the purposes' names: three are
+/// shown, then "+N".
+pub fn grant(
+    grantee: &str,
+    types: &[&str],
+    budget: u32,
+    until: u64,
+    may_delegate: bool,
+    circle: &str,
+) -> Screen {
+    let mut s = Draw::new();
+    s.title("grant");
+    let w = cols(&FONT_8X13);
+    s.centered(&FONT_8X13, 32, &fit("to ", grantee, LAPTOP, w));
+    let what = if types.is_empty() {
+        String::from("for nothing")
+    } else {
+        let mut t = format!("for {}", types[..types.len().min(3)].join(", "));
+        if types.len() > 3 {
+            t.push_str(&format!(" +{}", types.len() - 3));
+        }
+        t
+    };
+    s.two_rows(&FONT_8X13, 48, &what);
+    let pad = if budget == 1 {
+        String::from("1 byte of pad")
+    } else {
+        format!("{budget} bytes of pad")
+    };
+    s.centered(&FONT_8X13, 78, &pad);
+    s.two_rows(&FONT_8X13, 94, &format!("until log entry {until}{LAPTOP}"));
+    s.centered(
+        &FONT_8X13,
+        124,
+        if may_delegate {
+            "may delegate"
+        } else {
+            "no delegation"
+        },
+    );
+    s.centered(&FONT_8X13, 146, &fit("", circle, "", w));
+    s.footer(Some("refuse"), Some("A+B  allow"), Some("refuse"));
+    s.done()
+}
+
 /// What marks a value the laptop sent and the badge could not check.
 const LAPTOP: &str = " (laptop)";
 

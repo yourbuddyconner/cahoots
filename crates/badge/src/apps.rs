@@ -10,16 +10,27 @@
 //! is `ChipError`, never returned.
 //!
 //! A circle whose seat key is in the chip signs there; one without a chip slot signs with its
-//! software seat key and says so in `Describe`. Contact cards, grants and seal keys come later:
-//! they answer `NoChip` now, before asking.
+//! software seat key and says so in `Describe`.
+//!
+//! - A contact card is decoded and shown (its name and how many handles and endpoints); one
+//!   that names another circle or another seat is `Unparseable`.
+//! - A grant, version 1 or 2, is decoded and shown; the badge signs only root grants of its
+//!   own seat in the circle the request names, so anything else is `Unparseable`.
+//! - A seal key is `HMAC-SHA256(root, label || circle_id)`, computed in the chip when the root
+//!   is there and from the record otherwise. The badge must name the label on the screen, so a
+//!   label that is not 1 to 32 printable ASCII characters is `Unparseable`.
 
 use crate::board::Circle;
 use crate::chip::ChipSeat;
 use crate::screens::{self, Screen};
 use crate::ssh::{self, HostCheck, Signed};
+use alloc::string::String;
 use alloc::vec::Vec;
 use cahoots_chip::{Attested, ChipOps, KeyId, KeyKind};
+use cahoots_core::cose;
 use cahoots_core::seat::{SeatKey, SeatPublic, SeatSigner};
+use cahoots_objects::card::{self, Card};
+use cahoots_objects::grant::{self, key_id, Grant, Grantor};
 use cahoots_custodian::wire::{ChipRequest, ErrorCode, SshHost};
 use cahoots_custodian::{ChipApps, ChipInfo, CircleId, CircleInfo, Custodian, PadError, PskHandle};
 use zeroize::Zeroizing;
@@ -29,6 +40,9 @@ pub const CURVE_P256: u8 = 0;
 
 /// The namespace git signs commits in.
 const GIT_NAMESPACE: &str = "git";
+
+/// The longest seal key label the badge names on its screen.
+pub const MAX_LABEL: usize = 32;
 
 /// The badge's chip requests for the circles it holds.
 pub struct BadgeApps<'a> {
@@ -62,6 +76,50 @@ impl Seat<'_> {
             Seat::Soft(k) => Ok(k.sign(msg)),
         }
     }
+}
+
+/// A `Seat` as a signer for the objects' `sign` functions. A chip failure gives zeros here;
+/// the caller checks `failed` and verifies the signature before it answers.
+impl SeatSigner for Seat<'_> {
+    fn public(&mut self) -> SeatPublic {
+        match self {
+            Seat::Chip(c) => c.public(),
+            Seat::Soft(k) => k.public(),
+        }
+    }
+
+    fn sign(&mut self, msg: &[u8]) -> [u8; 64] {
+        match self {
+            Seat::Chip(c) => c.sign(msg),
+            Seat::Soft(k) => k.sign(msg),
+        }
+    }
+}
+
+impl Seat<'_> {
+    fn failed(&self) -> bool {
+        matches!(self, Seat::Chip(c) if c.error.is_some())
+    }
+}
+
+/// A label the badge can name on its screen: 1 to [`MAX_LABEL`] printable ASCII characters.
+fn label_ok(label: &str) -> bool {
+    (1..=MAX_LABEL).contains(&label.len()) && label.bytes().all(|b| (0x20..0x7f).contains(&b))
+}
+
+/// The purpose names a grant's screen shows.
+fn purpose_names(purposes: &[u8]) -> Vec<String> {
+    purposes
+        .iter()
+        .map(|p| match card::purpose_name(*p) {
+            Some(name) if *p <= 5 => String::from(name),
+            _ => alloc::format!("purpose-{p}"),
+        })
+        .collect()
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| alloc::format!("{b:02x}")).collect()
 }
 
 impl<'a> BadgeApps<'a> {
@@ -115,9 +173,86 @@ impl<'a> BadgeApps<'a> {
             } => self
                 .ssh_screen(c, data, host.as_ref(), content.as_deref())
                 .map(Some),
-            ChipRequest::Card { .. }
-            | ChipRequest::GrantSign { .. }
-            | ChipRequest::SealKey { .. } => Err(ErrorCode::NoChip),
+            ChipRequest::Card { card } => {
+                let card = Self::check_card(c, card)?;
+                Ok(Some(screens::card_sign(
+                    &card.name,
+                    card.handles.len(),
+                    card.endpoints.len(),
+                    &c.params.name,
+                )))
+            }
+            ChipRequest::GrantSign { grant } => {
+                let g = Self::check_grant(c, grant)?;
+                let names = purpose_names(&g.purposes);
+                let names: Vec<&str> = names.iter().map(String::as_str).collect();
+                let short = hex(&key_id(&g.grantee)[..4]);
+                Ok(Some(screens::grant(
+                    &short,
+                    &names,
+                    g.budget,
+                    g.not_after,
+                    g.depth > 0,
+                    &c.params.name,
+                )))
+            }
+            ChipRequest::SealKey { label } => {
+                if !label_ok(label) {
+                    return Err(ErrorCode::Unparseable);
+                }
+                self.check_root(c)?;
+                Ok(Some(screens::seal_key(label, &c.params.name)))
+            }
+        }
+    }
+
+    /// The card a request asks the badge to sign, if it is this seat's card for this circle.
+    fn check_card(c: &Circle, bytes: &[u8]) -> Result<Card, ErrorCode> {
+        let card = Card::decode(bytes).map_err(|_| ErrorCode::Unparseable)?;
+        if card.circle_id != c.circle_id || card.seat != c.seat {
+            return Err(ErrorCode::Unparseable);
+        }
+        Ok(card)
+    }
+
+    /// The grant a request asks the badge to sign, if it is a root grant from this seat in
+    /// this circle: the seat key signs nothing else.
+    fn check_grant(c: &Circle, bytes: &[u8]) -> Result<Grant, ErrorCode> {
+        let (g, _) = Grant::decode_any(bytes).map_err(|_| ErrorCode::Unparseable)?;
+        if g.circle_id != c.circle_id || g.grantor != Grantor::Seat(c.seat) || g.parent.is_some()
+        {
+            return Err(ErrorCode::Unparseable);
+        }
+        Ok(g)
+    }
+
+    /// Whether the circle's root is there to derive from: in its chip slot, or in the record.
+    fn check_root(&mut self, c: &Circle) -> Result<(), ErrorCode> {
+        match c.chip_slot {
+            Some(slot) => {
+                let chip = self.chip.as_deref_mut().ok_or(ErrorCode::NoChip)?;
+                match chip.exists(KeyId::new(KeyKind::Root, slot)) {
+                    Ok(true) => Ok(()),
+                    _ => Err(ErrorCode::ChipError),
+                }
+            }
+            None if c.root.is_some() => Ok(()),
+            None => Err(ErrorCode::NoChip),
+        }
+    }
+
+    /// Sign `payload` as a COSE_Sign1 under kid `[seat]` with the circle's seat key, and check
+    /// the signature with the seat public key before it is returned.
+    fn sign_object(&mut self, c: &Circle, payload: &[u8], domain: &[u8]) -> Result<Vec<u8>, ErrorCode> {
+        let mut seat = self.seat(c)?;
+        let public = seat.public()?;
+        let signed = cose::sign1(&mut seat, &[c.seat], payload, domain, false);
+        if seat.failed() {
+            return Err(ErrorCode::ChipError);
+        }
+        match cose::verify1(&public, &signed, None, domain) {
+            Ok(p) if p == payload => Ok(signed),
+            _ => Err(ErrorCode::ChipError),
         }
     }
 
@@ -219,19 +354,40 @@ impl ChipApps for BadgeApps<'_> {
         Ok(ssh::encode_signature(&sig))
     }
 
-    fn card_sign(&mut self, circle: &CircleId, _: &[u8]) -> Result<Vec<u8>, ErrorCode> {
-        self.held(circle)?;
-        Err(ErrorCode::NoChip)
+    fn card_sign(&mut self, circle: &CircleId, card: &[u8]) -> Result<Vec<u8>, ErrorCode> {
+        let c = self.held(circle)?;
+        // The same checks as before the screen: the badge signs the card it described.
+        Self::check_card(c, card)?;
+        self.sign_object(c, card, card::DOMAIN)
     }
 
-    fn grant_sign(&mut self, circle: &CircleId, _: &[u8]) -> Result<Vec<u8>, ErrorCode> {
-        self.held(circle)?;
-        Err(ErrorCode::NoChip)
+    fn grant_sign(&mut self, circle: &CircleId, grant: &[u8]) -> Result<Vec<u8>, ErrorCode> {
+        let c = self.held(circle)?;
+        Self::check_grant(c, grant)?;
+        self.sign_object(c, grant, grant::DOMAIN)
     }
 
-    fn seal_key(&mut self, circle: &CircleId, _: &str) -> Result<[u8; 32], ErrorCode> {
-        self.held(circle)?;
-        Err(ErrorCode::NoChip)
+    fn seal_key(&mut self, circle: &CircleId, label: &str) -> Result<[u8; 32], ErrorCode> {
+        let c = self.held(circle)?;
+        if !label_ok(label) {
+            return Err(ErrorCode::Unparseable);
+        }
+        match (c.chip_slot, &c.root) {
+            (Some(slot), _) => {
+                let chip = self.chip.as_deref_mut().ok_or(ErrorCode::NoChip)?;
+                let mut data = Vec::with_capacity(label.len() + c.circle_id.len());
+                data.extend_from_slice(label.as_bytes());
+                data.extend_from_slice(&c.circle_id);
+                chip.hmac(KeyId::new(KeyKind::Root, slot), &data)
+                    .map_err(|_| ErrorCode::ChipError)
+            }
+            (None, Some(root)) => Ok(cahoots_core::root::seal_key(
+                root,
+                label.as_bytes(),
+                &c.circle_id,
+            )),
+            (None, None) => Err(ErrorCode::NoChip),
+        }
     }
 
     fn has_chip(&self) -> bool {
@@ -243,6 +399,8 @@ impl ChipApps for BadgeApps<'_> {
 pub struct Served<'a, C> {
     pub custody: &'a mut C,
     pub apps: BadgeApps<'a>,
+    /// The card this request signed, and its circle, for the badge to keep.
+    pub signed_card: Option<(CircleId, Vec<u8>)>,
 }
 
 impl<C: Custodian> Custodian for Served<'_, C> {
@@ -307,7 +465,9 @@ impl<C> ChipApps for Served<'_, C> {
     }
 
     fn card_sign(&mut self, circle: &CircleId, card: &[u8]) -> Result<Vec<u8>, ErrorCode> {
-        self.apps.card_sign(circle, card)
+        let signed = self.apps.card_sign(circle, card)?;
+        self.signed_card = Some((*circle, signed.clone()));
+        Ok(signed)
     }
 
     fn grant_sign(&mut self, circle: &CircleId, grant: &[u8]) -> Result<Vec<u8>, ErrorCode> {

@@ -384,6 +384,7 @@ dependencies = [
  "cahoots-core",
  "cahoots-custodian",
  "cahoots-hal",
+ "cahoots-objects",
  "ed25519-dalek",
  "embedded-graphics",
  "minicbor",
@@ -524,8 +525,10 @@ dependencies = [
 name = "cahoots-objects"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "cahoots-chip",
  "cahoots-core",
+ "getrandom 0.2.17",
  "hex",
  "minicbor",
  "p256",

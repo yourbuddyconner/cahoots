@@ -278,6 +278,9 @@ pub struct Badge<B: Board> {
     /// The chip slot of the seat key this pass made, until the circle is kept. A pass that
     /// fails or is discarded deletes the slot's objects.
     chip_slot: Option<u8>,
+    /// The last contact card the holder signed for each circle, as signed. Kept in memory
+    /// only, for a card page to show: a restart forgets it, and the laptop keeps its own copy.
+    cards: Vec<(CircleId, Vec<u8>)>,
 }
 
 impl<B: Board> Badge<B> {
@@ -290,7 +293,20 @@ impl<B: Board> Badge<B> {
             state: State::Idle,
             idle: Idle::Off,
             chip_slot: None,
+            cards: Vec::new(),
         }
+    }
+
+    /// The last contact card signed on this badge for `circle` since it started, if the badge
+    /// still holds that circle.
+    pub fn signed_card(&self, circle: &CircleId) -> Option<&[u8]> {
+        if !self.circles.iter().any(|c| c.circle_id == *circle) {
+            return None;
+        }
+        self.cards
+            .iter()
+            .find(|(id, _)| id == circle)
+            .map(|(_, card)| card.as_slice())
     }
 
     pub fn board(&mut self) -> &mut B {
@@ -911,7 +927,13 @@ impl<B: Board> Badge<B> {
             Idle::Choose { index } => self.choose_step(index),
             Idle::NewCircle => self.new_circle_step(),
             Idle::On(mut menu) => {
-                match Self::menu_step(&mut self.board, &self.circles, self.current, &mut menu) {
+                match Self::menu_step(
+                    &mut self.board,
+                    &self.circles,
+                    self.current,
+                    &mut menu,
+                    &mut self.cards,
+                ) {
                     MenuAction::Stay => Idle::On(menu),
                     MenuAction::Choose => {
                         drop(menu);
@@ -1024,6 +1046,8 @@ impl<B: Board> Badge<B> {
             }
         }
         self.circles = self.board.load_circles();
+        let held: Vec<CircleId> = self.circles.iter().map(|c| c.circle_id).collect();
+        self.cards.retain(|(id, _)| held.contains(id));
         self.current = 0;
         self.open_current = false;
     }
@@ -1083,7 +1107,13 @@ impl<B: Board> Badge<B> {
         Idle::On(Box::new(menu))
     }
 
-    fn menu_step(board: &mut B, circles: &[Circle], current: usize, m: &mut Menu<B>) -> MenuAction {
+    fn menu_step(
+        board: &mut B,
+        circles: &[Circle],
+        current: usize,
+        m: &mut Menu<B>,
+        cards: &mut Vec<(CircleId, Vec<u8>)>,
+    ) -> MenuAction {
         let c = &circles[current];
         let asked = m.pending.is_some();
         let present = m.down.peer_present();
@@ -1127,9 +1157,14 @@ impl<B: Board> Badge<B> {
             let mut served = Served {
                 custody: &mut m.pads,
                 apps: BadgeApps::new(circles, board.chip()),
+                signed_card: None,
             };
             let resp = serve(&mut served, &mut Answer(yes), &p.request);
             respond(&mut m.down, p.seq, &resp);
+            if let Some((circle, card)) = served.signed_card {
+                cards.retain(|(id, _)| *id != circle);
+                cards.push((circle, card));
+            }
             board.log(match (p.chip, yes) {
                 (false, true) => "spend allowed",
                 (false, false) => "spend refused",
@@ -1267,6 +1302,7 @@ impl<B: Board> Badge<B> {
                     let mut served = Served {
                         custody: &mut m.pads,
                         apps: BadgeApps::new(circles, board.chip()),
+                        signed_card: None,
                     };
                     let resp = serve(&mut served, &mut Answer(false), &payload);
                     respond(&mut m.down, seq, &resp);

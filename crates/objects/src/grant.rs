@@ -16,7 +16,12 @@
 //!
 //! A root grant is signed by a seat key with kid `[seat]`. A delegated grant is signed by the
 //! parent's grantee key with kid = SHA-256 of that key's 33 bytes.
+//!
+//! Version 2 of the payload is a CBOR Web Token with the same meaning ([`crate::cwt`]). Both
+//! versions are signed the same way under the same external AAD, and a chain may mix them:
+//! a payload whose first key is 0 is version 1, any other is read as a CWT.
 
+use alloc::string::String;
 use alloc::vec::Vec;
 use cahoots_core::cose::{self, CoseError};
 use cahoots_core::manifest::Manifest;
@@ -25,6 +30,7 @@ use cahoots_core::CircleId;
 use minicbor::data::Type;
 use sha2::{Digest, Sha256};
 
+use crate::cwt::{self, Claims, Detail};
 use crate::{canonical, encode_with, Enc, EncResult, ObjectError, Reader, VERSION};
 
 /// External AAD of a grant's COSE_Sign1.
@@ -169,6 +175,70 @@ impl Grant {
     pub fn sign<S: SeatSigner>(&self, key: S, kid: &[u8]) -> Vec<u8> {
         cose::sign1(key, kid, &self.encode(), DOMAIN, false)
     }
+
+    /// The same grant as version 2 claims.
+    pub fn to_v2(&self) -> Claims {
+        let mut details: Vec<Detail> = self
+            .purposes
+            .iter()
+            .map(|p| Detail {
+                r#type: cwt::purpose_type(*p),
+                budget: None,
+            })
+            .collect();
+        details.push(Detail {
+            r#type: String::from(cwt::PAD_TYPE),
+            budget: Some(self.budget),
+        });
+        Claims {
+            iss: cwt::issuer(&self.circle_id),
+            sub: cwt::subject(&self.grantee),
+            cnf: self.grantee,
+            cti: self.nonce,
+            authorization_details: details,
+            log_not_after: self.not_after,
+            parent: self.parent,
+            depth: self.depth,
+            grantor: self.grantor,
+        }
+    }
+
+    /// The grant version 2 claims hold. `Malformed` if they are not a grant: see
+    /// [`Claims::decode`].
+    pub fn from_v2(claims: &Claims) -> Result<Grant, ObjectError> {
+        let (circle_id, purposes, budget) = claims.meaning()?;
+        Ok(Grant {
+            circle_id,
+            grantor: claims.grantor,
+            grantee: claims.cnf,
+            purposes,
+            budget,
+            not_after: claims.log_not_after,
+            depth: claims.depth,
+            parent: claims.parent,
+            nonce: claims.cti,
+        })
+    }
+
+    /// The version 2 payload: [`Grant::to_v2`] encoded.
+    pub fn encode_v2(&self) -> Vec<u8> {
+        self.to_v2().encode()
+    }
+
+    /// Sign the version 2 payload, as [`Grant::sign`] does version 1.
+    pub fn sign_v2<S: SeatSigner>(&self, key: S, kid: &[u8]) -> Vec<u8> {
+        cose::sign1(key, kid, &self.encode_v2(), DOMAIN, false)
+    }
+
+    /// Parse a payload of either version: the grant and its version, 1 or 2.
+    pub fn decode_any(bytes: &[u8]) -> Result<(Grant, u8), ObjectError> {
+        // Version 1 is a map whose first key is 0; a CWT has no key 0.
+        if bytes.len() >= 2 && bytes[0] & 0xe0 == 0xa0 && bytes[1] == 0x00 {
+            return Grant::decode(bytes).map(|g| (g, 1));
+        }
+        let claims = Claims::decode(bytes)?;
+        Grant::from_v2(&claims).map(|g| (g, 2))
+    }
 }
 
 /// The kid of a delegated grant: SHA-256 of the signing key's 33 bytes.
@@ -240,5 +310,7 @@ pub fn verify_chain(chain: &[&[u8]], manifest: &Manifest) -> Result<Grant, Grant
 
 fn open(bytes: &[u8], key: &SeatPublic) -> Result<Grant, GrantError> {
     let payload = cose::verify1(key, bytes, None, DOMAIN).map_err(GrantError::Cose)?;
-    Grant::decode(&payload).map_err(GrantError::Decode)
+    Grant::decode_any(&payload)
+        .map(|(g, _)| g)
+        .map_err(GrantError::Decode)
 }

@@ -1,6 +1,6 @@
 [package]
 name = "cahoots-objects"
-description = "The signed objects a seat emits: grants, approvals, facts and receipts, as COSE-signed canonical CBOR. no_std + alloc."
+description = "The signed objects a seat emits: grants, approvals, facts, receipts and contact cards, as COSE-signed canonical CBOR. no_std + alloc."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,7 @@ repository.workspace = true
 
 [features]
 default = ["std"]
-std = ["cahoots-core/std", "dep:serde_json"]
+std = ["cahoots-core/std", "dep:serde_json", "dep:getrandom"]
 
 [dependencies]
 cahoots-core = { workspace = true }
@@ -19,6 +19,8 @@ p256 = { version = "0.13", default-features = false, features = ["ecdsa", "arith
 serde_json = { workspace = true, optional = true }
 cahoots-chip = { workspace = true }
 x509-cert = { version = "0.2", default-features = false, features = ["pem"] }
+aes-gcm = { version = "0.10.3", default-features = false, features = ["aes", "alloc"] }
+getrandom = { version = "0.2", optional = true }
 
 [dev-dependencies]
 cahoots-chip = { workspace = true, features = ["std"] }

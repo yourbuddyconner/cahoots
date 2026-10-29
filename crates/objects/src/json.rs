@@ -7,7 +7,9 @@ use cahoots_core::seat::SeatPublic;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use serde_json::{json, Value};
 
-use crate::{Approval, Fact, Grant, Receipt, VERSION};
+use crate::cwt::Claims;
+use crate::grant::Grantor;
+use crate::{Approval, Card, Fact, Grant, Receipt, VERSION};
 
 pub(crate) fn hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
@@ -72,6 +74,52 @@ impl Grant {
             "exp_log": self.not_after,
             "depth": self.depth,
             "parent": opt_hex(&self.parent),
+        })
+    }
+}
+
+impl Claims {
+    /// The claims by name: `iss`, `sub`, `cti` (hex), `cnf` as `{"jwk": ...}`,
+    /// `authorization_details`, and the Cahoots claims `cahoots-log`, `cahoots-parent` (hex or
+    /// null), `cahoots-depth` and `cahoots-grantor` (a seat number, or the key in hex).
+    pub fn to_json(&self) -> Value {
+        let details: Vec<Value> = self
+            .authorization_details
+            .iter()
+            .map(|d| match d.budget {
+                Some(b) => json!({ "type": d.r#type, "budget": b }),
+                None => json!({ "type": d.r#type }),
+            })
+            .collect();
+        json!({
+            "iss": self.iss,
+            "sub": self.sub,
+            "cti": hex(&self.cti),
+            "cnf": { "jwk": jwk(&self.cnf) },
+            "authorization_details": details,
+            "cahoots-log": self.log_not_after,
+            "cahoots-parent": opt_hex(&self.parent),
+            "cahoots-depth": self.depth,
+            "cahoots-grantor": match &self.grantor {
+                Grantor::Seat(s) => json!(s),
+                Grantor::Key(k) => json!(hex(&k.0)),
+            },
+        })
+    }
+}
+
+impl Card {
+    /// The table's fields, flat; `circle_id` as `"circle"`, handles as `[kind, value]` and
+    /// endpoints as `[purpose, value]` pairs.
+    pub fn to_json(&self) -> Value {
+        json!({
+            "version": VERSION,
+            "circle": hex(&self.circle_id),
+            "seat": self.seat,
+            "name": self.name,
+            "handles": self.handles.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
+            "endpoints": self.endpoints.iter().map(|(p, v)| json!([p, v])).collect::<Vec<_>>(),
+            "log": self.log,
         })
     }
 }

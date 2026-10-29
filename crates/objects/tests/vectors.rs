@@ -217,3 +217,75 @@ fn the_receipt_is_reproduced() {
     check(&v["receipt"], r.encode(), &signed, r.to_json());
     assert_eq!(Receipt::verify(&signed, &m).unwrap(), r);
 }
+
+#[test]
+fn the_v2_grants_are_reproduced() {
+    use cahoots_objects::cwt::Claims;
+    let v = vectors();
+    let m = manifest(&v);
+    let seat = uint(&v["seat"]) as u8;
+    let seat_key = key(&v["seat_seeds"][usize::from(seat)]);
+    let delegate = key(&v["delegate_seed"]);
+
+    let root = grant(&v["grant_v2_root"]["inputs"]);
+    assert_eq!(root, grant(&v["root_grant"]["inputs"]), "the same root");
+    let root_signed = root.sign_v2(&seat_key, &[seat]);
+    check(
+        &v["grant_v2_root"],
+        root.encode_v2(),
+        &root_signed,
+        root.to_v2().to_json(),
+    );
+    let delegated = grant(&v["grant_v2_delegated"]["inputs"]);
+    assert_eq!(delegated.parent, Some(Sha256::digest(&root_signed).into()));
+    let delegated_signed = delegated.sign_v2(&delegate, &key_id(&delegate.public()));
+    check(
+        &v["grant_v2_delegated"],
+        delegated.encode_v2(),
+        &delegated_signed,
+        delegated.to_v2().to_json(),
+    );
+    assert_eq!(
+        verify_chain(&[&root_signed, &delegated_signed], &m).unwrap(),
+        delegated
+    );
+    let claims = Claims::decode(&unhex(&v["grant_v2_root"]["payload"])).unwrap();
+    assert_eq!(Grant::from_v2(&claims).unwrap(), root);
+}
+
+#[test]
+fn the_card_is_reproduced() {
+    use cahoots_objects::card::{self, Card};
+    let v = vectors();
+    let m = manifest(&v);
+    let i = &v["card"]["inputs"];
+    let c = Card {
+        circle_id: arr(&i["circle_id"]),
+        seat: uint(&i["seat"]) as u8,
+        name: i["name"].as_str().unwrap().into(),
+        handles: i["handles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|h| (h[0].as_str().unwrap().into(), h[1].as_str().unwrap().into()))
+            .collect(),
+        endpoints: i["endpoints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| (uint(&e[0]) as u8, e[1].as_str().unwrap().into()))
+            .collect(),
+        log: uint(&i["log"]),
+    };
+    let signed = c.sign(&key(&v["seat_seeds"][usize::from(c.seat)]), &[c.seat]);
+    check(&v["card"], c.encode(), &signed, c.to_json());
+    assert_eq!(Card::verify(&signed, &m).unwrap(), c);
+
+    let s = &v["card"]["seal"];
+    let root: [u8; 32] = arr(&s["root"]);
+    let seal_key = cahoots_core::root::seal_key(&root, b"seal/card", &c.circle_id);
+    assert_eq!(seal_key.to_vec(), unhex(&s["key"]));
+    let sealed = card::seal_with_nonce(&signed, &seal_key, arr(&s["nonce"]));
+    assert_eq!(hex::encode(&sealed), s["sealed"].as_str().unwrap());
+    assert_eq!(card::open(&sealed, &seal_key).unwrap(), signed);
+}

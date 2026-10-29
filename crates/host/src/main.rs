@@ -12,6 +12,10 @@
 //! cahoots-host git-sign -Y sign -n git -f <key file> <file>
 //! cahoots-host roster --ssh --circle <name> --state <dir>
 //! cahoots-host attest (--serial <port> | --sim <socket>) --circle <name> [--json]
+//! cahoots-host card set (--serial <port> | --sim <socket>) --circle <name> --name <text> [--handle kind=value]... [--endpoint purpose=value]... --out <file>
+//! cahoots-host card fetch (--serial <port> | --sim <socket>) --circle <name> --state <dir> --in <file>... [--out <dir>]
+//! cahoots-host card show --circle <name> --state <dir> <signed card file>
+//! cahoots-host grant (--serial <port> | --sim <socket>) --circle <name> --to <key hex> --purpose <name>... --budget N --until N [--depth N] [--v2] [--out <file>]
 //! ```
 //!
 //! `pile` runs a stack of cards on this machine, bottom first, over Unix sockets. With
@@ -27,6 +31,8 @@
 //! every signature. `git-sign` is the program git runs to sign a commit (also built as
 //! `cahoots-host-git-sign`, the one to name in `gpg.ssh.program`). `roster` prints a circle's
 //! seat keys as `authorized_keys` lines. `attest` asks the badge's chip to attest a seat key.
+//! `card` makes, opens and shows contact cards, and `grant` has the badge sign a grant; see
+//! [`cahoots_host::card`].
 //! `--sim` is the socket a simulated badge listens on (its `--listen`).
 
 use base64::Engine;
@@ -128,7 +134,7 @@ fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let Some(cmd) = argv.first().cloned() else {
         eprintln!(
-            "usage: cahoots-host <ceremony|pile|badge|logs|send|recv|status|agent|git-sign|roster|attest> ..."
+            "usage: cahoots-host <ceremony|pile|badge|logs|send|recv|status|agent|git-sign|roster|attest|card|grant> ..."
         );
         std::process::exit(2);
     };
@@ -325,6 +331,8 @@ fn main() {
                     }
                 })
         }
+        "card" => run_card(&args),
+        "grant" => run_grant(&args),
         _ => Err(format!("unknown command {cmd}")),
     };
     if let Err(e) = result {
@@ -365,6 +373,93 @@ fn run_agent(args: &Args) -> Result<(), String> {
     Arc::new(Agent::new(badge, circles, known_hosts))
         .serve(listener)
         .map_err(|e| e.to_string())
+}
+
+/// `card set`, `card fetch` and `card show`.
+fn run_card(args: &Args) -> Result<(), String> {
+    use cahoots_host::card;
+    let circle = args.req("--circle");
+    match args.0.first().map(String::as_str) {
+        Some("set") => {
+            let mut badge = args.badge()?;
+            let info = card::circle(&mut badge, &circle)?;
+            let log = match args.get("--log") {
+                Some(n) => n.parse().map_err(|_| "--log: a number")?,
+                None => 0,
+            };
+            let c = card::build(
+                &info,
+                &args.req("--name"),
+                &args.all("--handle"),
+                &args.all("--endpoint"),
+                log,
+            )?;
+            let out = PathBuf::from(args.req("--out"));
+            card::set(&mut badge, &info, &c, &out)?;
+            println!("{}", serde_json::to_string_pretty(&c.to_json()).unwrap_or_default());
+            println!("sealed card written to {}", out.display());
+            Ok(())
+        }
+        Some("fetch") => {
+            let manifest = cahoots_host::roster::manifest(Path::new(&args.req("--state")), &circle)?;
+            let files: Vec<PathBuf> = args.all("--in").into_iter().map(PathBuf::from).collect();
+            if files.is_empty() {
+                return Err("name the sealed cards with --in <file>".into());
+            }
+            let mut badge = args.badge()?;
+            let info = card::circle(&mut badge, &circle)?;
+            let key = card::seal_key(&mut badge, &info)?;
+            let cards = card::open_all(&files, &key, &manifest)?;
+            for (signed, c) in &cards {
+                println!("{}", serde_json::to_string_pretty(&c.to_json()).unwrap_or_default());
+                if let Some(dir) = args.get("--out") {
+                    let path = Path::new(dir).join(format!("{}.card", c.seat));
+                    std::fs::write(&path, signed).map_err(|e| format!("{}: {e}", path.display()))?;
+                }
+            }
+            Ok(())
+        }
+        Some("show") => {
+            let manifest = cahoots_host::roster::manifest(Path::new(&args.req("--state")), &circle)?;
+            let file = args
+                .0
+                .last()
+                .filter(|f| !f.starts_with("--") && args.0.len() > 1)
+                .ok_or("name the signed card file last")?;
+            let signed = std::fs::read(file).map_err(|e| format!("{file}: {e}"))?;
+            let c = card::read_signed(&signed, &manifest)?;
+            println!("{}", serde_json::to_string_pretty(&c.to_json()).unwrap_or_default());
+            Ok(())
+        }
+        _ => Err("card set, card fetch or card show".into()),
+    }
+}
+
+/// `grant`: a root grant from this seat, signed by the badge.
+fn run_grant(args: &Args) -> Result<(), String> {
+    use cahoots_host::card;
+    let circle = args.req("--circle");
+    let number = |key: &str| -> Result<u64, String> {
+        args.req(key).parse().map_err(|_| format!("{key}: a number"))
+    };
+    let budget = u32::try_from(number("--budget")?).map_err(|_| "--budget: too large")?;
+    let until = number("--until")?;
+    let depth = match args.get("--depth") {
+        Some(d) => d.parse().map_err(|_| "--depth: 0 to 255")?,
+        None => 0,
+    };
+    let mut badge = args.badge()?;
+    let info = card::circle(&mut badge, &circle)?;
+    let g = card::build_grant(&info, &args.req("--to"), &args.all("--purpose"), budget, until, depth)?;
+    let v2 = args.has("--v2");
+    let signed = card::sign_grant(&mut badge, &info, &g, v2)?;
+    match args.get("--out") {
+        Some(out) => std::fs::write(out, &signed).map_err(|e| format!("{out}: {e}"))?,
+        None => println!("{}", hex(&signed)),
+    }
+    let projection = if v2 { g.to_v2().to_json() } else { g.to_json() };
+    eprintln!("{}", serde_json::to_string_pretty(&projection).unwrap_or_default());
+    Ok(())
 }
 
 fn hex(b: &[u8]) -> String {

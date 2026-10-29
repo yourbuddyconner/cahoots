@@ -166,6 +166,26 @@ Sends a fresh random value, asks the badge's chip to sign the seat key with it, 
 
 `attest` opens the badge's link itself; stop the agent first, since a board's port and a simulated badge's socket serve one program at a time.
 
+### Contact cards
+
+```sh
+cahoots-host card set --serial /dev/cu.usbmodem1101 --circle sf --name "Ada" \
+    --handle email=ada@example.com --handle github=ada --endpoint ssh=ada.example.com --out ada.card
+cahoots-host card fetch --serial /dev/cu.usbmodem1101 --circle sf --state /tmp/b0 --in ada.card --in bob.card [--out cards/]
+cahoots-host card show --circle sf --state /tmp/b0 cards/1.card
+```
+
+`card set` builds this seat's card, asks the badge to sign it (the badge shows "sign your card", the name, and how many handles and endpoints), then asks for the circle's card seal key (the badge shows "key for seal/card"). It writes the sealed card to `--out`. Endpoint purposes are `wireguard`, `tls`, `mls`, `wifi`, `meshtastic`, `other`, `ssh` and `chat`. `card fetch` asks for the seal key, opens each sealed card, checks its signature against the manifest in `--state` (as `roster` reads it), and prints it as JSON. With `--out`, it also writes each signed card there as `<seat>.card`, which `card show` checks and prints. Cards travel as files. Publishing them on the circle's station topic is not built yet. The laptop does not keep the seal key, so each fetch asks the badge again. The badge keeps the last card it signed for each circle in memory until it restarts.
+
+### Grants
+
+```sh
+cahoots-host grant --serial /dev/cu.usbmodem1101 --circle sf --to <33-byte key hex> \
+    --purpose wireguard --purpose tls --budget 4096 --until 1000 [--depth 1] [--v2] [--out grant.cose]
+```
+
+Builds a root grant from this seat to the key `--to`, asks the badge to sign it with the seat key, and writes the signed grant to `--out`, or as hex to stdout. The JSON form goes to stderr. With `--v2`, the payload is a CBOR Web Token (`docs/protocol.md` section 8.3). The badge shows the grantee's short key id and the log position marked "(laptop)", and shows the purposes, the budget and whether the grantee may delegate.
+
 ### Tests
 
-`tests/agent.rs` runs a ceremony between two simulated badges with software chips, serves the top one, starts the agent as a process, and checks the identity, a signature that verifies, a refusal, an unknown key, and the host named from `session-bind@openssh.com` and `known_hosts`. `tests/gitsign.rs` signs a commit text the way git calls `gpg.ssh.program` and checks the result with `ssh-key` and `ssh-keygen -Y verify`. `tests/roster.rs` checks the `authorized_keys` lines against the manifest, and `tests/attest.rs` the attestation of a software chip.
+`tests/agent.rs` runs a ceremony between two simulated badges with software chips, serves the top one, starts the agent as a process, and checks the identity, a signature that verifies, a refusal, an unknown key, and the host named from `session-bind@openssh.com` and `known_hosts`. `tests/gitsign.rs` signs a commit text the way git calls `gpg.ssh.program` and checks the result with `ssh-key` and `ssh-keygen -Y verify`. `tests/roster.rs` checks the `authorized_keys` lines against the manifest, `tests/attest.rs` the attestation of a software chip, and `tests/card.rs` a card set, fetched and shown, and a version 2 grant that verifies against the manifest.
