@@ -149,7 +149,7 @@ Implementation: `crates/core/src/manifest.rs`.
 
 A circle root is a 32-byte secret that every member computes and no outsider can. It is `HKDF-SHA256(ikm, salt, info)`, where `ikm` is the content key of each seat's reveal joined in seat order, `salt` is the circle ID, and `info` is `cahoots/root/v1`. The content key of a reveal is the key that reveal is encrypted under. Every member opens every reveal, so every member holds all of them. The pairwise X-Wing secrets are not used, because they differ for each pair of members.
 
-Two keys come from the root. The card seal key is `HMAC-SHA256(root, "seal/card" || circle_id)`. The chat key is `HMAC-SHA256(root, "chat" || circle_id || epoch)`, with the epoch as a big-endian u64. A badge with a chip makes the root in the chip. A reveal sealed again under another content key is refused as a conflicting reveal, so the root cannot change after the manifest is signed.
+Two keys come from the root. The card seal key is `HMAC-SHA256(root, "seal/card" || circle_id)`. The chat key is `HMAC-SHA256(root, "chat" || circle_id || epoch)`, with the epoch as a big-endian u64. A badge computes the root at the ceremony. With a chip, it stores the root in the chip beside the seat key and keeps none in its circle record; without a chip, the root is in the circle record. Members who are honest get the same root. Nothing in the manifest or the check words checks that yet, so a member who sends different content keys to different members could split the root. A reveal sealed again under another content key by a member already revealed is refused as a conflicting reveal.
 
 Implementation: `crates/core`.
 

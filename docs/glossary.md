@@ -56,7 +56,7 @@ The words these documents use, in plain terms. Where a term has a precise defini
 
 **Seat key.** A signing key (P-256) a device makes for one circle at the ceremony. It is bound into the device's commitment, so it cannot change after the group has seen it, and it signs everything that device says afterwards. One key per circle, never shared across circles. See [protocol section 3.4](protocol.md). On a badge with a secure element the key is made in the chip and never leaves it: the chip signs, and the badge asks it to. The key is the member's identity in the circle. It is also what signs SSH logins and git commits for that member.
 
-**Circle root.** A 32-byte secret every member of a circle can compute and no outsider can. It is HKDF-SHA256 over the content keys of all the reveals (the key each member's reveal is encrypted under), joined in seat order, with the circle ID as salt. It makes the card seal key and the chat key. See [protocol](protocol.md) section 3.6.
+**Circle root.** A 32-byte secret every member of a circle can compute and no outsider can. The badge computes it at the ceremony and, with a chip, keeps it there. It is HKDF-SHA256 over the content keys of all the reveals (the key each member's reveal is encrypted under), joined in seat order, with the circle ID as salt. It makes the card seal key and the chat key. See [protocol](protocol.md) section 3.6.
 
 **Contact card.** A seat's name, handles (such as an email or a GitHub name) and endpoints (such as an SSH host), signed by the seat key and sealed so that only the circle can read it. Cards travel as files for now. See [protocol section 8.8](protocol.md).
 

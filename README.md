@@ -37,7 +37,7 @@ On a V1 board with the NXP SE051 secure element, the chip makes and holds each c
 - Sign grants as CBOR Web Tokens.
 - Keep up to 16 circles on the Pico 2, and 4 on the Nano, with nothing linking them.
 
-All of this is built and tested against a software chip. The Pico 2 firmware drives the real chip, but flashing it, a ceremony with a chip seat, attestation against NXP's root, and a verified commit still wait for the bench. See [the roadmap](docs/plan.md) (M4f) and the [host program](crates/host/README.md).
+All of this is built and tested against a software chip. The Pico 2 firmware has a driver for the real chip, built but not yet run on a board. Flashing it, a ceremony with a chip seat, attestation against NXP's root, and a verified commit still wait for the bench. See [the roadmap](docs/plan.md) (M4f) and the [host program](crates/host/README.md).
 
 ## Repository layout
 
