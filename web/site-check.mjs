@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 const here = resolve(fileURLToPath(import.meta.url), "..");
 const { chromium } = createRequire(join(here, "package.json"))("playwright");
 // SITE_DIR points the check at another copy of site/, for example an older commit's.
+// SHOTS_DIR, when set, is where the check saves a full-page screenshot at 390 px (phone.png).
 const siteDir = resolve(process.env.SITE_DIR || join(here, "..", "site"));
 
 const types = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png", ".ico": "image/x-icon" };
@@ -91,8 +92,6 @@ try {
   const sw = await phone.evaluate(() => document.documentElement.scrollWidth);
   check("no console errors at 390 px", perrors.length === 0, perrors.join("; "));
   check("at 390 px the page is no wider than 390", sw <= 390, `scrollWidth ${sw}`);
-  const shotDir = join(repo0(), ".superpowers/sdd/2026-10-28-site-and-docs/shots/task4");
-  function repo0() { return resolve(here, ".."); }
   const pf = await phone.evaluate(() => {
     const img = document.querySelector(".scene img");
     const apps = [...document.querySelectorAll(".app")].map((a) => a.getBoundingClientRect());
@@ -111,8 +110,11 @@ try {
   check("at 390 px the five .app cards share one left edge", pf.lefts.length === 5 && new Set(pf.lefts).size === 1, pf.lefts.join(","));
   check("at 390 px each .app card sits below the previous", pf.stacked);
   check("at 390 px the ticker is visible", pf.ticker);
-  mkdirSync(shotDir, { recursive: true });
-  await phone.screenshot({ path: join(shotDir, "phone.png"), fullPage: true });
+  if (process.env.SHOTS_DIR) {
+    const shotDir = resolve(process.env.SHOTS_DIR);
+    mkdirSync(shotDir, { recursive: true });
+    await phone.screenshot({ path: join(shotDir, "phone.png"), fullPage: true });
+  }
   const running = (pg) => pg.evaluate(() => {
     const tr = document.querySelector(".ticker-track");
     return tr.getAnimations().filter((a) => a.playState === "running").length;
