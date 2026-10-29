@@ -56,6 +56,11 @@ try {
     const card = document.getElementById("card");
     return {
       h1: document.querySelector("h1")?.textContent.trim() ?? null,
+      heroAlt: document.querySelector(".scene > img")?.getAttribute("alt") ?? null,
+      heroSrc: document.querySelector(".scene > img")?.getAttribute("src") ?? null,
+      heroRendering: (() => { const i = document.querySelector(".scene > img"); return i ? getComputedStyle(i).imageRendering : null; })(),
+      h1InScene: !!document.querySelector(".scene h1"),
+      h1Font: (() => { const h = document.querySelector("h1"); return h ? getComputedStyle(h).fontFamily : ""; })(),
       steps: q("ol.steps li").length,
       apps: q(".app").length,
       ways: q(".way").length,
@@ -70,6 +75,10 @@ try {
   });
   check("no console errors or failed requests at 1280 px", errors.length === 0, errors.join("; "));
   check('the H1 is "Get in cahoots."', facts.h1 === "Get in cahoots.", JSON.stringify(facts.h1));
+  const alt = "A rooftop at golden hour: five people at a round table, their cards on it, the city behind";
+  check("the hero image is place.svg with the rooftop alt text", facts.heroSrc === "assets/place.svg" && facts.heroAlt === alt, `${facts.heroSrc} ${JSON.stringify(facts.heroAlt)}`);
+  check("the hero image is not drawn pixelated", !/pixelated|crisp-edges/.test(facts.heroRendering ?? ""), facts.heroRendering);
+  check("the H1 sits over the poster, set in Fraunces", facts.h1InScene && /Fraunces/.test(facts.h1Font), `${facts.h1InScene} ${facts.h1Font}`);
   check("six ol.steps li", facts.steps === 6, `found ${facts.steps}`);
   check("five .app cards", facts.apps === 5, `found ${facts.apps}`);
   check("three .way columns", facts.ways === 3, `found ${facts.ways}`);
@@ -93,19 +102,23 @@ try {
   check("no console errors at 390 px", perrors.length === 0, perrors.join("; "));
   check("at 390 px the page is no wider than 390", sw <= 390, `scrollWidth ${sw}`);
   const pf = await phone.evaluate(() => {
-    const img = document.querySelector(".scene img");
+    const img = document.querySelector(".scene > img");
+    const h1 = document.querySelector(".scene h1")?.getBoundingClientRect();
+    const ir = img?.getBoundingClientRect();
     const apps = [...document.querySelectorAll(".app")].map((a) => a.getBoundingClientRect());
     const t = document.querySelector(".ticker");
     const tr = t?.getBoundingClientRect();
     const ts = t && getComputedStyle(t);
     return {
       pos: img ? getComputedStyle(img).objectPosition : null,
+      h1Inside: !!h1 && !!ir && h1.left >= ir.left && h1.right <= ir.right && h1.top >= ir.top && h1.bottom <= ir.top + ir.height * 0.4,
       fit: img ? getComputedStyle(img).objectFit : null,
       lefts: apps.map((r) => Math.round(r.left)),
       stacked: apps.every((r, i) => i === 0 || r.top >= apps[i - 1].bottom - 1),
       ticker: !!t && tr.width > 0 && tr.height > 0 && ts.display !== "none" && ts.visibility !== "hidden",
     };
   });
+  check("at 390 px the headline fits inside the top of the poster", pf.h1Inside);
   check("at 390 px the hero image is cropped from the centre", pf.fit === "cover" && /^(50%|center)/.test(pf.pos ?? ""), `${pf.fit} ${pf.pos}`);
   check("at 390 px the five .app cards share one left edge", pf.lefts.length === 5 && new Set(pf.lefts).size === 1, pf.lefts.join(","));
   check("at 390 px each .app card sits below the previous", pf.stacked);

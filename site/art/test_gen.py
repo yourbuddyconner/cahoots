@@ -11,6 +11,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 import gen  # noqa: E402
 
 FILL = re.compile(r'fill="(#[0-9a-f]{6})"')
+HEX = re.compile(r"#[0-9a-fA-F]{6}\b")
+STOP = re.compile(r'stop-color="(#[0-9a-f]{6})"')
 RECT = re.compile(r'<rect x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"')
 
 
@@ -37,21 +39,32 @@ class Render(unittest.TestCase):
         self.assertIn('viewBox="0 0 12 4"', svg)
 
 
-class Scene(unittest.TestCase):
+class Poster(unittest.TestCase):
     def setUp(self):
-        self.svg = gen.scene()
+        self.svg = gen.poster()
 
-    def test_scene_size_and_palette(self):
-        rows = gen.SCENE.strip("\n").split("\n")
-        self.assertEqual(len(rows), 56)
-        self.assertTrue(all(len(r) == 96 for r in rows))
-        self.assertIn(f'viewBox="0 0 {96 * gen.SCENE_CELL} {56 * gen.SCENE_CELL}"', self.svg)
-        pal = gen.palette()
-        self.assertEqual(len(pal), 16)
-        self.assertLessEqual(fills(self.svg), set(pal.values()))
+    def test_poster_size(self):
+        self.assertIn('viewBox="0 0 1600 900"', self.svg)
+        self.assertLess(len(self.svg.encode()), 120_000)
 
-    def test_scene_under_60k(self):
-        self.assertLess(len(self.svg.encode()), 60_000)
+    def test_poster_colours(self):
+        """Only the seven palette colours, plus the two stops of the sky gradient."""
+        allowed = set(gen.POSTER_COLOURS) | {gen.P_SKY_TOP, gen.P_SKY_HORIZON}
+        self.assertEqual(len(gen.POSTER_COLOURS), 7)
+        self.assertLessEqual(set(HEX.findall(self.svg)), allowed)
+        self.assertEqual(set(STOP.findall(self.svg)), {gen.P_SKY_TOP, gen.P_SKY_HORIZON})
+        self.assertEqual(self.svg.count("<linearGradient"), 1)
+        self.assertNotIn("<radialGradient", self.svg)
+
+    def test_poster_grain(self):
+        self.assertIn("<feTurbulence", self.svg)
+        self.assertIn('filter="url(#grain)"', self.svg)
+
+    def test_poster_title(self):
+        self.assertIn(
+            "<title>A rooftop at golden hour: five people at a round table, their cards on it, the city behind</title>",
+            self.svg,
+        )
 
 
 class Sigil(unittest.TestCase):
@@ -76,13 +89,14 @@ class Sigil(unittest.TestCase):
 
 
 class Icons(unittest.TestCase):
-    def test_icons_one_bit(self):
-        amber = gen.palette()["a"]
+    def test_icons_two_amber_strokes(self):
         for name in gen.ICONS:
             svg = gen.icon(name)
-            self.assertIn('viewBox="0 0 16 16"', svg, name)
-            self.assertEqual(fills(svg), {amber}, name)
-            self.assertTrue(cells(svg, 1), name)
+            self.assertIn('viewBox="0 0 24 24"', svg, name)
+            self.assertEqual(svg.count("<path "), 2, name)
+            self.assertEqual(set(HEX.findall(svg)), {gen.AMBER}, name)
+            self.assertIn(f'stroke="{gen.AMBER}"', svg, name)
+            self.assertIn('fill="none"', svg, name)
 
 
 class WordsScreen(unittest.TestCase):

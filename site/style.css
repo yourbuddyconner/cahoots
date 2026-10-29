@@ -9,8 +9,11 @@
   --amber: #e5a33a;
   --amber-hi: #e8b35f;  /* amber 20% toward fg */
   --bg-3: #171719;     /* bg-2 3% toward fg: a raised surface */
-  --wall: #242428;     /* bg-2 22% toward fg-3: the scene's wall, from site/art/gen.py */
   --paper: #f0dcbd;    /* fg 30% toward amber: the e-paper, from site/art/gen.py */
+  --sky-low: #7fb0ee;  /* the poster's sky at the horizon, from site/art/gen.py */
+  --sky-ink: #1e2f4f;  /* the poster's skyline blue, behind the headline's shadow */
+  --on-sky: #ffffff;   /* the headline over the poster's sky */
+  --serif: "Fraunces", Georgia, serif;
   --display: "Inter Tight", "Inter", system-ui, sans-serif;
   --body: "Inter", system-ui, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, monospace;
@@ -59,15 +62,16 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .nav-cta:hover { border-color: color-mix(in srgb, var(--fg) 30%, transparent); }
 @media (max-width: 820px) { .top nav a:not(.nav-cta) { display: none; } }
 
-/* Hero: the place. The scene shows whole at its own aspect; only the floor sits under the headline. */
+/* Hero: a poster of the place. The picture fills the band, cropped from the centre, with the headline over the sky. */
 .hero { position: relative; padding-bottom: clamp(40px, 6vh, 64px); }
-.scene { position: relative; overflow: hidden; background: var(--wall); }
-.scene img { display: block; width: 100%; height: auto; max-height: max(420px, calc(100svh - 60px - 150px)); object-fit: cover; object-position: 50% 72%; image-rendering: pixelated; image-rendering: crisp-edges; }
-.scene::after { content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(to top, var(--bg) 0%, color-mix(in srgb, var(--bg) 80%, transparent) 8%, color-mix(in srgb, var(--bg) 30%, transparent) 17%, transparent 26%); }
-.hero-copy { position: relative; margin-top: -64px; }
-.hero h1 { text-shadow: 0 2px 30px color-mix(in srgb, var(--bg) 85%, transparent); margin-bottom: 18px; }
-.hero .eyebrow { color: var(--fg-2); margin-bottom: 14px; text-shadow: 0 1px 12px var(--bg); }
+.scene { position: relative; overflow: hidden; background: var(--sky-low); }
+.scene > img { display: block; width: 100%; height: clamp(480px, 56.25vw, calc(100svh - 60px - 110px)); object-fit: cover; object-position: 50% 72%; }
+.poster-title { position: absolute; left: 0; right: 0; top: 11%; padding: 0 var(--gutter); text-align: center; color: var(--on-sky); }
+.hero h1 { font-family: var(--serif); font-optical-sizing: auto; font-weight: 600; font-size: clamp(46px, 7.4vw, 116px); letter-spacing: -0.02em; line-height: 1; margin: 0; text-shadow: 0 2px 28px color-mix(in srgb, var(--sky-ink) 30%, transparent); }
+.poster-brand { display: inline-flex; align-items: center; gap: 10px; margin: clamp(14px, 2.2vw, 26px) 0 0; font-family: var(--display); font-weight: 600; font-size: clamp(17px, 1.6vw, 22px); letter-spacing: -0.01em; }
+.poster-brand img { width: clamp(24px, 2.2vw, 30px); height: auto; border-radius: 6px; }
+.hero-copy { position: relative; padding-top: clamp(32px, 5vh, 52px); }
+.hero .eyebrow { margin-bottom: 14px; }
 .lede { font-size: clamp(16px, 1.4vw, 19px); color: var(--fg-2); max-width: 880px; margin: 0 0 24px; }
 .cta { display: flex; gap: 10px; flex-wrap: wrap; margin: 0; }
 .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 10px; text-decoration: none; font-weight: 500; font-size: 14.5px; border: 1px solid var(--line-2); color: var(--fg); transition: border-color .15s, background .15s; }
@@ -78,10 +82,8 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .btn.ghost span { color: var(--fg-3); transition: transform .15s; }
 .btn.ghost:hover span { transform: translateX(2px); }
 @media (max-width: 760px) {
-  .scene img { height: 280px; max-height: none; object-position: 50% 60%; }
-  .scene::after { background: linear-gradient(to top, var(--bg) 0%, color-mix(in srgb, var(--bg) 0%, transparent) 30%); }
-  .hero-copy { margin-top: -28px; }
-  .hero h1 { text-shadow: none; }
+  .scene > img { height: 540px; }
+  .poster-title { top: 9%; }
 }
 
 /* Ticker */

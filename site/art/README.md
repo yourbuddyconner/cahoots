@@ -1,10 +1,10 @@
 # Site art
 
-`gen.py` draws the site's pixel art from text maps: the back room at the top of
-the landing page, the five app icons, a sigil and a mock of the badge's words
-screen. It needs only Python 3, no packages.
+`gen.py` draws the site's pictures: the poster at the top of the landing page,
+the five app icons, a sigil and a mock of the badge's words screen. It needs
+only Python 3, no packages.
 
-Run it from the repo root after editing a map:
+Run it from the repo root after editing:
 
     python3 site/art/gen.py
 
@@ -12,10 +12,24 @@ It writes `site/assets/place.svg`, `site/assets/icons/*.svg`,
 `site/assets/sigil.svg` and `site/assets/screen-words.svg`. Commit the SVGs
 with the script.
 
-Each map is a block of text, one character per cell. In the back room, each
-character is one of the sixteen colours in `palette()`, which are built from
-the theme colours in `site/style.css`. In the icons, `#` is ink and `.` is
-empty.
+The poster, `poster()`, is a rooftop terrace at golden hour: big cumulus
+clouds over a city and a bay, and five people at a round table with their cards
+on it. It is flat vector shapes on a 1600 by 900 canvas in seven colours (sky,
+cloud white, cream, terracotta, deep green, amber and skyline blue, listed once
+as `POSTER_COLOURS`), one gradient for the sky and a light grain filter over
+everything. The sun is low on the right, so lit edges face right and shadows
+fall to the left. Each cloud comes from `cumulus()`: an outline of points, built
+up in rows of round lobes, each a cream disc under a smaller white one.
+
+The icons are 24 by 24 glyphs, two amber strokes each, in `ICONS`.
+
+The sigil is a text map, one character per cell, in two colours from the
+pixel palette in `palette()`.
+
+After changing the poster, render the Open Graph cards again, which use it as
+their background:
+
+    sh site/og/render.sh
 
 Run the tests:
 

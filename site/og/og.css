@@ -1,5 +1,5 @@
 /* Shared styles for the Open Graph cards. Rendered to PNG by render.sh. */
-:root { --bg: #0a0a0b; --fg: #f4f4f5; --fg-2: #a1a1aa; --fg-3: #6b6b74; --amber: #e5a33a; --paper: #e6e2d8; --ink: #17191b; }
+:root { --bg: #0a0a0b; --fg: #f4f4f5; --fg-2: #a1a1aa; --fg-3: #6b6b74; --amber: #e5a33a; --paper: #e6e2d8; --ink: #17191b; --sky-low: #7fb0ee; --on-sky: #ffffff; }
 * { box-sizing: border-box; }
 html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; }
 body { background: var(--bg); color: var(--fg); font-family: "Inter", system-ui, sans-serif; -webkit-font-smoothing: antialiased; position: relative; }
@@ -13,11 +13,12 @@ h1 { font-family: "Inter Tight", sans-serif; font-weight: 600; font-size: 104px;
 h1.sm { font-size: 84px; }
 .lede { font-size: 27px; line-height: 1.4; color: var(--fg-2); max-width: 640px; margin: 0; }
 .foot { display: flex; justify-content: space-between; align-items: flex-end; font-family: "JetBrains Mono", monospace; font-size: 17px; color: var(--fg-3); letter-spacing: 0.04em; }
-/* The three site cards: the back room scene sits low, the headline above the heads. */
-body.scene { background: var(--bg) url("../assets/place.png") no-repeat center 44px / 1200px 700px; image-rendering: pixelated; }
-body.scene::before { content: ""; position: absolute; inset: 0; background: linear-gradient(to bottom, var(--bg) 0, var(--bg) 150px, rgba(10,10,11,0.82) 230px, rgba(10,10,11,0.3) 300px, rgba(10,10,11,0) 360px, rgba(10,10,11,0) 540px, rgba(10,10,11,0.7) 630px); }
-body.scene .card { padding: 38px 72px 34px; justify-content: flex-start; gap: 22px; }
-body.scene .lede { max-width: 1000px; font-size: 24px; line-height: 1.4; color: var(--fg); opacity: 0.82; }
-body.scene h1 { font-size: 84px; margin-bottom: 14px; max-width: none; }
-body.scene h1.sm { font-size: 76px; }
-body.scene .foot { margin-top: auto; text-shadow: 0 1px 8px var(--bg), 0 0 3px var(--bg); color: var(--fg-2); }
+/* The three site cards: the poster of the rooftop fills the card, the headline in Fraunces over the sky. */
+body.scene { background: var(--sky-low) url("../assets/place.png") no-repeat center 72% / 1200px 675px; }
+body.scene .card { padding: 58px 72px 0; justify-content: flex-start; align-items: center; gap: 22px; text-align: center; }
+body.scene h1 { font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: 104px; line-height: 1; letter-spacing: -0.02em; margin: 0; max-width: none; color: var(--on-sky); text-shadow: 0 2px 28px rgba(30, 47, 79, 0.3); }
+body.scene h1.sm { font-size: 74px; line-height: 1.02; }
+body.scene .brand { color: var(--on-sky); font-size: 28px; }
+body.scene .brand img { border-radius: 7px; }
+body.scene .brand .sub { color: var(--on-sky); opacity: 0.85; }
+body.scene .brand .sub::before { color: rgba(255, 255, 255, 0.6); }
