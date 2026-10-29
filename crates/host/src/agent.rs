@@ -1,0 +1,585 @@
+//! `cahoots-host agent`: an SSH agent whose keys are a badge's seat keys.
+//!
+//! It speaks OpenSSH's agent protocol (`PROTOCOL.agent`) on a Unix socket, one thread per
+//! connection:
+//!
+//! - `SSH_AGENTC_REQUEST_IDENTITIES` (11): each circle's seat key as `ecdsa-sha2-nistp256`,
+//!   comment `cahoots:<circle>:<seat>`, in `SSH_AGENT_IDENTITIES_ANSWER` (12). The keys are
+//!   asked of the badge (`Describe`) the first time and kept: they are public.
+//! - `SSH_AGENTC_SIGN_REQUEST` (13): one `SshSign` request to the badge, which asks its
+//!   holder. The badge's signature comes back in `SSH_AGENT_SIGN_RESPONSE` (14); a refusal or
+//!   any error is `SSH_AGENT_FAILURE` (5). Nothing is signed here and no signature is kept.
+//! - `SSH_AGENTC_EXTENSION` (27) `session-bind@openssh.com`: the server's host key, the
+//!   session id, the server's signature over it, and whether the connection is forwarded. The
+//!   agent keeps it for the connection and sends it with the next request to sign for that
+//!   session, with the host's name from `known_hosts`. The badge checks the signature.
+//! - `SSH_AGENTC_EXTENSION` (27) `sign-with-content@cahoots`: the key, an `SSHSIG` envelope
+//!   to sign, and the content it hashes. `cahoots-host-git-sign` sends it so the badge can show
+//!   the commit it signs. Answered `SSH_AGENT_SUCCESS` (6) followed by the signature.
+//! - Anything else: `SSH_AGENT_FAILURE`.
+
+use crate::badge_client::{describe_error, BadgeClient};
+use base64::Engine;
+use cahoots_custodian::wire::{ChipRequest, ChipResponse, Request, Response, SshHost};
+use cahoots_custodian::CircleId;
+use hmac::{Hmac, Mac};
+use std::io::{self, Read, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+pub const SSH_AGENT_FAILURE: u8 = 5;
+pub const SSH_AGENT_SUCCESS: u8 = 6;
+pub const SSH_AGENTC_REQUEST_IDENTITIES: u8 = 11;
+pub const SSH_AGENT_IDENTITIES_ANSWER: u8 = 12;
+pub const SSH_AGENTC_SIGN_REQUEST: u8 = 13;
+pub const SSH_AGENT_SIGN_RESPONSE: u8 = 14;
+pub const SSH_AGENTC_EXTENSION: u8 = 27;
+
+/// OpenSSH's extension that binds a connection to the server's host key.
+pub const SESSION_BIND: &str = "session-bind@openssh.com";
+/// This agent's extension for a signature over content the badge is shown.
+pub const SIGN_WITH_CONTENT: &str = "sign-with-content@cahoots";
+
+/// The longest message read, as OpenSSH's agent: anything longer closes the connection.
+const MAX_MESSAGE: usize = 256 * 1024;
+/// The most session bindings one connection keeps, as OpenSSH's agent.
+const MAX_BINDS: usize = 16;
+
+/// Host names tried against hashed `known_hosts` entries, besides those in the ssh config
+/// beside `known_hosts`: a hashed entry keeps no name, only a keyed hash of it.
+const KNOWN_FORGES: &[&str] = &[
+    "github.com",
+    "gitlab.com",
+    "bitbucket.org",
+    "codeberg.org",
+    "ssh.dev.azure.com",
+];
+
+/// One seat key the agent offers.
+#[derive(Clone, Debug)]
+struct Identity {
+    circle: CircleId,
+    /// The SSH public key blob.
+    blob: Vec<u8>,
+    comment: String,
+}
+
+/// What `session-bind@openssh.com` told the agent.
+#[derive(Clone, Debug)]
+struct Bind {
+    host_key: Vec<u8>,
+    session_id: Vec<u8>,
+    host_sig: Vec<u8>,
+}
+
+/// The agent: one badge, the circles whose seat keys it offers, and where host names come
+/// from.
+pub struct Agent {
+    badge: Mutex<BadgeClient>,
+    circles: Vec<String>,
+    identities: Mutex<Option<Vec<Identity>>>,
+    known_hosts: PathBuf,
+}
+
+impl Agent {
+    /// An agent for the seat keys of `circles` (circle names) on `badge`, naming hosts from
+    /// `known_hosts` (and the ssh `config` file in the same directory).
+    pub fn new(badge: BadgeClient, circles: Vec<String>, known_hosts: PathBuf) -> Agent {
+        Agent {
+            badge: Mutex::new(badge),
+            circles,
+            identities: Mutex::new(None),
+            known_hosts,
+        }
+    }
+
+    /// Answer connections on `listener` until it fails, one thread each.
+    pub fn serve(self: Arc<Self>, listener: UnixListener) -> io::Result<()> {
+        for conn in listener.incoming() {
+            let conn = conn?;
+            let agent = self.clone();
+            std::thread::spawn(move || {
+                let _ = agent.connection(conn);
+            });
+        }
+        Ok(())
+    }
+
+    /// Answer one connection's messages until it closes.
+    fn connection(&self, mut s: UnixStream) -> io::Result<()> {
+        let mut binds = Vec::new();
+        loop {
+            let mut len = [0u8; 4];
+            s.read_exact(&mut len)?;
+            let len = u32::from_be_bytes(len) as usize;
+            if len == 0 || len > MAX_MESSAGE {
+                return Ok(());
+            }
+            let mut msg = vec![0u8; len];
+            s.read_exact(&mut msg)?;
+            let reply = self.answer(&msg, &mut binds);
+            let mut out = (reply.len() as u32).to_be_bytes().to_vec();
+            out.extend_from_slice(&reply);
+            s.write_all(&out)?;
+        }
+    }
+
+    /// The answer to one message (type byte and body).
+    fn answer(&self, msg: &[u8], binds: &mut Vec<Bind>) -> Vec<u8> {
+        let mut r = Reader(&msg[1..]);
+        let answer = match msg[0] {
+            SSH_AGENTC_REQUEST_IDENTITIES if r.0.is_empty() => Some(self.identities_answer()),
+            SSH_AGENTC_SIGN_REQUEST => self.sign_request(&mut r, binds),
+            SSH_AGENTC_EXTENSION => self.extension(&mut r, binds),
+            _ => None,
+        };
+        answer.unwrap_or_else(|| vec![SSH_AGENT_FAILURE])
+    }
+
+    fn identities_answer(&self) -> Vec<u8> {
+        let ids = self.identities();
+        let mut out = vec![SSH_AGENT_IDENTITIES_ANSWER];
+        out.extend_from_slice(&(ids.len() as u32).to_be_bytes());
+        for id in &ids {
+            put_string(&mut out, &id.blob);
+            put_string(&mut out, id.comment.as_bytes());
+        }
+        out
+    }
+
+    /// The seat keys, asked of the badge until every circle is found, then kept.
+    fn identities(&self) -> Vec<Identity> {
+        let mut kept = self.identities.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(ids) = kept.as_ref() {
+            return ids.clone();
+        }
+        let mut badge = self.badge.lock().unwrap_or_else(|e| e.into_inner());
+        let (ids, complete) = match fetch_identities(&mut badge, &self.circles) {
+            Ok(found) => found,
+            Err(e) => {
+                eprintln!("agent: no keys yet: {e}");
+                return Vec::new();
+            }
+        };
+        if complete {
+            *kept = Some(ids.clone());
+        }
+        ids
+    }
+
+    fn sign_request(&self, r: &mut Reader, binds: &[Bind]) -> Option<Vec<u8>> {
+        let key = r.string()?;
+        let data = r.string()?;
+        let _flags = r.u32()?;
+        r.end()?;
+        let id = self.identity(key)?;
+        let host = self.host_for(data, binds);
+        let sig = self.badge_sign(&id, data.to_vec(), host, None)?;
+        let mut out = vec![SSH_AGENT_SIGN_RESPONSE];
+        put_string(&mut out, &sig);
+        Some(out)
+    }
+
+    fn extension(&self, r: &mut Reader, binds: &mut Vec<Bind>) -> Option<Vec<u8>> {
+        let name = r.string()?;
+        if name == SESSION_BIND.as_bytes() {
+            let host_key = r.string()?.to_vec();
+            let session_id = r.string()?.to_vec();
+            let host_sig = r.string()?.to_vec();
+            let _forwarding = r.byte()?;
+            r.end()?;
+            if binds.len() >= MAX_BINDS {
+                return None;
+            }
+            binds.push(Bind {
+                host_key,
+                session_id,
+                host_sig,
+            });
+            Some(vec![SSH_AGENT_SUCCESS])
+        } else if name == SIGN_WITH_CONTENT.as_bytes() {
+            let key = r.string()?;
+            let data = r.string()?.to_vec();
+            let content = r.string()?.to_vec();
+            r.end()?;
+            let id = self.identity(key)?;
+            let sig = self.badge_sign(&id, data, None, Some(content))?;
+            let mut out = vec![SSH_AGENT_SUCCESS];
+            put_string(&mut out, &sig);
+            Some(out)
+        } else {
+            None
+        }
+    }
+
+    /// The identity whose key blob is `key`.
+    fn identity(&self, key: &[u8]) -> Option<Identity> {
+        self.identities().into_iter().find(|i| i.blob == key)
+    }
+
+    /// The session binding for the session `data` signs in, with the host's name, if the
+    /// connection bound one and `known_hosts` names its key. A host with no name is sent as
+    /// no host: the badge then says "host not named".
+    fn host_for(&self, data: &[u8], binds: &[Bind]) -> Option<SshHost> {
+        let (session_id, user) = userauth_session(data)?;
+        let bind = binds.iter().rev().find(|b| b.session_id == session_id)?;
+        let name = host_name(&self.known_hosts, &bind.host_key)?;
+        Some(SshHost {
+            host_key: bind.host_key.clone(),
+            session_id: bind.session_id.clone(),
+            host_sig: bind.host_sig.clone(),
+            name,
+            user,
+        })
+    }
+
+    /// One `SshSign` request to the badge. `None` for a refusal or any error, logged.
+    fn badge_sign(
+        &self,
+        id: &Identity,
+        data: Vec<u8>,
+        host: Option<SshHost>,
+        content: Option<Vec<u8>>,
+    ) -> Option<Vec<u8>> {
+        let req = Request::Chip {
+            circle: id.circle,
+            op: ChipRequest::SshSign {
+                data,
+                host,
+                content,
+            },
+        };
+        let mut badge = self.badge.lock().unwrap_or_else(|e| e.into_inner());
+        match badge.request(req) {
+            Ok(Response::Chip {
+                result: ChipResponse::Signature { signature },
+            }) => {
+                eprintln!("agent: {} signed", id.comment);
+                Some(signature)
+            }
+            Ok(Response::Error { code }) => {
+                eprintln!("agent: {}: {}", id.comment, describe_error(code));
+                None
+            }
+            Ok(other) => {
+                eprintln!("agent: {}: unexpected answer {other:?}", id.comment);
+                None
+            }
+            Err(e) => {
+                eprintln!("agent: {}: {e}", id.comment);
+                None
+            }
+        }
+    }
+}
+
+/// Ask the badge for the seat key of each circle in `names`. Returns the keys found and
+/// whether every circle was found.
+fn fetch_identities(
+    badge: &mut BadgeClient,
+    names: &[String],
+) -> Result<(Vec<Identity>, bool), String> {
+    let circles = match badge
+        .request(Request::Identify)
+        .map_err(|e| e.to_string())?
+    {
+        Response::Identity { circles, .. } => circles,
+        Response::Error { code } => return Err(describe_error(code).into()),
+        other => return Err(format!("unexpected answer {other:?}")),
+    };
+    let mut ids = Vec::new();
+    let mut complete = true;
+    for name in names {
+        let Some(info) = circles.iter().find(|c| &c.name == name) else {
+            eprintln!("agent: the badge holds no circle named {name}");
+            complete = false;
+            continue;
+        };
+        let req = Request::Chip {
+            circle: info.circle_id,
+            op: ChipRequest::Describe,
+        };
+        match badge.request(req).map_err(|e| e.to_string())? {
+            Response::Chip {
+                result: ChipResponse::Description { public, .. },
+            } => match seat_blob(&public) {
+                Some(blob) => ids.push(Identity {
+                    circle: info.circle_id,
+                    blob,
+                    comment: format!("cahoots:{}:{}", info.name, info.seat),
+                }),
+                None => {
+                    eprintln!("agent: {name}: the badge's key does not parse");
+                    complete = false;
+                }
+            },
+            Response::Error { code } => {
+                eprintln!("agent: {name}: {}", describe_error(code));
+                complete = false;
+            }
+            other => return Err(format!("unexpected answer {other:?}")),
+        }
+    }
+    Ok((ids, complete))
+}
+
+/// A P-256 public key (SEC1, either form) as an SSH public key blob.
+pub fn seat_blob(sec1: &[u8]) -> Option<Vec<u8>> {
+    use p256::elliptic_curve::sec1::ToEncodedPoint;
+    let point = p256::PublicKey::from_sec1_bytes(sec1)
+        .ok()?
+        .to_encoded_point(false);
+    let mut out = Vec::new();
+    put_string(&mut out, b"ecdsa-sha2-nistp256");
+    put_string(&mut out, b"nistp256");
+    put_string(&mut out, point.as_bytes());
+    Some(out)
+}
+
+/// A seat key as an `authorized_keys` line: `ecdsa-sha2-nistp256 <base64> <comment>`.
+pub fn authorized_key(sec1: &[u8], comment: &str) -> Option<String> {
+    let blob = seat_blob(sec1)?;
+    Some(format!(
+        "ecdsa-sha2-nistp256 {} {comment}",
+        base64::engine::general_purpose::STANDARD.encode(blob)
+    ))
+}
+
+/// The session id and user of a userauth request, or `None` for anything else.
+fn userauth_session(data: &[u8]) -> Option<(Vec<u8>, String)> {
+    let mut r = Reader(data);
+    let session_id = r.string()?.to_vec();
+    if r.byte()? != 50 {
+        return None;
+    }
+    let user = String::from_utf8(r.string()?.to_vec()).ok()?;
+    Some((session_id, user))
+}
+
+/// The name `known_hosts` gives `host_key` (an SSH public key blob), or `None`.
+///
+/// A plain entry names its first host that is not a pattern or a negation (`[host]:port` is
+/// shown as `host:port`). A hashed entry (`|1|salt|hash`, HMAC-SHA1 of the name under the
+/// salt) keeps no name, so names are tried against it: the `Host` and `HostName` values in the
+/// ssh `config` file in the same directory, then a few well-known git hosts. Marked lines
+/// (`@cert-authority`, `@revoked`) name nothing.
+pub fn host_name(known_hosts: &Path, host_key: &[u8]) -> Option<String> {
+    let text = std::fs::read_to_string(known_hosts).ok()?;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let mut candidates: Option<Vec<String>> = None;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with('@') {
+            continue;
+        }
+        let mut fields = line.split_whitespace();
+        let (Some(hosts), Some(_kind), Some(key)) = (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        if b64.decode(key).ok().as_deref() != Some(host_key) {
+            continue;
+        }
+        for pattern in hosts.split(',') {
+            if let Some(hashed) = pattern.strip_prefix("|1|") {
+                let tried = candidates.get_or_insert_with(|| names_to_try(known_hosts));
+                if let Some(name) = tried.iter().find(|n| hashed_matches(hashed, n)) {
+                    return Some(name.clone());
+                }
+            } else if !pattern.starts_with('!') && !pattern.contains(['*', '?']) {
+                return Some(show_host(pattern));
+            }
+        }
+    }
+    None
+}
+
+/// `[host]:port` as `host:port`; anything else as it is.
+fn show_host(pattern: &str) -> String {
+    match pattern.strip_prefix('[').and_then(|p| p.split_once("]:")) {
+        Some((host, port)) => format!("{host}:{port}"),
+        None => pattern.to_string(),
+    }
+}
+
+/// True if `salt|hash` (both base64) is the HMAC-SHA1 of `name` under the salt.
+fn hashed_matches(salt_hash: &str, name: &str) -> bool {
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let Some((salt, hash)) = salt_hash.split_once('|') else {
+        return false;
+    };
+    let (Ok(salt), Ok(hash)) = (b64.decode(salt), b64.decode(hash)) else {
+        return false;
+    };
+    let Ok(mut mac) = <Hmac<sha1::Sha1> as Mac>::new_from_slice(&salt) else {
+        return false;
+    };
+    mac.update(name.as_bytes());
+    mac.verify_slice(&hash).is_ok()
+}
+
+/// The names tried against hashed entries: from the ssh `config` beside `known_hosts`, then
+/// [`KNOWN_FORGES`].
+fn names_to_try(known_hosts: &Path) -> Vec<String> {
+    let mut names = Vec::new();
+    let config = known_hosts.with_file_name("config");
+    if let Ok(text) = std::fs::read_to_string(config) {
+        for line in text.lines() {
+            let mut words = line.split_whitespace();
+            let Some(key) = words.next() else { continue };
+            if key.eq_ignore_ascii_case("host") || key.eq_ignore_ascii_case("hostname") {
+                for w in words {
+                    if !w.starts_with('!') && !w.contains(['*', '?', '%']) {
+                        names.push(w.to_string());
+                    }
+                }
+            }
+        }
+    }
+    names.extend(KNOWN_FORGES.iter().map(|s| s.to_string()));
+    names
+}
+
+/// Append `b` as an SSH string.
+fn put_string(out: &mut Vec<u8>, b: &[u8]) {
+    out.extend_from_slice(&(b.len() as u32).to_be_bytes());
+    out.extend_from_slice(b);
+}
+
+/// A cursor over SSH wire data. Every read checks the length; nothing here panics.
+struct Reader<'a>(&'a [u8]);
+
+impl<'a> Reader<'a> {
+    fn raw(&mut self, n: usize) -> Option<&'a [u8]> {
+        if n > self.0.len() {
+            return None;
+        }
+        let (head, rest) = self.0.split_at(n);
+        self.0 = rest;
+        Some(head)
+    }
+    fn byte(&mut self) -> Option<u8> {
+        Some(self.raw(1)?[0])
+    }
+    fn u32(&mut self) -> Option<u32> {
+        Some(u32::from_be_bytes(self.raw(4)?.try_into().ok()?))
+    }
+    fn string(&mut self) -> Option<&'a [u8]> {
+        let n = self.u32()? as usize;
+        self.raw(n)
+    }
+    fn end(&self) -> Option<()> {
+        self.0.is_empty().then_some(())
+    }
+}
+
+/// Call the agent at `socket` with `sign-with-content@cahoots`: sign `data` with the key
+/// `key` (an SSH public key blob), showing the badge `content`. The SSH signature blob, or an
+/// error in words.
+pub fn sign_with_content(
+    socket: &Path,
+    key: &[u8],
+    data: &[u8],
+    content: &[u8],
+) -> Result<Vec<u8>, String> {
+    let mut s = UnixStream::connect(socket)
+        .map_err(|e| format!("no agent at {}: {e}", socket.display()))?;
+    let mut msg = vec![SSH_AGENTC_EXTENSION];
+    put_string(&mut msg, SIGN_WITH_CONTENT.as_bytes());
+    put_string(&mut msg, key);
+    put_string(&mut msg, data);
+    put_string(&mut msg, content);
+    let mut framed = (msg.len() as u32).to_be_bytes().to_vec();
+    framed.extend_from_slice(&msg);
+    s.write_all(&framed).map_err(|e| format!("agent: {e}"))?;
+    let mut len = [0u8; 4];
+    s.read_exact(&mut len).map_err(|e| format!("agent: {e}"))?;
+    let len = u32::from_be_bytes(len) as usize;
+    if len == 0 || len > MAX_MESSAGE {
+        return Err("agent: an answer of the wrong length".into());
+    }
+    let mut reply = vec![0u8; len];
+    s.read_exact(&mut reply)
+        .map_err(|e| format!("agent: {e}"))?;
+    let mut r = Reader(&reply[1..]);
+    match reply[0] {
+        SSH_AGENT_SUCCESS => {
+            let sig = r.string().ok_or("agent: a short answer")?.to_vec();
+            r.end().ok_or("agent: a long answer")?;
+            Ok(sig)
+        }
+        _ => Err(
+            "the agent did not sign: refused on the badge, the key is not one the agent \
+                  holds, or the badge could not be asked (the agent's log says which)"
+                .into(),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn b64(b: &[u8]) -> String {
+        base64::engine::general_purpose::STANDARD.encode(b)
+    }
+
+    fn hashed(salt: &[u8], name: &str) -> String {
+        let mut mac = <Hmac<sha1::Sha1> as Mac>::new_from_slice(salt).unwrap();
+        mac.update(name.as_bytes());
+        format!("|1|{}|{}", b64(salt), b64(&mac.finalize().into_bytes()))
+    }
+
+    #[test]
+    fn known_hosts_names_plain_and_hashed_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("known_hosts");
+        let (k1, k2, k3, k4, k5) = (b"key one", b"key two", b"key six", b"key ten", b"key red");
+        let text = format!(
+            "# comment\n\
+             @revoked bad.example {kind} {r}\n\
+             *.example,!x.example,box.example {kind} {a}\n\
+             {h} {kind} {b}\n\
+             [git.example]:2222 {kind} {c}\n\
+             {h2} {kind} {d}\n",
+            kind = "ssh-ed25519",
+            r = b64(k5),
+            a = b64(k1),
+            h = hashed(b"0123456789abcdef0123", "github.com"),
+            b = b64(k2),
+            c = b64(k3),
+            h2 = hashed(b"saltsaltsaltsaltsalt", "build.internal"),
+            d = b64(k4),
+        );
+        std::fs::write(&path, text).unwrap();
+        assert_eq!(host_name(&path, k1).as_deref(), Some("box.example"));
+        assert_eq!(host_name(&path, k2).as_deref(), Some("github.com"));
+        assert_eq!(host_name(&path, k3).as_deref(), Some("git.example:2222"));
+        assert_eq!(host_name(&path, k4), None, "a hashed name nobody offers");
+        assert_eq!(host_name(&path, k5), None, "a revoked key names nothing");
+        assert_eq!(host_name(&path, b"no such key"), None);
+
+        // A name from the ssh config beside known_hosts opens a hashed entry.
+        std::fs::write(
+            tmp.path().join("config"),
+            "Host build\n  HostName build.internal\n",
+        )
+        .unwrap();
+        assert_eq!(host_name(&path, k4).as_deref(), Some("build.internal"));
+    }
+
+    #[test]
+    fn userauth_session_reads_the_session_and_user() {
+        let mut d = Vec::new();
+        put_string(&mut d, b"session");
+        d.push(50);
+        put_string(&mut d, b"git");
+        assert_eq!(
+            userauth_session(&d),
+            Some((b"session".to_vec(), "git".into()))
+        );
+        assert_eq!(userauth_session(b"SSHSIG"), None);
+        assert_eq!(userauth_session(&[]), None);
+    }
+}

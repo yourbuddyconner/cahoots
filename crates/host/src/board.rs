@@ -12,18 +12,24 @@
 //!   (for example `echo B > buttons.txt`, or write a side file and rename it in).
 //! - `a_down`: while this file exists, button A is held.
 //! - `chip.cbor`: the chip record (see `cahoots_badge::chip`), once a chip has made a key.
+//! - `softchip.bin`: the software chip's objects, for a board made with
+//!   [`HostBoard::with_soft_chip`] (`cahoots-host badge --chip soft`). Written after every
+//!   chip call, so a restarted simulator keeps its chip keys. It holds the keys in the clear:
+//!   a simulated chip is no safer than the files beside it.
 
 use crate::display::PngDisplay;
 use crate::link::{Absent, SocketLink};
 use crate::store::{FilePadStore, FileRecordStore};
 use cahoots_badge::chip::ChipRecord;
 use cahoots_badge::{word_indices, Board, BoardError, Circle, Press};
+use cahoots_chip::{Attested, ChipError, ChipOps, Curve, KeyId, Signature64, SoftChip, Version};
 use cahoots_core::checkwords::WORDLIST;
 use cahoots_core::params::CircleParams;
 use cahoots_hal::health::{HealthTests, Tested};
 use cahoots_hal::{Display, Entropy, Frame, HealthError, Link, PadStore};
 use std::collections::VecDeque;
-use std::io;
+use std::io::{self, Write};
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -146,6 +152,129 @@ pub struct HostBoard {
     buttons: VecDeque<Button>,
     /// The `(down, up)` links, connected once in `new`. `links()` hands out handles.
     links: (HostLink, HostLink),
+    seed: Option<u64>,
+    chip: Option<HostChip>,
+}
+
+/// The simulated chip: a [`SoftChip`] kept in a file and written after every call that can
+/// change it, so the chip a simulator restarts with is the chip it stopped with. The badge
+/// reconciles its chip record against the chip at boot; an empty chip would make it forget
+/// keys the record names.
+pub struct HostChip {
+    chip: SoftChip,
+    path: PathBuf,
+}
+
+impl HostChip {
+    /// Open the chip kept at `path`, or make an empty one there. `seed` makes the new chip's
+    /// keys repeatable; a kept chip carries on from where it was.
+    pub fn open(path: &Path, seed: Option<u64>) -> io::Result<HostChip> {
+        let chip = match std::fs::read(path) {
+            Ok(bytes) => {
+                let bytes = Zeroizing::new(bytes);
+                SoftChip::import(&bytes).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "not a software chip")
+                })?
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                let chip = match seed {
+                    Some(s) => {
+                        let mut bytes = [0u8; 32];
+                        bytes[..8].copy_from_slice(b"softchip");
+                        bytes[8..16].copy_from_slice(&s.to_le_bytes());
+                        SoftChip::with_seed(bytes)
+                    }
+                    None => SoftChip::new(),
+                };
+                let made = HostChip {
+                    chip,
+                    path: path.to_path_buf(),
+                };
+                made.save()?;
+                return Ok(made);
+            }
+            Err(e) => return Err(e),
+        };
+        Ok(HostChip {
+            chip,
+            path: path.to_path_buf(),
+        })
+    }
+
+    /// Write the chip to a side file readable only by this user, then rename it in.
+    fn save(&self) -> io::Result<()> {
+        let bytes = Zeroizing::new(self.chip.export());
+        let tmp = self.path.with_extension("tmp");
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        f.write_all(&bytes)?;
+        f.sync_data()?;
+        std::fs::rename(&tmp, &self.path)
+    }
+
+    /// `r`, once the chip is written; a chip that cannot be written is a failed call.
+    fn kept<T>(&mut self, r: Result<T, ChipError>) -> Result<T, ChipError> {
+        let v = r?;
+        self.save().map_err(|_| ChipError::Transport)?;
+        Ok(v)
+    }
+}
+
+impl ChipOps for HostChip {
+    fn version(&mut self) -> Result<Version, ChipError> {
+        self.chip.version()
+    }
+    fn random(&mut self, n: usize) -> Result<Vec<u8>, ChipError> {
+        let r = self.chip.random(n);
+        self.kept(r)
+    }
+    fn generate(&mut self, id: KeyId, curve: Curve) -> Result<Vec<u8>, ChipError> {
+        let r = self.chip.generate(id, curve);
+        self.kept(r)
+    }
+    fn public(&mut self, id: KeyId) -> Result<Vec<u8>, ChipError> {
+        self.chip.public(id)
+    }
+    fn delete(&mut self, id: KeyId) -> Result<(), ChipError> {
+        let r = self.chip.delete(id);
+        self.kept(r)
+    }
+    fn exists(&mut self, id: KeyId) -> Result<bool, ChipError> {
+        self.chip.exists(id)
+    }
+    fn ids(&mut self) -> Result<Vec<KeyId>, ChipError> {
+        self.chip.ids()
+    }
+    fn sign_p256(&mut self, id: KeyId, digest: &[u8; 32]) -> Result<Signature64, ChipError> {
+        self.chip.sign_p256(id, digest)
+    }
+    fn sign_ed25519(&mut self, id: KeyId, message: &[u8]) -> Result<Signature64, ChipError> {
+        self.chip.sign_ed25519(id, message)
+    }
+    fn attest(&mut self, id: KeyId, freshness: &[u8; 16]) -> Result<Attested, ChipError> {
+        // The chip's clock moves.
+        let r = self.chip.attest(id, freshness);
+        self.kept(r)
+    }
+    fn put_hmac_key(&mut self, id: KeyId, key: &[u8; 32]) -> Result<(), ChipError> {
+        let r = self.chip.put_hmac_key(id, key);
+        self.kept(r)
+    }
+    fn hmac(&mut self, id: KeyId, data: &[u8]) -> Result<[u8; 32], ChipError> {
+        self.chip.hmac(id, data)
+    }
+    fn put_counter(&mut self, id: KeyId, value: u64) -> Result<(), ChipError> {
+        let r = self.chip.put_counter(id, value);
+        self.kept(r)
+    }
+    fn counter_next(&mut self, id: KeyId) -> Result<u64, ChipError> {
+        let r = self.chip.counter_next(id);
+        self.kept(r)
+    }
 }
 
 impl HostBoard {
@@ -182,7 +311,22 @@ impl HostBoard {
             display: HostDisplay::new(state_dir, name),
             buttons: VecDeque::new(),
             links,
+            seed,
+            chip: None,
         }
+    }
+
+    /// Give the board a software chip, kept in `softchip.bin` in its state directory: the one
+    /// kept there, or a new empty one. With a chip the badge makes seat keys in it.
+    ///
+    /// Panics if `softchip.bin` exists but cannot be read: a board must not boot with an empty
+    /// chip in place of one whose keys its circle names.
+    pub fn with_soft_chip(mut self) -> HostBoard {
+        let path = self.dir.join("softchip.bin");
+        let chip = HostChip::open(&path, self.seed)
+            .unwrap_or_else(|e| panic!("software chip {}: {e}", path.display()));
+        self.chip = Some(chip);
+        self
     }
 
     pub fn dir(&self) -> &Path {
@@ -405,7 +549,11 @@ impl Board for HostBoard {
     }
 
     fn selftest(&mut self) -> Vec<String> {
-        vec![format!("files: {}", self.dir.display())]
+        let mut lines = vec![format!("files: {}", self.dir.display())];
+        if self.chip.is_some() {
+            lines.push("chip: software, in softchip.bin".into());
+        }
+        lines
     }
 
     fn log(&mut self, line: &str) {
@@ -421,6 +569,10 @@ impl Board for HostBoard {
             eprintln!("[{}] {}", self.name, lines.join("\n"));
         }
         self.display.note(lines);
+    }
+
+    fn chip(&mut self) -> Option<&mut dyn ChipOps> {
+        self.chip.as_mut().map(|c| c as &mut dyn ChipOps)
     }
 
     /// `chip.cbor`: `Ok(None)` if it is missing, an error if it cannot be read or does not

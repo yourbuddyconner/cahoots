@@ -7,7 +7,11 @@
 //! cahoots-host recv --state /tmp/dev3 --message <base64url>
 //! cahoots-host status --state /tmp/dev0
 //! cahoots-host pile --cards 3 --state /tmp/pile [--serial /dev/cu.usbmodem...] [--name sf] [--pad-len 16384]
-//! cahoots-host badge --state /tmp/b0 --listen - --next /tmp/b1.sock --name sf --pad-len 16384 [--seed 1]
+//! cahoots-host badge --state /tmp/b0 --listen - --next /tmp/b1.sock --name sf --pad-len 16384 [--seed 1] [--chip soft]
+//! cahoots-host agent (--serial <port> | --sim <socket>) --circle <name>... [--socket <path>] [--known-hosts <path>]
+//! cahoots-host git-sign -Y sign -n git -f <key file> <file>
+//! cahoots-host roster --ssh --circle <name> --state <dir>
+//! cahoots-host attest (--serial <port> | --sim <socket>) --circle <name> [--json]
 //! ```
 //!
 //! `pile` runs a stack of cards on this machine, bottom first, over Unix sockets. With
@@ -16,7 +20,14 @@
 //! `badge` runs one card through the badge crate on a [`HostBoard`]: boot, then a pile pass
 //! while it has no circle, then the idle menu. `--listen` is the down link and `--next` the
 //! up link; `-` means nothing is plugged in on that side. Press buttons by writing `L`, `R` or `B` (Both)
-//! lines to `buttons.txt` in the state directory.
+//! lines to `buttons.txt` in the state directory. `--chip soft` gives the card a software chip,
+//! kept in `softchip.bin`, so its seat keys are made and used there.
+//!
+//! `agent` is an SSH agent whose keys are a badge's seat keys; the badge asks its holder for
+//! every signature. `git-sign` is the program git runs to sign a commit (also built as
+//! `cahoots-host-git-sign`, the one to name in `gpg.ssh.program`). `roster` prints a circle's
+//! seat keys as `authorized_keys` lines. `attest` asks the badge's chip to attest a seat key.
+//! `--sim` is the socket a simulated badge listens on (its `--listen`).
 
 use base64::Engine;
 use cahoots_badge::{Badge, Board};
@@ -25,11 +36,14 @@ use cahoots_core::params::CircleParams;
 use cahoots_hal::health::{HealthTests, Tested};
 use cahoots_hal::Display;
 use cahoots_hal::{Entropy, HealthError};
+use cahoots_host::agent::Agent;
+use cahoots_host::badge_client::BadgeClient;
 use cahoots_host::board::HostBoard;
 use cahoots_host::device::Device;
 use cahoots_host::link::SocketLink;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// The host's randomness: the OS CSPRNG. A simulated badge is a `CSPRNG` source, not a
@@ -64,6 +78,24 @@ impl Args {
             .and_then(|i| self.0.get(i + 1))
             .map(String::as_str)
     }
+    fn all(&self, key: &str) -> Vec<String> {
+        self.0
+            .windows(2)
+            .filter(|w| w[0] == key)
+            .map(|w| w[1].clone())
+            .collect()
+    }
+    fn has(&self, flag: &str) -> bool {
+        self.0.iter().any(|a| a == flag)
+    }
+    /// The badge named by `--serial <port>` or `--sim <socket>`.
+    fn badge(&self) -> Result<BadgeClient, String> {
+        match (self.get("--serial"), self.get("--sim")) {
+            (Some(port), None) => BadgeClient::serial(port).map_err(|e| e.to_string()),
+            (None, Some(sock)) => BadgeClient::sim(Path::new(sock)).map_err(|e| e.to_string()),
+            _ => Err("name the badge with --serial <port> or --sim <socket>".into()),
+        }
+    }
     fn req(&self, key: &str) -> String {
         self.get(key).map(String::from).unwrap_or_else(|| {
             eprintln!("missing {key}");
@@ -95,9 +127,14 @@ fn connect_ring(listen: &str, next: &str) -> std::io::Result<(SocketLink, Socket
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let Some(cmd) = argv.first().cloned() else {
-        eprintln!("usage: cahoots-host <ceremony|pile|badge|logs|send|recv|status> ...");
+        eprintln!(
+            "usage: cahoots-host <ceremony|pile|badge|logs|send|recv|status|agent|git-sign|roster|attest> ..."
+        );
         std::process::exit(2);
     };
+    if cmd == "git-sign" {
+        std::process::exit(cahoots_host::gitsign::main(&argv[1..]));
+    }
     let args = Args(argv[1..].to_vec());
     let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
     let result: Result<(), String> = match cmd.as_str() {
@@ -202,6 +239,16 @@ fn main() {
                 pad_len,
                 seed,
             );
+            let board = match args.get("--chip") {
+                None => board,
+                Some("soft") => board.with_soft_chip(),
+                Some(other) => {
+                    eprintln!(
+                        "--chip {other}: the simulator has only a software chip, --chip soft"
+                    );
+                    std::process::exit(2)
+                }
+            };
             let mut badge = Badge::new(board);
             badge.boot();
             loop {
@@ -240,12 +287,84 @@ fn main() {
                 })
                 .map_err(|e| e.to_string())
         }
+        "agent" => run_agent(&args),
+        "roster" => {
+            if !args.has("--ssh") {
+                eprintln!("roster prints authorized_keys lines: add --ssh");
+                std::process::exit(2);
+            }
+            let state = PathBuf::from(args.req("--state"));
+            cahoots_host::roster::manifest(&state, &args.req("--circle"))
+                .and_then(|m| cahoots_host::roster::ssh_lines(&m))
+                .map(|lines| {
+                    for l in lines {
+                        println!("{l}");
+                    }
+                })
+        }
+        "attest" => {
+            let circle = args.req("--circle");
+            args.badge()
+                .and_then(|mut b| cahoots_host::attest::attest(&mut b, &circle))
+                .and_then(|o| {
+                    if args.has("--json") {
+                        println!("{}", o.json);
+                    } else {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&o.json).unwrap_or_default()
+                        );
+                        for l in &o.lines {
+                            println!("{l}");
+                        }
+                    }
+                    if o.verified {
+                        Ok(())
+                    } else {
+                        Err("the attestation did not verify".into())
+                    }
+                })
+        }
         _ => Err(format!("unknown command {cmd}")),
     };
     if let Err(e) = result {
         eprintln!("error: {e}");
         std::process::exit(1);
     }
+}
+
+/// `agent`: listen on the socket, print the line that points ssh at it, and answer until
+/// killed.
+fn run_agent(args: &Args) -> Result<(), String> {
+    let circles = args.all("--circle");
+    if circles.is_empty() {
+        return Err("name at least one circle with --circle".into());
+    }
+    let socket = args
+        .get("--socket")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("cahoots-agent.sock"));
+    let known_hosts = match args.get("--known-hosts") {
+        Some(p) => PathBuf::from(p),
+        None => std::env::var_os("HOME")
+            .map(|h| PathBuf::from(h).join(".ssh/known_hosts"))
+            .ok_or("no HOME: name the known_hosts file with --known-hosts")?,
+    };
+    let badge = args.badge()?;
+    let _ = std::fs::remove_file(&socket);
+    let listener = UnixListener::bind(&socket).map_err(|e| format!("{}: {e}", socket.display()))?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("{}: {e}", socket.display()))?;
+    }
+    println!("SSH_AUTH_SOCK={}; export SSH_AUTH_SOCK;", socket.display());
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    eprintln!("agent: the badge must be on its Serve page, serving, to answer");
+    Arc::new(Agent::new(badge, circles, known_hosts))
+        .serve(listener)
+        .map_err(|e| e.to_string())
 }
 
 fn hex(b: &[u8]) -> String {

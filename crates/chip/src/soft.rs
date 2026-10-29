@@ -91,6 +91,89 @@ impl SoftChip {
     }
 }
 
+/// The first bytes of [`SoftChip::export`]'s output.
+const EXPORT_MAGIC: &[u8; 9] = b"SOFTCHIP1";
+
+impl SoftChip {
+    /// Everything the chip holds, so a simulated badge can keep its chip across restarts: the
+    /// generator's seed and position, the clock, and every object with its secret.
+    ///
+    /// `SOFTCHIP1 | seed 32 | counter u64 | clock u64 | count u32 | (id u32 | tag u8 | value)*`,
+    /// big-endian, objects in id order; the tag is 1 for P-256 (a 32-byte scalar), 2 for
+    /// Ed25519 (a 32-byte seed), 3 for an HMAC key (32 bytes), 4 for a counter (u64).
+    ///
+    /// The output holds secret keys in the clear, as a software chip does in memory.
+    pub fn export(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(EXPORT_MAGIC);
+        out.extend_from_slice(&self.rng.seed);
+        out.extend_from_slice(&self.rng.counter.to_be_bytes());
+        out.extend_from_slice(&self.clock.to_be_bytes());
+        out.extend_from_slice(&(self.objects.len() as u32).to_be_bytes());
+        for (id, o) in &self.objects {
+            out.extend_from_slice(&id.to_be_bytes());
+            match o {
+                Object::P256(k) => {
+                    out.push(1);
+                    out.extend_from_slice(&k.to_bytes());
+                }
+                Object::Ed25519(k) => {
+                    out.push(2);
+                    out.extend_from_slice(&k.to_bytes());
+                }
+                Object::Hmac(k) => {
+                    out.push(3);
+                    out.extend_from_slice(k);
+                }
+                Object::Counter(c) => {
+                    out.push(4);
+                    out.extend_from_slice(&c.to_be_bytes());
+                }
+            }
+        }
+        out
+    }
+
+    /// A chip from [`SoftChip::export`]'s output, or `None` if the bytes are not exactly that.
+    pub fn import(bytes: &[u8]) -> Option<SoftChip> {
+        let mut r = bytes.strip_prefix(EXPORT_MAGIC.as_slice())?;
+        let mut take = |n: usize| -> Option<&[u8]> {
+            if r.len() < n {
+                return None;
+            }
+            let (head, rest) = r.split_at(n);
+            r = rest;
+            Some(head)
+        };
+        let seed: [u8; 32] = take(32)?.try_into().ok()?;
+        let counter = u64::from_be_bytes(take(8)?.try_into().ok()?);
+        let clock = u64::from_be_bytes(take(8)?.try_into().ok()?);
+        let count = u32::from_be_bytes(take(4)?.try_into().ok()?);
+        let mut chip = SoftChip::with_seed(seed);
+        chip.rng.counter = counter;
+        chip.clock = clock;
+        for _ in 0..count {
+            let id = u32::from_be_bytes(take(4)?.try_into().ok()?);
+            let object = match take(1)?[0] {
+                1 => Object::P256(p256::ecdsa::SigningKey::from_slice(take(32)?).ok()?),
+                2 => Object::Ed25519(ed25519_dalek::SigningKey::from_bytes(
+                    take(32)?.try_into().ok()?,
+                )),
+                3 => Object::Hmac(take(32)?.try_into().ok()?),
+                4 => Object::Counter(u64::from_be_bytes(take(8)?.try_into().ok()?)),
+                _ => return None,
+            };
+            if chip.objects.insert(id, object).is_some() {
+                return None;
+            }
+        }
+        if !r.is_empty() {
+            return None;
+        }
+        Some(chip)
+    }
+}
+
 #[cfg(feature = "std")]
 impl Default for SoftChip {
     fn default() -> Self {

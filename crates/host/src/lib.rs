@@ -8,11 +8,19 @@
 //! - [`device::Device`]: one simulated badge with a state directory.
 //! - [`board::HostBoard`]: the same stand-ins as a `cahoots_badge::Board`, so the badge crate
 //!   runs here as it does on a board.
+//! - [`badge_client::BadgeClient`]: a laptop's requests to a badge, real or simulated.
+//! - [`agent`], [`gitsign`], [`roster`], [`attest`]: SSH logins and git signatures with a
+//!   badge's seat key, the circle as `authorized_keys`, and the chip's attestation.
 
+pub mod agent;
+pub mod attest;
+pub mod badge_client;
 pub mod board;
 pub mod device;
 pub mod display;
 mod font;
+pub mod gitsign;
 pub mod link;
 pub mod pile;
+pub mod roster;
 pub mod store;

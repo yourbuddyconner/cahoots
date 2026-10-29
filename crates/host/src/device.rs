@@ -67,7 +67,10 @@ pub struct Device {
 
 /// What `circle.txt` keeps of a seat's place in the signed manifest.
 struct Seat {
+    /// All zeros when `in_chip`: the key is in the badge's chip, not here.
     key: Zeroizing<[u8; 32]>,
+    /// `circle.txt` names a chip slot: the seat key is in the chip.
+    in_chip: bool,
     tier: u8,
     manifest: Vec<u8>,
 }
@@ -124,6 +127,7 @@ impl Device {
                 .to_bytes(),
             tier: result.tier,
             manifest: result.manifest.encode(),
+            in_chip: false,
         };
         let circle_txt = Zeroizing::new(format!(
             "params={}\nindex={}\ncircle_id={}\nwords={}\nlabel=CSPRNG\nseat_key={}\ntier={}\nmanifest={}\n",
@@ -205,6 +209,7 @@ impl Device {
                     key,
                     tier,
                     manifest: unhex(&field("manifest")?)?,
+                    in_chip: field("chip_slot").is_ok(),
                 })
             }
         };
@@ -229,10 +234,20 @@ impl Device {
     pub fn params(&self) -> &CircleParams {
         self.pad.params()
     }
-    /// This seat's signing key, or `None` for a circle kept before seat keys (or a stored
-    /// seed that is not a valid key).
+    /// This seat's signing key, or `None` for a circle kept before seat keys, a stored seed
+    /// that is not a valid key, or a seat key kept in the badge's chip: the file holds zeros in
+    /// its place, and only the badge signs with it.
     pub fn seat_key(&self) -> Option<SeatKey> {
-        SeatKey::from_seed(&self.seat.as_ref()?.key).ok()
+        let seat = self.seat.as_ref()?;
+        if seat.in_chip {
+            return None;
+        }
+        SeatKey::from_seed(&seat.key).ok()
+    }
+
+    /// True when this seat's key is in the badge's chip.
+    pub fn seat_in_chip(&self) -> bool {
+        self.seat.as_ref().is_some_and(|s| s.in_chip)
     }
     /// The tier this seat declared in the ceremony, or `None` for a circle kept before seat
     /// keys.

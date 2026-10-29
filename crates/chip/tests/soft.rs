@@ -140,3 +140,42 @@ fn attested_round_trips_cbor() {
     let bytes = minicbor::to_vec(&at).unwrap();
     assert_eq!(minicbor::decode::<Attested>(&bytes).unwrap(), at);
 }
+
+#[test]
+fn export_then_import_keeps_every_object_and_the_generator() {
+    let mut chip = SoftChip::with_seed([3; 32]);
+    let seat = KeyId::new(KeyKind::Seat, 0);
+    let ed = KeyId::new(KeyKind::Seat, 1);
+    let root = KeyId::new(KeyKind::Root, 0);
+    let epoch = KeyId::new(KeyKind::Epoch, 0);
+    let public = chip.generate(seat, Curve::P256).unwrap();
+    let ed_public = chip.generate(ed, Curve::Ed25519).unwrap();
+    chip.put_hmac_key(root, &[9; 32]).unwrap();
+    chip.put_counter(epoch, 41).unwrap();
+    chip.attest(seat, &[1; 16]).unwrap();
+
+    let saved = chip.export();
+    let mut back = SoftChip::import(&saved).expect("imports");
+    assert_eq!(back.ids().unwrap(), chip.ids().unwrap());
+    assert_eq!(back.public(seat).unwrap(), public);
+    assert_eq!(back.public(ed).unwrap(), ed_public);
+    assert_eq!(back.hmac(root, b"x").unwrap(), chip.hmac(root, b"x").unwrap());
+    assert_eq!(back.counter_next(epoch).unwrap(), 42);
+    // The generator and the clock carry on where they were, so no key or timestamp repeats.
+    assert_eq!(back.random(16).unwrap(), chip.random(16).unwrap());
+    assert_eq!(
+        back.attest(seat, &[2; 16]).unwrap().timestamp,
+        chip.attest(seat, &[2; 16]).unwrap().timestamp
+    );
+    let digest: [u8; 32] = Sha256::digest(b"hello").into();
+    let sig = back.sign_p256(seat, &digest).unwrap();
+    let vk = p256::ecdsa::VerifyingKey::from_sec1_bytes(&public).unwrap();
+    vk.verify_prehash(&digest, &p256::ecdsa::Signature::from_slice(&sig).unwrap())
+        .unwrap();
+
+    assert!(SoftChip::import(b"").is_none());
+    assert!(SoftChip::import(&saved[..saved.len() - 1]).is_none());
+    let mut longer = saved.clone();
+    longer.push(0);
+    assert!(SoftChip::import(&longer).is_none());
+}
