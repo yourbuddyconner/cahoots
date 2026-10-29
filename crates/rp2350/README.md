@@ -77,11 +77,15 @@ The program may use the first 2 MiB (`memory.x`). Above it, by offset from the s
 
 | Region | Offset | Size | Contents |
 |---|---|---|---|
-| pad | 0x200000 | 1 MiB | the pad, programmed once, spent bytes programmed to zero |
-| ledger | 0x300000 | 64 KiB | 16-byte spent-range records, appended |
-| circle | 0x310000 | 4 KiB | `CAH3`: params, seat, circle id, the six check words, the seat key (32 bytes, plaintext like the pad; zeros when the key is in the chip), tier, the sealed manifest, the chip slot and the circle root (when there is no chip). A `CAH2` record, without the last two, still loads |
+| pad | 0x200000 | 1 MiB | the first circle's pad, programmed once, spent bytes programmed to zero |
+| ledger | 0x300000 | 64 KiB | the first circle's 16-byte spent-range records, appended |
+| circle | 0x310000 | 4 KiB | the first circle's record, `CAH3`: params, seat, circle id, the six check words, the seat key (32 bytes, plaintext like the pad; zeros when the key is in the chip), tier, the sealed manifest, the chip slot and the circle root (when there is no chip). A `CAH2` record, without the last two, still loads |
 | panic | 0x311000 | 4 KiB | the last panic's message, shown at the next boot |
 | trace | 0x312000 | 4 KiB | the last 4 KiB of log lines and screens before a panic, written with the panic record |
+| circles | 0x313000 | 15 x 4 KiB | the records of circles 2 to 16, one sector each, as the first's |
+| places | 0x322000 | 15 x 56 KiB | for circles 2 to 16, one block each: a 48 KiB pad, then an 8 KiB ledger (512 spends) |
+
+The badge holds up to 16 circles. Each has its own record, pad and ledger, and keeps its place until it is forgotten; a new circle takes the lowest free place. The first place is where firmware from before many circles kept its one circle, so flashing over keeps it. A pad in any place but the first can be at most 48 KiB; the Pico proposes 16 KiB.
 
 The chip runs from this flash, so every erase and program hands the bus to the boot ROM's flash routines from a function placed in RAM (`in_ram`), with interrupts off, and reads go through the memory-mapped window. The record format is byte for byte the Nano's, so the same `cahoots-host` tools read both.
 

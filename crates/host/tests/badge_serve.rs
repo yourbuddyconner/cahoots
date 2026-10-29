@@ -47,9 +47,9 @@ fn keep_a_circle(dir: &Path) -> Circle {
         manifest: Vec::new(),
     };
     let mut board = HostBoard::new(dir, "-", "-", "bench", PAD_LEN, Some(5));
-    board.write_pad(&pad).unwrap();
-    board.records(true).unwrap();
-    board.save_circle(&circle).unwrap();
+    board.write_pad(&circle.circle_id, &pad).unwrap();
+    board.records(&circle.circle_id, true).unwrap();
+    board.store_circles(std::slice::from_ref(&circle)).unwrap();
     circle
 }
 
@@ -85,7 +85,7 @@ fn a_host_board_in_serve_answers_identify_on_its_down_link() {
     };
 
     // The words page, then Right twice to Serve, then Both to start serving.
-    wait_screen(&dir, "1/3");
+    wait_screen(&dir, "1/5");
     std::fs::write(dir.join("buttons.tmp"), "R\nR\nB\n").unwrap();
     std::fs::rename(dir.join("buttons.tmp"), dir.join("buttons.txt")).unwrap();
     // The line "serving" appears only once serving has started: before it, the Serve page
@@ -151,12 +151,12 @@ fn a_host_board_keeps_the_chip_slot_the_root_and_the_chip_record() {
     let dir = tmp.path().join("card");
     let mut circle = keep_a_circle(&dir);
     let mut board = HostBoard::new(&dir, "-", "-", "bench", PAD_LEN, Some(5));
-    assert_eq!(board.load_circle(), Some(circle.clone()));
+    assert_eq!(board.load_circles(), vec![circle.clone()]);
     for (slot, root) in [(Some(3), None), (None, Some([9; 32]))] {
         circle.chip_slot = slot;
         circle.root = root;
-        board.save_circle(&circle).unwrap();
-        assert_eq!(board.load_circle(), Some(circle.clone()));
+        board.store_circles(&[circle.clone()]).unwrap();
+        assert_eq!(board.load_circles(), vec![circle.clone()]);
     }
 
     assert_eq!(board.chip_record_load(), Ok(None));

@@ -110,8 +110,8 @@ fn two_host_boards_complete_a_ceremony_through_the_badge_crate() {
 
     // A fresh HostBoard on the same directory loads the circle it kept.
     use cahoots_badge::Board;
-    let again = HostBoard::new(&bottom, "-", "-", "bench", PAD_LEN, Some(1));
-    assert_eq!(again.load_circle(), Some(c_bottom));
+    let mut again = HostBoard::new(&bottom, "-", "-", "bench", PAD_LEN, Some(1));
+    assert_eq!(again.load_circles(), vec![c_bottom]);
 
     // A circle file from before seat keys is no circle to a HostBoard.
     let path = bottom.join("circle.txt");
@@ -122,5 +122,5 @@ fn two_host_boards_complete_a_ceremony_through_the_badge_crate() {
         .map(|l| format!("{l}\n"))
         .collect();
     std::fs::write(&path, old).unwrap();
-    assert_eq!(again.load_circle(), None);
+    assert_eq!(again.load_circles(), Vec::new());
 }

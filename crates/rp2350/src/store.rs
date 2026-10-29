@@ -13,6 +13,16 @@
 //! The ledger's 16-byte records program onto `0xFF` as the ledger appends. The circle record
 //! is small and rewritten whole, in the format `cahoots_badge::Circle::encode_record` writes
 //! (`CAH3`), the same as the Nano's.
+//!
+//! The board holds [`PLACES`] circles, each in a place of its own: a record sector, a pad
+//! region and a ledger region, shared with no other circle. Place 0 is where the one circle
+//! of earlier firmware lives, so a badge flashed over keeps it: the 1 MiB pad region at
+//! `0x20_0000`, the 64 KiB ledger at `0x30_0000` and the record sector at `0x31_0000`. Places
+//! 1 to 15 have a record sector each from `0x31_3000`, after the panic and trace sectors, and
+//! from `0x32_2000` a 56 KiB block each: a 48 KiB pad region and an 8 KiB ledger (512
+//! spends). The last block ends at `0x3F_4000`, under the 4 MiB the flash has. So a circle in
+//! place 0 may have a pad of up to 1 MiB and one in any other place up to 48 KiB; the Pico
+//! proposes 16 KiB.
 
 use alloc::string::String;
 use alloc::vec;
@@ -33,6 +43,18 @@ pub const PAD_CAP: u32 = 0x10_0000;
 pub const LEDGER_BASE: u32 = 0x30_0000;
 pub const LEDGER_CAP: u32 = 0x1_0000;
 pub const CIRCLE_BASE: u32 = 0x31_0000;
+/// How many circles the board holds.
+pub const PLACES: usize = 16;
+/// The record sectors of places 1 to 15, one each.
+const RECORDS_BASE: u32 = 0x31_3000;
+/// The pad and ledger blocks of places 1 to 15.
+const BLOCKS_BASE: u32 = 0x32_2000;
+/// A place after the first: its pad region, then its ledger.
+const BLOCK_PAD_CAP: u32 = 0xC000;
+const BLOCK_LEDGER_CAP: u32 = 0x2000;
+const BLOCK: u32 = BLOCK_PAD_CAP + BLOCK_LEDGER_CAP;
+const _: () = assert!(BLOCKS_BASE + (PLACES as u32 - 1) * BLOCK <= 0x40_0000);
+const _: () = assert!(RECORDS_BASE + (PLACES as u32 - 1) * SECTOR <= BLOCKS_BASE);
 /// One sector after the circle record: the message of the last panic, shown at the next boot.
 pub const PANIC_BASE: u32 = 0x31_1000;
 /// One sector after the panic record: the last log lines and screens before a panic,
@@ -40,6 +62,38 @@ pub const PANIC_BASE: u32 = 0x31_1000;
 pub const TRACE_BASE: u32 = 0x31_2000;
 pub const SECTOR: u32 = 4096;
 const PAGE: u32 = 256;
+
+/// Where one place's record, pad and ledger are.
+#[derive(Clone, Copy)]
+pub struct Place {
+    pub record: u32,
+    pub pad: u32,
+    pub pad_cap: u32,
+    pub ledger: u32,
+    pub ledger_cap: u32,
+}
+
+/// Place `p`, from 0 to [`PLACES`] - 1.
+pub fn place(p: usize) -> Place {
+    if p == 0 {
+        return Place {
+            record: CIRCLE_BASE,
+            pad: PAD_BASE,
+            pad_cap: PAD_CAP,
+            ledger: LEDGER_BASE,
+            ledger_cap: LEDGER_CAP,
+        };
+    }
+    let k = p as u32 - 1;
+    let block = BLOCKS_BASE + k * BLOCK;
+    Place {
+        record: RECORDS_BASE + k * SECTOR,
+        pad: block,
+        pad_cap: BLOCK_PAD_CAP,
+        ledger: block + BLOCK_PAD_CAP,
+        ledger_cap: BLOCK_LEDGER_CAP,
+    }
+}
 
 /// The boot ROM's flash routines, looked up before the bus is handed over, so nothing in
 /// the RAM function touches flash.
@@ -136,26 +190,31 @@ pub fn erase_sectors(addr: u32, len: u32) -> Result<(), ()> {
     }
 }
 
-/// The pad region, sized to this circle's pad.
+/// A place's pad region, sized to its circle's pad.
 pub struct FlashPadStore {
+    base: u32,
     len: u32,
 }
 
 impl FlashPadStore {
-    /// Write a fresh pad: erase its sectors, then program it.
-    pub fn write(pad: &[u8]) -> Result<Self, ()> {
-        if pad.len() as u32 > PAD_CAP {
+    /// Write a fresh pad into place `at`: erase its sectors, then program it.
+    pub fn write(at: Place, pad: &[u8]) -> Result<Self, ()> {
+        if pad.len() as u32 > at.pad_cap {
             return Err(());
         }
-        erase_sectors(PAD_BASE, pad.len() as u32)?;
-        program_any(PAD_BASE, pad)?;
+        erase_sectors(at.pad, pad.len() as u32)?;
+        program_any(at.pad, pad)?;
         Ok(FlashPadStore {
+            base: at.pad,
             len: pad.len() as u32,
         })
     }
 
-    pub fn open(len: u32) -> Self {
-        FlashPadStore { len }
+    pub fn open(at: Place, len: u32) -> Result<Self, ()> {
+        if len > at.pad_cap {
+            return Err(());
+        }
+        Ok(FlashPadStore { base: at.pad, len })
     }
 }
 
@@ -169,7 +228,7 @@ impl PadStore for FlashPadStore {
             buf.fill(0);
             return;
         }
-        read_any(PAD_BASE + off, buf);
+        read_any(self.base + off, buf);
     }
 
     fn erase(&mut self, off: u32, len: u32) -> Result<(), EraseError> {
@@ -181,7 +240,7 @@ impl PadStore for FlashPadStore {
         let mut pos = off;
         while pos < end {
             let n = (end - pos).min(4096);
-            program_any(PAD_BASE + pos, &zeros[..n as usize])
+            program_any(self.base + pos, &zeros[..n as usize])
                 .map_err(|_| EraseError::VerifyFailed)?;
             pos += n;
         }
@@ -193,72 +252,92 @@ impl PadStore for FlashPadStore {
     }
 }
 
-/// The ledger region. Records program onto erased flash.
-pub struct FlashRecordStore;
+/// A place's ledger region. Records program onto erased flash.
+pub struct FlashRecordStore {
+    base: u32,
+    cap: u32,
+}
 
 impl FlashRecordStore {
-    /// Erase the region for a new circle.
-    pub fn fresh() -> Result<Self, ()> {
-        erase_sectors(LEDGER_BASE, LEDGER_CAP)?;
-        Ok(FlashRecordStore)
+    /// Erase the region of place `at` for a new circle.
+    pub fn fresh(at: Place) -> Result<Self, ()> {
+        erase_sectors(at.ledger, at.ledger_cap)?;
+        Ok(Self::open(at))
     }
 
-    /// The region as it is, for the circle already stored.
-    pub fn open() -> Self {
-        FlashRecordStore
+    /// The region of place `at` as it is, for the circle already stored there.
+    pub fn open(at: Place) -> Self {
+        FlashRecordStore {
+            base: at.ledger,
+            cap: at.ledger_cap,
+        }
     }
 }
 
 impl RecordStore for FlashRecordStore {
     fn capacity(&self) -> u32 {
-        LEDGER_CAP
+        self.cap
     }
 
     fn read(&self, off: u32, buf: &mut [u8]) {
-        if off.saturating_add(buf.len() as u32) > LEDGER_CAP {
+        if off.saturating_add(buf.len() as u32) > self.cap {
             buf.fill(0xFF);
             return;
         }
-        read_any(LEDGER_BASE + off, buf);
+        read_any(self.base + off, buf);
     }
 
     fn write(&mut self, off: u32, data: &[u8]) -> Result<(), StoreError> {
-        if off as usize + data.len() > LEDGER_CAP as usize {
+        if off as usize + data.len() > self.cap as usize {
             return Err(StoreError::OutOfRange);
         }
-        program_any(LEDGER_BASE + off, data).map_err(|_| StoreError::WriteFailed)
+        program_any(self.base + off, data).map_err(|_| StoreError::WriteFailed)
     }
 }
 
-/// The circle record, `Circle::encode_record`'s `CAH3` (or the older `CAH2`, which still
-/// loads), rewritten whole in its own sector: the Nano's record. The seat key and the root
-/// are secrets: they go to flash here and nowhere else.
-pub fn save_circle(c: &Circle) -> Result<(), ()> {
+/// Write circle `c` into the record sector of place `p`: `Circle::encode_record`'s `CAH3`,
+/// rewritten whole in its own sector, so no write touches another circle's record. The seat
+/// key and the root are secrets: they go to flash here and nowhere else.
+pub fn save_circle(p: usize, c: &Circle) -> Result<(), ()> {
     let body = c.encode_record().ok_or(())?;
     if body.len() > SECTOR as usize {
         return Err(());
     }
-    erase_sectors(CIRCLE_BASE, SECTOR).and_then(|()| program_any(CIRCLE_BASE, &body))
+    let at = place(p).record;
+    erase_sectors(at, SECTOR).and_then(|()| program_any(at, &body))
 }
 
-/// The stored circle, or `None` if there is none or the record does not parse.
-pub fn load_circle() -> Option<Circle> {
+/// The circle in place `p`, or `None` if there is none or the record does not parse. The older
+/// `CAH2` record still loads.
+pub fn load_circle(p: usize) -> Option<Circle> {
+    let at = place(p).record;
     let mut head = [0u8; 6];
-    read_any(CIRCLE_BASE, &mut head);
+    read_any(at, &mut head);
     let len = record_body_len(&head)?;
     let mut record = vec![0u8; 6 + len];
     record[..6].copy_from_slice(&head);
-    read_any(CIRCLE_BASE + 6, &mut record[6..]);
+    read_any(at + 6, &mut record[6..]);
     let c = Circle::decode_record(&record);
     record.fill(0);
     c
 }
 
-/// Forget the circle: the record, the ledger, and the pad's sectors.
-pub fn wipe(pad_len: u32) -> Result<(), ()> {
-    erase_sectors(CIRCLE_BASE, SECTOR)?;
-    erase_sectors(PAD_BASE, pad_len.max(SECTOR))?;
-    erase_sectors(LEDGER_BASE, LEDGER_CAP)
+/// Erase the record sector of place `p`, if it holds anything.
+pub fn erase_circle(p: usize) -> Result<(), ()> {
+    let at = place(p).record;
+    let mut head = [0u8; 4];
+    read_any(at, &mut head);
+    if head == [0xFF; 4] {
+        return Ok(());
+    }
+    erase_sectors(at, SECTOR)
+}
+
+/// Forget the circle in place `p`'s pad and ledger: the ledger, and the pad's sectors.
+pub fn wipe(p: usize, pad_len: u32) -> Result<(), ()> {
+    let at = place(p);
+    erase_sectors(at.pad, pad_len.clamp(SECTOR, at.pad_cap))?;
+    erase_sectors(at.ledger, at.ledger_cap)
 }
 
 const PANIC_MAGIC: &[u8; 4] = b"CAHP";

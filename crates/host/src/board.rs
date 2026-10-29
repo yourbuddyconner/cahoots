@@ -2,9 +2,12 @@
 //!
 //! Everything lives in one state directory:
 //!
-//! - `pad.bin`, `ledger.bin` and `circle.txt`: the same files [`crate::device::Device`]
-//!   keeps, so `Device::open` (and `cahoots-host status`, `send`, `recv`) work on a
-//!   directory a `HostBoard` kept.
+//! - `pad.bin`, `ledger.bin` and `circle.txt`: the first circle, in the same files
+//!   [`crate::device::Device`] keeps, so `Device::open` (and `cahoots-host status`, `send`,
+//!   `recv`) work on a directory a `HostBoard` kept.
+//! - `circle-<k>.txt`, `pad-<k>.bin` and `ledger-<k>.bin` for `k` from 1 to 15: the circles
+//!   after the first, one place each. A circle keeps its place; a new one takes the lowest
+//!   free place.
 //! - `display.png`: the screen. `screen.txt` holds the text of the latest screen, so a
 //!   script or a test can follow the badge without reading the image.
 //! - `buttons.txt`: the buttons. Each line `L`, `R` or `B` (Both) is one gesture. The board reads the
@@ -21,7 +24,9 @@ use crate::display::PngDisplay;
 use crate::link::{Absent, SocketLink};
 use crate::store::{FilePadStore, FileRecordStore};
 use cahoots_badge::chip::ChipRecord;
+use cahoots_badge::board::{assign_places, place_for};
 use cahoots_badge::{word_indices, Board, BoardError, Circle, Press};
+use cahoots_core::circle_id::CircleId;
 use cahoots_chip::{Attested, ChipError, ChipOps, Curve, KeyId, Signature64, SoftChip, Version};
 use cahoots_core::checkwords::WORDLIST;
 use cahoots_core::params::CircleParams;
@@ -38,6 +43,9 @@ use zeroize::Zeroizing;
 
 /// The ledger region's size, as `Device` uses.
 const LEDGER_BYTES: u32 = 64 * 1024;
+
+/// How many circles a simulated badge holds: the Pico's count.
+pub const MAX_CIRCLES: usize = 16;
 
 /// How long `HostBoard::new` keeps trying to reach the `next` socket.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -154,6 +162,8 @@ pub struct HostBoard {
     links: (HostLink, HostLink),
     seed: Option<u64>,
     chip: Option<HostChip>,
+    /// The place a pad was written to for a circle not stored yet.
+    pending: Option<(CircleId, usize)>,
 }
 
 /// The simulated chip: a [`SoftChip`] kept in a file and written after every call that can
@@ -313,6 +323,7 @@ impl HostBoard {
             links,
             seed,
             chip: None,
+            pending: None,
         }
     }
 
@@ -331,6 +342,34 @@ impl HostBoard {
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// The circle record, pad and ledger files of place `p`.
+    fn place_files(&self, p: usize) -> (PathBuf, PathBuf, PathBuf) {
+        if p == 0 {
+            (
+                self.dir.join("circle.txt"),
+                self.dir.join("pad.bin"),
+                self.dir.join("ledger.bin"),
+            )
+        } else {
+            (
+                self.dir.join(format!("circle-{p}.txt")),
+                self.dir.join(format!("pad-{p}.bin")),
+                self.dir.join(format!("ledger-{p}.bin")),
+            )
+        }
+    }
+
+    /// The circle id each place holds.
+    fn held(&self) -> Vec<Option<CircleId>> {
+        (0..MAX_CIRCLES)
+            .map(|p| read_circle(&self.place_files(p).0).map(|c| c.circle_id))
+            .collect()
+    }
+
+    fn place(&self, circle: &CircleId) -> Result<usize, BoardError> {
+        place_for(&self.held(), self.pending, circle).ok_or(BoardError::Storage)
     }
 
     /// Move any presses written to `buttons.txt` into the queue, and remove the file.
@@ -426,84 +465,40 @@ impl Board for HostBoard {
         self.links.clone()
     }
 
-    fn load_circle(&self) -> Option<Circle> {
-        let txt = Zeroizing::new(std::fs::read_to_string(self.dir.join("circle.txt")).ok()?);
-        let field = |k: &str| {
-            txt.lines()
-                .find_map(|l| l.strip_prefix(k)?.strip_prefix('='))
-        };
-        let params = CircleParams::decode(&unhex(field("params")?)?).ok()?;
-        let seat = field("index")?.parse().ok()?;
-        let circle_id = unhex(field("circle_id")?)?.try_into().ok()?;
-        let words: Vec<&str> = field("words")?.split(' ').collect();
-        let words = word_indices(&words.try_into().ok()?)?;
-        // A circle file from before seat keys has no `seat_key=` line: no circle.
-        let seat_key =
-            <[u8; 32]>::try_from(&Zeroizing::new(unhex(field("seat_key")?)?)[..]).ok()?;
-        let tier = field("tier")?.parse().ok()?;
-        let manifest = unhex(field("manifest")?)?;
-        // Both optional: a file from before the chip has neither. One that does not parse
-        // makes the file no circle.
-        let chip_slot = match field("chip_slot") {
-            Some(v) => Some(v.parse().ok()?),
-            None => None,
-        };
-        let root = match field("root") {
-            Some(v) => Some(<[u8; 32]>::try_from(&Zeroizing::new(unhex(v)?)[..]).ok()?),
-            None => None,
-        };
-        Some(Circle {
-            params,
-            seat,
-            circle_id,
-            words,
-            seat_key,
-            chip_slot,
-            root,
-            tier,
-            manifest,
-        })
+    fn max_circles(&self) -> usize {
+        MAX_CIRCLES
     }
 
-    /// Writes `circle.txt` in the format `Device::from_result` writes. The seat key goes in
-    /// as plaintext hex, as the pad sits in `pad.bin`: a simulated badge is tier 0. A
-    /// `chip_slot=` line says the seat key is in the chip, and a `root=` line holds the circle
-    /// root of a badge without one; each is written only when set.
-    fn save_circle(&mut self, c: &Circle) -> Result<(), BoardError> {
-        let words: Vec<&str> = c
-            .words
-            .iter()
-            .map(|&i| WORDLIST[usize::from(i) % WORDLIST.len()])
-            .collect();
-        let txt = Zeroizing::new(format!(
-            "params={}\nindex={}\ncircle_id={}\nwords={}\nlabel=CSPRNG\nseat_key={}\ntier={}\nmanifest={}\n",
-            hex(&c.params.encode()),
-            c.seat,
-            hex(&c.circle_id),
-            words.join(" "),
-            *Zeroizing::new(hex(&c.seat_key)),
-            c.tier,
-            hex(&c.manifest)
-        ));
-        let mut txt = txt;
-        if let Some(slot) = c.chip_slot {
-            txt.push_str(&format!("chip_slot={slot}\n"));
-        }
-        if let Some(root) = &c.root {
-            txt.push_str(&format!("root={}\n", *Zeroizing::new(hex(root))));
-        }
-        std::fs::write(self.dir.join("circle.txt"), txt.as_bytes()).map_err(|_| BoardError::Storage)
+    fn load_circles(&mut self) -> Vec<Circle> {
+        (0..MAX_CIRCLES)
+            .filter_map(|p| read_circle(&self.place_files(p).0))
+            .collect()
     }
 
-    fn wipe(&mut self, pad_len: u32) -> Result<(), BoardError> {
-        match std::fs::remove_file(self.dir.join("circle.txt")) {
-            Ok(()) => {}
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(_) => return Err(BoardError::Storage),
+    /// Writes each circle's file in the format `Device::from_result` writes, and removes the
+    /// file of a place whose circle is not in the list.
+    fn store_circles(&mut self, circles: &[Circle]) -> Result<(), BoardError> {
+        let places = assign_places(&self.held(), self.pending, circles)?;
+        for (p, i) in places.into_iter().enumerate() {
+            let path = self.place_files(p).0;
+            match i {
+                Some(i) => write_circle(&path, &circles[i])?,
+                None => match std::fs::remove_file(&path) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                    Err(_) => return Err(BoardError::Storage),
+                },
+            }
         }
-        FileRecordStore::create(&self.dir.join("ledger.bin"), LEDGER_BYTES)
-            .map_err(|_| BoardError::Storage)?;
-        let pad = self.dir.join("pad.bin");
+        self.pending = None;
+        Ok(())
+    }
+
+    /// Erases the circle's ledger and the first `pad_len` bytes of its pad. Its file goes in
+    /// the next `store_circles`.
+    fn forget(&mut self, circle: &CircleId, pad_len: u32) -> Result<(), BoardError> {
+        let (_, pad, ledger) = self.place_files(self.place(circle)?);
+        FileRecordStore::create(&ledger, LEDGER_BYTES).map_err(|_| BoardError::Storage)?;
         if pad.exists() {
             let mut store = FilePadStore::open(&pad).map_err(|_| BoardError::Storage)?;
             let n = pad_len.min(store.len());
@@ -512,26 +507,25 @@ impl Board for HostBoard {
         Ok(())
     }
 
-    fn write_pad(&mut self, pad: &[u8]) -> Result<FilePadStore, BoardError> {
-        FilePadStore::create(&self.dir.join("pad.bin"), pad).map_err(|_| BoardError::Storage)
+    fn write_pad(&mut self, circle: &CircleId, pad: &[u8]) -> Result<FilePadStore, BoardError> {
+        let p = self.place(circle)?;
+        self.pending = Some((*circle, p));
+        FilePadStore::create(&self.place_files(p).1, pad).map_err(|_| BoardError::Storage)
     }
 
-    /// Panics if `pad.bin` is missing or shorter than `len`: the circle record names a pad
-    /// this directory does not hold.
-    fn open_pad(&mut self, len: u32) -> FilePadStore {
-        let path = self.dir.join("pad.bin");
-        let store = FilePadStore::open(&path)
-            .unwrap_or_else(|e| panic!("open_pad {}: {e}", path.display()));
-        assert!(
-            store.len() >= len,
-            "pad.bin holds {} of {len} bytes",
-            store.len()
-        );
-        store
+    /// An error if the circle's pad file is missing or shorter than `len`: its record names a
+    /// pad this directory does not hold.
+    fn open_pad(&mut self, circle: &CircleId, len: u32) -> Result<FilePadStore, BoardError> {
+        let path = self.place_files(self.place(circle)?).1;
+        let store = FilePadStore::open(&path).map_err(|_| BoardError::Storage)?;
+        if store.len() < len {
+            return Err(BoardError::Storage);
+        }
+        Ok(store)
     }
 
-    fn records(&mut self, fresh: bool) -> Result<FileRecordStore, BoardError> {
-        let path = self.dir.join("ledger.bin");
+    fn records(&mut self, circle: &CircleId, fresh: bool) -> Result<FileRecordStore, BoardError> {
+        let path = self.place_files(self.place(circle)?).2;
         if fresh || !path.exists() {
             FileRecordStore::create(&path, LEDGER_BYTES)
         } else {
@@ -591,6 +585,74 @@ impl Board for HostBoard {
     fn chip_record_store(&mut self, r: &ChipRecord) -> Result<(), BoardError> {
         std::fs::write(self.dir.join("chip.cbor"), r.encode()).map_err(|_| BoardError::Storage)
     }
+}
+
+/// The circle in a `circle.txt` file, or `None` if there is none or it does not parse.
+fn read_circle(path: &Path) -> Option<Circle> {
+    let txt = Zeroizing::new(std::fs::read_to_string(path).ok()?);
+    let field = |k: &str| {
+        txt.lines()
+            .find_map(|l| l.strip_prefix(k)?.strip_prefix('='))
+    };
+    let params = CircleParams::decode(&unhex(field("params")?)?).ok()?;
+    let seat = field("index")?.parse().ok()?;
+    let circle_id = unhex(field("circle_id")?)?.try_into().ok()?;
+    let words: Vec<&str> = field("words")?.split(' ').collect();
+    let words = word_indices(&words.try_into().ok()?)?;
+    // A circle file from before seat keys has no `seat_key=` line: no circle.
+    let seat_key = <[u8; 32]>::try_from(&Zeroizing::new(unhex(field("seat_key")?)?)[..]).ok()?;
+    let tier = field("tier")?.parse().ok()?;
+    let manifest = unhex(field("manifest")?)?;
+    // Both optional: a file from before the chip has neither. One that does not parse makes
+    // the file no circle.
+    let chip_slot = match field("chip_slot") {
+        Some(v) => Some(v.parse().ok()?),
+        None => None,
+    };
+    let root = match field("root") {
+        Some(v) => Some(<[u8; 32]>::try_from(&Zeroizing::new(unhex(v)?)[..]).ok()?),
+        None => None,
+    };
+    Some(Circle {
+        params,
+        seat,
+        circle_id,
+        words,
+        seat_key,
+        chip_slot,
+        root,
+        tier,
+        manifest,
+    })
+}
+
+/// Write `c` as a `circle.txt` file in the format `Device::from_result` writes. The seat key
+/// goes in as plaintext hex, as the pad sits in `pad.bin`: a simulated badge is tier 0. A
+/// `chip_slot=` line says the seat key is in the chip, and a `root=` line holds the circle
+/// root of a badge without one; each is written only when set.
+fn write_circle(path: &Path, c: &Circle) -> Result<(), BoardError> {
+    let words: Vec<&str> = c
+        .words
+        .iter()
+        .map(|&i| WORDLIST[usize::from(i) % WORDLIST.len()])
+        .collect();
+    let mut txt = Zeroizing::new(format!(
+        "params={}\nindex={}\ncircle_id={}\nwords={}\nlabel=CSPRNG\nseat_key={}\ntier={}\nmanifest={}\n",
+        hex(&c.params.encode()),
+        c.seat,
+        hex(&c.circle_id),
+        words.join(" "),
+        *Zeroizing::new(hex(&c.seat_key)),
+        c.tier,
+        hex(&c.manifest)
+    ));
+    if let Some(slot) = c.chip_slot {
+        txt.push_str(&format!("chip_slot={slot}\n"));
+    }
+    if let Some(root) = &c.root {
+        txt.push_str(&format!("root={}\n", *Zeroizing::new(hex(root))));
+    }
+    std::fs::write(path, txt.as_bytes()).map_err(|_| BoardError::Storage)
 }
 
 fn hex(b: &[u8]) -> String {

@@ -60,6 +60,15 @@ pub fn panic(msg: &str) -> Screen {
 
 /// The pile: "stack the cards", and the seat once this card knows it, large.
 pub fn pile(seat: Option<u8>) -> Screen {
+    pile_with(seat, false)
+}
+
+/// The pile, for a badge that already holds circles: A or B alone goes back to the list.
+pub fn pile_or_back(seat: Option<u8>) -> Screen {
+    pile_with(seat, true)
+}
+
+fn pile_with(seat: Option<u8>, back: bool) -> Screen {
     let mut s = Draw::new();
     s.title("stack the cards");
     match seat {
@@ -73,7 +82,8 @@ pub fn pile(seat: Option<u8>) -> Screen {
             s.centered(&FONT_10X20, 104, "the pile...");
         }
     }
-    s.footer(None, Some("A+B on the top card  start"), None);
+    let back = back.then_some("back");
+    s.footer(back, Some("A+B on the top card  start"), back);
     s.done()
 }
 
@@ -189,6 +199,49 @@ pub fn menu_page(
         s.arrow(190, ">");
     }
     s.footer(Some("page"), Some("A+B  choose"), Some("page"));
+    s.done()
+}
+
+/// How many entries of the circle list fit on the screen at once.
+const CHOOSER_ROWS: usize = 8;
+
+/// The list of circles: one entry per row, the chosen one marked with `>` and drawn bold.
+/// With more entries than rows, the rows shown are the ones around the chosen entry, with
+/// its place in the list under the title.
+pub fn chooser(names: &[String], chosen: usize) -> Screen {
+    let mut s = Draw::new();
+    s.title("circles");
+    let n = names.len();
+    let first = if n <= CHOOSER_ROWS {
+        0
+    } else {
+        chosen.saturating_sub(CHOOSER_ROWS / 2).min(n - CHOOSER_ROWS)
+    };
+    if n > CHOOSER_ROWS {
+        s.centered(&FONT_8X13, 30, &format!("{}/{n}", chosen + 1));
+    }
+    let w = cols(&FONT_8X13) - 2;
+    for (row, i) in (first..n.min(first + CHOOSER_ROWS)).enumerate() {
+        let y = 46 + 16 * row as i32;
+        let mark = if i == chosen { "> " } else { "  " };
+        let text = fit(mark, &names[i], "", w);
+        let font = if i == chosen { &FONT_7X13_BOLD } else { &FONT_8X13 };
+        s.text(font, Point::new(8, y), Alignment::Left, BinaryColor::On, &text);
+        s.lines.push(text);
+    }
+    s.footer(Some("prev"), Some("A+B  open"), Some("next"));
+    s.done()
+}
+
+/// The question before a circle is forgotten: its name, what goes, and keep or forget.
+pub fn forget_prompt(circle: &str) -> Screen {
+    let mut s = Draw::new();
+    s.title("forget this circle?");
+    s.centered(&FONT_9X18_BOLD, 46, &fit("", circle, "", cols(&FONT_9X18_BOLD)));
+    s.centered(&FONT_8X13, 80, "its words, pad and keys");
+    s.centered(&FONT_8X13, 96, "are erased for good");
+    s.centered(&FONT_8X13, 124, "other circles stay");
+    s.footer(Some("back"), Some("A+B  forget"), Some("back"));
     s.done()
 }
 

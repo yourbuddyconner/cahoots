@@ -122,7 +122,7 @@ pub fn badge_on(dir: &Path, sock: &Path) -> Serving {
 impl Serving {
     /// From the words page, Right twice to Serve and Both to start serving.
     pub fn start(&self) {
-        wait_line(&self.dir, "1/3");
+        wait_line(&self.dir, "1/5");
         press(&self.dir, "R R B");
         wait_line(&self.dir, "serving");
     }

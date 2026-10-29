@@ -214,6 +214,7 @@ fn main() -> ! {
         delay: timer,
         stack_logged: 0,
         heap_logged: 0,
+        pending: None,
     });
     badge.boot();
     loop {

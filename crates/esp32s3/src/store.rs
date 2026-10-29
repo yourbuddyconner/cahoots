@@ -9,6 +9,12 @@
 //! is small and rewritten whole, and carries the check words.
 //!
 //! One `FlashStorage` exists per chip, so the stores share it through an `Rc<RefCell>`.
+//!
+//! The board holds [`PLACES`] circles, each in a place of its own: a record sector, a 1 MiB pad
+//! region and a 64 KiB ledger, shared with no other circle. Place 0 is where the one circle of
+//! earlier firmware lives (`pad`, `ledger` and `circle` in `partitions.csv`), so a board
+//! flashed over keeps it. Places 1 to 3 have their record sectors from `0x41_3000`, their
+//! ledgers from `0x42_0000` and their pads from `0x50_0000` (`circles`, `ledgers` and `pads`).
 
 use alloc::rc::Rc;
 use alloc::string::String;
@@ -34,6 +40,37 @@ pub const PANIC_BASE: u32 = 0x41_1000;
 pub const TRACE_BASE: u32 = 0x41_2000;
 pub const SECTOR: u32 = 4096;
 const WORD: u32 = 4;
+/// How many circles the board holds.
+pub const PLACES: usize = 4;
+const RECORDS_BASE: u32 = 0x41_3000;
+const LEDGERS_BASE: u32 = 0x42_0000;
+const PADS_BASE: u32 = 0x50_0000;
+
+/// Where one place's record, pad and ledger are.
+#[derive(Clone, Copy)]
+pub struct Place {
+    pub record: u32,
+    pub pad: u32,
+    pub ledger: u32,
+}
+
+/// Place `p`, from 0 to [`PLACES`] - 1. Every place's pad region is `PAD_CAP` and its ledger
+/// `LEDGER_CAP`.
+pub fn place(p: usize) -> Place {
+    if p == 0 {
+        return Place {
+            record: CIRCLE_BASE,
+            pad: PAD_BASE,
+            ledger: LEDGER_BASE,
+        };
+    }
+    let k = p as u32 - 1;
+    Place {
+        record: RECORDS_BASE + k * SECTOR,
+        pad: PADS_BASE + k * PAD_CAP,
+        ledger: LEDGERS_BASE + k * LEDGER_CAP,
+    }
+}
 
 pub type SharedFlash = Rc<RefCell<FlashStorage<'static>>>;
 
@@ -101,31 +138,40 @@ pub fn erase_sectors(f: &mut FlashStorage<'_>, addr: u32, len: u32) -> Result<()
     f.erase(from, to).map_err(|_| ())
 }
 
-/// The pad region, sized to this circle's pad.
+/// A place's pad region, sized to its circle's pad.
 pub struct FlashPadStore {
     flash: SharedFlash,
+    base: u32,
     len: u32,
 }
 
 impl FlashPadStore {
-    /// Write a fresh pad: erase its sectors, then program it.
-    pub fn write(flash: SharedFlash, pad: &[u8]) -> Result<Self, ()> {
+    /// Write a fresh pad into place `at`: erase its sectors, then program it.
+    pub fn write(flash: SharedFlash, at: Place, pad: &[u8]) -> Result<Self, ()> {
         if pad.len() as u32 > PAD_CAP {
             return Err(());
         }
         {
             let mut f = flash.borrow_mut();
-            erase_sectors(&mut f, PAD_BASE, pad.len() as u32)?;
-            program_any(&mut f, PAD_BASE, pad)?;
+            erase_sectors(&mut f, at.pad, pad.len() as u32)?;
+            program_any(&mut f, at.pad, pad)?;
         }
         Ok(FlashPadStore {
             flash,
+            base: at.pad,
             len: pad.len() as u32,
         })
     }
 
-    pub fn open(flash: SharedFlash, len: u32) -> Self {
-        FlashPadStore { flash, len }
+    pub fn open(flash: SharedFlash, at: Place, len: u32) -> Result<Self, ()> {
+        if len > PAD_CAP {
+            return Err(());
+        }
+        Ok(FlashPadStore {
+            flash,
+            base: at.pad,
+            len,
+        })
     }
 }
 
@@ -136,7 +182,9 @@ impl PadStore for FlashPadStore {
 
     fn read(&self, off: u32, buf: &mut [u8]) {
         let mut f = self.flash.borrow_mut();
-        if read_any(&mut f, PAD_BASE + off, buf).is_err() {
+        if off.saturating_add(buf.len() as u32) > self.len
+            || read_any(&mut f, self.base + off, buf).is_err()
+        {
             buf.fill(0);
         }
     }
@@ -151,7 +199,7 @@ impl PadStore for FlashPadStore {
         let mut pos = off;
         while pos < end {
             let n = (end - pos).min(4096);
-            program_any(&mut f, PAD_BASE + pos, &zeros[..n as usize])
+            program_any(&mut f, self.base + pos, &zeros[..n as usize])
                 .map_err(|_| EraseError::VerifyFailed)?;
             pos += n;
         }
@@ -163,24 +211,28 @@ impl PadStore for FlashPadStore {
     }
 }
 
-/// The ledger region. Records program onto erased flash.
+/// A place's ledger region. Records program onto erased flash.
 pub struct FlashRecordStore {
     flash: SharedFlash,
+    base: u32,
 }
 
 impl FlashRecordStore {
-    /// Erase the region for a new circle.
-    pub fn fresh(flash: SharedFlash) -> Result<Self, ()> {
+    /// Erase the region of place `at` for a new circle.
+    pub fn fresh(flash: SharedFlash, at: Place) -> Result<Self, ()> {
         flash
             .borrow_mut()
-            .erase(LEDGER_BASE, LEDGER_BASE + LEDGER_CAP)
+            .erase(at.ledger, at.ledger + LEDGER_CAP)
             .map_err(|_| ())?;
-        Ok(FlashRecordStore { flash })
+        Ok(Self::open(flash, at))
     }
 
-    /// The region as it is, for the circle already stored.
-    pub fn open(flash: SharedFlash) -> Self {
-        FlashRecordStore { flash }
+    /// The region of place `at` as it is, for the circle already stored there.
+    pub fn open(flash: SharedFlash, at: Place) -> Self {
+        FlashRecordStore {
+            flash,
+            base: at.ledger,
+        }
     }
 }
 
@@ -191,7 +243,9 @@ impl RecordStore for FlashRecordStore {
 
     fn read(&self, off: u32, buf: &mut [u8]) {
         let mut f = self.flash.borrow_mut();
-        if read_any(&mut f, LEDGER_BASE + off, buf).is_err() {
+        if off.saturating_add(buf.len() as u32) > LEDGER_CAP
+            || read_any(&mut f, self.base + off, buf).is_err()
+        {
             buf.fill(0xFF);
         }
     }
@@ -201,51 +255,64 @@ impl RecordStore for FlashRecordStore {
             return Err(StoreError::OutOfRange);
         }
         let mut f = self.flash.borrow_mut();
-        program_any(&mut f, LEDGER_BASE + off, data).map_err(|_| StoreError::WriteFailed)
+        program_any(&mut f, self.base + off, data).map_err(|_| StoreError::WriteFailed)
     }
 }
 
-/// The circle record, `Circle::encode_record`'s `CAH3` (or the older `CAH2`, which still
-/// loads), rewritten whole in its own sector. The record must fit the 4 KiB sector, header
-/// included; for n = 8 the manifest is under 2 KiB, so there is room, and `save_circle`
-/// refuses a record over the limit.
+/// Write circle `c` into the record sector of place `p`: `Circle::encode_record`'s `CAH3`,
+/// rewritten whole in its own sector. The record must fit the 4 KiB sector, header included;
+/// for n = 8 the manifest is under 2 KiB, so there is room, and this refuses a record over
+/// the limit.
 ///
 /// The seat key and the root are secrets: they go to flash here and nowhere else, never into
 /// a log line, the trace or the screen.
-pub fn save_circle(flash: &SharedFlash, c: &Circle) -> Result<(), ()> {
+pub fn save_circle(flash: &SharedFlash, p: usize, c: &Circle) -> Result<(), ()> {
     let body = c.encode_record().ok_or(())?;
     if body.len() > SECTOR as usize {
         return Err(());
     }
+    let at = place(p).record;
     let mut f = flash.borrow_mut();
-    erase_sectors(&mut f, CIRCLE_BASE, SECTOR).and_then(|()| program_any(&mut f, CIRCLE_BASE, &body))
+    erase_sectors(&mut f, at, SECTOR).and_then(|()| program_any(&mut f, at, &body))
 }
 
-/// The stored circle, or `None` if there is none or the record does not parse.
+/// The circle in place `p`, or `None` if there is none or the record does not parse.
 ///
 /// A `CAH1` record, from before the seat key and the manifest, has another magic and loads
 /// as `None`: the holder runs the ceremony again. The seat key cannot be worked out from
 /// the pad, and the words cannot either, because spending erases pad bytes.
-pub fn load_circle(flash: &SharedFlash) -> Option<Circle> {
+pub fn load_circle(flash: &SharedFlash, p: usize) -> Option<Circle> {
+    let at = place(p).record;
     let mut head = [0u8; 6];
     let mut f = flash.borrow_mut();
-    read_any(&mut f, CIRCLE_BASE, &mut head).ok()?;
+    read_any(&mut f, at, &mut head).ok()?;
     let len = record_body_len(&head)?;
     let mut record = vec![0u8; 6 + len];
     record[..6].copy_from_slice(&head);
-    read_any(&mut f, CIRCLE_BASE + 6, &mut record[6..]).ok()?;
+    read_any(&mut f, at + 6, &mut record[6..]).ok()?;
     let c = Circle::decode_record(&record);
     record.fill(0);
     c
 }
 
-/// Forget the circle: the record, the ledger, and the pad's sectors.
-pub fn wipe(flash: &SharedFlash, pad_len: u32) -> Result<(), ()> {
+/// Erase the record sector of place `p`, if it holds anything.
+pub fn erase_circle(flash: &SharedFlash, p: usize) -> Result<(), ()> {
+    let at = place(p).record;
     let mut f = flash.borrow_mut();
-    erase_sectors(&mut f, CIRCLE_BASE, SECTOR)?;
-    erase_sectors(&mut f, PAD_BASE, pad_len.max(SECTOR))?;
-    f.erase(LEDGER_BASE, LEDGER_BASE + LEDGER_CAP)
-        .map_err(|_| ())
+    let mut head = [0u8; 4];
+    read_any(&mut f, at, &mut head)?;
+    if head == [0xFF; 4] {
+        return Ok(());
+    }
+    erase_sectors(&mut f, at, SECTOR)
+}
+
+/// Forget the circle in place `p`'s pad and ledger: the ledger, and the pad's sectors.
+pub fn wipe(flash: &SharedFlash, p: usize, pad_len: u32) -> Result<(), ()> {
+    let at = place(p);
+    let mut f = flash.borrow_mut();
+    erase_sectors(&mut f, at.pad, pad_len.clamp(SECTOR, PAD_CAP))?;
+    f.erase(at.ledger, at.ledger + LEDGER_CAP).map_err(|_| ())
 }
 
 const PANIC_MAGIC: &[u8; 4] = b"CAHP";

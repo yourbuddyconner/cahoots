@@ -7,7 +7,8 @@
 //! key-releasing operations always do.
 //!
 //! `Identify` answers with the custodian's circles, the first circle's tier (0 when there
-//! are none) and an empty name. A device that has a name wraps the response and fills it in.
+//! are none), an empty name and whether it has a chip. A device that has a name wraps the
+//! response and fills it in.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -71,7 +72,7 @@ pub fn serve<C: Custodian + ChipApps, K: Consent>(
                 circles,
                 tier,
                 name: String::new(),
-                chip: false,
+                chip: c.has_chip(),
             }
         }
         Request::Psk { circle, context } => match c.psk(&circle, &context) {

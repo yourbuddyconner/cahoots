@@ -139,8 +139,10 @@ dependencies = [
  "cahoots-core",
  "cahoots-custodian",
  "cahoots-hal",
+ "ed25519-dalek",
  "embedded-graphics",
  "minicbor",
+ "p256",
  "profont",
  "sha2 0.10.9",
  "zeroize",
@@ -180,6 +182,7 @@ dependencies = [
 name = "cahoots-custodian"
 version = "0.1.0"
 dependencies = [
+ "cahoots-chip",
  "cahoots-core",
  "minicbor",
  "zeroize",

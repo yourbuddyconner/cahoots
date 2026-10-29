@@ -81,18 +81,34 @@ enum State<L: Link> {
     },
 }
 
-/// The custodian a badge serves: its stored pad and its ledger, reporting the board's tier.
-type Custody<B> = Tiered<Pad<StorePad<<B as Board>::Pad>, PersistentLedger<<B as Board>::Records>>>;
+/// One circle's stored pad and its ledger.
+type CirclePad<B> = Pad<StorePad<<B as Board>::Pad>, PersistentLedger<<B as Board>::Records>>;
 
-/// A custodian that reports `tier` for every circle it holds. Everything else is `inner`'s.
-struct Tiered<C> {
-    inner: C,
+/// The custodian a badge serves: the pad and ledger of every circle it holds, each request
+/// sent to the circle it names, reporting the board's tier. A circle it does not hold is
+/// `UnknownCircle`.
+struct Pads<C> {
+    held: Vec<(CircleId, C)>,
     tier: u8,
 }
 
-impl<C: Custodian> Custodian for Tiered<C> {
+impl<C: Custodian> Pads<C> {
+    fn get(&self, circle: &CircleId) -> Option<&C> {
+        self.held.iter().find(|(id, _)| id == circle).map(|(_, c)| c)
+    }
+
+    fn get_mut(&mut self, circle: &CircleId) -> Result<&mut C, PadError> {
+        self.held
+            .iter_mut()
+            .find(|(id, _)| id == circle)
+            .map(|(_, c)| c)
+            .ok_or(PadError::UnknownCircle)
+    }
+}
+
+impl<C: Custodian> Custodian for Pads<C> {
     fn circles(&self) -> Vec<CircleInfo> {
-        let mut circles = self.inner.circles();
+        let mut circles: Vec<CircleInfo> = self.held.iter().flat_map(|(_, c)| c.circles()).collect();
         for c in &mut circles {
             c.tier = self.tier;
         }
@@ -104,7 +120,7 @@ impl<C: Custodian> Custodian for Tiered<C> {
         circle: &CircleId,
         context: &[u8],
     ) -> Result<(PskHandle, Zeroizing<[u8; 32]>), PadError> {
-        self.inner.psk(circle, context)
+        self.get_mut(circle)?.psk(circle, context)
     }
 
     fn psk_for(
@@ -112,7 +128,7 @@ impl<C: Custodian> Custodian for Tiered<C> {
         handle: &PskHandle,
         context: &[u8],
     ) -> Result<Zeroizing<[u8; 32]>, PadError> {
-        self.inner.psk_for(handle, context)
+        self.get_mut(&handle.circle_id)?.psk_for(handle, context)
     }
 
     fn spend(
@@ -120,19 +136,19 @@ impl<C: Custodian> Custodian for Tiered<C> {
         circle: &CircleId,
         len: u32,
     ) -> Result<(PskHandle, Zeroizing<Vec<u8>>), PadError> {
-        self.inner.spend(circle, len)
+        self.get_mut(circle)?.spend(circle, len)
     }
 
     fn spend_for(&mut self, handle: &PskHandle, len: u32) -> Result<Zeroizing<Vec<u8>>, PadError> {
-        self.inner.spend_for(handle, len)
+        self.get_mut(&handle.circle_id)?.spend_for(handle, len)
     }
 
     fn remaining(&self, circle: &CircleId) -> u64 {
-        self.inner.remaining(circle)
+        self.get(circle).map_or(0, |c| c.remaining(circle))
     }
 
     fn low_pad(&self, circle: &CircleId) -> bool {
-        self.inner.low_pad(circle)
+        self.get(circle).is_some_and(|c| c.low_pad(circle))
     }
 }
 
@@ -147,10 +163,14 @@ enum Page {
     Words,
     Key,
     Serve,
+    /// Both shows the list of circles, where another circle opens or a new one starts.
+    Circles,
+    /// Both asks, then forgets this circle and nothing else.
+    Forget,
 }
 
 impl Page {
-    const ALL: [Page; 3] = [Page::Words, Page::Key, Page::Serve];
+    const ALL: [Page; 5] = [Page::Words, Page::Key, Page::Serve, Page::Circles, Page::Forget];
 
     /// The page's place in the ring, from 0.
     fn index(self) -> usize {
@@ -158,6 +178,8 @@ impl Page {
             Page::Words => 0,
             Page::Key => 1,
             Page::Serve => 2,
+            Page::Circles => 3,
+            Page::Forget => 4,
         }
     }
 
@@ -174,6 +196,8 @@ impl Page {
             Page::Words => "words",
             Page::Key => "key as code",
             Page::Serve => "serve a laptop",
+            Page::Circles => "circles",
+            Page::Forget => "forget this circle",
         }
     }
 }
@@ -187,9 +211,10 @@ struct Pending {
     chip: bool,
 }
 
-/// The idle menu, built once when it is entered and kept for the idle loop's life.
+/// The idle menu of one circle, built when it is entered. It holds every circle's pad, since
+/// Serve answers for any circle the badge holds.
 struct Menu<B: Board> {
-    pad: Custody<B>,
+    pads: Pads<CirclePad<B>>,
     down: B::Link,
     rx: Vec<u8>,
     page: Page,
@@ -200,16 +225,35 @@ struct Menu<B: Board> {
     peer_seen: bool,
     /// Another screen (the code, or an error) covers the page; any gesture goes back to it.
     covered: bool,
+    /// Both on the Forget page asked "forget this circle?": Both forgets, Left or Right goes
+    /// back.
+    confirm_forget: bool,
+}
+
+/// What the menu asks of the badge after a step.
+enum MenuAction {
+    Stay,
+    /// Show the list of circles.
+    Choose,
+    /// Forget the circle whose menu this is.
+    Forget,
 }
 
 enum Idle<B: Board> {
-    /// Not entered yet.
+    /// Not entered yet. With one circle, or right after a circle is kept, the next step opens
+    /// its menu; with more, the list of circles.
     Off,
-    /// The pad or the ledger would not open. Shown once.
-    Broken,
+    /// The list of circles, `index` the entry marked: Left and Right move, Both opens that
+    /// circle's menu. The last entry, "new circle", is there while the board has room.
+    Choose { index: usize },
     /// Boxed: the menu holds the custodian and the link, and lives beside the pass state.
     On(Box<Menu<B>>),
+    /// "new circle" was chosen: the pass runs from the idle loop until it ends.
+    NewCircle,
 }
+
+/// The chooser's last entry, which starts a pass for one more circle.
+const NEW_CIRCLE: &str = "new circle";
 
 /// The answer the holder gave with the buttons, handed to `serve`.
 struct Answer(bool);
@@ -222,7 +266,13 @@ impl Consent for Answer {
 
 pub struct Badge<B: Board> {
     board: B,
-    circle: Option<Circle>,
+    /// Every circle the badge holds, in the board's order. Nothing is shared between them
+    /// but the badge: each has its own record, pad, ledger, seat key, root and chip slot.
+    circles: Vec<Circle>,
+    /// The circle whose menu is open, or was last.
+    current: usize,
+    /// The next idle step opens the menu of `current`, not the list: a circle was just kept.
+    open_current: bool,
     state: State<B::Link>,
     idle: Idle<B>,
     /// The chip slot of the seat key this pass made, until the circle is kept. A pass that
@@ -234,7 +284,9 @@ impl<B: Board> Badge<B> {
     pub fn new(board: B) -> Self {
         Self {
             board,
-            circle: None,
+            circles: Vec::new(),
+            current: 0,
+            open_current: false,
             state: State::Idle,
             idle: Idle::Off,
             chip_slot: None,
@@ -245,12 +297,23 @@ impl<B: Board> Badge<B> {
         &mut self.board
     }
 
+    /// The circle whose menu is open or was last, or `None` if the badge holds none.
     pub fn circle(&self) -> Option<&Circle> {
-        self.circle.as_ref()
+        self.circles.get(self.current).or(self.circles.first())
+    }
+
+    /// Every circle the badge holds.
+    pub fn circles(&self) -> &[Circle] {
+        &self.circles
+    }
+
+    /// The chip slots the held circles name.
+    fn held_slots(&self) -> Vec<u8> {
+        self.circles.iter().filter_map(|c| c.chip_slot).collect()
     }
 
     /// The self-test screen for 2.5 s or until Both, the A-held wipe, and the words of a
-    /// stored circle.
+    /// stored circle when there is one.
     pub fn boot(&mut self) {
         let mut lines: Vec<String> = Vec::new();
         let mut sample = vec![0u8; 4096];
@@ -259,19 +322,21 @@ impl<B: Board> Badge<B> {
             Err(e) => format!("trng: FAILED {e:?}"),
         });
         lines.extend(self.board.selftest());
-        let circle = self.board.load_circle();
-        lines.push(match &circle {
-            Some(c) => format!(
+        let circles = self.board.load_circles();
+        if circles.is_empty() {
+            lines.push("circle: none yet".into());
+        }
+        for c in &circles {
+            lines.push(format!(
                 "circle: {} seat {} of {}",
                 c.params.name, c.seat, c.params.n
-            ),
-            None => "circle: none yet".into(),
-        });
+            ));
+        }
         for l in &lines {
             self.board.log(l);
         }
-        self.reconcile_chip(circle.as_ref().and_then(|c| c.chip_slot));
-        // A must already be held at power-on to mean "forget the circle". Sample it before
+        self.reconcile_chip(circles.iter().filter_map(|c| c.chip_slot).collect());
+        // A must already be held at power-on to mean "forget every circle". Sample it before
         // the wait: a Both that ends the wait holds A down too, and must not wipe.
         let held_at_power_on = self.board.a_down();
         show(&mut self.board, screens::self_test(&lines));
@@ -284,39 +349,89 @@ impl<B: Board> Badge<B> {
             self.board.delay_ms(POLL_MS);
         }
 
-        // A held from power-on through the whole self-test forgets the circle: record,
-        // ledger and pad. A Both that ended the wait early never does.
+        // A held from power-on through the whole self-test forgets every circle: records,
+        // ledgers, pads, chip objects and the chip record. A Both that ended the wait early
+        // never does.
         let wipe = held_at_power_on && !skipped && self.board.a_down();
-        self.circle = if circle.is_some() && wipe {
-            let pad_len = circle.as_ref().map_or(0, |c| c.params.pad_len);
-            match self.board.wipe(pad_len) {
-                Ok(()) => {
-                    self.forget_chip();
-                    self.board.log("A held at boot: circle forgotten");
-                    show(
-                        &mut self.board,
-                        screens::status(&["circle forgotten", "release A"]),
-                    );
-                    while self.board.a_down() {
-                        self.board.delay_ms(10);
-                    }
-                    None
-                }
-                Err(_) => {
-                    self.board.log("wipe failed");
-                    circle
-                }
-            }
+        self.circles = if !circles.is_empty() && wipe {
+            self.forget_all(&circles)
         } else {
-            circle
+            circles
         };
+        self.current = 0;
+        self.open_current = false;
+        self.idle = Idle::Off;
 
-        if let Some(c) = &self.circle {
+        // With more than one circle the list comes first, in the idle loop.
+        if let [c] = self.circles.as_slice() {
+            let c = c.clone();
             let words = c.check_words();
-            show_words(&mut self.board, c, &words);
+            show_words(&mut self.board, &c, &words);
             self.board
                 .log(&format!("words from the record: {}", words.join(" ")));
         }
+    }
+
+    /// The wipe at boot: every circle's pad and ledger, the list of records, every chip
+    /// object and the chip record. Returns the circles left: none, or all of them if a
+    /// write failed.
+    fn forget_all(&mut self, circles: &[Circle]) -> Vec<Circle> {
+        let mut ok = true;
+        for c in circles {
+            ok &= self.board.forget(&c.circle_id, c.params.pad_len).is_ok();
+        }
+        ok = ok && self.board.store_circles(&[]).is_ok();
+        if !ok {
+            self.board.log("wipe failed");
+            return self.board.load_circles();
+        }
+        self.forget_chip();
+        self.board.log("A held at boot: every circle forgotten");
+        let what = if circles.len() == 1 {
+            "circle forgotten"
+        } else {
+            "circles forgotten"
+        };
+        show(&mut self.board, screens::status(&[what, "release A"]));
+        while self.board.a_down() {
+            self.board.delay_ms(10);
+        }
+        Vec::new()
+    }
+
+    /// Forget one circle and nothing else: its chip objects and chip record entry first,
+    /// then its pad and ledger, then its record. A failure part way leaves the circle listed,
+    /// so forgetting it again finishes the job.
+    fn forget_circle(&mut self, c: &Circle) -> Result<(), String> {
+        if let Some(slot) = c.chip_slot {
+            if let Some(chip) = self.board.chip() {
+                chip::delete_slot(chip, slot).map_err(|e| format!("chip: {e:?}"))?;
+            }
+            match self.board.chip_record_load() {
+                Ok(Some(mut record)) if record.entry(slot).is_some() => {
+                    record.remove(slot);
+                    self.board
+                        .chip_record_store(&record)
+                        .map_err(|_| String::from("flash: chip record failed"))?;
+                }
+                Ok(_) => {}
+                Err(_) => self
+                    .board
+                    .log("chip record: unreadable, left as it is"),
+            }
+        }
+        self.board
+            .forget(&c.circle_id, c.params.pad_len)
+            .map_err(|_| String::from("flash: pad erase failed"))?;
+        let rest: Vec<Circle> = self
+            .circles
+            .iter()
+            .filter(|x| x.circle_id != c.circle_id)
+            .cloned()
+            .collect();
+        self.board
+            .store_circles(&rest)
+            .map_err(|_| String::from("flash: circle records failed"))
     }
 
     /// One pass: find the pile, run the ceremony, keep or discard the result. Steps until
@@ -347,9 +462,9 @@ impl<B: Board> Badge<B> {
     }
 
     /// At boot: delete every chip object in a slot the chip record does not know, and log it.
-    /// A record that cannot be read deletes nothing: it is not the same as no record. The slot
-    /// the kept circle names is never deleted, whatever the record says.
-    fn reconcile_chip(&mut self, kept: Option<u8>) {
+    /// A record that cannot be read deletes nothing: it is not the same as no record. A slot
+    /// a kept circle names is never deleted, whatever the record says.
+    fn reconcile_chip(&mut self, keep: Vec<u8>) {
         if self.board.chip().is_none() {
             return;
         }
@@ -365,7 +480,6 @@ impl<B: Board> Badge<B> {
         let Some(chip) = self.board.chip() else {
             return;
         };
-        let keep: Vec<u8> = kept.into_iter().collect();
         let lines = record.reconcile_keeping(chip, &keep);
         for l in &lines {
             self.board.log(l);
@@ -375,7 +489,7 @@ impl<B: Board> Badge<B> {
         }
     }
 
-    /// The wipe at boot: every chip object and the chip record go with the circle.
+    /// The wipe at boot: every chip object and the chip record go with the circles.
     fn forget_chip(&mut self) {
         let Some(chip) = self.board.chip() else {
             return;
@@ -389,13 +503,14 @@ impl<B: Board> Badge<B> {
         }
     }
 
-    /// Make this pass's seat key in the chip, in the chip record's lowest free slot. Anything
-    /// left in that slot is deleted first: the record does not know it, so it is not reused.
+    /// Make this pass's seat key in the chip, in the chip record's lowest free slot that no
+    /// held circle names. Anything left in that slot is deleted first: the record does not
+    /// know it, so it is not reused. A slot a circle holds is never chosen.
     fn make_chip_seat(&mut self) -> Result<(u8, SeatPublic), String> {
         let record = self.load_chip_record()?;
-        let kept = self.circle.as_ref().and_then(|c| c.chip_slot);
+        let kept = self.held_slots();
         let slot = (0..=u8::MAX)
-            .find(|&s| record.entry(s).is_none() && Some(s) != kept)
+            .find(|&s| record.entry(s).is_none() && !kept.contains(&s))
             .ok_or("chip: every slot is in use")?;
         let chip = self.board.chip().ok_or("chip: not found")?;
         chip::delete_slot(chip, slot).map_err(|e| format!("chip: {e:?}"))?;
@@ -475,7 +590,8 @@ impl<B: Board> Badge<B> {
     fn advance(&mut self, state: State<B::Link>) -> Result<(State<B::Link>, Step), String> {
         match state {
             State::Idle => {
-                show(&mut self.board, screens::pile(None));
+                let screen = self.pile_screen(None);
+                show(&mut self.board, screen);
                 let (down, up) = self.board.links();
                 let (name, pad_len) = self.board.proposal();
                 let pile = Pile::new(down, up, &name, pad_len, false);
@@ -522,11 +638,20 @@ impl<B: Board> Badge<B> {
                     shown = pile.seat();
                     if let Some(s) = shown {
                         self.board.log(&format!("seat {s}"));
-                        show(&mut self.board, screens::pile(Some(s)));
+                        let screen = self.pile_screen(Some(s));
+                        show(&mut self.board, screen);
                     }
                 }
-                // Both on the top card starts the count. Left and Right do nothing here.
-                if self.board.press() == Press::Both {
+                // Both on the top card starts the count. On a badge that holds circles, Left
+                // or Right leaves the pile and goes back to the list; otherwise they do
+                // nothing here.
+                let gesture = self.board.press();
+                if matches!(gesture, Press::Left | Press::Right) && !self.circles.is_empty() {
+                    drop(pile);
+                    self.board.log("left the pile");
+                    return Ok((State::Idle, Step::Discarded));
+                }
+                if gesture == Press::Both {
                     match pile.start() {
                         Ok(()) => {
                             self.board.log("Both: counting the pile");
@@ -631,11 +756,15 @@ impl<B: Board> Badge<B> {
                 let gesture = self.board.press();
                 if gesture == Press::Both {
                     show_status(&mut self.board, "saving...");
+                    let id = result.circle_id;
+                    if self.circles.iter().any(|c| c.circle_id == id) {
+                        return Err(String::from("circle: already held"));
+                    }
                     self.board
-                        .write_pad(&result.pad)
+                        .write_pad(&id, &result.pad)
                         .map_err(|_| "flash: pad write failed")?;
                     self.board
-                        .records(true)
+                        .records(&id, true)
                         .map_err(|_| "flash: ledger erase failed")?;
                     let words = crate::board::word_indices(&result.check_words)
                         .ok_or("words: not in the word list")?;
@@ -669,15 +798,29 @@ impl<B: Board> Badge<B> {
                         tier: result.tier,
                         manifest: result.manifest.encode(),
                     };
+                    let mut all = self.circles.clone();
+                    all.push(circle);
                     self.board
-                        .save_circle(&circle)
+                        .store_circles(&all)
                         .map_err(|_| "flash: circle record failed")?;
                     // Kept: the slot belongs to the circle now.
                     self.chip_slot = None;
                     self.board
-                        .log(&format!("saved: {} seat {seat}", circle.params.name));
+                        .log(&format!("saved: {} seat {seat}", result.params.name));
                     show_status(&mut self.board, "saved. read the words aloud");
-                    self.circle = Some(circle);
+                    // The board's order, which is the order the next boot lists them in.
+                    let stored = self.board.load_circles();
+                    self.circles = if stored.iter().any(|c| c.circle_id == id) {
+                        stored
+                    } else {
+                        all
+                    };
+                    self.current = self
+                        .circles
+                        .iter()
+                        .position(|c| c.circle_id == id)
+                        .unwrap_or(0);
+                    self.open_current = true;
                     self.idle = Idle::Off;
                     return Ok((State::Idle, Step::Kept));
                 }
@@ -704,72 +847,224 @@ impl<B: Board> Badge<B> {
         }
     }
 
-    /// One poll of the idle menu, for a badge with a stored circle. Call it in a loop. The
-    /// menu is a ring of pages, Words, Key and Serve: Left and Right turn the page, Both
-    /// selects. Both on Key spends 32 bytes and shows them as a code; Both on Serve answers
-    /// custodian requests from the down link, each spend allowed by Both or refused by Left
-    /// or Right. Ends with a 1 ms delay. Does nothing until a circle is stored.
+    /// The pile screen: with a way back to the list when the badge holds circles.
+    fn pile_screen(&self, seat: Option<u8>) -> Screen {
+        if self.circles.is_empty() {
+            screens::pile(seat)
+        } else {
+            screens::pile_or_back(seat)
+        }
+    }
+
+    /// One poll of the idle loop, for a badge that holds a circle. Call it in a loop. Does
+    /// nothing until a circle is stored. Ends with a 1 ms delay.
+    ///
+    /// With one circle, its menu opens; with more, the list of circles comes first: Left and
+    /// Right move, Both opens that circle's menu, and the last entry, "new circle", starts a
+    /// pass for one more while the board has room. The menu is a ring of pages, Words, Key,
+    /// Serve, Circles and Forget: Left and Right turn the page, Both selects. Both on Key
+    /// spends 32 bytes and shows them as a code; Both on Serve answers custodian requests
+    /// from the down link for any circle the badge holds, each spend or signature allowed by
+    /// Both or refused by Left or Right; Both on Circles goes back to the list; Both on
+    /// Forget asks, and Both again forgets this circle and nothing else.
     pub fn idle_step(&mut self) {
-        let Some(circle) = self.circle.clone() else {
+        if self.circles.is_empty() {
             return;
+        }
+        let idle = core::mem::replace(&mut self.idle, Idle::Off);
+        self.idle = match idle {
+            Idle::Off => {
+                if self.circles.len() == 1 || self.open_current {
+                    self.open_current = false;
+                    if self.current >= self.circles.len() {
+                        self.current = 0;
+                    }
+                    self.enter_menu()
+                } else {
+                    self.current = self.current.min(self.circles.len() - 1);
+                    self.show_chooser(self.current);
+                    Idle::Choose {
+                        index: self.current,
+                    }
+                }
+            }
+            Idle::Choose { index } => self.choose_step(index),
+            Idle::NewCircle => self.new_circle_step(),
+            Idle::On(mut menu) => {
+                match Self::menu_step(&mut self.board, &self.circles, self.current, &mut menu) {
+                    MenuAction::Stay => Idle::On(menu),
+                    MenuAction::Choose => {
+                        drop(menu);
+                        self.show_chooser(self.current);
+                        Idle::Choose {
+                            index: self.current,
+                        }
+                    }
+                    MenuAction::Forget => {
+                        drop(menu);
+                        self.forget_current();
+                        Idle::Off
+                    }
+                }
+            }
         };
-        if matches!(self.idle, Idle::Off) {
-            self.idle = self.enter_menu(&circle);
-        }
-        if let Idle::On(menu) = &mut self.idle {
-            Self::menu_step(&mut self.board, &circle, menu);
-        }
         self.board.delay_ms(1);
     }
 
-    fn enter_menu(&mut self, c: &Circle) -> Idle<B> {
-        let len = c.params.pad_len;
-        let tier = self.board.tier();
-        let store = self.board.open_pad(len);
-        let pad = self
-            .board
-            .records(false)
-            .map_err(|_| String::from("flash: ledger read failed"))
-            .and_then(|records| {
-                PersistentLedger::open(records, c.params.slices())
-                    .map_err(|e| format!("ledger: {e:?}"))
+    /// The chooser's entries: each circle's name, a number after a name two circles share,
+    /// and "new circle" while the board has room for one more.
+    fn chooser_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .circles
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let name = &c.params.name;
+                if self.circles.iter().filter(|d| d.params.name == *name).count() > 1 {
+                    format!("{name} {}", i + 1)
+                } else {
+                    name.clone()
+                }
             })
-            .and_then(|ledger| {
-                Pad::with_circle_id(
-                    c.params.clone(),
-                    c.seat,
-                    c.circle_id,
-                    StorePad::new(store),
-                    ledger,
-                )
-                .map(|pad| Tiered { inner: pad, tier })
-                .map_err(|e| format!("pad: {e:?}"))
-            });
-        match pad {
-            Ok(pad) => {
-                let (down, _up) = self.board.links();
-                let menu = Menu {
-                    pad,
-                    down,
-                    rx: Vec::new(),
-                    page: Page::Words,
-                    serving: false,
-                    pending: None,
-                    peer_seen: false,
-                    covered: false,
-                };
-                show_page(&mut self.board, c, &menu);
-                Idle::On(Box::new(menu))
+            .collect();
+        if self.circles.len() < self.board.max_circles() {
+            names.push(String::from(NEW_CIRCLE));
+        }
+        names
+    }
+
+    fn show_chooser(&mut self, index: usize) {
+        let names = self.chooser_names();
+        show(&mut self.board, screens::chooser(&names, index));
+    }
+
+    fn choose_step(&mut self, index: usize) -> Idle<B> {
+        let entries = self.chooser_names().len();
+        let index = index.min(entries - 1);
+        match self.board.press() {
+            Press::None => Idle::Choose { index },
+            Press::Left => {
+                let index = (index + entries - 1) % entries;
+                self.show_chooser(index);
+                Idle::Choose { index }
             }
-            Err(e) => {
-                self.board.log(&e);
-                show_status(&mut self.board, &e);
-                Idle::Broken
+            Press::Right => {
+                let index = (index + 1) % entries;
+                self.show_chooser(index);
+                Idle::Choose { index }
+            }
+            Press::Both if index < self.circles.len() => {
+                self.current = index;
+                self.enter_menu()
+            }
+            Press::Both => {
+                self.board.log("new circle: looking for the pile");
+                self.state = State::Idle;
+                Idle::NewCircle
             }
         }
     }
 
-    fn menu_step(board: &mut B, c: &Circle, m: &mut Menu<B>) {
+    /// Run the pass for a new circle by one step. Kept opens the new circle's menu; anything
+    /// else that ends the pass goes back to the list.
+    fn new_circle_step(&mut self) -> Idle<B> {
+        match self.step() {
+            Step::Kept => Idle::Off,
+            Step::Discarded => {
+                self.show_chooser(self.current);
+                Idle::Choose {
+                    index: self.current,
+                }
+            }
+            Step::Failed(e) => {
+                self.board.log(&format!("new circle: {e}"));
+                self.show_chooser(self.current);
+                Idle::Choose {
+                    index: self.current,
+                }
+            }
+            _ => Idle::NewCircle,
+        }
+    }
+
+    /// Forget the circle whose menu was open, and say so.
+    fn forget_current(&mut self) {
+        let Some(c) = self.circles.get(self.current).cloned() else {
+            return;
+        };
+        match self.forget_circle(&c) {
+            Ok(()) => {
+                self.board
+                    .log(&format!("forgotten: {} seat {}", c.params.name, c.seat));
+                show_status(&mut self.board, "circle forgotten");
+            }
+            Err(e) => {
+                self.board.log(&format!("forget: {e}"));
+                show_status(&mut self.board, &e);
+            }
+        }
+        self.circles = self.board.load_circles();
+        self.current = 0;
+        self.open_current = false;
+    }
+
+    /// Open circle `c`'s pad and ledger.
+    fn open_circle_pad(&mut self, c: &Circle) -> Result<CirclePad<B>, String> {
+        let store = self
+            .board
+            .open_pad(&c.circle_id, c.params.pad_len)
+            .map_err(|_| String::from("flash: pad read failed"))?;
+        let records = self
+            .board
+            .records(&c.circle_id, false)
+            .map_err(|_| String::from("flash: ledger read failed"))?;
+        let ledger = PersistentLedger::open(records, c.params.slices())
+            .map_err(|e| format!("ledger: {e:?}"))?;
+        Pad::with_circle_id(c.params.clone(), c.seat, c.circle_id, StorePad::new(store), ledger)
+            .map_err(|e| format!("pad: {e:?}"))
+    }
+
+    /// The menu of circle `current`, with every circle's pad open for Serve. A pad that will
+    /// not open is logged and left out: requests for that circle are `UnknownCircle`, and if
+    /// it is this circle's, the error covers the first page.
+    fn enter_menu(&mut self) -> Idle<B> {
+        let tier = self.board.tier();
+        let mut held = Vec::new();
+        let mut broken = None;
+        for (i, c) in self.circles.clone().iter().enumerate() {
+            match self.open_circle_pad(c) {
+                Ok(pad) => held.push((c.circle_id, pad)),
+                Err(e) => {
+                    self.board.log(&format!("{}: {e}", c.params.name));
+                    if i == self.current {
+                        broken = Some(e);
+                    }
+                }
+            }
+        }
+        let (down, _up) = self.board.links();
+        let mut menu = Menu {
+            pads: Pads { held, tier },
+            down,
+            rx: Vec::new(),
+            page: Page::Words,
+            serving: false,
+            pending: None,
+            peer_seen: false,
+            covered: false,
+            confirm_forget: false,
+        };
+        let c = &self.circles[self.current];
+        show_page(&mut self.board, c, &menu);
+        if let Some(e) = broken {
+            show_status(&mut self.board, &e);
+            menu.covered = true;
+        }
+        Idle::On(Box::new(menu))
+    }
+
+    fn menu_step(board: &mut B, circles: &[Circle], current: usize, m: &mut Menu<B>) -> MenuAction {
+        let c = &circles[current];
         let asked = m.pending.is_some();
         let present = m.down.peer_present();
         let mut redraw = false;
@@ -780,7 +1075,7 @@ impl<B: Board> Badge<B> {
             } else {
                 "down link: nothing plugged in"
             });
-            redraw = m.page == Page::Serve;
+            redraw = m.page == Page::Serve && !m.covered && !m.confirm_forget;
         }
         // Read a chunk and decode after each, so `rx` never holds more than one request
         // frame and one chunk, whatever arrives.
@@ -791,7 +1086,7 @@ impl<B: Board> Badge<B> {
                 break;
             }
             m.rx.extend_from_slice(&buf[..n]);
-            Self::menu_decode(board, c, m);
+            Self::menu_decode(board, circles, m);
         }
 
         // A gesture made before the prompt was on the screen is not an answer to it: on the
@@ -799,19 +1094,19 @@ impl<B: Board> Badge<B> {
         // seen on this call and count only gestures seen on a later call.
         if !asked && m.pending.is_some() {
             let _ = board.press();
-            return;
+            return MenuAction::Stay;
         }
 
         let gesture = board.press();
         if let Some(p) = &m.pending {
             let yes = match gesture {
-                Press::None => return,
+                Press::None => return MenuAction::Stay,
                 Press::Both => true,
                 Press::Left | Press::Right => false,
             };
             let mut served = Served {
-                custody: &mut m.pad,
-                apps: BadgeApps::new(c, board.chip()),
+                custody: &mut m.pads,
+                apps: BadgeApps::new(circles, board.chip()),
             };
             let resp = serve(&mut served, &mut Answer(yes), &p.request);
             respond(&mut m.down, p.seq, &resp);
@@ -825,7 +1120,7 @@ impl<B: Board> Badge<B> {
             // The prompt replaced whatever was on the screen; the page is back now.
             m.covered = false;
             show_page(board, c, m);
-            return;
+            return MenuAction::Stay;
         }
 
         if m.covered {
@@ -833,7 +1128,19 @@ impl<B: Board> Badge<B> {
                 m.covered = false;
                 show_page(board, c, m);
             }
-            return;
+            return MenuAction::Stay;
+        }
+
+        if m.confirm_forget {
+            match gesture {
+                Press::None => {}
+                Press::Both => return MenuAction::Forget,
+                Press::Left | Press::Right => {
+                    m.confirm_forget = false;
+                    show_page(board, c, m);
+                }
+            }
+            return MenuAction::Stay;
         }
 
         match gesture {
@@ -854,7 +1161,7 @@ impl<B: Board> Badge<B> {
             Press::Both => match m.page {
                 Page::Words => show_page(board, c, m),
                 Page::Key => {
-                    match m.pad.spend(&c.circle_id, PSK_LEN) {
+                    match m.pads.spend(&c.circle_id, PSK_LEN) {
                         Ok((_, bytes)) => show(board, screens::code(&bytes)),
                         Err(e) => show_status(board, &format!("key: {e:?}")),
                     }
@@ -865,15 +1172,21 @@ impl<B: Board> Badge<B> {
                     board.log("serving the down link");
                     show_page(board, c, m);
                 }
+                Page::Circles => return MenuAction::Choose,
+                Page::Forget => {
+                    m.confirm_forget = true;
+                    show(board, screens::forget_prompt(&c.params.name));
+                }
             },
         }
+        MenuAction::Stay
     }
 
     /// Answer or queue every whole request frame in `rx`. Bytes that are not a frame, or a
     /// header longer than any request, are dropped one at a time to resync. A partial header
     /// left by garbage can claim a length that is never filled, so while the front is
     /// incomplete, a whole frame further on wins and the bytes before it are dropped.
-    fn menu_decode(board: &mut B, c: &Circle, m: &mut Menu<B>) {
+    fn menu_decode(board: &mut B, circles: &[Circle], m: &mut Menu<B>) {
         loop {
             let (kind, seq, payload, used) = match frame::decode_max(&m.rx, MAX_REQUEST_LEN) {
                 Ok((f, used)) => (f.kind, f.seq, f.payload.to_vec(), used),
@@ -906,9 +1219,17 @@ impl<B: Board> Badge<B> {
             let req = Request::decode(&payload).ok();
             let ask = match &req {
                 Some(Request::Chip { circle, op }) => {
-                    BadgeApps::new(c, board.chip()).prompt(circle, op)
+                    BadgeApps::new(circles, board.chip()).prompt(circle, op)
                 }
-                Some(r) => Ok(spends(r).map(|n| screens::consent(n, &c.params.name))),
+                Some(r) => match spends(r) {
+                    // A spend for a circle the badge does not hold is refused before asking.
+                    Some((id, n)) => circles
+                        .iter()
+                        .find(|c| c.circle_id == id)
+                        .map(|c| Some(screens::consent(n, &c.params.name)))
+                        .ok_or(ErrorCode::UnknownCircle),
+                    None => Ok(None),
+                },
                 None => Ok(None),
             };
             match ask {
@@ -924,16 +1245,16 @@ impl<B: Board> Badge<B> {
                 // never asked.
                 Ok(None) => {
                     let mut served = Served {
-                        custody: &mut m.pad,
-                        apps: BadgeApps::new(c, board.chip()),
+                        custody: &mut m.pads,
+                        apps: BadgeApps::new(circles, board.chip()),
                     };
                     let resp = serve(&mut served, &mut Answer(false), &payload);
                     respond(&mut m.down, seq, &resp);
                 }
-                // A chip request refused before anyone is asked: a circle the badge does not
-                // hold, a request to sign that it cannot describe, one it cannot do yet.
+                // Refused before anyone is asked: a circle the badge does not hold, a request
+                // to sign that it cannot describe, one it cannot do yet.
                 Err(code) => {
-                    board.log(&format!("chip request refused: {code:?}"));
+                    board.log(&format!("request refused: {code:?}"));
                     respond(&mut m.down, seq, &Response::Error { code }.encode());
                 }
             }
@@ -941,13 +1262,16 @@ impl<B: Board> Badge<B> {
     }
 }
 
-/// The bytes a request would spend, or `None` if it spends nothing. A chip request spends no
-/// pad; [`BadgeApps::prompt`] decides whether it asks.
-fn spends(req: &Request) -> Option<u32> {
+/// The circle a request would spend from and the bytes it would spend, or `None` if it
+/// spends nothing. A chip request spends no pad; [`BadgeApps::prompt`] decides whether it
+/// asks.
+fn spends(req: &Request) -> Option<(CircleId, u32)> {
     match req {
         Request::Identify | Request::Remaining { .. } | Request::Chip { .. } => None,
-        Request::Psk { .. } | Request::PskFor { .. } => Some(PSK_LEN),
-        Request::Spend { len, .. } | Request::SpendFor { len, .. } => Some(*len),
+        Request::Psk { circle, .. } => Some((*circle, PSK_LEN)),
+        Request::PskFor { handle, .. } => Some((handle.circle_id, PSK_LEN)),
+        Request::Spend { circle, len } => Some((*circle, *len)),
+        Request::SpendFor { handle, len } => Some((handle.circle_id, *len)),
     }
 }
 
@@ -1001,6 +1325,8 @@ fn show_page<B: Board>(board: &mut B, c: &Circle, m: &Menu<B>) {
             }
             body
         }
+        Page::Circles => vec!["Both to list the circles"],
+        Page::Forget => vec!["Both to forget this circle", "the others stay"],
     };
     let page = screens::menu_page(
         &c.params.name,

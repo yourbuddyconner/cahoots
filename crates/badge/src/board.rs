@@ -2,6 +2,7 @@
 
 use crate::chip::ChipRecord;
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 use cahoots_chip::ChipOps;
 use cahoots_core::checkwords::WORDLIST;
@@ -259,6 +260,64 @@ pub fn word_indices(words: &[&str; 6]) -> Option<[u16; 6]> {
     Some(out)
 }
 
+/// The place a circle's record, pad and ledger are in, on a board with `held.len()` places:
+/// the place whose record holds `circle`, else the place a pad was written to for it
+/// (`pending`), else the lowest place that holds nothing and is not pending for another.
+/// `None` if every place is taken.
+pub fn place_for(
+    held: &[Option<CircleId>],
+    pending: Option<(CircleId, usize)>,
+    circle: &CircleId,
+) -> Option<usize> {
+    if let Some(p) = held.iter().position(|h| h.as_ref() == Some(circle)) {
+        return Some(p);
+    }
+    match pending {
+        Some((id, p)) if id == *circle && held.get(p).is_some_and(Option::is_none) => Some(p),
+        _ => (0..held.len())
+            .find(|&p| held[p].is_none() && pending.is_none_or(|(_, q)| q != p)),
+    }
+}
+
+/// For [`Board::store_circles`] on a board with `held.len()` places: which of `circles` each
+/// place holds after the store. A circle keeps the place its record is in; a new one takes
+/// its pending place, else the lowest place left free. A place whose circle is not in the
+/// list is free. An error if one circle id is listed twice or the circles do not fit.
+pub fn assign_places(
+    held: &[Option<CircleId>],
+    pending: Option<(CircleId, usize)>,
+    circles: &[Circle],
+) -> Result<Vec<Option<usize>>, BoardError> {
+    let mut out: Vec<Option<usize>> = vec![None; held.len()];
+    let listed = |id: &CircleId| circles.iter().any(|c| c.circle_id == *id);
+    let mut placed = vec![false; circles.len()];
+    for (i, c) in circles.iter().enumerate() {
+        if circles[..i].iter().any(|d| d.circle_id == c.circle_id) {
+            return Err(BoardError::Storage);
+        }
+        if let Some(p) = held.iter().position(|h| h.as_ref() == Some(&c.circle_id)) {
+            out[p] = Some(i);
+            placed[i] = true;
+        }
+    }
+    let free = |out: &[Option<usize>], p: usize| {
+        out[p].is_none() && held[p].as_ref().is_none_or(|h| !listed(h))
+    };
+    for (i, c) in circles.iter().enumerate() {
+        if placed[i] {
+            continue;
+        }
+        let p = match pending {
+            Some((id, p)) if id == c.circle_id && p < held.len() && free(&out, p) => p,
+            _ => (0..held.len())
+                .find(|&p| free(&out, p))
+                .ok_or(BoardError::Storage)?,
+        };
+        out[p] = Some(i);
+    }
+    Ok(out)
+}
+
 /// One board: drivers plus a pin table. The badge logic is generic over this trait.
 pub trait Board {
     type Entropy: Entropy;
@@ -279,16 +338,50 @@ pub trait Board {
     /// it enters the idle menu, so every call must return usable links to the same two
     /// connectors: shared handles to links built once, or fresh unit links.
     fn links(&mut self) -> (Self::Link, Self::Link);
-    fn load_circle(&self) -> Option<Circle>;
-    fn save_circle(&mut self, c: &Circle) -> Result<(), BoardError>;
-    /// Forget the circle: the record, the ledger and the `pad_len` bytes of pad.
-    fn wipe(&mut self, pad_len: u32) -> Result<(), BoardError>;
-    /// Store a new pad and return a handle to it.
-    fn write_pad(&mut self, pad: &[u8]) -> Result<Self::Pad, BoardError>;
-    /// Open the stored pad of `len` bytes.
-    fn open_pad(&mut self, len: u32) -> Self::Pad;
-    /// The ledger's record region. `fresh` clears it first.
-    fn records(&mut self, fresh: bool) -> Result<Self::Records, BoardError>;
+    /// How many circles the board can hold. A board that holds one keeps the default and
+    /// implements [`Board::load_circle`] and [`Board::save_circle`]; the defaults of
+    /// [`Board::load_circles`] and [`Board::store_circles`] adapt it.
+    fn max_circles(&self) -> usize {
+        1
+    }
+    /// Every circle the board holds, in the order of its places.
+    fn load_circles(&mut self) -> Vec<Circle> {
+        self.load_circle().into_iter().collect()
+    }
+    /// Store the circles the badge holds, replacing the last list: a circle not in it loses
+    /// its record. Each circle keeps the place its record is in; a new one takes the place its
+    /// pad was written to by [`Board::write_pad`]. An error if they do not fit.
+    ///
+    /// The default is for a board with one record: [`Board::forget`] erased the record
+    /// already, so an empty list has nothing left to do.
+    fn store_circles(&mut self, circles: &[Circle]) -> Result<(), BoardError> {
+        match circles {
+            [] => Ok(()),
+            [c] => self.save_circle(c),
+            _ => Err(BoardError::Storage),
+        }
+    }
+    /// The one circle of a board with one record.
+    fn load_circle(&self) -> Option<Circle> {
+        None
+    }
+    /// Store the one circle of a board with one record, replacing it.
+    fn save_circle(&mut self, c: &Circle) -> Result<(), BoardError> {
+        let _ = c;
+        Err(BoardError::Storage)
+    }
+    /// Forget circle `circle`: its ledger and the `pad_len` bytes of its pad. A board with
+    /// one record erases the record too; a board with many erases it in the next
+    /// [`Board::store_circles`], which leaves the circle out.
+    fn forget(&mut self, circle: &CircleId, pad_len: u32) -> Result<(), BoardError>;
+    /// Store a new pad for circle `circle` and return a handle to it. On a board with many
+    /// places, a circle not stored yet takes the lowest free place, and keeps it when the
+    /// badge stores the circle.
+    fn write_pad(&mut self, circle: &CircleId, pad: &[u8]) -> Result<Self::Pad, BoardError>;
+    /// Open the stored pad of `len` bytes of circle `circle`.
+    fn open_pad(&mut self, circle: &CircleId, len: u32) -> Result<Self::Pad, BoardError>;
+    /// The ledger's record region of circle `circle`. `fresh` clears it first.
+    fn records(&mut self, circle: &CircleId, fresh: bool) -> Result<Self::Records, BoardError>;
     /// `(name, pad_len)` if this card is the bottom of the pile and proposes a circle.
     fn proposal(&self) -> (String, u32);
     fn tier(&self) -> u8;

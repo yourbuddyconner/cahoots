@@ -12,7 +12,9 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use cahoots_badge::board::{assign_places, place_for};
 use cahoots_badge::{screens, Board, BoardError, Circle, Press};
+use cahoots_core::circle_id::CircleId;
 use cahoots_hal::health::Tested;
 use cahoots_hal::{Display, Link};
 use embedded_hal::delay::DelayNs;
@@ -31,6 +33,21 @@ pub struct PicoBoard {
     pub stack_logged: u32,
     /// The most heap use already written to the log.
     pub heap_logged: usize,
+    /// The place a pad was written to for a circle not stored yet.
+    pub pending: Option<(CircleId, usize)>,
+}
+
+impl PicoBoard {
+    /// The circle id each place holds.
+    fn held(&self) -> Vec<Option<CircleId>> {
+        (0..store::PLACES)
+            .map(|p| store::load_circle(p).map(|c| c.circle_id))
+            .collect()
+    }
+
+    fn place(&self, circle: &CircleId) -> Result<usize, BoardError> {
+        place_for(&self.held(), self.pending, circle).ok_or(BoardError::Storage)
+    }
 }
 
 impl Board for PicoBoard {
@@ -79,31 +96,49 @@ impl Board for PicoBoard {
         (Box::new(DownLink), Box::new(UpLink))
     }
 
-    fn load_circle(&self) -> Option<Circle> {
-        store::load_circle()
+    fn max_circles(&self) -> usize {
+        store::PLACES
     }
 
-    fn save_circle(&mut self, c: &Circle) -> Result<(), BoardError> {
-        store::save_circle(c).map_err(|()| BoardError::Storage)
+    fn load_circles(&mut self) -> Vec<Circle> {
+        (0..store::PLACES).filter_map(store::load_circle).collect()
     }
 
-    fn wipe(&mut self, pad_len: u32) -> Result<(), BoardError> {
-        store::wipe(pad_len).map_err(|()| BoardError::Storage)
+    /// Rewrites the record of each place whose circle changed, and erases the record of a
+    /// place whose circle is not in the list.
+    fn store_circles(&mut self, circles: &[Circle]) -> Result<(), BoardError> {
+        let places = assign_places(&self.held(), self.pending, circles)?;
+        for (p, i) in places.into_iter().enumerate() {
+            match i {
+                Some(i) if store::load_circle(p).as_ref() == Some(&circles[i]) => {}
+                Some(i) => store::save_circle(p, &circles[i]).map_err(|()| BoardError::Storage)?,
+                None => store::erase_circle(p).map_err(|()| BoardError::Storage)?,
+            }
+        }
+        self.pending = None;
+        Ok(())
     }
 
-    fn write_pad(&mut self, pad: &[u8]) -> Result<FlashPadStore, BoardError> {
-        FlashPadStore::write(pad).map_err(|()| BoardError::Storage)
+    fn forget(&mut self, circle: &CircleId, pad_len: u32) -> Result<(), BoardError> {
+        store::wipe(self.place(circle)?, pad_len).map_err(|()| BoardError::Storage)
     }
 
-    fn open_pad(&mut self, len: u32) -> FlashPadStore {
-        FlashPadStore::open(len)
+    fn write_pad(&mut self, circle: &CircleId, pad: &[u8]) -> Result<FlashPadStore, BoardError> {
+        let p = self.place(circle)?;
+        self.pending = Some((*circle, p));
+        FlashPadStore::write(store::place(p), pad).map_err(|()| BoardError::Storage)
     }
 
-    fn records(&mut self, fresh: bool) -> Result<FlashRecordStore, BoardError> {
+    fn open_pad(&mut self, circle: &CircleId, len: u32) -> Result<FlashPadStore, BoardError> {
+        FlashPadStore::open(store::place(self.place(circle)?), len).map_err(|()| BoardError::Storage)
+    }
+
+    fn records(&mut self, circle: &CircleId, fresh: bool) -> Result<FlashRecordStore, BoardError> {
+        let at = store::place(self.place(circle)?);
         if fresh {
-            FlashRecordStore::fresh().map_err(|()| BoardError::Storage)
+            FlashRecordStore::fresh(at).map_err(|()| BoardError::Storage)
         } else {
-            Ok(FlashRecordStore::open())
+            Ok(FlashRecordStore::open(at))
         }
     }
 
@@ -140,8 +175,8 @@ impl Board for PicoBoard {
                 self.delay.delay_ms(10);
             }
         }
-        let pad_in_the_way =
-            store::load_circle().is_some_and(|c| c.params.pad_len > store::PAD_CAP - store::SECTOR);
+        let pad_in_the_way = store::load_circle(0)
+            .is_some_and(|c| c.params.pad_len > store::PAD_CAP - store::SECTOR);
         let flash = if pad_in_the_way {
             "flash: skipped, pad fills the region".into()
         } else {

@@ -1,7 +1,8 @@
 //! The badge's answers to `Chip` requests: the seat key described, attested, and signing for
 //! ssh, and the consent screen each signing request shows before it is answered.
 //!
-//! [`BadgeApps`] holds the circle and the board's chip for one request. [`BadgeApps::prompt`]
+//! [`BadgeApps`] holds the circles the badge keeps and the board's chip for one request; each
+//! request names its circle, and one the badge does not hold is `UnknownCircle`. [`BadgeApps::prompt`]
 //! decides, before anyone is asked, whether a request is answered now, refused now, or shown:
 //! a request to sign that the badge cannot describe is refused with `Unparseable` and never
 //! reaches a screen. `ssh_sign` runs the same checks again after consent, signs, and verifies
@@ -29,9 +30,9 @@ pub const CURVE_P256: u8 = 0;
 /// The namespace git signs commits in.
 const GIT_NAMESPACE: &str = "git";
 
-/// The badge's chip requests for the circle it holds.
+/// The badge's chip requests for the circles it holds.
 pub struct BadgeApps<'a> {
-    circle: &'a Circle,
+    circles: &'a [Circle],
     chip: Option<&'a mut dyn ChipOps>,
 }
 
@@ -64,21 +65,22 @@ impl Seat<'_> {
 }
 
 impl<'a> BadgeApps<'a> {
-    pub fn new(circle: &'a Circle, chip: Option<&'a mut dyn ChipOps>) -> Self {
-        BadgeApps { circle, chip }
+    pub fn new(circles: &'a [Circle], chip: Option<&'a mut dyn ChipOps>) -> Self {
+        BadgeApps { circles, chip }
     }
 
-    fn held(&self, circle: &CircleId) -> Result<(), ErrorCode> {
-        if *circle == self.circle.circle_id {
-            Ok(())
-        } else {
-            Err(ErrorCode::UnknownCircle)
-        }
+    /// The circle the request names, if the badge holds it.
+    fn held(&self, circle: &CircleId) -> Result<&'a Circle, ErrorCode> {
+        let circles: &'a [Circle] = self.circles;
+        circles
+            .iter()
+            .find(|c| c.circle_id == *circle)
+            .ok_or(ErrorCode::UnknownCircle)
     }
 
     /// The circle's seat key: in the chip slot it names, or the software key it keeps.
-    fn seat(&mut self) -> Result<Seat<'_>, ErrorCode> {
-        match self.circle.chip_slot {
+    fn seat(&mut self, circle: &Circle) -> Result<Seat<'_>, ErrorCode> {
+        match circle.chip_slot {
             Some(slot) => {
                 let chip = self.chip.as_deref_mut().ok_or(ErrorCode::NoChip)?;
                 Ok(Seat::Chip(ChipSeat::new(
@@ -87,7 +89,7 @@ impl<'a> BadgeApps<'a> {
                 )))
             }
             None => {
-                let seed = Zeroizing::new(self.circle.seat_key);
+                let seed = Zeroizing::new(circle.seat_key);
                 SeatKey::from_seed(&seed)
                     .map(Seat::Soft)
                     .map_err(|_| ErrorCode::NoChip)
@@ -103,7 +105,7 @@ impl<'a> BadgeApps<'a> {
         circle: &CircleId,
         op: &ChipRequest,
     ) -> Result<Option<Screen>, ErrorCode> {
-        self.held(circle)?;
+        let c = self.held(circle)?;
         match op {
             ChipRequest::Describe | ChipRequest::Attest { .. } => Ok(None),
             ChipRequest::SshSign {
@@ -111,7 +113,7 @@ impl<'a> BadgeApps<'a> {
                 host,
                 content,
             } => self
-                .ssh_screen(data, host.as_ref(), content.as_deref())
+                .ssh_screen(c, data, host.as_ref(), content.as_deref())
                 .map(Some),
             ChipRequest::Card { .. }
             | ChipRequest::GrantSign { .. }
@@ -123,12 +125,13 @@ impl<'a> BadgeApps<'a> {
     /// badge cannot describe is `Unparseable`.
     fn ssh_screen(
         &mut self,
+        c: &Circle,
         data: &[u8],
         host: Option<&SshHost>,
         content: Option<&[u8]>,
     ) -> Result<Screen, ErrorCode> {
         let signed = ssh::parse(data).map_err(|_| ErrorCode::Unparseable)?;
-        let name = &self.circle.params.name;
+        let name = &c.params.name;
         match &signed {
             Signed::Login {
                 user,
@@ -136,7 +139,7 @@ impl<'a> BadgeApps<'a> {
                 key,
                 host_key,
             } => {
-                let public = self.seat()?.public()?;
+                let public = self.seat(c)?.public()?;
                 if *key != ssh::public_key_blob(&public) {
                     return Err(ErrorCode::Unparseable);
                 }
@@ -179,9 +182,9 @@ impl<'a> BadgeApps<'a> {
 
 impl ChipApps for BadgeApps<'_> {
     fn describe(&mut self, circle: &CircleId) -> Result<ChipInfo, ErrorCode> {
-        self.held(circle)?;
-        let in_chip = self.circle.chip_slot.is_some();
-        let public = self.seat()?.public()?;
+        let c = self.held(circle)?;
+        let in_chip = c.chip_slot.is_some();
+        let public = self.seat(c)?.public()?;
         Ok(ChipInfo {
             public: public.0.to_vec(),
             curve: CURVE_P256,
@@ -191,8 +194,7 @@ impl ChipApps for BadgeApps<'_> {
     }
 
     fn attest(&mut self, circle: &CircleId, freshness: &[u8; 16]) -> Result<Attested, ErrorCode> {
-        self.held(circle)?;
-        let slot = self.circle.chip_slot.ok_or(ErrorCode::NoChip)?;
+        let slot = self.held(circle)?.chip_slot.ok_or(ErrorCode::NoChip)?;
         let chip = self.chip.as_deref_mut().ok_or(ErrorCode::NoChip)?;
         chip.attest(KeyId::new(KeyKind::Seat, slot), freshness)
             .map_err(|_| ErrorCode::ChipError)
@@ -205,10 +207,10 @@ impl ChipApps for BadgeApps<'_> {
         host: Option<&SshHost>,
         content: Option<&[u8]>,
     ) -> Result<Vec<u8>, ErrorCode> {
-        self.held(circle)?;
+        let c = self.held(circle)?;
         // The same checks as before the screen: nothing is signed that was not described.
-        self.ssh_screen(data, host, content)?;
-        let mut seat = self.seat()?;
+        self.ssh_screen(c, data, host, content)?;
+        let mut seat = self.seat(c)?;
         let public = seat.public()?;
         let sig = seat.sign(data)?;
         if !public.verify(data, &sig) {
@@ -230,6 +232,10 @@ impl ChipApps for BadgeApps<'_> {
     fn seal_key(&mut self, circle: &CircleId, _: &str) -> Result<[u8; 32], ErrorCode> {
         self.held(circle)?;
         Err(ErrorCode::NoChip)
+    }
+
+    fn has_chip(&self) -> bool {
+        self.chip.is_some()
     }
 }
 
@@ -310,5 +316,9 @@ impl<C> ChipApps for Served<'_, C> {
 
     fn seal_key(&mut self, circle: &CircleId, label: &str) -> Result<[u8; 32], ErrorCode> {
         self.apps.seal_key(circle, label)
+    }
+
+    fn has_chip(&self) -> bool {
+        self.apps.has_chip()
     }
 }

@@ -1,5 +1,6 @@
 //! The idle menu: a ring of pages (the words, a key as a code, serving a laptop on the down
-//! link), Left and Right to turn the page, Both to select.
+//! link, the list of circles, forgetting this circle), Left and Right to turn the page, Both
+//! to select.
 
 mod common;
 
@@ -29,11 +30,11 @@ fn press(badge: &mut Badge<FakeBoard>, gesture: Press) {
     badge.idle_step();
 }
 
-/// The last screen is menu page `page` of 3, titled `title`.
+/// The last screen is menu page `page` of 5, titled `title`.
 /// The words page has no title: its six words are the page.
 fn on_page(badge: &mut Badge<FakeBoard>, page: usize, title: &str) -> bool {
     let b = badge.board();
-    b.shows(&format!("{page}/3")) && (title.is_empty() || b.shows(title))
+    b.shows(&format!("{page}/5")) && (title.is_empty() || b.shows(title))
 }
 
 /// Right twice to the Serve page, then Both to start serving.
@@ -117,7 +118,15 @@ fn left_and_right_walk_the_page_ring() {
     press(&mut badge, Press::Right);
     assert!(on_page(&mut badge, 3, "serve a laptop"));
     press(&mut badge, Press::Right);
+    assert!(on_page(&mut badge, 4, "circles"));
+    press(&mut badge, Press::Right);
+    assert!(on_page(&mut badge, 5, "forget this circle"));
+    press(&mut badge, Press::Right);
     assert!(on_page(&mut badge, 1, ""));
+    press(&mut badge, Press::Left);
+    assert!(on_page(&mut badge, 5, "forget this circle"));
+    press(&mut badge, Press::Left);
+    assert!(on_page(&mut badge, 4, "circles"));
     press(&mut badge, Press::Left);
     assert!(on_page(&mut badge, 3, "serve a laptop"));
     press(&mut badge, Press::Left);
@@ -186,12 +195,14 @@ fn both_on_the_key_page_spends_32_bytes_and_shows_the_code() {
 fn both_on_the_words_page_spends_nothing() {
     let (mut badge, mut laptop, id) = serving();
     let before = remaining(&mut badge, &mut laptop, id);
-    press(&mut badge, Press::Right);
+    press(&mut badge, Press::Left);
+    press(&mut badge, Press::Left);
     assert!(on_page(&mut badge, 1, ""));
     press(&mut badge, Press::Both);
     press(&mut badge, Press::Both);
     assert!(badge.board().codes().is_empty());
-    press(&mut badge, Press::Left);
+    press(&mut badge, Press::Right);
+    press(&mut badge, Press::Right);
     press(&mut badge, Press::Both);
     assert_eq!(remaining(&mut badge, &mut laptop, id), before);
 }
@@ -245,7 +256,8 @@ fn serve_answers_identify_without_a_prompt() {
 fn the_serve_page_shows_listening_once_a_laptop_is_present() {
     let (mut badge, laptop, _) = in_the_menu();
     laptop.present.set(false);
-    press(&mut badge, Press::Left);
+    press(&mut badge, Press::Right);
+    press(&mut badge, Press::Right);
     assert!(on_page(&mut badge, 3, "serve a laptop"));
     assert!(!badge.board().shows("a laptop is listening"));
     laptop.present.set(true);
@@ -345,7 +357,7 @@ fn a_request_outside_serve_is_busy() {
 fn turning_off_the_serve_page_stops_serving() {
     let (mut badge, mut laptop, _) = serving();
     press(&mut badge, Press::Right);
-    assert!(on_page(&mut badge, 1, ""));
+    assert!(on_page(&mut badge, 4, "circles"));
     press(&mut badge, Press::Left);
     send(&mut laptop, 2, &Request::Identify);
     badge.idle_step();

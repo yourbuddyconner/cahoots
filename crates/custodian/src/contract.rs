@@ -241,6 +241,10 @@ pub trait ChipApps {
     fn card_sign(&mut self, circle: &CircleId, card: &[u8]) -> Result<Vec<u8>, ErrorCode>;
     fn grant_sign(&mut self, circle: &CircleId, grant: &[u8]) -> Result<Vec<u8>, ErrorCode>;
     fn seal_key(&mut self, circle: &CircleId, label: &str) -> Result<[u8; 32], ErrorCode>;
+    /// Whether the device has a chip: `Identify` says so. A device without one keeps this.
+    fn has_chip(&self) -> bool {
+        false
+    }
 }
 
 /// A bare pad has no chip: every operation says so.

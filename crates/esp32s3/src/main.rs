@@ -102,6 +102,7 @@ fn main() -> ! {
         flash,
         delay,
         stack_logged: 0,
+        pending: None,
     });
     badge.boot();
     loop {

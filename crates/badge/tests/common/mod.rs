@@ -1,10 +1,11 @@
 #![allow(dead_code)]
 
 use cahoots_badge::chip::ChipRecord;
+use cahoots_badge::board::{assign_places, place_for};
 use cahoots_badge::{word_indices, Board, BoardError, Circle, Press};
 use cahoots_chip::{ChipOps, SoftChip};
 use cahoots_core::checkwords::{check_words, WORDLIST};
-use cahoots_core::circle_id::circle_id;
+use cahoots_core::circle_id::{circle_id, CircleId};
 use cahoots_core::params::CircleParams;
 use cahoots_hal::health::{HealthTests, Tested};
 use cahoots_hal::ledger::RecordStore;
@@ -148,6 +149,14 @@ pub fn cable() -> (FakeLink, FakeLink) {
     )
 }
 
+/// A place on the fake board beyond the first: a circle record, its pad and its ledger.
+#[derive(Clone, Default)]
+pub struct FakePlace {
+    pub circle: Option<Circle>,
+    pub pad: Vec<u8>,
+    pub records: Vec<u8>,
+}
+
 /// The tier the fake board reports. Non-zero, so a test can see it passed through.
 pub const FAKE_TIER: u8 = 1;
 
@@ -156,9 +165,17 @@ pub struct FakeBoard {
     pub display: FakeDisplay,
     /// The lines of every screen the badge noted, in order.
     pub screens: Vec<Vec<String>>,
+    /// The first place: its pad, ledger and circle record. A badge with one circle uses
+    /// only this place.
     pub pad: Vec<u8>,
     pub records: Vec<u8>,
     pub circle: Option<Circle>,
+    /// The places after the first, `max_circles - 1` of them.
+    pub more: Vec<FakePlace>,
+    /// The place a pad was written to for a circle not stored yet.
+    pub pending: Option<(CircleId, usize)>,
+    /// The name this card proposes for a circle when it is the bottom of the pile.
+    pub name: String,
     /// The gestures `press()` hands out, one per call, then `Press::None`.
     pub presses: VecDeque<Press>,
     pub a_down: bool,
@@ -190,6 +207,16 @@ impl FakeBoard {
             pad: Vec::new(),
             records: vec![0xFF; 4096],
             circle: None,
+            more: vec![
+                FakePlace {
+                    circle: None,
+                    pad: Vec::new(),
+                    records: vec![0xFF; 4096],
+                };
+                3
+            ],
+            pending: None,
+            name: "fakes".into(),
             presses: VecDeque::new(),
             a_down: false,
             release_at_ms: 3000,
@@ -208,6 +235,28 @@ impl FakeBoard {
         let mut b = Self::new();
         b.entropy = Tested::new(Xorshift(seed), HealthTests::for_min_entropy(6));
         b
+    }
+
+    /// The circle id each place holds.
+    fn held(&self) -> Vec<Option<CircleId>> {
+        core::iter::once(&self.circle)
+            .chain(self.more.iter().map(|p| &p.circle))
+            .map(|c| c.as_ref().map(|c| c.circle_id))
+            .collect()
+    }
+
+    fn place(&self, id: &CircleId) -> Option<usize> {
+        place_for(&self.held(), self.pending, id)
+    }
+
+    /// The pad and ledger of place `p`.
+    fn region(&mut self, p: usize) -> (&mut Vec<u8>, &mut Vec<u8>) {
+        if p == 0 {
+            (&mut self.pad, &mut self.records)
+        } else {
+            let place = &mut self.more[p - 1];
+            (&mut place.pad, &mut place.records)
+        }
     }
 
     /// The status screens, each one's lines joined by newlines.
@@ -294,35 +343,62 @@ impl Board for FakeBoard {
             .take()
             .unwrap_or_else(|| (FakeLink::open(), FakeLink::open()))
     }
+    fn max_circles(&self) -> usize {
+        1 + self.more.len()
+    }
+    fn load_circles(&mut self) -> Vec<Circle> {
+        core::iter::once(&self.circle)
+            .chain(self.more.iter().map(|p| &p.circle))
+            .filter_map(Clone::clone)
+            .collect()
+    }
+    fn store_circles(&mut self, circles: &[Circle]) -> Result<(), BoardError> {
+        let places = assign_places(&self.held(), self.pending, circles)?;
+        for (p, i) in places.into_iter().enumerate() {
+            let c = i.map(|i| circles[i].clone());
+            if p == 0 {
+                self.circle = c;
+            } else {
+                self.more[p - 1].circle = c;
+            }
+        }
+        self.pending = None;
+        Ok(())
+    }
+    /// The first place's circle: the one a badge with one circle keeps.
     fn load_circle(&self) -> Option<Circle> {
         self.circle.clone()
     }
-    fn save_circle(&mut self, c: &Circle) -> Result<(), BoardError> {
-        self.circle = Some(c.clone());
+    fn forget(&mut self, circle: &CircleId, pad_len: u32) -> Result<(), BoardError> {
+        let p = self.place(circle).ok_or(BoardError::Storage)?;
+        let (pad, records) = self.region(p);
+        records.fill(0xFF);
+        let n = (pad_len as usize).min(pad.len());
+        pad[..n].fill(0);
         Ok(())
     }
-    fn wipe(&mut self, pad_len: u32) -> Result<(), BoardError> {
-        self.circle = None;
-        self.records.fill(0xFF);
-        let n = (pad_len as usize).min(self.pad.len());
-        self.pad[..n].fill(0);
-        Ok(())
+    fn write_pad(&mut self, circle: &CircleId, pad: &[u8]) -> Result<VecPad, BoardError> {
+        let p = self.place(circle).ok_or(BoardError::Storage)?;
+        self.pending = Some((*circle, p));
+        let (stored, _) = self.region(p);
+        *stored = pad.to_vec();
+        Ok(VecPad(pad.to_vec()))
     }
-    fn write_pad(&mut self, pad: &[u8]) -> Result<VecPad, BoardError> {
-        self.pad = pad.to_vec();
-        Ok(VecPad(self.pad.clone()))
+    fn open_pad(&mut self, circle: &CircleId, len: u32) -> Result<VecPad, BoardError> {
+        let p = self.place(circle).ok_or(BoardError::Storage)?;
+        let (pad, _) = self.region(p);
+        Ok(VecPad(pad.get(..len as usize).ok_or(BoardError::Storage)?.to_vec()))
     }
-    fn open_pad(&mut self, len: u32) -> VecPad {
-        VecPad(self.pad[..len as usize].to_vec())
-    }
-    fn records(&mut self, fresh: bool) -> Result<VecRecords, BoardError> {
+    fn records(&mut self, circle: &CircleId, fresh: bool) -> Result<VecRecords, BoardError> {
+        let p = self.place(circle).ok_or(BoardError::Storage)?;
+        let (_, records) = self.region(p);
         if fresh {
-            self.records.fill(0xFF);
+            records.fill(0xFF);
         }
-        Ok(VecRecords(self.records.clone()))
+        Ok(VecRecords(records.clone()))
     }
     fn proposal(&self) -> (String, u32) {
-        ("fakes".into(), 192)
+        (self.name.clone(), 192)
     }
     fn tier(&self) -> u8 {
         FAKE_TIER

@@ -916,7 +916,7 @@ fn a_signature_that_does_not_verify_is_never_returned() {
         .generate(KeyId::new(KeyKind::Seat, 0), Curve::P256)
         .unwrap();
     let data = userauth(SESSION, "git", &seat_blob(&SeatPublic::parse(&p).unwrap()));
-    let mut apps = BadgeApps::new(&circle, Some(&mut chip));
+    let mut apps = BadgeApps::new(core::slice::from_ref(&circle), Some(&mut chip));
     let r = apps.ssh_sign(&circle.circle_id, &data, None, None);
     assert_eq!(r, Err(ErrorCode::ChipError));
 }
