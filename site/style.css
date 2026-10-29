@@ -144,6 +144,8 @@ h3 { font-family: var(--display); font-weight: 600; font-size: 17px; letter-spac
 .plate.board img { background: var(--fg); }
 .plate.paper img { aspect-ratio: 1; padding: 14%; background: var(--paper); box-sizing: border-box; }
 .plate figcaption { font-family: var(--mono); font-size: 11.5px; color: var(--fg-3); margin-top: 10px; letter-spacing: 0.04em; }
+.plate.punks { margin-top: 48px; }
+.plate.punks img { background: var(--paper); }
 @media (max-width: 860px) { .card-row { grid-template-columns: 1fr; gap: 40px; } }
 
 /* The feed */

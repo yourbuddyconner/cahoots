@@ -4,9 +4,10 @@
     python3 site/art/gen.py
 
 It writes site/assets/place.svg (the poster at the top of the landing page),
-the four app icons in site/assets/icons/, a sigil in site/assets/sigil.svg and
-a mock of the badge's words screen in site/assets/screen-words.svg. The poster
-is flat vector shapes in seven colours with a grain over them; the sigil is a
+the four app icons in site/assets/icons/, one punk in site/assets/sigil.svg,
+twelve in site/assets/punks.svg and a mock of the badge's words screen in
+site/assets/screen-words.svg. The poster
+is flat vector shapes in seven colours with a grain over them; the punks are a
 text map turned into rects with crisp edges. The SVGs are committed so the site
 needs no build step.
 """
@@ -40,7 +41,7 @@ def mix(a, b, t):
 def palette():
     """The sixteen pixel colours, by the character that stands for each in a map.
 
-    They were drawn up for the old back-room scene; the sigil and the words
+    They were drawn up for the old back-room scene; the punks and the words
     screen use its ink (".") and warm white ("c").
     """
     return {
@@ -534,31 +535,439 @@ def icon(name):
     )
 
 
-# The sigil: 24 by 24 cells with a 2-cell border, drawn on a 10 by 10 grid of
-# 2-cell blocks and mirrored left to right, so it reads as a mark, not noise.
-SIGIL_CELL = 8
+# The punk: the picture a card shows at rest. A 24 by 24 one-bit face in the
+# style of CryptoPunks, turned to the left: the face on the left, the ear and
+# the back of the head on the right, the neck under the back. It is built from
+# six layers drawn in order, head, hair, accessory, mouth, eyes, hat; each
+# layer picks one trait with one byte of SHA-256 of the seed, by weight out of
+# 256, so the same seed always gives the same punk.
+#
+# A sprite is (x, y, rows): rows of "#" ink, "o" paper and "_" nothing, with
+# its top left corner at x, y. Head maps also use "s" for skin, which is plain
+# paper or a sparse dot pattern. A hat removes the hair on and above its brim.
+PUNK_CELL = 8
+# The twelve on the landing page, picked from "punk 1" upward so that between
+# them they show every hat, hair, eyewear and mouth.
+PUNK_SEEDS = [f"punk {i}".encode() for i in (13, 23, 28, 101, 7, 63, 17, 112, 36, 21, 52, 106)]
+
+HEADS = {
+    # The common head: flat top, straight face, the jaw cut in under the mouth.
+    "square": (0, 0, [
+        "________________________",
+        "________________________",
+        "________________________",
+        "________________________",
+        "________________________",
+        "_______#########________",
+        "______#sssssssss#_______",
+        "______#sssssssss#_______",
+        "______#sssssssss#_______",
+        "______#sssssssss#_______",
+        "______#sssssssss#_______",
+        "______#ssssssssss#______",
+        "______#ssssssss#s#______",
+        "______#ssssssss#s#______",
+        "______#ssssssssss#______",
+        "______#sssssssss#_______",
+        "______#sssssssss#_______",
+        "______#sssssssss#_______",
+        "_______#ssssssss#_______",
+        "________#####sss#_______",
+        "____________#sss#_______",
+        "____________#sss#_______",
+        "____________#sss#_______",
+        "____________#sss#_______",
+    ]),
+    # Rounder: the top corners and the jaw cut on a slant.
+    "round": (0, 0, [
+        "________________________",
+        "________________________",
+        "________________________",
+        "________________________",
+        "________________________",
+        "________#######_________",
+        "_______#sssssss#________",
+        "______#sssssssss#_______",
+        "______#sssssssss#_______",
+        "______#sssssssss#_______",
+        "______#sssssssss#_______",
+        "______#ssssssssss#______",
+        "______#ssssssss#s#______",
+        "______#ssssssss#s#______",
+        "______#ssssssssss#______",
+        "______#sssssssss#_______",
+        "______#sssssssss#_______",
+        "_______#ssssssss#_______",
+        "________#sssssss#_______",
+        "_________####sss#_______",
+        "____________#sss#_______",
+        "____________#sss#_______",
+        "____________#sss#_______",
+        "____________#sss#_______",
+    ]),
+    # Slimmer: one cell narrower at the front and a longer, thinner neck.
+    "slim": (0, 0, [
+        "________________________",
+        "________________________",
+        "________________________",
+        "________________________",
+        "________________________",
+        "________########________",
+        "_______#ssssssss#_______",
+        "_______#ssssssss#_______",
+        "_______#ssssssss#_______",
+        "_______#ssssssss#_______",
+        "_______#ssssssss#_______",
+        "_______#sssssssss#______",
+        "_______#sssssss#s#______",
+        "_______#sssssss#s#______",
+        "_______#sssssssss#______",
+        "_______#ssssssss#_______",
+        "_______#ssssssss#_______",
+        "_______#ssssssss#_______",
+        "________#sssssss#_______",
+        "_________####sss#_______",
+        "_____________#ss#_______",
+        "_____________#ss#_______",
+        "_____________#ss#_______",
+        "_____________#ss#_______",
+    ]),
+}
+
+SKINS = {"plain": 160, "dotted": 96}
 
 
-def sigil(seed):
-    """A one-bit mark from SHA-256 of seed, the same seed giving the same mark."""
+def skin_ink(x, y):
+    """The dotted skin: a checker, which reads as a mid tone."""
+    return (x + y) % 2 == 0
+
+
+def head_sprite(shape):
+    x0, y0, rows = HEADS[shape]
+    return (x0, y0, [row.replace("s", "o") for row in rows])
+
+
+def skin_cells(shape):
+    x0, y0, rows = HEADS[shape]
+    return [(x0 + x, y0 + y) for y, row in enumerate(rows) for x, ch in enumerate(row) if ch == "s"]
+
+
+HEAD_WEIGHTS = {"square": 128, "round": 64, "slim": 64}
+
+PUNK_LAYERS = {
+    "head": {
+        "bounds": (0, 0, 24, 24),
+        "traits": {},
+    },
+    "hair": {
+        "bounds": (1, 0, 22, 23),
+        "traits": {
+            "bald": (60, (0, 0, [])),
+            "short": (70, (5, 3, [
+                "___#######____",
+                "__##########__",
+                "_############_",
+                "#############_",
+                "#_#_#__######_",
+                "___________###",
+                "___________##_",
+            ])),
+            "mohawk": (40, (10, 0, [
+                "_#_",
+                "###",
+                "###",
+                "###",
+                "###",
+                "###",
+            ])),
+            "long": (46, (5, 4, [
+                "__#########___",
+                "_###########__",
+                "###_______###_",
+                "##________###_",
+                "##________####",
+                "#_________####",
+                "#_________####",
+                "__________####",
+                "__________####",
+                "__________####",
+                "___________###",
+                "___________###",
+                "___________###",
+                "___________###",
+                "___________##_",
+            ])),
+            "wild": (40, (3, 1, [
+                "___#__#___#__#___",
+                "__###_##_###_##__",
+                "_###############_",
+                "#################",
+                "_###############_",
+                "##################",
+                "_##_#__#_#__######",
+                "_#____________###",
+                "______________##_",
+            ])),
+        },
+    },
+    "accessory": {
+        "bounds": (9, 13, 21, 24),
+        "traits": {
+            "none": (170, (0, 0, [])),
+            "earring": (54, (16, 16, [
+                "_#_",
+                "#o#",
+                "_#_",
+            ])),
+            "chain": (32, (11, 20, [
+                "_#####_",
+                "#_____#",
+                "_#####_",
+                "___#___",
+            ])),
+        },
+    },
+    "mouth": {
+        "bounds": (0, 10, 17, 22),
+        "traits": {
+            "plain": (80, (8, 17, ["###"])),
+            "smile": (44, (8, 16, [
+                "___#",
+                "###_",
+            ])),
+            "moustache": (34, (7, 15, [
+                "_###_",
+                "#####",
+                "#___#",
+            ])),
+            "beard": (40, (6, 15, [
+                "_______####",
+                "###########",
+                "##ooo######",
+                "###########",
+                "_#########_",
+                "__#####____",
+            ])),
+            "pipe": (30, (1, 12, [
+                "_#______",
+                "#_______",
+                "_#______",
+                "#_______",
+                "________",
+                "####_###",
+                "#oo#####",
+                "#oo#____",
+                "_##_____",
+            ])),
+            "cigarette": (28, (1, 11, [
+                "#______",
+                "_#_____",
+                "#______",
+                "_#_____",
+                "_______",
+                "#######",
+                "#ooooo#",
+                "#######",
+            ])),
+        },
+    },
+    "eyes": {
+        "bounds": (5, 9, 19, 18),
+        "traits": {
+            "plain": (120, (8, 10, [
+                "##__##",
+                "oo__oo",
+                "#o__#o",
+                "oo__oo",
+            ])),
+            "shades": (56, (7, 11, [
+                "##########",
+                "#o###o####",
+                "_###_###__",
+            ])),
+            "3D glasses": (44, (7, 10, [
+                "##########",
+                "#ooo#o#o#_",
+                "#ooo##o##_",
+                "#########_",
+            ])),
+            "monocle": (36, (8, 10, [
+                "___#####",
+                "oo_#ooo#",
+                "#o_#o#o#",
+                "oo_#ooo#",
+                "___#####",
+                "_______#",
+                "________",
+                "_______#",
+            ])),
+        },
+    },
+    "hat": {
+        "bounds": (0, 0, 24, 10),
+        "traits": {
+            "none": (100, (0, 0, [])),
+            "beanie": (34, (6, 1, [
+                "____###____",
+                "____###____",
+                "__#######__",
+                "_#########_",
+                "###########",
+                "#o#o#o#o#o#",
+                "###########",
+            ])),
+            "cap": (36, (1, 3, [
+                "_______#########_",
+                "______###########",
+                "______###########",
+                "_################",
+                "#################",
+            ])),
+            "fedora": (28, (4, 2, [
+                "_____##_##_____",
+                "____#######____",
+                "____#######____",
+                "____#######____",
+                "_#############_",
+                "###############",
+            ])),
+            "top hat": (22, (4, 0, [
+                "___#########___",
+                "___#########___",
+                "___#########___",
+                "___#########___",
+                "___#########___",
+                "___#ooooooo#___",
+                "___#########___",
+                "_#############_",
+            ])),
+            "bandana": (22, (5, 4, [
+                "__#########___",
+                "_#o#o#o#o#o##_",
+                "#############_",
+                "____________###",
+                "____________#_#",
+            ])),
+            "crown": (14, (7, 1, [
+                "#___#___#",
+                "##_###_##",
+                "#o#o#o#o#",
+                "#########",
+                "#########",
+            ])),
+        },
+    },
+}
+PUNK_LAYERS["head"]["traits"] = {
+    f"{shape}, {skin}": (HEAD_WEIGHTS[shape] * SKINS[skin] // 256, head_sprite(shape))
+    for shape in HEADS
+    for skin in SKINS
+}
+
+# The row of each hat's brim: hair on this row and above it is not drawn.
+HAT_BRIM = {"beanie": 7, "cap": 7, "fedora": 7, "top hat": 7, "bandana": 6, "crown": 5}
+
+
+def sprite_pixels(sprite):
+    """The (x, y, ch) of every drawn cell of a sprite, ch being "#" or "o"."""
+    x0, y0, rows = sprite
+    for dy, row in enumerate(rows):
+        for dx, ch in enumerate(row):
+            if ch != "_":
+                yield x0 + dx, y0 + dy, ch
+
+
+def pick(traits, byte):
+    """The trait whose range of the 256 byte values holds byte."""
+    for name, (weight, _) in traits.items():
+        if byte < weight:
+            return name
+        byte -= weight
+    raise ValueError("weights do not add up to 256")
+
+
+def punk_traits(seed):
     digest = hashlib.sha256(seed).digest()
-    while True:
-        bits = int.from_bytes(digest, "big")
-        half = [[(bits >> (y * 5 + x)) & 1 for x in range(5)] for y in range(10)]
-        ink = sum(map(sum, half)) / 50
-        if 0.3 <= ink <= 0.7:
-            break
-        digest = hashlib.sha256(digest).digest()
-    rows = []
-    for by in range(12):
-        blocks = [0] * 12
-        if 1 <= by <= 10:
-            left = half[by - 1]
-            blocks[1:11] = left + left[::-1]
-        row = "".join("#" * 2 if b else "." * 2 for b in blocks)
-        rows += [row, row]
+    return {layer: pick(spec["traits"], digest[i]) for i, (layer, spec) in enumerate(PUNK_LAYERS.items())}
+
+
+def punk_layers(seed):
+    """Each layer's cells for this seed, in drawing order, after the hat clips the hair."""
+    traits = punk_traits(seed)
+    brim = HAT_BRIM.get(traits["hat"], -1)
+    out = []
+    for layer, spec in PUNK_LAYERS.items():
+        px = list(sprite_pixels(spec["traits"][traits[layer]][1]))
+        if layer == "hair":
+            px = [(x, y, ch) for x, y, ch in px if y > brim]
+        out.append((layer, px))
+    return out
+
+
+def punk_pixels(seed):
+    """The punk as 24 rows of "#" ink and "." paper.
+
+    Dotted skin is a checker laid on the skin once the head is drawn, kept off
+    the outline; each later layer first clears the dots around its own ink, so
+    every feature sits on a ring of plain paper and stays readable.
+    """
+    grid = [["."] * 24 for _ in range(24)]
+    shape, skin = punk_traits(seed)["head"].split(", ")
+    dots = set()
+
+    def near(x, y):
+        return [(x + dx, y + dy) for dy in (-1, 0, 1) for dx in (-1, 0, 1)
+                if 0 <= x + dx < 24 and 0 <= y + dy < 24]
+
+    for layer, px in punk_layers(seed):
+        for x, y, ch in px:
+            if ch == "#":
+                for cell in near(x, y):
+                    if cell in dots:
+                        dots.discard(cell)
+                        grid[cell[1]][cell[0]] = "."
+        for x, y, ch in px:
+            grid[y][x] = "#" if ch == "#" else "."
+            dots.discard((x, y))
+        if layer == "head" and skin == "dotted":
+            for x, y in skin_cells(shape):
+                if skin_ink(x, y):
+                    dots.add((x, y))
+            for x, y in dots:
+                grid[y][x] = "#"
+    return ["".join(r) for r in grid]
+
+
+def punk(seed):
+    """A one-bit punk from SHA-256 of seed: ink on the e-paper's warm white."""
     pal = palette()
-    return render("\n".join(rows), {"#": pal["."], ".": pal["c"]}, SIGIL_CELL, background=".")
+    return render("\n".join(punk_pixels(seed)), {"#": pal["."], ".": pal["c"]}, PUNK_CELL, background=".")
+
+
+# The grid of twelve on the landing page: six by two, a four-cell gap between
+# punks and around the edge, drawn as one map at four pixels a cell.
+GRID_CELL = 4
+GRID_GAP = 4
+
+
+def punk_grid_size():
+    cols, rows = 6, 2
+    w = cols * 24 + (cols + 1) * GRID_GAP
+    h = rows * 24 + (rows + 1) * GRID_GAP
+    return w * GRID_CELL, h * GRID_CELL
+
+
+def punks(seeds):
+    w, h = (v // GRID_CELL for v in punk_grid_size())
+    grid = [["."] * w for _ in range(h)]
+    for i, seed in enumerate(seeds):
+        ox = GRID_GAP + (i % 6) * (24 + GRID_GAP)
+        oy = GRID_GAP + (i // 6) * (24 + GRID_GAP)
+        for y, row in enumerate(punk_pixels(seed)):
+            for x, ch in enumerate(row):
+                grid[oy + y][ox + x] = ch
+    pal = palette()
+    return render("\n".join("".join(r) for r in grid), {"#": pal["."], ".": pal["c"]}, GRID_CELL, background=".")
 
 
 # The badge's words screen, after words() in crates/badge/src/screens.rs: the
@@ -599,7 +1008,8 @@ def main():
     write(ASSETS / "place.svg", poster())
     for name in ICONS:
         write(ASSETS / "icons" / f"{name}.svg", icon(name))
-    write(ASSETS / "sigil.svg", sigil(b"cahoots"))
+    write(ASSETS / "sigil.svg", punk(b"cahoots"))
+    write(ASSETS / "punks.svg", punks(PUNK_SEEDS))
     write(
         ASSETS / "screen-words.svg",
         words_screen("back room", "TRNG · T1", ["orbit", "maple", "fossil", "drum", "velvet", "harbor"]),

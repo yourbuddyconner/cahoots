@@ -66,6 +66,8 @@ try {
       ways: q(".way").length,
       front: !!card?.querySelector('img[src$="v1-front.png"]'),
       sigil: !!card?.querySelector('img[src$="sigil.svg"]'),
+      punks: !!card?.querySelector('img[src$="punks.svg"]'),
+      punkCopy: /your punk, drawn from the card's own randomness, the same in every circle/.test(card?.textContent ?? ""),
       soon: q(".soon").length,
       text: document.body.innerText,
       desc: document.querySelector('meta[name="description"]')?.getAttribute("content") ?? null,
@@ -86,6 +88,8 @@ try {
   check("three .way columns", facts.ways === 3, `found ${facts.ways}`);
   check('#card has img[src$="v1-front.png"]', facts.front);
   check('#card has img[src$="sigil.svg"]', facts.sigil);
+  check('#card has img[src$="punks.svg"]', facts.punks);
+  check("#card calls the picture at rest your punk", facts.punkCopy);
   check("no .soon elements", facts.soon === 0, `found ${facts.soon}`);
   check('no "being built" text on the page', !/being built/i.test(facts.text));
   check('no "tunnel" in the page text', !/tunnel/i.test(facts.text));

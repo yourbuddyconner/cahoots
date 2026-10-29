@@ -67,25 +67,64 @@ class Poster(unittest.TestCase):
         )
 
 
-class Sigil(unittest.TestCase):
-    def grid(self, seed):
-        svg = gen.sigil(seed)
-        ink = cells(svg, gen.SIGIL_CELL)
-        return svg, ink
+class Punk(unittest.TestCase):
+    def test_punk_deterministic(self):
+        self.assertEqual(gen.punk(b"a"), gen.punk(b"a"))
+        self.assertEqual(gen.punk_traits(b"a"), gen.punk_traits(b"a"))
 
-    def test_sigil_symmetric_and_bounded_ink(self):
+    def test_punk_is_24_by_24(self):
         for i in range(40):
-            _, ink = self.grid(f"seed {i}".encode())
-            for x, y in ink:
-                self.assertIn((23 - x, y), ink)
-                self.assertTrue(2 <= x < 22 and 2 <= y < 22, (x, y))
-            share = len(ink) / (20 * 20)
-            self.assertGreaterEqual(share, 0.30)
-            self.assertLessEqual(share, 0.70)
+            seed = f"seed {i}".encode()
+            rows = gen.punk_pixels(seed)
+            self.assertEqual(len(rows), 24)
+            self.assertTrue(all(len(r) == 24 and set(r) <= {"#", "."} for r in rows))
+            svg = gen.punk(seed)
+            side = 24 * gen.PUNK_CELL
+            self.assertIn(f'viewBox="0 0 {side} {side}"', svg)
+            self.assertIn('shape-rendering="crispEdges"', svg)
+            ink = cells(svg, gen.PUNK_CELL)
+            self.assertTrue(all(0 <= x < 24 and 0 <= y < 24 for x, y in ink))
+            self.assertEqual(ink, {(x, y) for y, r in enumerate(rows) for x, c in enumerate(r) if c == "#"})
 
-    def test_sigil_deterministic(self):
-        self.assertEqual(gen.sigil(b"a"), gen.sigil(b"a"))
-        self.assertNotEqual(gen.sigil(b"a"), gen.sigil(b"b"))
+    def test_punk_one_bit(self):
+        pal = gen.palette()
+        self.assertEqual(fills(gen.punk(b"cahoots")), {pal["."], pal["c"]})
+
+    def test_each_layer_draws_within_its_bounds(self):
+        self.assertEqual(
+            list(gen.PUNK_LAYERS), ["head", "hair", "accessory", "mouth", "eyes", "hat"]
+        )
+        for layer, spec in gen.PUNK_LAYERS.items():
+            x0, y0, x1, y1 = spec["bounds"]
+            self.assertTrue(0 <= x0 < x1 <= 24 and 0 <= y0 < y1 <= 24, layer)
+            self.assertEqual(sum(w for w, _ in spec["traits"].values()), 256, layer)
+            self.assertGreaterEqual(len(spec["traits"]), 2, layer)
+            for name, (_, sprite) in spec["traits"].items():
+                for x, y, ch in gen.sprite_pixels(sprite):
+                    self.assertIn(ch, "#o", (layer, name))
+                    self.assertTrue(x0 <= x < x1 and y0 <= y < y1, (layer, name, x, y))
+
+    def test_hat_replaces_the_top_of_the_hair(self):
+        for i in range(200):
+            layers = dict(gen.punk_layers(f"seed {i}".encode()))
+            traits = gen.punk_traits(f"seed {i}".encode())
+            brim = gen.HAT_BRIM.get(traits["hat"])
+            if brim is not None:
+                self.assertTrue(all(y > brim for _, y, _ in layers["hair"]), traits)
+
+    def test_twelve_seeds_twelve_punks(self):
+        self.assertEqual(len(gen.PUNK_SEEDS), 12)
+        images = {"".join(gen.punk_pixels(s)) for s in gen.PUNK_SEEDS}
+        self.assertEqual(len(images), 12)
+
+    def test_punk_grid_is_six_by_two(self):
+        svg = gen.punks(gen.PUNK_SEEDS)
+        w, h = gen.punk_grid_size()
+        self.assertIn(f'viewBox="0 0 {w} {h}"', svg)
+        self.assertGreater(w, h * 2)
+        self.assertIn('shape-rendering="crispEdges"', svg)
+        pal = gen.palette()
+        self.assertEqual(fills(svg), {pal["."], pal["c"]})
 
 
 class Icons(unittest.TestCase):
