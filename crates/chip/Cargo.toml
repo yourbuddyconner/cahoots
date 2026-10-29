@@ -1,0 +1,27 @@
+[package]
+name = "cahoots-chip"
+description = "The operations a badge's secure element offers (keys that sign but never leave, HMAC keys, counters, attestation) as a trait, with a software chip for tests. no_std + alloc."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["std"]
+std = ["p256/std", "sha2/std", "hmac/std", "dep:getrandom"]
+
+[dependencies]
+minicbor = { version = "2.3", default-features = false, features = ["alloc", "derive"] }
+sha2 = { workspace = true }
+hmac = { version = "0.12", default-features = false }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "arithmetic"] }
+ed25519-dalek = { version = "2", default-features = false, features = ["alloc", "rand_core", "zeroize"] }
+rand_core = { version = "0.6", default-features = false }
+getrandom = { version = "0.2", optional = true }
+
+[dev-dependencies]
+x509-cert = { version = "0.2", default-features = false }
+hex = { workspace = true }
+ed25519-dalek = { version = "2", default-features = false }
+minicbor = { version = "2.3", default-features = false, features = ["alloc", "derive"] }

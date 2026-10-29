@@ -16,6 +16,7 @@ members = [
     "crates/objects",
     "crates/station",
     "crates/relay",
+    "crates/chip",
 ]
 exclude = ["crates/fuzz", "crates/esp32s3", "crates/rp2350", "crates/dabao"]
 # Not workspace members: crates/esp32s3 (needs the esp toolchain), crates/rp2350 (thumbv8m target, own config), crates/dabao (built with
@@ -38,6 +39,7 @@ cahoots-provider = { path = "crates/provider" }
 cahoots-chat = { path = "crates/chat", default-features = false }
 cahoots-objects = { path = "crates/objects", default-features = false }
 cahoots-station = { path = "crates/station" }
+cahoots-chip = { path = "crates/chip", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 poly1305 = { version = "0.8", default-features = false }
 subtle = { version = "2.6", default-features = false }
