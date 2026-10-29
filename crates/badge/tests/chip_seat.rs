@@ -123,7 +123,7 @@ fn ceremony_with_soft_chip_makes_seat_in_chip() {
     assert_eq!(chip(&mut b1).counter_next(id(KeyKind::Epoch, 0)).unwrap(), 1);
 
     // The chip record knows the slot and what was made in it.
-    let record = b1.board().chip_record_load().expect("a chip record");
+    let record = b1.board().chip_record_load().unwrap().expect("a chip record");
     assert_eq!(
         record.slots,
         vec![SlotEntry {
@@ -176,6 +176,7 @@ fn discarding_deletes_the_key_made_in_the_chip() {
     assert!(b1
         .board()
         .chip_record_load()
+        .unwrap()
         .is_none_or(|r| r.slots.is_empty()));
 }
 
@@ -193,6 +194,7 @@ fn forget_deletes_slot_objects() {
     assert!(b1
         .board()
         .chip_record_load()
+        .unwrap()
         .is_none_or(|r| r.slots.is_empty()));
 }
 
@@ -354,4 +356,43 @@ fn a_chip_that_cannot_sign_fails_the_pass_and_leaves_no_key() {
     assert!(b1.board().log.iter().any(|l| l.contains("signing failed")));
     // Slot 0 is cleaned up; slot 7 was never this pass's.
     assert_eq!(chip(&mut b1).ids().unwrap(), vec![id(KeyKind::Seat, 7)]);
+}
+
+#[test]
+fn an_unreadable_chip_record_deletes_nothing_at_boot() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    b1.board().chip_record = Some(vec![0xFF; 5]);
+    b1.boot();
+    assert_eq!(chip(&mut b1).ids().unwrap().len(), 3, "the kept circle's objects stay");
+    assert!(b1.circle().is_some());
+    assert!(b1.board().log.iter().any(|l| l.contains("chip record: unreadable")));
+    assert_eq!(b1.board().chip_record, Some(vec![0xFF; 5]), "not written over");
+}
+
+#[test]
+fn boot_keeps_the_slot_the_circle_names_even_if_the_record_forgot_it() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    b1.board().chip_record = Some(ChipRecord::default().encode());
+    b1.boot();
+    assert_eq!(chip(&mut b1).ids().unwrap().len(), 3);
+    assert!(b1.board().log.iter().any(|l| l.contains("a circle names it")));
+}
+
+#[test]
+fn an_unreadable_chip_record_makes_no_key() {
+    let (mut b1, mut b2) = pile_of_two((true, false));
+    b1.board().chip_record = Some(vec![0xFF; 5]);
+    drive(&mut b1, &mut b2, |b1, b2, _, _| has_seat(b1) && has_seat(b2));
+    b2.board().presses.push_back(Press::Both);
+    let mut failed = None;
+    for _ in 0..10_000 {
+        if let Step::Failed(e) = b1.step() {
+            failed = Some(e);
+            break;
+        }
+        let _ = b2.step();
+    }
+    assert!(failed.expect("the pass fails").contains("chip record: unreadable"));
+    assert!(chip(&mut b1).ids().unwrap().is_empty());
+    assert_eq!(b1.board().chip_record, Some(vec![0xFF; 5]));
 }

@@ -266,7 +266,7 @@ impl<B: Board> Badge<B> {
         for l in &lines {
             self.board.log(l);
         }
-        self.reconcile_chip();
+        self.reconcile_chip(circle.as_ref().and_then(|c| c.chip_slot));
         // A must already be held at power-on to mean "forget the circle". Sample it before
         // the wait: a Both that ends the wait holds A down too, and must not wipe.
         let held_at_power_on = self.board.a_down();
@@ -343,16 +343,26 @@ impl<B: Board> Badge<B> {
     }
 
     /// At boot: delete every chip object in a slot the chip record does not know, and log it.
-    fn reconcile_chip(&mut self) {
+    /// A record that cannot be read deletes nothing: it is not the same as no record. The slot
+    /// the kept circle names is never deleted, whatever the record says.
+    fn reconcile_chip(&mut self, kept: Option<u8>) {
         if self.board.chip().is_none() {
             return;
         }
-        let stored = self.board.chip_record_load();
+        let stored = match self.board.chip_record_load() {
+            Ok(stored) => stored,
+            Err(_) => {
+                self.board
+                    .log("chip record: unreadable, chip objects left as they are");
+                return;
+            }
+        };
         let mut record = stored.clone().unwrap_or_default();
         let Some(chip) = self.board.chip() else {
             return;
         };
-        let lines = record.reconcile(chip);
+        let keep: Vec<u8> = kept.into_iter().collect();
+        let lines = record.reconcile_keeping(chip, &keep);
         for l in &lines {
             self.board.log(l);
         }
@@ -378,8 +388,11 @@ impl<B: Board> Badge<B> {
     /// Make this pass's seat key in the chip, in the chip record's lowest free slot. Anything
     /// left in that slot is deleted first: the record does not know it, so it is not reused.
     fn make_chip_seat(&mut self) -> Result<(u8, SeatPublic), String> {
-        let record = self.board.chip_record_load().unwrap_or_default();
-        let slot = record.next_free_slot().ok_or("chip: every slot is in use")?;
+        let record = self.load_chip_record()?;
+        let kept = self.circle.as_ref().and_then(|c| c.chip_slot);
+        let slot = (0..=u8::MAX)
+            .find(|&s| record.entry(s).is_none() && Some(s) != kept)
+            .ok_or("chip: every slot is in use")?;
         let chip = self.board.chip().ok_or("chip: not found")?;
         chip::delete_slot(chip, slot).map_err(|e| format!("chip: {e:?}"))?;
         let public = chip
@@ -401,7 +414,7 @@ impl<B: Board> Badge<B> {
             .map_err(|e| format!("chip: root not stored: {e:?}"))?;
         chip.put_counter(KeyId::new(KeyKind::Epoch, slot), 0)
             .map_err(|e| format!("chip: counter not stored: {e:?}"))?;
-        let mut record = self.board.chip_record_load().unwrap_or_default();
+        let mut record = self.load_chip_record()?;
         record.insert(SlotEntry {
             slot,
             circle_id: *circle_id,
@@ -412,6 +425,19 @@ impl<B: Board> Badge<B> {
         self.board
             .chip_record_store(&record)
             .map_err(|_| String::from("flash: chip record failed"))
+    }
+
+    /// The stored chip record, empty if there is none. An unreadable one is an error, logged:
+    /// writing over it, or choosing a slot from nothing, could lose a kept circle's keys.
+    fn load_chip_record(&mut self) -> Result<chip::ChipRecord, String> {
+        match self.board.chip_record_load() {
+            Ok(r) => Ok(r.unwrap_or_default()),
+            Err(_) => {
+                let e = "chip record: unreadable, no key made or kept";
+                self.board.log(e);
+                Err(String::from(e))
+            }
+        }
     }
 
     /// A pass that made a chip key ended without keeping it: delete the slot's objects and
@@ -426,7 +452,7 @@ impl<B: Board> Badge<B> {
                     .log(&format!("chip: slot {slot} not deleted: {e:?}"));
             }
         }
-        if let Some(mut record) = self.board.chip_record_load() {
+        if let Ok(Some(mut record)) = self.board.chip_record_load() {
             if record.entry(slot).is_some() {
                 record.remove(slot);
                 if self.board.chip_record_store(&record).is_err() {

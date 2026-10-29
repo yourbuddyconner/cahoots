@@ -157,6 +157,12 @@ impl ChipRecord {
     /// any object the record says was made but the chip does not hold. Returns a log line for
     /// each change.
     pub fn reconcile(&mut self, chip: &mut dyn ChipOps) -> Vec<String> {
+        self.reconcile_keeping(chip, &[])
+    }
+
+    /// Like [`reconcile`](Self::reconcile), never deleting objects in the slots in `keep`
+    /// (the slot a stored circle names), whether the record knows them or not.
+    pub fn reconcile_keeping(&mut self, chip: &mut dyn ChipOps, keep: &[u8]) -> Vec<String> {
         let mut lines = Vec::new();
         let ids = match chip.ids() {
             Ok(ids) => ids,
@@ -169,6 +175,13 @@ impl ChipRecord {
             // Every id in the range ends in its slot, whatever its kind.
             let slot = id.0 as u8;
             if self.entry(slot).is_some() {
+                continue;
+            }
+            if keep.contains(&slot) {
+                lines.push(format!(
+                    "chip: slot {slot} is not in the chip record but a circle names it, kept object {:08x}",
+                    id.0
+                ));
                 continue;
             }
             lines.push(match chip.delete(*id) {

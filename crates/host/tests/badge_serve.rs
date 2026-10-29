@@ -159,7 +159,7 @@ fn a_host_board_keeps_the_chip_slot_the_root_and_the_chip_record() {
         assert_eq!(board.load_circle(), Some(circle.clone()));
     }
 
-    assert_eq!(board.chip_record_load(), None);
+    assert_eq!(board.chip_record_load(), Ok(None));
     let record = ChipRecord {
         slots: vec![SlotEntry {
             slot: 3,
@@ -170,7 +170,7 @@ fn a_host_board_keeps_the_chip_slot_the_root_and_the_chip_record() {
         }],
     };
     board.chip_record_store(&record).unwrap();
-    assert_eq!(board.chip_record_load(), Some(record));
+    assert_eq!(board.chip_record_load(), Ok(Some(record)));
     std::fs::write(dir.join("chip.cbor"), b"not cbor").unwrap();
-    assert_eq!(board.chip_record_load(), None);
+    assert_eq!(board.chip_record_load(), Err(cahoots_badge::BoardError::Storage));
 }

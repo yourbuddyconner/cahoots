@@ -423,10 +423,17 @@ impl Board for HostBoard {
         self.display.note(lines);
     }
 
-    /// `chip.cbor`, or `None` if it is missing or does not decode.
-    fn chip_record_load(&mut self) -> Option<ChipRecord> {
-        let bytes = std::fs::read(self.dir.join("chip.cbor")).ok()?;
-        ChipRecord::decode(&bytes).ok()
+    /// `chip.cbor`: `Ok(None)` if it is missing, an error if it cannot be read or does not
+    /// decode.
+    fn chip_record_load(&mut self) -> Result<Option<ChipRecord>, BoardError> {
+        let bytes = match std::fs::read(self.dir.join("chip.cbor")) {
+            Ok(b) => b,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(BoardError::Storage),
+        };
+        ChipRecord::decode(&bytes)
+            .map(Some)
+            .map_err(|_| BoardError::Storage)
     }
 
     fn chip_record_store(&mut self, r: &ChipRecord) -> Result<(), BoardError> {

@@ -307,10 +307,12 @@ pub trait Board {
     fn chip(&mut self) -> Option<&mut dyn ChipOps> {
         None
     }
-    /// The chip record (see [`crate::chip`]), or `None` if none is stored. A board without a
-    /// chip stores none.
-    fn chip_record_load(&mut self) -> Option<ChipRecord> {
-        None
+    /// The chip record (see [`crate::chip`]): `Ok(None)` if none is stored, an error if one is
+    /// stored but cannot be read or does not decode. The two differ: the badge deletes chip
+    /// objects the record does not know, so an unreadable record must not pass for an empty
+    /// one. A board without a chip stores none.
+    fn chip_record_load(&mut self) -> Result<Option<ChipRecord>, BoardError> {
+        Ok(None)
     }
     /// Store the chip record, replacing the last. A board without a chip keeps nothing.
     fn chip_record_store(&mut self, r: &ChipRecord) -> Result<(), BoardError> {

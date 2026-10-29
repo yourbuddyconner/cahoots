@@ -339,8 +339,11 @@ impl Board for FakeBoard {
     fn chip(&mut self) -> Option<&mut dyn ChipOps> {
         self.chip.as_mut().map(|c| c as &mut dyn ChipOps)
     }
-    fn chip_record_load(&mut self) -> Option<ChipRecord> {
-        ChipRecord::decode(self.chip_record.as_ref()?).ok()
+    fn chip_record_load(&mut self) -> Result<Option<ChipRecord>, BoardError> {
+        match &self.chip_record {
+            None => Ok(None),
+            Some(b) => ChipRecord::decode(b).map(Some).map_err(|_| BoardError::Storage),
+        }
     }
     fn chip_record_store(&mut self, r: &ChipRecord) -> Result<(), BoardError> {
         self.chip_record = Some(r.encode());
