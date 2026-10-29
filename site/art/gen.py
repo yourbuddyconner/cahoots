@@ -4,7 +4,7 @@
     python3 site/art/gen.py
 
 It writes site/assets/place.svg (the poster at the top of the landing page),
-the five app icons in site/assets/icons/, a sigil in site/assets/sigil.svg and
+the four app icons in site/assets/icons/, a sigil in site/assets/sigil.svg and
 a mock of the badge's words screen in site/assets/screen-words.svg. The poster
 is flat vector shapes in seven colours with a grain over them; the sigil is a
 text map turned into rects with crisp edges. The SVGs are committed so the site
@@ -518,8 +518,6 @@ ICONS = {
     "chat": ("M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-5 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z", "M8 11h8"),
     # A key: the bow and the shaft with its bit.
     "login": ("M3 12a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0-9 0z", "M12 12h9v3.5M17.5 12v2.5"),
-    # A tunnel mouth, and the road running into it.
-    "tunnel": ("M3 20v-8a9 9 0 0 1 18 0v8", "M12 20v-6"),
     # A padlock: the shackle and the body.
     "seal": ("M8 10V7a4 4 0 0 1 8 0v3", "M6 10h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z"),
     # A pen, and the signature it leaves.

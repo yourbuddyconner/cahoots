@@ -4,18 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cahoots</title>
-<meta name="description" content="A private network that only exists between people who have met in person. Chat, log in and tunnel to your circle with keys no server ever had.">
+<meta name="description" content="A private network for people who have met in person.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Cahoots">
 <meta property="og:title" content="Get in cahoots">
-<meta property="og:description" content="A private network that only exists between people who have met in person. Chat, log in and tunnel to your circle with keys no server ever had.">
+<meta property="og:description" content="A private network for people who have met in person.">
 <meta property="og:url" content="https://cahoots.network/">
 <meta property="og:image" content="https://cahoots.network/assets/og-home.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Get in cahoots">
-<meta name="twitter:description" content="A private network that only exists between people who have met in person. Chat, log in and tunnel to your circle with keys no server ever had.">
+<meta name="twitter:description" content="A private network for people who have met in person.">
 <meta name="twitter:image" content="https://cahoots.network/assets/og-home.png">
 <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -46,12 +46,12 @@
     <img src="assets/place.svg" width="1600" height="900" alt="A rooftop at golden hour: five people at a round table, their cards on it, the city behind" fetchpriority="high">
     <div class="poster-title">
       <h1 id="hero-title">Get in cahoots.</h1>
+      <p class="poster-tag">A private network for people who have met in person.</p>
       <p class="poster-brand"><svg viewBox="0 0 64 64" width="30" height="30" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="4"><circle cx="32" cy="32" r="26"/><circle cx="32" cy="32" r="15"/><circle cx="32" cy="32" r="5" fill="currentColor" stroke="none"/></svg><span>Cahoots</span></p>
     </div>
   </div>
   <div class="wrap hero-copy">
-    <p class="eyebrow">A private network for people who have met</p>
-    <p class="lede">A circle of people meets once, for five minutes, in a room. After that they can message, log in and tunnel to each other with keys no server ever had. The card in your wallet holds yours. <span class="soon">being built</span></p>
+    <p class="lede">Meet once. After that, everything your circle shares is encrypted with keys no server ever had.</p>
     <div class="cta">
       <a class="btn primary" href="app/">Open the app</a>
       <a class="btn ghost" href="#how">How you get in <span aria-hidden="true">↓</span></a>
@@ -64,38 +64,29 @@
 <main>
 <section class="band wrap" id="what" aria-labelledby="what-title">
   <p class="eyebrow">What you get</p>
-  <h2 id="what-title">What members can do.</h2>
+  <h2 id="what-title">What your circle can do.</h2>
   <div class="apps">
     <article class="app">
       <img class="px icon" src="assets/icons/chat.svg" alt="" width="32" height="32">
       <h3>Chat</h3>
-      <p>A group chat only your circle can read. Keys came from the room, rotate on their own, and live on your card.</p>
-      <p class="app-note">Today, in the browser app. Keys on the card and the phone app: <span class="soon">being built</span></p>
+      <p>A group chat only your circle can read. Its keys come from your meeting and stay on your card.</p>
     </article>
     <article class="app">
       <img class="px icon" src="assets/icons/login.svg" alt="" width="32" height="32">
       <h3>Log in</h3>
-      <p>Your circle is an authorized_keys file. SSH and git signing from the card, with a button press per login.</p>
-      <p class="app-note"><span class="soon">being built</span></p>
-    </article>
-    <article class="app">
-      <img class="px icon" src="assets/icons/tunnel.svg" alt="" width="32" height="32">
-      <h3>Tunnel</h3>
-      <p>WireGuard between members, keyed from the pad. No account, no coordination server.</p>
+      <p>Your circle is an SSH authorized_keys file. Your card logs you in and signs git commits, one button press each.</p>
     </article>
     <article class="app">
       <img class="px icon" src="assets/icons/seal.svg" alt="" width="32" height="32">
       <h3>Seal</h3>
-      <p>Files and messages sealed to one member or the whole circle. HPKE, age, TLS 1.3 all have a slot for a shared secret; the pad fills it.</p>
+      <p>Seal files and messages to one member or the whole circle. HPKE, age and TLS 1.3 take your circle's shared secret.</p>
     </article>
     <article class="app">
       <img class="px icon" src="assets/icons/sign.svg" alt="" width="32" height="32">
       <h3>Sign</h3>
-      <p>Approvals, grants and facts signed by a key that only exists in silicon, checkable by anyone against the chip maker's certificate.</p>
-      <p class="app-note"><span class="soon">being built</span></p>
+      <p>Sign approvals and grants with a key that never leaves the chip. Anyone can check it against the chip maker's certificate.</p>
     </article>
   </div>
-  <p class="note">Today: the browser app does ceremonies, chat and sealed messages, and a command-line tool sets up WireGuard tunnels. The card and the logins are being built in the open.</p>
 </section>
 
 <section class="band wrap" id="how" aria-labelledby="how-title">
@@ -103,15 +94,14 @@
   <h2 id="how-title">Five minutes, in person.</h2>
   <div class="how">
     <ol class="steps">
-      <li><span><b>Meet.</b> A group meets in a room, each person with a phone or a card.</span></li>
-      <li><span><b>Draw.</b> Each device makes random bytes from its own hardware and commits to them before it sees anyone else's.</span></li>
-      <li><span><b>Swap.</b> The devices pass their bytes along a pile of stacked cards or as animated codes on screen, each one encrypted to the other members, so a camera in the room does not get the pad.</span></li>
-      <li><span><b>Mix.</b> Every device combines all the contributions into one shared pad, which is random if even one member was honest.</span></li>
-      <li><span><b>Sign.</b> Every device signs the list of seats with a key it made for this circle, so the circle has a signed roster.</span></li>
-      <li><span><b>Say the words.</b> Everyone reads six check words aloud, and if they match, every device holds the same pad.</span></li>
+      <li><span><b>Meet.</b> A group meets in one room with phones or cards.</span></li>
+      <li><span><b>Draw.</b> Each device makes random bytes and commits to them before it sees the others.</span></li>
+      <li><span><b>Swap.</b> The devices pass the bytes through a stack of cards or as codes on screen, encrypted so a camera in the room learns nothing.</span></li>
+      <li><span><b>Mix.</b> Every device combines the bytes into one shared pad, random if even one member was honest.</span></li>
+      <li><span><b>Sign.</b> Every device signs the list of seats.</span></li>
+      <li><span><b>Say the words.</b> Everyone reads six words aloud, and matching words mean every device holds the same pad.</span></li>
     </ol>
     <figure class="words">
-      <p>Six words appear on every screen. Read them aloud. If they match, you're in.</p>
       <img src="assets/screen-words.svg" width="200" height="200" alt="A badge screen headed back room, TRNG, T1, showing the six words orbit, maple, fossil, drum, velvet, harbor">
     </figure>
   </div>
@@ -119,25 +109,25 @@
 
 <section class="band wrap" id="ways" aria-labelledby="ways-title">
   <p class="eyebrow">Ways in</p>
-  <h2 id="ways-title">A phone, a laptop, or the card.</h2>
+  <h2 id="ways-title">A phone, a laptop or the card.</h2>
   <div class="ways">
     <div class="way">
       <h3>Phone</h3>
-      <p>The browser app, on the phone you already carry. Nothing to buy. The phone decides what it protects.</p>
+      <p>The browser app, on the phone you already carry.</p>
       <p class="assure"><span>Assurance</span> claimed</p>
     </div>
     <div class="way">
       <h3>Laptop</h3>
-      <p>The host program and the station. A seat for a hosted member or an agent, kept by a program you run.</p>
+      <p>A program you run keeps the seat, for you, a hosted member or an AI agent.</p>
       <p class="assure"><span>Assurance</span> claimed</p>
     </div>
     <div class="way best">
       <h3>The card</h3>
-      <p>The badge. Keys in a chip that proves they were made there <span class="soon">being built</span>. Both buttons pressed for every approval.</p>
-      <p class="assure"><span>Assurance</span> attested <span class="soon">being built</span>, present</p>
+      <p>The keys stay in its chip. You press both buttons to approve each action.</p>
+      <p class="assure"><span>Assurance</span> attested, present</p>
     </div>
   </div>
-  <p class="note">A circle is as safe as its least careful member. The ceremony records what each seat brought. <a href="docs/#/tiers">How assurance is measured <span aria-hidden="true">→</span></a></p>
+  <p class="note">A circle is only as safe as its least careful member. <a href="docs/#/tiers">How assurance is measured <span aria-hidden="true">→</span></a></p>
 </section>
 
 <section class="band wrap" id="card" aria-labelledby="card-title">
@@ -145,9 +135,8 @@
   <h2 id="card-title">A card you keep in your wallet.</h2>
   <div class="card-row">
     <div class="card-copy">
-      <p>V1 is a 54 by 86 mm board with a 1.54 inch e-paper, two buttons, a coin cell, and a magnetic connector with contacts at one end, so cards stack face to face into a pile for a ceremony. Five are quoted and about to be ordered. It carries an NXP SE051 that holds the keys and attests that they were made inside it. <span class="soon">being built</span></p>
-      <p>At rest it shows a sigil, a picture drawn from its own randomness, so people know each other's card across a room, and a second page is its contact card, with a code a phone camera reads. <span class="soon">being built</span></p>
-      <p class="quiet">V2 is the card around the Baochip, designed once V1 has been handled.</p>
+      <p>V1 is a 54 by 86 mm board with an e-paper screen, two buttons and a coin cell. Its NXP SE051 chip holds the keys and proves it made them. Cards stack face to face for a ceremony.</p>
+      <p>At rest it shows a sigil drawn from its own randomness, so you know a friend's card across a room. Its second page is a contact card that a phone camera reads.</p>
       <div class="cta">
         <a class="btn ghost" href="docs/#/diy-badge">Build one <span aria-hidden="true">→</span></a>
         <a class="btn ghost" href="docs/#/v1-board">The board <span aria-hidden="true">→</span></a>
@@ -170,7 +159,7 @@
   <p class="eyebrow">The feed</p>
   <h2 id="feed-title">Post anywhere. Only your circle can read it.</h2>
   <div class="feed">
-    <p class="sub">During the Cold War, radio stations read out strings of numbers that anyone could hear and only the holder of the matching code sheet could read. Cahoots posts to a public feed the same way: anyone can see the messages, only your circle can read them or post as you, and the feed keeps them in an order nobody can quietly rewrite.</p>
+    <p class="sub">Like a Cold War numbers station, Cahoots posts to a public feed that anyone can see. Nobody outside your circle can post to it, and nobody can quietly reorder the posts.</p>
     <div class="station-card" role="group" aria-label="Live feed example">
       <div class="station-head"><span>circle 6f8648f8</span><span>seq 41 · 25 B</span></div>
       <pre id="station-sample"></pre>
@@ -182,9 +171,9 @@
   <p class="eyebrow">Open</p>
   <h2 id="open-title">Open hardware, open protocol.</h2>
   <div class="links">
-    <a href="docs/#/protocol"><b>The protocol</b><span>The ceremony, the messages and the storage, in full.</span></a>
-    <a href="docs/#/threat-model"><b>The threat model</b><span>What is covered, what is not, and what the app may claim.</span></a>
-    <a href="https://github.com/yourbuddyconner/cahoots"><b>The repository</b><span>The firmware, the app, the board files and these pages.</span></a>
+    <a href="docs/#/protocol"><b>The protocol</b><span>The ceremony, the messages and the storage.</span></a>
+    <a href="docs/#/threat-model"><b>The threat model</b><span>What Cahoots protects against, and what it does not.</span></a>
+    <a href="https://github.com/yourbuddyconner/cahoots"><b>The repository</b><span>The firmware, the app and the board files.</span></a>
   </div>
 </section>
 </main>
@@ -193,7 +182,7 @@
   <div class="wrap foot">
     <div>
       <a class="brand" href="./"><img src="assets/mark.svg" alt="" width="22" height="22"><span>Cahoots</span></a>
-      <p class="fine"><em>In cahoots</em>: secretly working together. A group that shares a secret is a circle. Open source under MIT or Apache-2.0.</p>
+      <p class="fine"><em>In cahoots</em>: secretly working together. Open source under MIT or Apache-2.0.</p>
     </div>
     <div class="foot-links">
       <a href="docs/">Docs</a>

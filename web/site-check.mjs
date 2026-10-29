@@ -66,7 +66,9 @@ try {
       ways: q(".way").length,
       front: !!card?.querySelector('img[src$="v1-front.png"]'),
       sigil: !!card?.querySelector('img[src$="sigil.svg"]'),
-      soon: q(".soon").map((e) => e.textContent.trim()),
+      soon: q(".soon").length,
+      text: document.body.innerText,
+      desc: document.querySelector('meta[name="description"]')?.getAttribute("content") ?? null,
       three: q('script[src*="three"]').length + q('script[type="importmap"]').filter((s) => s.textContent.includes("three")).length,
       ids: ["what", "how", "ways", "card", "feed", "open"].filter((id) => !document.getElementById(id)),
       images: q("img").length,
@@ -80,11 +82,15 @@ try {
   check("the hero image is not drawn pixelated", !/pixelated|crisp-edges/.test(facts.heroRendering ?? ""), facts.heroRendering);
   check("the H1 sits over the poster, set in Fraunces", facts.h1InScene && /Fraunces/.test(facts.h1Font), `${facts.h1InScene} ${facts.h1Font}`);
   check("six ol.steps li", facts.steps === 6, `found ${facts.steps}`);
-  check("five .app cards", facts.apps === 5, `found ${facts.apps}`);
+  check("four .app cards", facts.apps === 4, `found ${facts.apps}`);
   check("three .way columns", facts.ways === 3, `found ${facts.ways}`);
   check('#card has img[src$="v1-front.png"]', facts.front);
   check('#card has img[src$="sigil.svg"]', facts.sigil);
-  check('every .soon label reads "being built"', facts.soon.length > 0 && facts.soon.every((t) => t === "being built"), JSON.stringify(facts.soon));
+  check("no .soon elements", facts.soon === 0, `found ${facts.soon}`);
+  check('no "being built" text on the page', !/being built/i.test(facts.text));
+  check('no "tunnel" in the page text', !/tunnel/i.test(facts.text));
+  const tagline = "A private network for people who have met in person.";
+  check("the meta description is the tagline", facts.desc === tagline, JSON.stringify(facts.desc));
   check("no three.js script or import map", facts.three === 0, `found ${facts.three}`);
   check("sections what, how, ways, card, feed, open exist", facts.ids.length === 0, `missing ${facts.ids.join(", ")}`);
   check(`every image loads (${facts.images} checked)`, facts.broken.length === 0, facts.broken.join(", "));
@@ -120,7 +126,7 @@ try {
   });
   check("at 390 px the headline fits inside the top of the poster", pf.h1Inside);
   check("at 390 px the hero image is cropped from the centre", pf.fit === "cover" && /^(50%|center)/.test(pf.pos ?? ""), `${pf.fit} ${pf.pos}`);
-  check("at 390 px the five .app cards share one left edge", pf.lefts.length === 5 && new Set(pf.lefts).size === 1, pf.lefts.join(","));
+  check("at 390 px the four .app cards share one left edge", pf.lefts.length === 4 && new Set(pf.lefts).size === 1, pf.lefts.join(","));
   check("at 390 px each .app card sits below the previous", pf.stacked);
   check("at 390 px the ticker is visible", pf.ticker);
   if (process.env.SHOTS_DIR) {

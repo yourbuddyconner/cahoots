@@ -66,13 +66,13 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .hero { position: relative; padding-bottom: clamp(40px, 6vh, 64px); }
 .scene { position: relative; overflow: hidden; background: var(--sky-low); }
 .scene > img { display: block; width: 100%; height: clamp(480px, 56.25vw, calc(100svh - 60px - 110px)); object-fit: cover; object-position: 50% 72%; }
-.poster-title { position: absolute; left: 0; right: 0; top: 11%; padding: 0 var(--gutter); text-align: center; color: var(--on-sky); }
+.poster-title { position: absolute; left: 0; right: 0; top: 7%; padding: 0 var(--gutter); text-align: center; color: var(--on-sky); }
 .hero h1 { font-family: var(--serif); font-optical-sizing: auto; font-weight: 600; font-size: clamp(46px, 7.4vw, 116px); letter-spacing: -0.02em; line-height: 1; margin: 0; text-shadow: 0 2px 28px color-mix(in srgb, var(--sky-ink) 30%, transparent); }
+.poster-tag { font-family: var(--serif); font-optical-sizing: auto; font-weight: 600; font-size: clamp(21px, 2.1vw, 30px); letter-spacing: -0.01em; line-height: 1.15; max-width: 15em; margin: clamp(10px, 1.4vw, 18px) auto 0; text-wrap: balance; text-shadow: 0 1px 18px color-mix(in srgb, var(--sky-ink) 35%, transparent); }
 .poster-brand { display: inline-flex; align-items: center; gap: 10px; margin: clamp(14px, 2.2vw, 26px) 0 0; font-family: var(--display); font-weight: 600; font-size: clamp(17px, 1.6vw, 22px); letter-spacing: -0.01em; }
 /* The mark in the headline's white: the rings of assets/mark.svg without its dark tile. */
 .poster-brand svg { width: clamp(24px, 2.2vw, 30px); height: auto; }
 .hero-copy { position: relative; padding-top: clamp(32px, 5vh, 52px); }
-.hero .eyebrow { margin-bottom: 14px; }
 .lede { font-size: clamp(16px, 1.4vw, 19px); color: var(--fg-2); max-width: 880px; margin: 0 0 24px; }
 .cta { display: flex; gap: 10px; flex-wrap: wrap; margin: 0; }
 .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 10px; text-decoration: none; font-weight: 500; font-size: 14.5px; border: 1px solid var(--line-2); color: var(--fg); transition: border-color .15s, background .15s; }
@@ -107,16 +107,13 @@ h3 { font-family: var(--display); font-weight: 600; font-size: 17px; letter-spac
 .note { margin: 28px 0 0; color: var(--fg-2); font-family: var(--mono); font-size: 12.5px; line-height: 1.7; max-width: 760px; }
 .note a { color: var(--fg-2); text-decoration: none; white-space: nowrap; }
 .note a:hover { color: var(--fg); }
-.soon { display: inline-block; font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--amber); border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent); border-radius: 4px; padding: 1px 6px 0; line-height: 1.6; vertical-align: 2px; white-space: nowrap; }
 
 /* What members can do */
-.apps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; margin-top: 40px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.apps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 40px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
 .app { background: var(--bg-2); padding: 24px 20px 22px; display: flex; flex-direction: column; }
 .app .icon { width: 32px; height: 32px; margin-bottom: 18px; }
 .app p { color: var(--fg-2); font-size: 14.5px; line-height: 1.55; margin: 0; }
-.app .app-note { margin-top: auto; padding-top: 18px; font-size: 13px; color: var(--fg-2); }
-@media (max-width: 1060px) { .apps { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 760px) { .apps { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 1060px) { .apps { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 520px) { .apps { grid-template-columns: 1fr; } .app .icon { margin-bottom: 14px; } }
 
 /* How you get in */
@@ -124,7 +121,6 @@ h3 { font-family: var(--display); font-weight: 600; font-size: 17px; letter-spac
 .steps li { font-size: 15.5px; }
 .steps li:last-child { border-bottom: 1px solid var(--line); }
 .words { margin: 0; }
-.words p { color: var(--fg-2); font-size: 15px; margin: 0 0 18px; }
 .words img { display: block; width: 100%; height: auto; border-radius: 6px; box-shadow: 0 0 0 10px var(--bg-3), 0 0 0 11px var(--line-2), 0 30px 60px -20px color-mix(in srgb, var(--bg) 80%, transparent); margin: 11px; width: calc(100% - 22px); }
 @media (max-width: 860px) { .how { grid-template-columns: 1fr; gap: 40px; } .words { max-width: 320px; } }
 
@@ -141,7 +137,6 @@ h3 { font-family: var(--display); font-weight: 600; font-size: 17px; letter-spac
 /* The card */
 .card-row { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; margin-top: 40px; }
 .card-copy p { color: var(--fg-2); font-size: 16.5px; max-width: 520px; }
-.card-copy .quiet { color: var(--fg-3); font-size: 15px; }
 .card-copy .cta { margin-top: 28px; }
 .plates { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: end; }
 .plate { margin: 0; }
