@@ -35,7 +35,8 @@ On a V1 board with the NXP SE051 secure element, the chip makes and holds each c
 - Sign SSH logins and git commits. A laptop program asks, the badge shows the user and host or the commit's author and subject, and it signs when both buttons are pressed.
 - Sign a contact card and share its circle's card seal key, so a circle can swap cards.
 - Sign grants as CBOR Web Tokens.
-- Keep up to 16 circles on the Pico 2, and 4 on the Nano, with nothing linking them.
+
+A badge also keeps several circles at once, with nothing linking them, whether or not it has the chip: up to 16 on the Pico 2, and 4 on the Nano ESP32, which has no chip.
 
 All of this is built and tested against a software chip. The Pico 2 firmware has a driver for the real chip, built but not yet run on a board. Flashing it, a ceremony with a chip seat, attestation against NXP's root, and a verified commit still wait for the bench. See [the roadmap](docs/plan.md) (M4f) and the [host program](crates/host/README.md).
 
