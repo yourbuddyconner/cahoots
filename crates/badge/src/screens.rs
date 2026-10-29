@@ -9,6 +9,7 @@
 //! both do in the middle, what B does on the right, in the places the buttons are. A menu
 //! page shows `<` and `>` at the edges of the middle row when there is a page on that side.
 
+use crate::ssh::HostCheck;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -215,6 +216,66 @@ pub fn consent(len: u32, circle: &str) -> Screen {
     s.wrapped_centered(&FONT_9X18_BOLD, 84, &format!("for {circle}?"));
     s.footer(Some("refuse"), Some("A+B  allow"), Some("refuse"));
     s.done()
+}
+
+/// The question a request to sign an ssh login asks: the user from the request, which the
+/// badge read itself, the host the laptop names (or "host not named"), and the circle.
+pub fn ssh_login(user: &str, host: &HostCheck, circle: &str) -> Screen {
+    let mut s = Draw::new();
+    s.title("ssh login");
+    s.centered(
+        &FONT_9X18_BOLD,
+        50,
+        &fit("as ", user, "", cols(&FONT_9X18_BOLD)),
+    );
+    let w = cols(&FONT_8X13);
+    let host = match host {
+        HostCheck::Verified(name) | HostCheck::Unverified(name) if !name.is_empty() => {
+            fit("to ", name, LAPTOP, 2 * w)
+        }
+        _ => String::from("host not named"),
+    };
+    s.two_rows(&FONT_8X13, 80, &host);
+    s.centered(&FONT_8X13, 130, &fit("", circle, "", w));
+    s.footer(Some("refuse"), Some("A+B  allow"), Some("refuse"));
+    s.done()
+}
+
+/// The question a request to sign a git commit asks: the commit's author and subject, each
+/// marked "(laptop)" unless the badge read them from the commit text it hashed, and the circle.
+pub fn git_signature(author: &str, subject: &str, verified: bool, circle: &str) -> Screen {
+    let mut s = Draw::new();
+    s.title("sign a git commit");
+    let mark = if verified { "" } else { LAPTOP };
+    let w = cols(&FONT_8X13);
+    s.two_rows(&FONT_8X13, 42, &fit("", author, mark, 2 * w));
+    s.two_rows(&FONT_8X13, 82, &fit("", subject, mark, 2 * w));
+    s.centered(&FONT_8X13, 130, &fit("", circle, "", w));
+    s.footer(Some("refuse"), Some("A+B  allow"), Some("refuse"));
+    s.done()
+}
+
+/// What marks a value the laptop sent and the badge could not check.
+const LAPTOP: &str = " (laptop)";
+
+/// `prefix`, `value` and `suffix` in at most `cols` characters: `value` is cut, ending in
+/// "...", when the row would be too wide, so the prefix and the mark always show. Control
+/// characters in `value` are shown as "?".
+fn fit(prefix: &str, value: &str, suffix: &str, cols: usize) -> String {
+    let clean: String = value
+        .chars()
+        .map(|c| if c.is_control() { '?' } else { c })
+        .collect();
+    let room = cols.saturating_sub(prefix.chars().count() + suffix.chars().count());
+    let shown = if clean.chars().count() <= room {
+        clean
+    } else {
+        let keep = room.saturating_sub(3);
+        let mut cut: String = clean.chars().take(keep).collect();
+        cut.push_str("...");
+        cut
+    };
+    format!("{prefix}{shown}{suffix}")
 }
 
 /// One or a few lines of text, for errors and short notes. `lines` keeps the caller's lines;
@@ -446,6 +507,29 @@ impl Draw {
             y += pitch;
         }
         y
+    }
+
+    /// `s`, at most two rows wide, centred from `y` and kept whole in `lines`: wrapped at
+    /// spaces, or cut every row's width when that would take more than two rows.
+    fn two_rows(&mut self, font: &MonoFont, mut y: i32, s: &str) {
+        let w = cols(font);
+        let mut rows = wrap(s, w);
+        if rows.len() > 2 {
+            let chars: Vec<char> = s.chars().collect();
+            rows = chars.chunks(w).map(|c| c.iter().collect()).collect();
+        }
+        let pitch = font.character_size.height as i32 + 2;
+        for row in &rows {
+            self.text(
+                font,
+                Point::new(W / 2, y),
+                Alignment::Center,
+                BinaryColor::On,
+                row,
+            );
+            y += pitch;
+        }
+        self.lines.push(String::from(s));
     }
 
     /// `s` wrapped to the screen's width, left-aligned from `y`, without adding the rows to

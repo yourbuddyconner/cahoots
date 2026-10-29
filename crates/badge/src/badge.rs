@@ -1,5 +1,6 @@
 //! [`Badge`]: the boot screen, the pile and the ceremony, and the idle menu.
 
+use crate::apps::{BadgeApps, Served};
 use crate::board::{Board, Circle, Press};
 use crate::chip::{self, ChipSeat, SlotEntry};
 use crate::screens::{self, Screen};
@@ -8,18 +9,17 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use cahoots_chip::{Attested, Curve, KeyId, KeyKind};
+use cahoots_chip::{Curve, KeyId, KeyKind};
 use cahoots_core::ceremony::CeremonyResult;
 use cahoots_core::frame::{self, Frame, FrameError};
 use cahoots_core::pad::Pad;
 use cahoots_core::params::CircleParams;
 use cahoots_core::seat::SeatPublic;
 use cahoots_custodian::wire::{
-    ErrorCode, Request, Response, SshHost, KIND_REQUEST, KIND_RESPONSE, MAX_REQUEST_LEN,
+    ErrorCode, Request, Response, KIND_REQUEST, KIND_RESPONSE, MAX_REQUEST_LEN,
 };
 use cahoots_custodian::{
-    serve, ChipApps, ChipInfo, CircleId, CircleInfo, Consent, Custodian, PadError, PskHandle,
-    PSK_LEN,
+    serve, CircleId, CircleInfo, Consent, Custodian, PadError, PskHandle, PSK_LEN,
 };
 use cahoots_hal::ledger::PersistentLedger;
 use cahoots_hal::pile::{Pile, PileError};
@@ -178,10 +178,13 @@ impl Page {
     }
 }
 
-/// A spending request waiting for an answer: Both allows, Left or Right refuses.
+/// A request waiting for an answer, a spend or a signature: Both allows, Left or Right
+/// refuses.
 struct Pending {
     seq: u32,
     request: Vec<u8>,
+    /// A `Chip` request: the log says "signature", not "spend".
+    chip: bool,
 }
 
 /// The idle menu, built once when it is entered and kept for the idle loop's life.
@@ -206,34 +209,6 @@ enum Idle<B: Board> {
     Broken,
     /// Boxed: the menu holds the custodian and the link, and lives beside the pass state.
     On(Box<Menu<B>>),
-}
-
-/// The badge does not yet answer chip requests: every operation says there is no chip.
-impl<C> ChipApps for Tiered<C> {
-    fn describe(&mut self, _: &CircleId) -> Result<ChipInfo, ErrorCode> {
-        Err(ErrorCode::NoChip)
-    }
-    fn attest(&mut self, _: &CircleId, _: &[u8; 16]) -> Result<Attested, ErrorCode> {
-        Err(ErrorCode::NoChip)
-    }
-    fn ssh_sign(
-        &mut self,
-        _: &CircleId,
-        _: &[u8],
-        _: Option<&SshHost>,
-        _: Option<&[u8]>,
-    ) -> Result<Vec<u8>, ErrorCode> {
-        Err(ErrorCode::NoChip)
-    }
-    fn card_sign(&mut self, _: &CircleId, _: &[u8]) -> Result<Vec<u8>, ErrorCode> {
-        Err(ErrorCode::NoChip)
-    }
-    fn grant_sign(&mut self, _: &CircleId, _: &[u8]) -> Result<Vec<u8>, ErrorCode> {
-        Err(ErrorCode::NoChip)
-    }
-    fn seal_key(&mut self, _: &CircleId, _: &str) -> Result<[u8; 32], ErrorCode> {
-        Err(ErrorCode::NoChip)
-    }
 }
 
 /// The answer the holder gave with the buttons, handed to `serve`.
@@ -834,14 +809,19 @@ impl<B: Board> Badge<B> {
                 Press::Both => true,
                 Press::Left | Press::Right => false,
             };
-            let resp = serve(&mut m.pad, &mut Answer(yes), &p.request);
+            let mut served = Served {
+                custody: &mut m.pad,
+                apps: BadgeApps::new(c, board.chip()),
+            };
+            let resp = serve(&mut served, &mut Answer(yes), &p.request);
             respond(&mut m.down, p.seq, &resp);
-            m.pending = None;
-            board.log(if yes {
-                "spend allowed"
-            } else {
-                "spend refused"
+            board.log(match (p.chip, yes) {
+                (false, true) => "spend allowed",
+                (false, false) => "spend refused",
+                (true, true) => "signature allowed",
+                (true, false) => "signature refused",
             });
+            m.pending = None;
             // The prompt replaced whatever was on the screen; the page is back now.
             m.covered = false;
             show_page(board, c, m);
@@ -923,18 +903,38 @@ impl<B: Board> Badge<B> {
                 respond(&mut m.down, seq, &busy.encode());
                 continue;
             }
-            match Request::decode(&payload).ok().as_ref().and_then(spends) {
-                Some(n) => {
-                    show(board, screens::consent(n, &c.params.name));
+            let req = Request::decode(&payload).ok();
+            let ask = match &req {
+                Some(Request::Chip { circle, op }) => {
+                    BadgeApps::new(c, board.chip()).prompt(circle, op)
+                }
+                Some(r) => Ok(spends(r).map(|n| screens::consent(n, &c.params.name))),
+                None => Ok(None),
+            };
+            match ask {
+                Ok(Some(screen)) => {
+                    show(board, screen);
                     m.pending = Some(Pending {
                         seq,
                         request: payload,
+                        chip: matches!(req, Some(Request::Chip { .. })),
                     });
                 }
-                // Identify, Remaining and anything malformed: answered now, never asked.
-                None => {
-                    let resp = serve(&mut m.pad, &mut Answer(false), &payload);
+                // Identify, Remaining, Describe, Attest and anything malformed: answered now,
+                // never asked.
+                Ok(None) => {
+                    let mut served = Served {
+                        custody: &mut m.pad,
+                        apps: BadgeApps::new(c, board.chip()),
+                    };
+                    let resp = serve(&mut served, &mut Answer(false), &payload);
                     respond(&mut m.down, seq, &resp);
+                }
+                // A chip request refused before anyone is asked: a circle the badge does not
+                // hold, a request to sign that it cannot describe, one it cannot do yet.
+                Err(code) => {
+                    board.log(&format!("chip request refused: {code:?}"));
+                    respond(&mut m.down, seq, &Response::Error { code }.encode());
                 }
             }
         }
@@ -942,8 +942,7 @@ impl<B: Board> Badge<B> {
 }
 
 /// The bytes a request would spend, or `None` if it spends nothing. A chip request spends no
-/// pad. Until the badge answers them, `serve` is given a refusal for the ones that need
-/// consent, and the rest get `NoChip`.
+/// pad; [`BadgeApps::prompt`] decides whether it asks.
 fn spends(req: &Request) -> Option<u32> {
     match req {
         Request::Identify | Request::Remaining { .. } | Request::Chip { .. } => None,

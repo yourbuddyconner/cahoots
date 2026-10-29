@@ -5,10 +5,12 @@
 
 extern crate alloc;
 
+pub mod apps;
 pub mod badge;
 pub mod board;
 pub mod chip;
 pub mod screens;
+pub mod ssh;
 
 pub use badge::{Badge, Step};
 pub use board::{word_indices, Board, BoardError, Circle, Press};
