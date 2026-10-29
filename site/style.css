@@ -116,26 +116,29 @@ h3 { font-family: var(--display); font-weight: 600; font-size: 17px; letter-spac
 @media (max-width: 1060px) { .apps { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 520px) { .apps { grid-template-columns: 1fr; } .app .icon { margin-bottom: 14px; } }
 
-/* How you get in */
+/* How you join */
 .how { display: grid; grid-template-columns: 1fr 320px; gap: 64px; align-items: start; margin-top: 40px; }
 .steps li { font-size: 15.5px; }
 .steps li:last-child { border-bottom: 1px solid var(--line); }
+.more { margin: 20px 0 0; font-size: 15px; }
+.more a { color: var(--fg); text-decoration: none; border-bottom: 1px solid var(--line-2); padding-bottom: 2px; }
+.more a:hover { border-color: var(--amber); }
+.more span { color: var(--fg-3); }
 .words { margin: 0; }
 .words img { display: block; width: 100%; height: auto; border-radius: 6px; box-shadow: 0 0 0 10px var(--bg-3), 0 0 0 11px var(--line-2), 0 30px 60px -20px color-mix(in srgb, var(--bg) 80%, transparent); margin: 11px; width: calc(100% - 22px); }
 @media (max-width: 860px) { .how { grid-template-columns: 1fr; gap: 40px; } .words { max-width: 320px; } }
 
-/* Ways in */
-.ways { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 40px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
-.way { background: var(--bg-2); padding: 26px 24px 22px; display: flex; flex-direction: column; }
-.way p { color: var(--fg-2); font-size: 15px; margin: 0; }
-.way .assure { margin-top: auto; padding-top: 22px; font-family: var(--mono); font-size: 12.5px; color: var(--fg); }
-.way .assure > span:first-child { color: var(--fg-3); margin-right: 8px; text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; }
-.way.best { background: linear-gradient(180deg, color-mix(in srgb, var(--amber) 10%, transparent), color-mix(in srgb, var(--amber) 2%, transparent) 70%), var(--bg-2); }
-.way.best .assure { color: var(--amber); }
-@media (max-width: 860px) { .ways { grid-template-columns: 1fr; } }
+/* Devices: a short line each for phone and laptop, then the card */
+.devices { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; margin-top: 40px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.device { background: var(--bg-2); padding: 24px 24px 20px; display: flex; flex-direction: column; }
+.device p { color: var(--fg-2); font-size: 15px; margin: 0; }
+.device .fact { margin-top: auto; padding-top: 16px; font-family: var(--mono); font-size: 12.5px; color: var(--fg); }
+@media (max-width: 860px) { .devices { grid-template-columns: 1fr; } }
 
 /* The card */
-.card-row { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; margin-top: 40px; }
+.card { margin-top: clamp(64px, 9vh, 104px); }
+.card-row { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; }
+.card-copy h2 { margin-bottom: 24px; }
 .card-copy p { color: var(--fg-2); font-size: 16.5px; max-width: 520px; }
 .card-copy .cta { margin-top: 28px; }
 .plates { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: end; }

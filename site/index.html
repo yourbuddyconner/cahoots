@@ -24,16 +24,16 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<a class="skip" href="#what">Skip to content</a>
+<a class="skip" href="#how">Skip to content</a>
 
 <header class="top">
   <div class="wrap">
     <a class="brand" href="./"><img src="assets/mark.svg" alt="" width="22" height="22"><span>Cahoots</span></a>
     <nav aria-label="Primary">
+      <a href="#how">How you join</a>
       <a href="#what">What you get</a>
-      <a href="#how">How you get in</a>
-      <a href="#ways">Ways in</a>
-      <a href="#card">The card</a>
+      <a href="#feed">The feed</a>
+      <a href="#devices">Devices</a>
       <a href="docs/">Docs</a>
       <a href="blog/">Blog</a>
       <a class="nav-cta" href="app/">Open the app</a>
@@ -51,10 +51,10 @@
     </div>
   </div>
   <div class="wrap hero-copy">
-    <p class="lede">Meet once. After that, everything your circle shares is encrypted with keys no server ever had.</p>
+    <p class="lede">Meet in person once. Five minutes later your circle has keys no server ever had, and a group chat only you can read.</p>
     <div class="cta">
       <a class="btn primary" href="app/">Open the app</a>
-      <a class="btn ghost" href="#how">How you get in <span aria-hidden="true">↓</span></a>
+      <a class="btn ghost" href="#how">How you join <span aria-hidden="true">↓</span></a>
     </div>
   </div>
 </section>
@@ -62,90 +62,91 @@
 <div class="ticker" aria-hidden="true"><div class="ticker-track" id="ticker"></div></div>
 
 <main>
+<section class="band wrap" id="how" aria-labelledby="how-title">
+  <h2 id="how-title">Five minutes, in person.</h2>
+  <div class="how">
+    <div>
+      <ol class="steps">
+        <li><span><b>Meet.</b> Bring your circle together, with phones or cards.</span></li>
+        <li><span><b>Exchange.</b> Stack the cards or scan the codes on the screens; the devices make the keys.</span></li>
+        <li><span><b>Compare.</b> Read your six words aloud. Everyone's must match.</span></li>
+      </ol>
+      <p class="more"><a href="docs/#/ceremony-guide">The full six steps <span aria-hidden="true">→</span></a></p>
+    </div>
+    <figure class="words">
+      <img src="assets/screen-words.svg" width="200" height="200" alt="A card's screen for the circle back room, showing the six words orbit, maple, fossil, drum, velvet, harbor">
+    </figure>
+  </div>
+</section>
+
 <section class="band wrap" id="what" aria-labelledby="what-title">
-  <p class="eyebrow">What you get</p>
   <h2 id="what-title">What your circle can do.</h2>
   <div class="apps">
     <article class="app">
       <img class="px icon" src="assets/icons/chat.svg" alt="" width="32" height="32">
       <h3>Chat</h3>
-      <p>A group chat only your circle can read. Its keys come from your meeting and stay on your card.</p>
+      <p>A group chat only your circle can read. The keys come from the meeting and never touch a server.</p>
     </article>
     <article class="app">
       <img class="px icon" src="assets/icons/login.svg" alt="" width="32" height="32">
       <h3>Log in</h3>
-      <p>Your circle is an SSH authorized_keys file. Your card logs you in and signs git commits, one button press each.</p>
+      <p>Your circle becomes an SSH authorized_keys file. Log in to servers and sign git commits with a press of both buttons.</p>
     </article>
     <article class="app">
       <img class="px icon" src="assets/icons/seal.svg" alt="" width="32" height="32">
       <h3>Seal</h3>
-      <p>Seal files and messages to one member or the whole circle. HPKE, age and TLS 1.3 take your circle's shared secret.</p>
+      <p>Encrypt files and messages to one member or the whole circle. age, HPKE and TLS 1.3 take the circle's shared secret as a pre-shared key.</p>
     </article>
     <article class="app">
       <img class="px icon" src="assets/icons/sign.svg" alt="" width="32" height="32">
       <h3>Sign</h3>
-      <p>Sign approvals and grants with a key that never leaves the chip. Anyone can check it against the chip maker's certificate.</p>
+      <p>Sign approvals with a key that never leaves the card's chip. Anyone can check the signature against the chip maker's certificate.</p>
     </article>
   </div>
 </section>
 
-<section class="band wrap" id="how" aria-labelledby="how-title">
-  <p class="eyebrow">How you get in</p>
-  <h2 id="how-title">Five minutes, in person.</h2>
-  <div class="how">
-    <ol class="steps">
-      <li><span><b>Meet.</b> A group meets in one room with phones or cards.</span></li>
-      <li><span><b>Draw.</b> Each device makes random bytes and commits to them before it sees the others.</span></li>
-      <li><span><b>Swap.</b> The devices pass the bytes through a stack of cards or as codes on screen, encrypted so a camera in the room learns nothing.</span></li>
-      <li><span><b>Mix.</b> Every device combines the bytes into one shared pad, random if even one member was honest.</span></li>
-      <li><span><b>Sign.</b> Every device signs the list of seats.</span></li>
-      <li><span><b>Say the words.</b> Everyone reads six words aloud, and matching words mean every device holds the same pad.</span></li>
-    </ol>
-    <figure class="words">
-      <img src="assets/screen-words.svg" width="200" height="200" alt="A badge screen headed back room, TRNG, T1, showing the six words orbit, maple, fossil, drum, velvet, harbor">
-    </figure>
+<section class="band wrap" id="feed" aria-labelledby="feed-title">
+  <h2 id="feed-title">Your messages sit in public. Only your circle can read them.</h2>
+  <div class="feed">
+    <p class="sub">Cahoots posts to a public feed, like a numbers station. Anyone can see it. Only your circle can read it, post to it, or notice if a post goes missing or moves.</p>
+    <div class="station-card" role="group" aria-label="Live feed example">
+      <div class="station-head"><span>circle 6f8648f8</span><span>seq 41 · 25 B</span></div>
+      <pre id="station-sample"></pre>
+    </div>
   </div>
 </section>
 
-<section class="band wrap" id="ways" aria-labelledby="ways-title">
-  <p class="eyebrow">Ways in</p>
-  <h2 id="ways-title">A phone, a laptop or the card.</h2>
-  <div class="ways">
-    <div class="way">
+<section class="band wrap" id="devices" aria-labelledby="devices-title">
+  <h2 id="devices-title">Choose your device.</h2>
+  <div class="devices">
+    <div class="device">
       <h3>Phone</h3>
       <p>The browser app, on the phone you already carry.</p>
-      <p class="assure"><span>Assurance</span> claimed</p>
+      <p class="fact">Keys in the browser.</p>
     </div>
-    <div class="way">
+    <div class="device">
       <h3>Laptop</h3>
-      <p>A program you run holds a seat in the circle for you, a hosted member or an AI agent.</p>
-      <p class="assure"><span>Assurance</span> claimed</p>
-    </div>
-    <div class="way best">
-      <h3>The card</h3>
-      <p>The keys stay in its chip. You press both buttons to approve each action.</p>
-      <p class="assure"><span>Assurance</span> attested, present</p>
+      <p>A program on your machine holds the keys. It can run for you, for a server, or for an AI agent.</p>
+      <p class="fact">Keys on disk.</p>
     </div>
   </div>
-  <p class="note">A circle is only as safe as its least careful member. <a href="docs/#/tiers">How assurance is measured <span aria-hidden="true">→</span></a></p>
-</section>
+  <p class="note">One member with keys on a laptop can leak what everyone else keeps on cards. <a href="docs/#/tiers">How the devices compare <span aria-hidden="true">→</span></a></p>
 
-<section class="band wrap" id="card" aria-labelledby="card-title">
-  <p class="eyebrow">The card</p>
-  <h2 id="card-title">A card you keep in your wallet.</h2>
+  <div class="card" id="card">
   <div class="card-row">
     <div class="card-copy">
-      <p>V1 is a 54 by 86 mm board with an e-paper screen, two buttons and a coin cell. Its NXP SE051 chip holds the keys and proves it made them. Cards stack face to face for a ceremony.</p>
-      <p>At rest it shows your punk, drawn from the card's own randomness, the same in every circle. Its second page is a contact card that a phone camera reads.</p>
+      <h2 id="card-title">Why carry a card.</h2>
+      <p>Your keys live in a chip that can prove they were made there and never gives them up. Every approval is a press of two buttons on something in your hand, so no app, laptop or agent can act for you, and no website can trick you into it. Lose your phone and you lose nothing: tap the card and your chats come back. Stack cards with people you trust and a circle exists in minutes, with nothing sent anywhere.</p>
+      <p>It shows your punk, your contact card, and the six words you read aloud when a circle is made. The hardware and the firmware are open; build your own, or carry ours.</p>
       <div class="cta">
+        <a class="btn ghost" href="docs/#/v1-board">What's inside <span aria-hidden="true">→</span></a>
         <a class="btn ghost" href="docs/#/diy-badge">Build one <span aria-hidden="true">→</span></a>
-        <a class="btn ghost" href="docs/#/v1-board">The board <span aria-hidden="true">→</span></a>
       </div>
     </div>
     <div class="plates">
       <figure class="plate board">
-        <img src="assets/v1-front.png" width="600" height="902" alt="The front of the V1 board: the e-paper at the top, two buttons, and three sockets at the bottom edge" loading="lazy">
-        <figcaption>V1, front</figcaption>
+        <img src="assets/v1-front.png" width="600" height="902" alt="The front of the card's circuit board: the e-paper screen at the top, two buttons, and three sockets at the bottom edge" loading="lazy">
+        <figcaption>The card, front</figcaption>
       </figure>
       <figure class="plate paper">
         <img class="px" src="assets/sigil.svg" width="192" height="192" alt="A one-bit pixel punk in a top hat, the picture a card shows at rest" loading="lazy">
@@ -157,25 +158,13 @@
     <img class="px" src="assets/punks.svg" width="688" height="240" alt="Twelve pixel punks from twelve cards, with hats, glasses, beards, a pipe and a cigarette" loading="lazy">
     <figcaption>Twelve cards, twelve punks</figcaption>
   </figure>
-</section>
-
-<section class="band wrap" id="feed" aria-labelledby="feed-title">
-  <p class="eyebrow">The feed</p>
-  <h2 id="feed-title">Post anywhere. Only your circle can read it.</h2>
-  <div class="feed">
-    <p class="sub">Like a Cold War numbers station, Cahoots posts to a public feed anyone can see. Only your circle can read the posts or write ones members accept, and nobody can quietly reorder them.</p>
-    <div class="station-card" role="group" aria-label="Live feed example">
-      <div class="station-head"><span>circle 6f8648f8</span><span>seq 41 · 25 B</span></div>
-      <pre id="station-sample"></pre>
-    </div>
   </div>
 </section>
 
 <section class="band wrap" id="open" aria-labelledby="open-title">
-  <p class="eyebrow">Open</p>
   <h2 id="open-title">Open hardware, open protocol.</h2>
   <div class="links">
-    <a href="docs/#/protocol"><b>The protocol</b><span>The ceremony, messages and storage.</span></a>
+    <a href="docs/#/protocol"><b>The protocol</b><span>How a circle is made, how messages move, and where they are kept.</span></a>
     <a href="docs/#/threat-model"><b>The threat model</b><span>What Cahoots protects against, and what it does not.</span></a>
     <a href="https://github.com/yourbuddyconner/cahoots"><b>The repository</b><span>Firmware, app and board files.</span></a>
   </div>

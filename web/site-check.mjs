@@ -63,16 +63,26 @@ try {
       h1Font: (() => { const h = document.querySelector("h1"); return h ? getComputedStyle(h).fontFamily : ""; })(),
       steps: q("ol.steps li").length,
       apps: q(".app").length,
-      ways: q(".way").length,
+      sectionOrder: q("main > section[id]").map((x) => x.id),
+      nav: q(".top nav a").map((a) => [a.textContent.trim(), a.getAttribute("href")]),
+      heroHow: document.querySelector('.hero-copy a[href^="#"]')?.getAttribute("href") ?? null,
+      fullSteps: q("#how a").filter((a) => a.textContent.includes("The full six steps")).map((a) => a.getAttribute("href")),
+      cardH2: card?.querySelector("h2")?.textContent.trim() ?? null,
+      cardInDevices: !!card?.closest("#devices"),
+      inside: q("#devices a").filter((a) => a.textContent.includes("What's inside")).map((a) => a.getAttribute("href")),
+      eyebrows: q("main .eyebrow").length,
+      ogTitle: document.querySelector('meta[property="og:title"]')?.getAttribute("content") ?? null,
+      ogDesc: document.querySelector('meta[property="og:description"]')?.getAttribute("content") ?? null,
+      footer: document.querySelector("footer")?.innerText ?? "",
       front: !!card?.querySelector('img[src$="v1-front.png"]'),
       sigil: !!card?.querySelector('img[src$="sigil.svg"]'),
       punks: !!card?.querySelector('img[src$="punks.svg"]'),
-      punkCopy: /your punk, drawn from the card's own randomness, the same in every circle/.test(card?.textContent ?? ""),
+      punkCopy: /It shows your punk, your contact card, and the six words you read aloud when a circle is made\./.test(card?.textContent ?? ""),
       soon: q(".soon").length,
       text: document.body.innerText,
       desc: document.querySelector('meta[name="description"]')?.getAttribute("content") ?? null,
       three: q('script[src*="three"]').length + q('script[type="importmap"]').filter((s) => s.textContent.includes("three")).length,
-      ids: ["what", "how", "ways", "card", "feed", "open"].filter((id) => !document.getElementById(id)),
+      ids: ["how", "what", "feed", "devices", "card", "open"].filter((id) => !document.getElementById(id)),
       images: q("img").length,
       broken: q("img").filter((i) => !i.complete || i.naturalWidth === 0).map((i) => i.getAttribute("src")),
     };
@@ -83,20 +93,32 @@ try {
   check("the hero image is place.svg with the rooftop alt text", facts.heroSrc === "assets/place.svg" && facts.heroAlt === alt, `${facts.heroSrc} ${JSON.stringify(facts.heroAlt)}`);
   check("the hero image is not drawn pixelated", !/pixelated|crisp-edges/.test(facts.heroRendering ?? ""), facts.heroRendering);
   check("the H1 sits over the poster, set in Fraunces", facts.h1InScene && /Fraunces/.test(facts.h1Font), `${facts.h1InScene} ${facts.h1Font}`);
-  check("six ol.steps li", facts.steps === 6, `found ${facts.steps}`);
+  check("three ol.steps li", facts.steps === 3, `found ${facts.steps}`);
+  check('"The full six steps" links to docs/#/ceremony-guide', facts.fullSteps.length === 1 && facts.fullSteps[0] === "docs/#/ceremony-guide", facts.fullSteps.join(", "));
   check("four .app cards", facts.apps === 4, `found ${facts.apps}`);
-  check("three .way columns", facts.ways === 3, `found ${facts.ways}`);
+  const order = ["how", "what", "feed", "devices", "open"];
+  check(`sections come in the order ${order.join(", ")}`, JSON.stringify(facts.sectionOrder) === JSON.stringify(order), facts.sectionOrder.join(", "));
+  const nav = [["How you join", "#how"], ["What you get", "#what"], ["The feed", "#feed"], ["Devices", "#devices"], ["Docs", "docs/"], ["Blog", "blog/"], ["Open the app", "app/"]];
+  check("the nav reads How you join, What you get, The feed, Devices, Docs, Blog, Open the app", JSON.stringify(facts.nav) === JSON.stringify(nav), JSON.stringify(facts.nav));
+  check("the hero's second button points at #how", facts.heroHow === "#how", facts.heroHow);
+  check("no eyebrow in main", facts.eyebrows === 0, `found ${facts.eyebrows}`);
+  check('#card sits in #devices with the h2 "Why carry a card."', facts.cardInDevices && facts.cardH2 === "Why carry a card.", `${facts.cardInDevices} ${JSON.stringify(facts.cardH2)}`);
+  check('"What\'s inside" links to docs/#/v1-board', facts.inside.length === 1 && facts.inside[0] === "docs/#/v1-board", facts.inside.join(", "));
   check('#card has img[src$="v1-front.png"]', facts.front);
   check('#card has img[src$="sigil.svg"]', facts.sigil);
   check('#card has img[src$="punks.svg"]', facts.punks);
-  check("#card calls the picture at rest your punk", facts.punkCopy);
+  check("#card says it shows your punk, your contact card and the six words", facts.punkCopy);
   check("no .soon elements", facts.soon === 0, `found ${facts.soon}`);
   check('no "being built" text on the page', !/being built/i.test(facts.text));
   check('no "tunnel" in the page text', !/tunnel/i.test(facts.text));
+  const insider = ["seat", "assurance", "grants", "V1", "sigil"].filter((w) => new RegExp(`\\b${w}`, "i").test(facts.text));
+  check("no seat, assurance, grants, V1 or sigil in the page text", insider.length === 0, insider.join(", "));
   const tagline = "A private network for people who have met in person.";
   check("the meta description is the tagline", facts.desc === tagline, JSON.stringify(facts.desc));
+  check('the OG title is "Get in cahoots" and the OG description is the tagline', facts.ogTitle === "Get in cahoots" && facts.ogDesc === tagline, `${facts.ogTitle} | ${facts.ogDesc}`);
+  check('the footer defines "in cahoots"', /In cahoots: secretly working together\./.test(facts.footer), JSON.stringify(facts.footer.slice(0, 80)));
   check("no three.js script or import map", facts.three === 0, `found ${facts.three}`);
-  check("sections what, how, ways, card, feed, open exist", facts.ids.length === 0, `missing ${facts.ids.join(", ")}`);
+  check("sections how, what, feed, devices, card, open exist", facts.ids.length === 0, `missing ${facts.ids.join(", ")}`);
   check(`every image loads (${facts.images} checked)`, facts.broken.length === 0, facts.broken.join(", "));
   await ctx.close();
 
