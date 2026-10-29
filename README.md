@@ -65,7 +65,7 @@ Every Rust crate lives under `crates/`. The PWA lives under `web/app`.
 | `crates/rp2350` | `cahoots-rp2350` | `rp235x-hal` firmware for the Raspberry Pi Pico 2 on V1's pin map: the e-paper, two buttons, the chip's TRNG, the pad and ledger in flash through the boot ROM, USB to a laptop and two UARTs up and down a pile. | done on a breadboard Pico 2 (M4b, 2026-10-27): a ceremony with the laptop as the pile, the circle kept in flash |
 | `crates/dabao` | | Xous app for the Baochip-1x Dabao, the V2 card. | placeholder (M4c, M5) |
 | `crates/chat` | `cahoots-chat` | Pad-seeded end-to-end chat: epoch keys, sender ratchets, ChaCha20-Poly1305, plus the `cahoots-chat` CLI demo. | done (C1, C3) |
-| `crates/station` | `cahoots-station` | The Numbers Station relay: hash-chained log, reuse refusal, long-poll feed, display page, per-client rate limit, log cap, Dockerfile, and the [deploy recipe](deploy/relay/README.md) for the default relay. | done (C2, C7 code); the default relay's deployment and the [TVC](https://docs.turnkey.com/features/verifiable-cloud/overview) deploy pending |
+| `crates/station` | `cahoots-station` | The Numbers Station relay: hash-chained log, reuse refusal, long-poll feed, display page, per-client rate limit, log cap, Dockerfile, and the [deploy recipe](deploy/relay/README.md) for the default relay. | done (C2, C7; `relay.cahoots.network` is up); the [TVC](https://docs.turnkey.com/features/verifiable-cloud/overview) deploy pending |
 | `crates/fuzz` | | `cargo-fuzz` targets for every parser. Not a workspace member. | done |
 | `docs/` | | Protocol spec, threat model, use cases, plan, ceremony guide. | |
 
