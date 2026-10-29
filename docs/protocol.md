@@ -253,7 +253,7 @@ A request is at most 16 KiB. Only `SshSign` may be longer than 4 KiB; any other 
 
 The laptop program and the badge firmware must come from the same release. `Identity` gained the field `chip`, and a decoder rejects any message that does not re-encode to the same bytes, so a laptop program from before it calls a new badge's `Identity` malformed.
 
-A custodian MUST obtain its owner's consent before it answers any request except `Identify`, `Remaining`, and the `Chip` operations `Describe` and `Attest`. A custodian that is refused answers `Denied`. A badge asks for consent with a line on its screen, and its owner allows the request with the B button.
+A custodian MUST obtain its owner's consent before it answers any request except `Identify`, `Remaining`, and the `Chip` operations `Describe` and `Attest`. A custodian that is refused answers `Denied`. A badge asks for consent with a line on its screen, and its owner allows the request by pressing A and B together (A+B); A or B alone refuses it.
 
 A badge answers `Busy` to a request that arrives on the words screen or on any menu item other than Serve, and ignores a request that arrives during the pile or the ceremony, so the laptop retries.
 

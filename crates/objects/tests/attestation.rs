@@ -1,7 +1,7 @@
 use cahoots_chip::ops::{ChipOps, Curve};
 use cahoots_chip::testca::ROOT_PEM;
 use cahoots_chip::{KeyId, KeyKind, SoftChip};
-use cahoots_objects::attestation::{verify, AttestError, NXP_ROOTS};
+use cahoots_objects::attestation::{compressed, verify, AttestError, NXP_ROOTS, TEST_ROOTS};
 
 const FRESH: [u8; 16] = [7; 16];
 
@@ -19,8 +19,30 @@ fn soft_chip_attestation_verifies_with_test_root() {
     assert_eq!(v.public, att.public);
     assert_eq!(v.uid, att.uid);
     assert_eq!(v.timestamp, att.timestamp);
-    // The placeholder file shipped as NXP_ROOTS is the test CA.
-    assert!(verify(&att, &FRESH, NXP_ROOTS).is_ok());
+    assert!(verify(&att, &FRESH, TEST_ROOTS).is_ok());
+}
+
+#[test]
+fn test_roots_are_the_software_chips_ca_and_nxp_roots_are_empty() {
+    assert_eq!(TEST_ROOTS, &[ROOT_PEM]);
+    // NXP's root is not vendored yet, so nothing verifies against NXP_ROOTS; the test CA,
+    // whose private key is in the source, must never be in that list.
+    assert!(NXP_ROOTS.is_empty());
+    assert_eq!(verify(&attested(), &FRESH, NXP_ROOTS), Err(AttestError::Chain));
+}
+
+#[test]
+fn uncompressed_seat_key_is_reported_compressed() {
+    use p256::elliptic_curve::sec1::ToEncodedPoint;
+    let att = attested();
+    let point = p256::PublicKey::from_sec1_bytes(&att.public).unwrap().to_encoded_point(false);
+    let wide = leaf_attested_with(LEAF_DER, point.as_bytes());
+    assert_eq!(wide.public.len(), 65);
+    let v = verify(&wide, &FRESH, &[ROOT_PEM]).unwrap();
+    assert_eq!(v.public, att.public);
+    assert_eq!(v.public.len(), 33);
+    assert_eq!(compressed(point.as_bytes()), Some(att.public.clone()));
+    assert_eq!(compressed(&[4, 1, 2]), None);
 }
 
 #[test]
@@ -132,8 +154,16 @@ const LEAF_DER: &[u8] = include_bytes!("fixtures/leaf.der");
 const LEAF_KEY: [u8; 32] = [0x43; 32];
 
 fn leaf_attested(cert: &[u8]) -> cahoots_chip::Attested {
+    let public = attested().public;
+    leaf_attested_with(cert, &public)
+}
+
+/// An attestation of `public` signed by the leaf key, as a chip that sends `public` in that
+/// form would.
+fn leaf_attested_with(cert: &[u8], public: &[u8]) -> cahoots_chip::Attested {
     use p256::ecdsa::signature::Signer;
     let mut att = attested();
+    att.public = public.to_vec();
     let key = p256::ecdsa::SigningKey::from_slice(&LEAF_KEY).unwrap();
     att.attest_public = key.verifying_key().to_encoded_point(false).as_bytes().to_vec();
     att.attest_cert_der = cert.to_vec();

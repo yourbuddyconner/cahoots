@@ -1,5 +1,6 @@
-//! `cahoots-host attest` asks a simulated badge's software chip to attest a seat key and checks
-//! it against the roots built in, which today are the software chip's test CA.
+//! `cahoots-host attest` asks a simulated badge's software chip to attest a seat key, checks it
+//! against the software chip's test root, ties it to the seat key the badge describes, and says
+//! it is a software chip, not hardware.
 
 mod common;
 
@@ -34,4 +35,9 @@ fn attest_prints_and_verifies_a_soft_chip_bundle() {
     assert_eq!(json["check"]["verified"], true);
     assert_eq!(json["attestation"]["freshness"], json["freshness"]);
     assert_eq!(json["check"]["public"], json["attestation"]["public"]);
+    // The attested key is the seat key the badge describes, not only the key in the answer.
+    assert_eq!(json["check"]["public"], json["seat_public"]);
+    // A pass against the test root is a software chip, never hardware.
+    assert_eq!(json["check"]["hardware"], false);
+    assert_eq!(json["check"]["root"], "software chip test root");
 }

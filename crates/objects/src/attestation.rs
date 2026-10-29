@@ -4,6 +4,9 @@
 //! that value and a timestamp, and returns the signature with its attestation certificate. The
 //! verifier checks that the value came back, that the signature is good, and that the
 //! certificate is a root it trusts or was issued by one.
+//!
+//! The chain is one level: the attestation certificate must be a root or be signed by one.
+//! Validity dates, basicConstraints and keyUsage are not checked. See `roots/README.md`.
 
 use alloc::vec::Vec;
 use cahoots_chip::Attested;
@@ -18,10 +21,17 @@ const ECDSA_SHA256: x509_cert::spki::ObjectIdentifier =
 
 /// NXP's attestation roots, as PEM.
 ///
-/// Until `roots/nxp-se05x-attestation-root.pem` is replaced with NXP's root (see
-/// `roots/README.md`), this holds the software chip's test CA, so it verifies only the software
-/// chip.
-pub const NXP_ROOTS: &[&str] = &[include_str!("../roots/nxp-se05x-attestation-root.pem")];
+/// Empty until NXP's root is read from the first real SE051 and vendored (see
+/// `roots/README.md`). With no roots, nothing verifies against this list.
+pub const NXP_ROOTS: &[&str] = &[];
+
+/// The software chip's test CA, as PEM (`roots/software-chip-test-root.pem`, the same
+/// certificate as `cahoots_chip::testca::ROOT_PEM`).
+///
+/// Its private key is in the source, so anyone can make a bundle that passes against it. A
+/// pass against this root shows only that the software is consistent, never that a key is in
+/// hardware. Use it for tests and simulated badges, never as a root of trust.
+pub const TEST_ROOTS: &[&str] = &[include_str!("../roots/software-chip-test-root.pem")];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttestError {
@@ -39,7 +49,7 @@ pub enum AttestError {
 /// What a good attestation proves.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Verified {
-    /// The seat key, SEC1 compressed.
+    /// The seat key, SEC1 compressed (33 bytes), whatever form the chip sent it in.
     pub public: Vec<u8>,
     /// The chip's unique id.
     pub uid: Vec<u8>,
@@ -78,13 +88,23 @@ pub fn verify(att: &Attested, freshness: &[u8; 16], roots: &[&str]) -> Result<Ve
     };
     key.verify(&attested_payload(att), &sig).map_err(|_| AttestError::Signature)?;
 
+    // The software chip sends the seat key compressed; the SE051 sends it as 04 || X || Y.
+    let public = compressed(&att.public).ok_or(AttestError::Parse)?;
+
     for pem in roots {
         let root = Certificate::from_pem(pem.as_bytes()).map_err(|_| AttestError::Parse)?;
         if trusts(&root, &cert, &att.attest_cert_der)? {
-            return Ok(Verified { public: att.public.clone(), uid: att.uid.clone(), timestamp: att.timestamp.clone() });
+            return Ok(Verified { public, uid: att.uid.clone(), timestamp: att.timestamp.clone() });
         }
     }
     Err(AttestError::Chain)
+}
+
+/// A P-256 public key in either SEC1 form, as SEC1 compressed. None when it is not a point.
+pub fn compressed(sec1: &[u8]) -> Option<Vec<u8>> {
+    use p256::elliptic_curve::sec1::ToEncodedPoint;
+    let key = p256::PublicKey::from_sec1_bytes(sec1).ok()?;
+    Some(key.to_encoded_point(true).as_bytes().to_vec())
 }
 
 /// Whether `root` is `cert` itself or issued it.

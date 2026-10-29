@@ -11,7 +11,7 @@
 //! cahoots-host agent (--serial <port> | --sim <socket>) --circle <name>... [--socket <path>] [--known-hosts <path>]
 //! cahoots-host git-sign -Y sign -n git -f <key file> <file>
 //! cahoots-host roster --ssh --circle <name> --state <dir>
-//! cahoots-host attest (--serial <port> | --sim <socket>) --circle <name> [--json]
+//! cahoots-host attest (--serial <port> | --sim <socket>) --circle <name> [--test-root] [--json]
 //! cahoots-host card set (--serial <port> | --sim <socket>) --circle <name> --name <text> [--handle kind=value]... [--endpoint purpose=value]... --out <file>
 //! cahoots-host card fetch (--serial <port> | --sim <socket>) --circle <name> --state <dir> --in <file>... [--out <dir>]
 //! cahoots-host card show --circle <name> --state <dir> <signed card file>
@@ -310,8 +310,11 @@ fn main() {
         }
         "attest" => {
             let circle = args.req("--circle");
+            // A simulated badge's chip is the software chip, so its test root is the one that
+            // can verify it; `--test-root` asks for the same on a board.
+            let test_root = args.has("--sim") || args.has("--test-root");
             args.badge()
-                .and_then(|mut b| cahoots_host::attest::attest(&mut b, &circle))
+                .and_then(|mut b| cahoots_host::attest::attest(&mut b, &circle, test_root))
                 .and_then(|o| {
                     if args.has("--json") {
                         println!("{}", o.json);

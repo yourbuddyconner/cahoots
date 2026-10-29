@@ -62,7 +62,7 @@ The words these documents use, in plain terms. Where a term has a precise defini
 
 **Chip record.** The badge's own list of which objects in its secure element belong to which circle. It lets the badge find and delete a chip key that no circle uses, and it never deletes a key a kept circle names.
 
-**Attested.** A seat key is attested when the chip that holds it signs a statement, over a fresh random value, that the key was made inside it. A verifier checks the statement against the chip maker's root certificate. Today only the software chip's test certificate verifies; NXP's root waits for the bench. See [device tiers](tiers.md).
+**Attested.** A seat key is attested when the chip that holds it signs a statement, over a fresh random value, that the key was made inside it. A verifier checks the statement against the chip maker's root certificate. Sharing an attestation shows which chip holds the key, so two circles that both see attestations from one badge can tell they share a member. NXP's root is not in the repository yet, so a real chip's attestation cannot verify today; the software chip's test certificate verifies only simulated badges, reported as software, not hardware. See [device tiers](tiers.md).
 
 **Manifest.** The circle's root document, written at the ceremony and signed by every seat: the seat keys and device tiers, the parameters, and the floor. An outside system that wants to trust a circle registers its manifest. See [protocol section 3.5](protocol.md).
 

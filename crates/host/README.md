@@ -159,10 +159,12 @@ One line per seat, comment `cahoots:<circle>:<seat>`, from the circle's sealed m
 ### Attesting a seat key
 
 ```sh
-cahoots-host attest --serial /dev/cu.usbmodem1101 --circle sf [--json]
+cahoots-host attest --serial /dev/cu.usbmodem1101 --circle sf [--test-root] [--json]
 ```
 
-Sends a fresh random value, asks the badge's chip to sign the seat key with it, prints the answer as JSON, and checks it. It exits non-zero when the check fails. The roots built into this program are, for now, the software chip's test CA (`crates/objects/roots/README.md`): a simulated badge with `--chip soft` passes, and a real SE051 fails with "does not lead to a root this program trusts" until NXP's attestation root is put in its place. A circle whose key is in software has nothing to attest.
+Asks the badge for the circle's seat key, sends a fresh random value, asks the badge's chip to sign the seat key with it, prints the answer as JSON, and checks it. The check passes only when the signature leads to a trusted root and the attested key is the seat key the badge named. It exits non-zero when the check fails. NXP's attestation root is not in this program yet (`crates/objects/roots/README.md`), so a real SE051 cannot pass, and `attest` says so. With `--sim`, or with `--test-root` on a board, the software chip's test root is also accepted; its private key is in the source, so a pass against it is printed as a software chip, not hardware, and the JSON has `"hardware": false`. A circle whose key is in software has nothing to attest.
+
+Sharing an attestation shows which chip holds the key, so two circles that both see attestations from one badge can tell they share a member. The badge gives an attestation without asking its holder.
 
 `attest` opens the badge's link itself; stop the agent first, since a board's port and a simulated badge's socket serve one program at a time.
 
