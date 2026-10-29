@@ -95,7 +95,7 @@ static void drawWordGrid() {
   }
 }
 
-// Mirrors wordsScreen() in site/badge.js: the same positions on the same 200 x 200 grid.
+// Mirrors the words screen in crates/badge/src/screens.rs: the same positions on the same 200 x 200 grid.
 static void drawWords() {
   display.setTextColor(GxEPD_BLACK);
   display.setFont(&FreeMono9pt7b);

@@ -101,7 +101,7 @@ main { display: block; }
 
 .px { image-rendering: pixelated; image-rendering: crisp-edges; }
 h3 { font-family: var(--display); font-weight: 600; font-size: 17px; letter-spacing: -0.015em; margin: 0 0 8px; }
-.note { margin: 28px 0 0; color: var(--fg-3); font-family: var(--mono); font-size: 12.5px; line-height: 1.7; max-width: 760px; }
+.note { margin: 28px 0 0; color: var(--fg-2); font-family: var(--mono); font-size: 12.5px; line-height: 1.7; max-width: 760px; }
 .note a { color: var(--fg-2); text-decoration: none; white-space: nowrap; }
 .note a:hover { color: var(--fg); }
 .soon { display: inline-block; font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--amber); border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent); border-radius: 4px; padding: 1px 6px 0; line-height: 1.6; vertical-align: 2px; white-space: nowrap; }
@@ -111,7 +111,7 @@ h3 { font-family: var(--display); font-weight: 600; font-size: 17px; letter-spac
 .app { background: var(--bg-2); padding: 24px 20px 22px; display: flex; flex-direction: column; }
 .app .icon { width: 32px; height: 32px; margin-bottom: 18px; }
 .app p { color: var(--fg-2); font-size: 14.5px; line-height: 1.55; margin: 0; }
-.app .app-note { margin-top: auto; padding-top: 18px; font-size: 13px; color: var(--fg-3); }
+.app .app-note { margin-top: auto; padding-top: 18px; font-size: 13px; color: var(--fg-2); }
 @media (max-width: 1060px) { .apps { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 760px) { .apps { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 520px) { .apps { grid-template-columns: 1fr; } .app .icon { margin-bottom: 14px; } }
@@ -130,7 +130,7 @@ h3 { font-family: var(--display); font-weight: 600; font-size: 17px; letter-spac
 .way { background: var(--bg-2); padding: 26px 24px 22px; display: flex; flex-direction: column; }
 .way p { color: var(--fg-2); font-size: 15px; margin: 0; }
 .way .assure { margin-top: auto; padding-top: 22px; font-family: var(--mono); font-size: 12.5px; color: var(--fg); }
-.way .assure span { color: var(--fg-3); margin-right: 8px; text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; }
+.way .assure > span:first-child { color: var(--fg-3); margin-right: 8px; text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; }
 .way.best { background: linear-gradient(180deg, color-mix(in srgb, var(--amber) 10%, transparent), color-mix(in srgb, var(--amber) 2%, transparent) 70%), var(--bg-2); }
 .way.best .assure { color: var(--amber); }
 @media (max-width: 860px) { .ways { grid-template-columns: 1fr; } }

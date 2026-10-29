@@ -232,7 +232,7 @@ async function render() {
       content.appendChild(pager(d));
       watchHeadings();
     } catch (e) {
-      content.innerHTML = `<p>This document isn't published yet (${e.message}). It lives in the repository under <code>docs/</code>.</p>`;
+      content.innerHTML = `<p>This document isn't published yet (${e.message}). It lives in the repository.</p>`;
     }
   }
   if (sub) {
