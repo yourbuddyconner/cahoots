@@ -69,7 +69,7 @@ Goal: a developer who already runs WireGuard, encrypts files, or signs approvals
 
 ## Networks
 
-Goal: a group that met once can set up a VPN or a mesh network with no coordination server and no certificate authority. The design is in [What it is for](use-cases.md), sections 3 to 5.
+Goal: a group that met once can set up a VPN or a mesh network with no coordination server and no certificate authority. The current tools are summarized in [Apps for your circle](apps.md); the milestones below track the remaining network work.
 
 | Milestone | What it delivers | Done when | Status |
 |---|---|---|---|
@@ -95,7 +95,7 @@ Goal: a group chat where the keys come from the pad and the messages travel over
 
 ## Apps
 
-Goal: small programs, such as a vote, that every member runs over the same ordered messages and that can never touch the pad. The design is in [What it is for](use-cases.md), section 8.
+Goal: small programs, such as a vote, that every member runs over the same ordered messages and that can never touch the pad. The proposal and implementation gaps are in [Circle apps](circle-apps.md).
 
 | Milestone | What it delivers | Done when | Status |
 |---|---|---|---|

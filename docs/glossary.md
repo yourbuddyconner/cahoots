@@ -1,91 +1,79 @@
 # Glossary
 
-The words these documents use, in plain terms. Where a term has a precise definition, the [protocol](protocol.md) wins.
+Terms used in the guides. For exact formats and requirements, use the [protocol specification](protocol.md).
 
-**Circle.** A group of people who made one secret together at a ceremony. The app calls it a cahoot.
+## People and devices
 
-**Ceremony.** The in-person meeting where a group makes its secret. Six steps: set up, draw, swap, mix, sign, say the words. In the app, set up is the New ceremony and Join screens, draw and swap happen on the Commit and Reveal screens, sign is the Sign screen, and mix and say the words are the Check screen. See the [ceremony guide](ceremony-guide.md).
+**Circle / cahoot:** the group created by a ceremony, together with its shared secret and membership record. “Cahoot” is the name used in the app.
 
-**Pad.** The secret itself: a file of random bytes, 16 KiB to 256 KiB in the app, that every member holds in full. Also called a one-time pad. Each byte is used once and then erased.
+**Ceremony:** the exchange that creates a circle. Devices commit to their contributions, exchange encrypted reveals, sign the membership record, and show check words. See [Create a circle](ceremony-guide.md).
 
-**Contribution.** The random bytes one device brings to the ceremony. The pad is all contributions combined, so one honest device is enough to make it random.
+**Seat:** one device’s numbered place in the circle. A hosted program can also occupy a seat.
 
-**Commitment.** A fingerprint of a device's contribution, shared before the contribution itself. It stops anyone from choosing their bytes after seeing everyone else's.
+**Badge / card:** a dedicated Cahoots device. The hardware is still in development; see [Hardware](hardware.md).
 
-**Sealed reveal.** A member's contribution encrypted to every other member before it leaves the device, with X-Wing (X25519 plus ML-KEM-768). The wire, the cable, or the phone screen never carries a contribution in the clear, so someone recording the ceremony from nearby learns nothing. The pad itself does not depend on this encryption.
+**Hosted seat:** a software member with its own copy of the circle secret, held in an enclave under a pinned policy. It changes whom the circle trusts.
 
-**KEM.** Key encapsulation mechanism: a way for one party to send another a fresh secret key using only the other party's public key. Cahoots uses X-Wing, which combines a classical scheme and a post-quantum one, so both would have to fall.
+## Secrets and messages
 
-**Check words.** Six English words that every device shows after the ceremony. They are derived from the pad. If everyone sees the same six words, everyone holds the same pad.
+**Pad:** the shared secret bytes. Every member holds the whole pad. Spending bytes consumes them; they must never be reused for a different operation.
 
-**Hello words.** Two words you say and two words another member says back, on a call, to know it is really them. They come from a key that only the two of you hold, made during the ceremony, and they change every time either of you taps Next.
+**Contribution:** the random bytes supplied by one device. Contributions are combined to make the pad.
 
-**Pair key.** A key that exactly two members of a circle hold, made from the keys they exchanged during the ceremony. It is what hello words come from. Unlike the pad, it depends on the math of X-Wing.
+**Commitment:** a hash shared before a contribution is revealed. It prevents a member from changing their contribution after seeing the others.
 
-**Circle ID.** A short public label for a group, derived from the pad. It identifies a group on the feed without revealing anything about the pad.
+**Sealed reveal:** a contribution encrypted for the other members. Recording the QR codes or wire traffic does not expose it in plaintext.
 
-**Slice, part.** The region of the pad that one member sends from. Everyone holds the whole pad. Giving each member their own region means two people never use the same bytes.
+**Check words:** six words derived from the ceremony result. Every person must check that all devices show the same words in the same order.
 
-**Spend.** Using pad bytes. Every spend is written to the ledger and the bytes are erased before anything leaves the device.
+**Slice:** the region of the pad assigned to one sender. Each member sends from its own slice, but every member has the full pad for receiving.
 
-**Ledger.** Each device's record of which pad bytes have been used. It is how a device recognizes a replayed message.
+**Spend:** consuming pad bytes for a message or key. The device records the spend and erases the bytes before releasing the result.
 
-**Pure-pad mode.** Encrypting a short message with one pad byte per message byte, plus 32 bytes for the one-time key that makes the 16-byte seal. Nothing can break it, now or later, without the pad.
+**Ledger:** the record of consumed pad ranges. It helps prevent reuse and detect replays.
 
-**PSK mode, hedged.** Spending 32 pad bytes to seed a normal key exchange, such as WireGuard or TLS. An attacker then has to break the math and have the pad. PSK stands for pre-shared key.
+**Pure-pad mode:** encrypting a short message directly with fresh pad bytes, plus a one-time authentication key. Its strongest confidentiality claim requires truly random secret bytes that are never reused.
 
-**Seal, tag.** The 16 bytes on the end of a message that prove it came from a group member and was not changed. Made with a one-time Poly1305 key.
+**PSK:** preshared key. Cahoots can spend 32 pad bytes to seed keys for conventional encryption. Chat and the file/network integrations use this approach.
 
-**Feed, Numbers Station.** The public bulletin board that carries encrypted messages. Anyone can read it. Only the group can read the messages. Each entry is chained to the last, so the log cannot be quietly rewritten.
+**Seal / tag:** authentication data attached to a message. The circle tag establishes that someone with the shared secret created the message; it does not identify a particular person within the circle.
 
-**Relay.** The program that runs the feed. The crate is `cahoots-station`.
+**Epoch:** one period of chat keys, started by a 32-byte pad spend. It can carry many chat messages.
 
-**Epoch.** In chat, a period keyed by one 32-byte spend. Any member can start a new one, which rotates everyone's keys.
+**Relay / Numbers Station / feed:** the server and public log used to deliver encrypted messages. The relay does not have the circle’s keys. See [Run a relay](relay.md).
 
-**Hosted seat, agent seat.** A group member that is a program running in a cloud enclave instead of a person with a device. Its copy of the pad lives in the enclave under a policy the group pinned.
+## Identity and security
 
-**TVC.** [Turnkey Verifiable Cloud](https://docs.turnkey.com/features/verifiable-cloud/overview): a cloud service that runs programs inside secure enclaves and publishes proof of exactly what is running.
+**Circle ID:** a public identifier derived from the pad. The relay uses it to group encrypted messages.
 
-**Badge.** The device Cahoots is designed around: a credit-card-sized board with a small screen, a wired touch link, and a hardware random number generator.
+**Seat key:** a separate P-256 signing key for one seat in one circle. It signs the manifest and signed objects. This is conventional public-key cryptography, not one-time-pad encryption.
 
-**Card.** The badge in its wallet form. V1 is a board in a printed case; V2 is the card.
+**Manifest:** the membership record signed by every seat during the ceremony. It records keys, parameters, declared device tiers, and policy limits.
 
-**Punk.** The picture a badge draws from its own randomness and shows at rest: a one-bit pixel face with its own hat, glasses or hair, the same on every circle, so people recognise each other's at a glance. It is being built (roadmap item M4i in [the plan](plan.md)).
+**Pair key:** a secret shared by exactly two members, established through X-Wing during the ceremony. It is separate from the group pad.
 
-**Contact card.** A page on the badge with a code that a phone camera reads. It is part of the idle screen being built (roadmap item M4i in [the plan](plan.md)); a tag on the board is also planned to carry it, or a link, for a phone with no app ([manufacturing](manufacturing.md)).
+**Hello words:** words derived from a pair key and a hello number, used to check someone during a call. Both devices must use the same number. See [the browser guide](browser.md#check-someone-on-a-call).
 
-**Touch link.** The wired connection between two badges, through magnetic pins. It is how badges exchange commitments and contributions. No radio is used.
+**TRNG / CSPRNG:** hardware-random and software-random labels. A circle qualifies as `TRNG` only when every device contributed hardware randomness. The app also shows a per-device source label; that label alone does not establish the whole circle’s status.
 
-**Device tier.** T0 to T4: how well a device protects the pad once it holds one, from a phone (T0) to inspected silicon (T4). A group is as protected as its least protected device. See [device tiers](tiers.md).
+**X-Wing / KEM:** X-Wing combines X25519 and ML-KEM-768. A KEM, or key encapsulation mechanism, lets devices establish encryption keys using public keys. Cahoots uses it to protect contributions and establish pair keys.
 
-**TRNG, CSPRNG.** The two randomness labels. TRNG means every device made its contribution from a hardware random number generator. CSPRNG means at least one device used software randomness. The label decides which security claim the group can make.
+**Device tier:** a description of protections against theft and tampering, from T0 to T4. A declared tier is not proof that those protections were verified. See [Device tiers](tiers.md).
 
-**Seat key.** A signing key (P-256) a device makes for one circle at the ceremony. It is bound into the device's commitment, so it cannot change after the group has seen it, and it signs everything that device says afterwards. One key per circle, never shared across circles. See [protocol section 3.4](protocol.md). On a badge with a secure element the key is made in the chip and never leaves it: the chip signs, and the badge asks it to. The key is the member's identity in the circle. It is also what signs SSH logins and git commits for that member.
+**Attestation:** a chip’s signed statement about a key it holds. It does not prove who holds the device or that its firmware is trustworthy. Real-chip attestation remains unverified in the current project.
 
-**Circle root.** A 32-byte secret every member of a circle can compute and no outsider can. The badge computes it at the ceremony and, with a chip, keeps it there. It is HKDF-SHA256 over the content keys of all the reveals (the key each member's reveal is encrypted under), joined in seat order, with the circle ID as salt. It makes the card seal key and the chat key. See [protocol](protocol.md) section 3.6.
+**Assurance:** the evidence that an owner authorized an operation, distinct from the device’s tier. See [Device tiers](tiers.md#assurance-for-an-operation).
 
-**Contact card.** A seat's name, handles (such as an email or a GitHub name) and endpoints (such as an SSH host), signed by the seat key and sealed so that only the circle can read it. Cards travel as files for now. See [protocol section 8.8](protocol.md).
+## Implementation terms
 
-**Chip record.** The badge's own list of which objects in its secure element belong to which circle. It lets the badge find and delete a chip key that no circle uses, and it never deletes a key a kept circle names.
+**Grant / approval / fact / receipt:** signed objects for delegated permissions, decisions on specific operations, readings, and spend records. See [protocol section 8](protocol.md#8-signed-objects).
 
-**Attested.** A seat key is attested when the chip that holds it signs a statement, over a fresh random value, that the key was made inside it. A verifier checks the statement against the chip maker's root certificate. Sharing an attestation shows which chip holds the key, so two circles that both see attestations from one badge can tell they share a member. NXP's root is not in the repository yet, so a real chip's attestation cannot verify today; the software chip's test certificate verifies only simulated badges, reported as software, not hardware. See [device tiers](tiers.md).
+**Floor:** policy limits in the manifest that outside policy cannot loosen.
 
-**Manifest.** The circle's root document, written at the ceremony and signed by every seat: the seat keys and device tiers, the parameters, and the floor. An outside system that wants to trust a circle registers its manifest. See [protocol section 3.5](protocol.md).
+**Circle root:** a secret derived from the ceremony’s reveal keys. It derives other keys, including contact-card sealing keys. It is not another name for the pad.
 
-**Floor.** The table in the manifest that says, for each purpose a request can name, whether the device may serve it under a grant alone, only with its owner present, or never, and how many pad bytes it may spend on it. It is the one rule no policy outside the circle can loosen.
+**Contact card:** signed member details such as names, handles, and endpoints. Publishing and displaying contact cards on badges is separate development work.
 
-**Grant, approval, fact, receipt.** The four things a seat signs, as CBOR with a COSE signature, defined in [protocol section 8](protocol.md). A grant lets another key ask for named purposes in this circle until a log position, and can be passed on only narrower. An approval is one seat's yes or no to one exact operation, over the fields the device showed. A fact is an attested reading in an envelope. A receipt records a spend.
+**HAL:** hardware abstraction layer: the interfaces for randomness, storage, display, and device links.
 
-**Assurance.** How sure a verifier can be that an owner meant one act, on a four-level scale from claimed, through key and present, to present with a PIN. A policy asks for a level and never for a method. See [device tiers](tiers.md).
-
-**Attested.** Said of a reading or a key whose origin a chip vouches for. The assurance level for it is being designed with the chip work and is not in [device tiers](tiers.md) yet.
-
-**Log position.** The place in the circle's feed that every grant, approval and fact names as its time, instead of a clock. Checkpoints that make it checkable from outside are planned (roadmap C6).
-
-**Test vectors.** Published example inputs and outputs. Every implementation must reproduce them so that different devices agree.
-
-**HAL.** Hardware abstraction layer. The four things a board must provide to run the badge software: randomness, pad storage, a screen, and a link.
-
-**Simulator.** A desktop program that behaves like a badge, used to develop and test without hardware.
-
-**Fountain code.** The way the phone app sends a large message as a loop of QR codes: enough of the frames, in any order, rebuild the whole message.
+**Test vectors:** fixed inputs and expected outputs used to check that implementations agree.

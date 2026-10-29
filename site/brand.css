@@ -1,0 +1,24 @@
+/* Cahoots: an open notebook. Shared identity for home, docs and journal. */
+:root {
+  --bg:#fff; --bg-2:#f6f6f7; --bg-3:#eeeef1;
+  --fg:#17181b; --fg-2:#50525a; --fg-3:#666973;
+  --line:#e0e1e5; --line-2:#babdc6; --amber:#304ed1; --amber-hi:#233bab;
+  --paper:#fff; --ink:var(--fg); --muted:var(--fg-2); --green:var(--amber);
+  --serif:Georgia,'Times New Roman',serif; --display:var(--serif);
+  --body:Arial,Helvetica,sans-serif; --sans:var(--body); --mono:ui-monospace,SFMono-Regular,Consolas,monospace;
+  --max:1200px; --gutter:clamp(20px,4vw,48px); --r:4px;
+}
+::selection{background:#dfe5ff;color:#17181b}
+body{background:var(--bg);color:var(--fg)}
+a:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid var(--amber);outline-offset:5px}
+.brand{font-family:var(--body);font-weight:700;font-size:27px;letter-spacing:-1.5px;gap:9px;color:var(--fg)}
+.brand img{width:30px;height:30px}.brand-sub{font:11px var(--body);letter-spacing:0;color:var(--fg-3)}
+.top{background:#fffffff2;backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.top .wrap{height:86px}.top nav{font-family:var(--body);font-size:13px;gap:28px}
+.top nav a{color:var(--fg-2)}.top .nav-cta{border-color:var(--line-2);border-radius:4px;padding:10px 16px}
+h1,h2{font-family:var(--serif);font-weight:400;letter-spacing:-.04em;line-height:1.1}
+.eyebrow{font-family:var(--mono);font-size:10px;color:var(--fg-3);letter-spacing:.12em}
+.btn{border-radius:4px}.btn.primary{color:white}.btn.small:hover{background:var(--bg-3)}
+footer{background:var(--bg);color:var(--fg-2)}.fine{font-size:11px}.foot-links{font-size:12px}
+@media(max-width:720px){.top .wrap{height:76px}.top nav{gap:16px}.brand{font-size:24px}.top .nav-cta{padding:8px 12px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation:none!important;transition:none!important}}

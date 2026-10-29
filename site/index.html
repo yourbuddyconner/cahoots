@@ -3,189 +3,89 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cahoots</title>
-<meta name="description" content="A private network for people who have met in person.">
+<title>Cahoots — Meet in person. Stay in cahoots.</title>
+<meta name="description" content="Create a private network with people you've met. Exchange keys in person, then keep your group conversations between you.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Cahoots">
-<meta property="og:title" content="Get in cahoots">
-<meta property="og:description" content="A private network for people who have met in person.">
+<meta property="og:title" content="Meet in person. Stay in cahoots.">
+<meta property="og:description" content="A private network that starts with people in the same room.">
 <meta property="og:url" content="https://cahoots.network/">
-<meta property="og:image" content="https://cahoots.network/assets/og-home.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Get in cahoots">
-<meta name="twitter:description" content="A private network for people who have met in person.">
-<meta name="twitter:image" content="https://cahoots.network/assets/og-home.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Meet in person. Stay in cahoots.">
+<meta name="twitter:description" content="A private network that starts with people in the same room.">
 <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Inter+Tight:wght@500;600&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="landing.css">
+<link rel="stylesheet" href="brand.css">
 </head>
 <body>
-<a class="skip" href="#how">Skip to content</a>
-
-<header class="top">
-  <div class="wrap">
-    <a class="brand" href="./"><img src="assets/mark.svg" alt="" width="22" height="22"><span>Cahoots</span></a>
-    <nav aria-label="Primary">
-      <a href="#how">How you join</a>
-      <a href="#what">What you get</a>
-      <a href="#feed">The feed</a>
-      <a href="#devices">Devices</a>
-      <a href="docs/">Docs</a>
-      <a href="blog/">Blog</a>
-      <a class="nav-cta" href="app/">Open the app</a>
-    </nav>
-  </div>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top wrap">
+  <a class="brand" href="./" aria-label="Cahoots home"><img src="assets/mark.svg" alt="" width="30" height="30"> cahoots</a>
+  <nav aria-label="Primary"><a href="#how">How it works</a><a href="docs/">Docs</a><a href="blog/">Journal</a><a class="nav-cta" href="app/">Open the app <span aria-hidden="true">↗</span></a></nav>
 </header>
-
-<section class="hero" aria-labelledby="hero-title">
-  <div class="scene">
-    <img src="assets/place.svg" width="1600" height="900" alt="A rooftop at golden hour: five people at a round table, their cards on it, the city behind" fetchpriority="high">
-    <div class="poster-title">
-      <h1 id="hero-title">Get in cahoots.</h1>
-      <p class="poster-tag">A private network for people who have met in person.</p>
-      <p class="poster-brand"><svg viewBox="0 0 64 64" width="30" height="30" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="4"><circle cx="32" cy="32" r="26"/><circle cx="32" cy="32" r="15"/><circle cx="32" cy="32" r="5" fill="currentColor" stroke="none"/></svg><span>Cahoots</span></p>
-    </div>
+<main id="main">
+<section class="hero wrap" aria-labelledby="hero-title">
+  <div class="hero-copy">
+    <p class="eyebrow"><span class="dot"></span> Trust starts in the room.</p>
+    <h1 id="hero-title">Meet in person.<br>Stay in <em>cahoots.</em></h1>
+    <p class="lede">A private network for people who know each other. Exchange keys when you meet, then keep your group conversations between you.</p>
+    <div class="actions"><a class="button primary" href="app/">Try the browser app <span aria-hidden="true">↗</span></a><a class="text-link" href="#how">See how it works <span aria-hidden="true">↓</span></a></div>
+    <p class="hero-note">Open source. In active development.</p>
   </div>
-  <div class="wrap hero-copy">
-    <p class="lede">Meet in person once. Five minutes later your circle has keys no server ever had, and a group chat only you can read.</p>
-    <div class="cta">
-      <a class="btn primary" href="app/">Open the app</a>
-      <a class="btn ghost" href="#how">How you join <span aria-hidden="true">↓</span></a>
-    </div>
-  </div>
-</section>
-
-<div class="ticker" aria-hidden="true"><div class="ticker-track" id="ticker"></div></div>
-
-<main>
-<section class="band wrap" id="how" aria-labelledby="how-title">
-  <h2 id="how-title">Five minutes, in person.</h2>
-  <div class="how">
-    <div>
-      <ol class="steps">
-        <li><span><b>Meet.</b> Bring your circle together, with phones or cards.</span></li>
-        <li><span><b>Exchange.</b> Stack the cards or scan the codes on the screens. The devices make the keys.</span></li>
-        <li><span><b>Compare.</b> Read your six words aloud. Everyone's must match.</span></li>
-      </ol>
-      <p class="more"><a href="docs/#/ceremony-guide">The full six steps <span aria-hidden="true">→</span></a></p>
-    </div>
-    <figure class="words">
-      <img src="assets/screen-words.svg" width="200" height="200" alt="A card's screen for a circle called rooftop, showing the six words orbit, maple, fossil, drum, velvet, harbor">
-    </figure>
-  </div>
-</section>
-
-<section class="band wrap" id="what" aria-labelledby="what-title">
-  <h2 id="what-title">What your circle can do.</h2>
-  <div class="apps">
-    <article class="app">
-      <img class="px icon" src="assets/icons/chat.svg" alt="" width="32" height="32">
-      <h3>Chat</h3>
-      <p>A group chat only your circle can read. The keys come from the meeting and never touch a server.</p>
-    </article>
-    <article class="app">
-      <img class="px icon" src="assets/icons/login.svg" alt="" width="32" height="32">
-      <h3>Log in</h3>
-      <p>Your circle becomes an SSH authorized_keys file. Log in to servers and sign git commits with a press of both buttons.</p>
-    </article>
-    <article class="app">
-      <img class="px icon" src="assets/icons/seal.svg" alt="" width="32" height="32">
-      <h3>Seal</h3>
-      <p>Encrypt files and messages to one member or the whole circle. age, HPKE and TLS 1.3 take the circle's shared secret as a pre-shared key.</p>
-    </article>
-    <article class="app">
-      <img class="px icon" src="assets/icons/sign.svg" alt="" width="32" height="32">
-      <h3>Sign</h3>
-      <p>Sign approvals with a key that never leaves the card's chip. Anyone can check the signature against the chip maker's certificate.</p>
-    </article>
-  </div>
-</section>
-
-<section class="band wrap" id="feed" aria-labelledby="feed-title">
-  <h2 id="feed-title">Your messages sit in public. Only your circle can read them.</h2>
-  <div class="feed">
-    <p class="sub">Cahoots posts to a public feed, like a numbers station. Anyone can see it, and anyone can post. Only your circle can read what's there, write a post that counts, or notice if one goes missing.</p>
-    <div class="station-card" role="group" aria-label="Live feed example">
-      <div class="station-head"><span>circle 6f8648f8</span><span>seq 41 · 25 B</span></div>
-      <pre id="station-sample"></pre>
-    </div>
-  </div>
-</section>
-
-<section class="band wrap" id="devices" aria-labelledby="devices-title">
-  <h2 id="devices-title">Choose your device.</h2>
-  <div class="devices">
-    <div class="device">
-      <h3>Phone</h3>
-      <p>The browser app, on the phone you already carry.</p>
-      <p class="fact">The keys stay in the browser.</p>
-    </div>
-    <div class="device">
-      <h3>Laptop</h3>
-      <p>A program on your machine holds the keys. It can run for you, for a server, or for an AI agent.</p>
-      <p class="fact">The keys sit on disk.</p>
-    </div>
-  </div>
-  <p class="note">One member with keys on a laptop can leak what everyone else keeps on cards. <a href="docs/#/tiers">How the devices compare <span aria-hidden="true">→</span></a></p>
-
-  <div class="card" id="card">
-  <div class="card-row">
-    <div class="card-copy">
-      <h2 id="card-title">Why carry a card.</h2>
-      <p>Your keys live in a chip that can prove they were made there and never gives them up. Every approval is a press of two buttons on something in your hand. No app, laptop or agent can act for you, and no website can trick you into it. Lose your phone and you lose nothing: tap the card and your chats come back. Stack cards with people you trust and a circle exists in minutes. Nothing is sent anywhere.</p>
-      <p>It shows your punk, your contact card, and the six words you read aloud when a circle is made. The hardware and the firmware are open. Build your own, or carry ours.</p>
-      <div class="cta">
-        <a class="btn ghost" href="docs/#/v1-board">What's inside <span aria-hidden="true">→</span></a>
-        <a class="btn ghost" href="docs/#/diy-badge">Build one <span aria-hidden="true">→</span></a>
-      </div>
-    </div>
-    <div class="plates">
-      <figure class="plate board">
-        <img src="assets/v1-front.png" width="600" height="902" alt="The front of the card's circuit board: the e-paper screen at the top, two buttons, and three sockets at the bottom edge" loading="lazy">
-        <figcaption>The card, front</figcaption>
-      </figure>
-      <figure class="plate paper">
-        <img class="px" src="assets/sigil.svg" width="192" height="192" alt="A one-bit pixel punk in a top hat, the picture a card shows at rest" loading="lazy">
-        <figcaption>At rest: your punk</figcaption>
-      </figure>
-    </div>
-  </div>
-  <figure class="plate punks">
-    <img class="px" src="assets/punks.svg" width="688" height="240" alt="Twelve pixel punks from twelve cards, with hats, glasses, beards, a pipe and a cigarette" loading="lazy">
-    <figcaption>Twelve cards, twelve punks</figcaption>
+  <figure class="circle-figure">
+    <div class="figure-top"><span>01 / A shared connection</span><span aria-hidden="true">↗</span></div>
+    <svg class="circle-art" viewBox="0 0 500 430" role="img" aria-labelledby="circle-title circle-desc">
+      <title id="circle-title">Your circle starts with a meeting</title><desc id="circle-desc">Three devices connect around a shared circle. Each holds the keys created together in person.</desc>
+      <defs><pattern id="grid" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".8" fill="#d0d2da"/></pattern></defs>
+      <rect width="500" height="430" fill="url(#grid)"/>
+      <circle cx="250" cy="216" r="147" fill="none" stroke="#c8cbd6" stroke-dasharray="3 7"/>
+      <circle cx="250" cy="216" r="106" fill="#eceef7" stroke="#b6bfdc"/>
+      <path d="M250 110V70 M156 270L115 294 M343 270L386 294" stroke="#304ed1" stroke-width="2"/>
+      <circle cx="250" cy="216" r="67" fill="#17181b"/>
+      <circle cx="250" cy="206" r="17" fill="none" stroke="#ffffff" stroke-width="2"/><circle cx="250" cy="206" r="8" fill="none" stroke="#ffffff" stroke-width="2"/>
+      <text x="250" y="248" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="12" letter-spacing="2">YOUR CIRCLE</text>
+      <g fill="#ffffff" stroke="#304ed1" stroke-width="2"><rect x="225" y="25" width="50" height="76" rx="8"/><rect x="70" y="272" width="50" height="76" rx="8"/><rect x="380" y="272" width="50" height="76" rx="8"/></g>
+      <g fill="#e4e8fa"><rect x="232" y="34" width="36" height="47" rx="2"/><rect x="77" y="281" width="36" height="47" rx="2"/><rect x="387" y="281" width="36" height="47" rx="2"/></g>
+      <g fill="#304ed1"><circle cx="250" cy="91" r="3"/><circle cx="95" cy="338" r="3"/><circle cx="405" cy="338" r="3"/></g>
+      <g fill="#304ed1" font-family="monospace" font-size="11" text-anchor="middle"><text x="250" y="61">01</text><text x="95" y="309">02</text><text x="405" y="309">03</text></g>
+      <g fill="#50525a" font-family="sans-serif" font-size="12" text-anchor="middle"><text x="250" y="17">You</text><text x="95" y="372">Your people</text><text x="405" y="372">Your people</text></g>
+    </svg>
+    <figcaption><span class="dot"></span> Made together. Kept between you.</figcaption>
   </figure>
-  </div>
 </section>
-
-<section class="band wrap" id="open" aria-labelledby="open-title">
-  <h2 id="open-title">Open hardware, open protocol.</h2>
-  <div class="links">
-    <a href="docs/#/protocol"><b>The protocol</b><span>How a circle is made, how messages move, and where they are kept.</span></a>
-    <a href="docs/#/threat-model"><b>The threat model</b><span>What Cahoots protects against, and what it does not.</span></a>
-    <a href="https://github.com/yourbuddyconner/cahoots"><b>The repository</b><span>Firmware, app and board files.</span></a>
-  </div>
+<div class="principles wrap"><span>Meet once. Connect from anywhere.</span><span>Keys stay with your group.</span><span>Built in the open.</span></div>
+<section class="section wrap how-section" id="how" aria-labelledby="how-title">
+  <div class="section-heading"><p class="eyebrow">A small beginning</p><h2 id="how-title">One meeting.<br>A lasting connection.</h2><p>Cahoots calls your private group a circle. You create it together, with the devices you bring.</p></div>
+  <ol class="steps">
+    <li><span class="step-number">01</span><div><h3>Get together.</h3><p>Open Cahoots on your phones or laptops. Scan each other’s codes to exchange the material your devices need to create shared keys.</p></div></li>
+    <li><span class="step-number">02</span><div><h3>Check the words.</h3><p>Each device shows six words. Read them aloud and make sure everyone sees the same ones. That confirms you share the same secret.</p></div></li>
+    <li><span class="step-number">03</span><div><h3>Take your circle with you.</h3><p>Use those keys to chat after you leave. The service delivering your messages never receives the keys to read them.</p></div></li>
+  </ol>
 </section>
+<section class="possibilities" id="what" aria-labelledby="what-title"><div class="wrap">
+  <div class="section-heading wide"><p class="eyebrow">From a shared secret</p><h2 id="what-title">More than a group chat.</h2><p>The same meeting can lay the groundwork for private conversations, encrypted files, and connections between your machines.</p></div>
+  <div class="use-grid">
+    <article><span class="use-symbol" aria-hidden="true">↔</span><h3>Keep talking.</h3><p>Send encrypted messages to your circle. Your devices hold the keys; a relay passes the messages along.</p><a href="docs/#/web">Explore the browser app <span aria-hidden="true">↗</span></a></article>
+    <article><span class="use-symbol" aria-hidden="true">▧</span><h3>Share privately.</h3><p>Use your circle’s shared secret with tools like age to encrypt files for the people you met.</p><a href="docs/#/adapters">Read about integrations <span aria-hidden="true">↗</span></a></article>
+    <article><span class="use-symbol" aria-hidden="true">⌁</span><h3>Connect your machines.</h3><p>Set up WireGuard connections with keys drawn from your circle. Carry trust from the room to your network.</p><a href="docs/#/use-cases">See the use cases <span aria-hidden="true">↗</span></a></article>
+  </div>
+</div></section>
+<section class="section wrap under-hood" aria-labelledby="trust-title">
+  <div><p class="eyebrow">Trust, with the details attached</p><h2 id="trust-title">Your keys.<br>Your responsibility.</h2></div>
+  <div class="trust-copy"><p class="large-copy">Cahoots moves the starting point for trust into a meeting between people.</p><p>Your devices create a shared secret in person. Later, they use it to protect messages sent over a public relay. Running that relay doesn’t give someone access to your conversations.</p><p>The devices still matter. A compromised device can expose its circle, and browser storage has limits. Cahoots is an experimental project; read the threat model before relying on it for sensitive conversations.</p><a class="text-link" href="docs/#/threat-model">Understand the security model <span aria-hidden="true">↗</span></a></div>
+</section>
+<section class="hardware wrap" aria-labelledby="hardware-title">
+  <div class="hardware-image" id="badge-stage">
+    <img class="badge-fallback" src="assets/v1-front.png" width="600" height="902" loading="lazy" alt="Cahoots V1 prototype circuit board">
+    <canvas id="badge" role="img" aria-label="Animated 3D export of the Cahoots V1 PCB design, showing its enclosure, display, circuit board and components" hidden></canvas>
+    <span class="image-label">V1 / PCB design</span>
+    <button class="motion-toggle" type="button" aria-pressed="false" hidden>Pause motion</button>
+  </div>
+  <div class="hardware-copy"><p class="eyebrow">Beyond the browser</p><h2 id="hardware-title">A little device.<br>A place for your keys.</h2><p>We’re also building a dedicated Cahoots badge: an e-paper display, two buttons, and hardware designed to keep signing keys in a secure chip.</p><p class="render-note">The 3D view comes directly from the V1 PCB design. Hardware is still in development.</p><p>The badge is a work in progress. The board files and firmware are open for anyone who wants to follow along or build one.</p><a class="text-link" href="docs/#/diy-badge">Explore the hardware <span aria-hidden="true">↗</span></a></div>
+</section>
+<section class="closing wrap" aria-labelledby="closing-title"><p class="eyebrow">Good things start with people.</p><h2 id="closing-title">Bring your people.<br>Make a circle.</h2><div class="actions"><a class="button primary" href="app/">Try the browser app <span aria-hidden="true">↗</span></a><a class="text-link" href="docs/#/ceremony-guide">Read the setup guide <span aria-hidden="true">↗</span></a></div></section>
 </main>
-
-<footer>
-  <div class="wrap foot">
-    <div>
-      <a class="brand" href="./"><img src="assets/mark.svg" alt="" width="22" height="22"><span>Cahoots</span></a>
-      <p class="fine"><em>In cahoots</em>: secretly working together. Open source under MIT or Apache-2.0.</p>
-    </div>
-    <div class="foot-links">
-      <a href="docs/">Docs</a>
-      <a href="blog/">Blog</a>
-      <a href="app/">App</a>
-      <a href="https://github.com/yourbuddyconner/cahoots">GitHub</a>
-    </div>
-  </div>
-</footer>
-
-<script type="module" src="main.js"></script>
+<footer class="wrap"><div><a class="brand" href="./"><img src="assets/mark.svg" alt="" width="30" height="30"> cahoots</a><p>Made for people who trust each other.</p></div><nav aria-label="Footer"><a href="docs/">Documentation</a><a href="blog/">Journal</a><a href="https://github.com/yourbuddyconner/cahoots">GitHub ↗</a></nav><p class="license">Open source · MIT / Apache-2.0</p></footer>
+<script type="module" src="badge-loader.js"></script>
 </body>
 </html>

@@ -2,35 +2,9 @@
 // selected crate READMEs into site/docs/md/, and docs/diagrams into site/docs/diagrams/.
 // Routes are #/<name>, with #/<name>#<heading> for a section.
 // src is the file's path in the repository; links inside it are relative to that.
-const DOCS = [
-  { group: "Start here" },
-  { id: "readme", title: "Overview", file: "readme.md", src: "README.md", lede: "What Cahoots is and how the pieces fit." },
-  { id: "use-cases", title: "What you get", file: "use-cases.md", src: "docs/use-cases.md", lede: "Concrete uses, from group chat to bootstrapping a network." },
-  { id: "ceremony-guide", title: "Ceremony guide", file: "ceremony-guide.md", src: "docs/ceremony-guide.md", lede: "How to run a ceremony with a group." },
-  { id: "glossary", title: "Glossary", file: "glossary.md", src: "docs/glossary.md", lede: "The words these pages use, in plain terms." },
-  { group: "The system" },
-  { id: "protocol", title: "Protocol v1", file: "protocol.md", src: "docs/protocol.md", lede: "The normative description of the ceremony, messages, and storage.", spec: true },
-  { id: "chat", title: "Chat", file: "chat.md", src: "docs/chat.md", lede: "Keys from the pad, forward secrecy per sender, messages over the feed.", spec: true },
-  { id: "threat-model", title: "Threat model", file: "threat-model.md", src: "docs/threat-model.md", lede: "What is covered, what is not, and what the app may claim." },
-  { id: "tiers", title: "Device assurance", file: "tiers.md", src: "docs/tiers.md", lede: "What each kind of device protects, from a phone to inspected silicon." },
-  { group: "The card" },
-  { id: "diy-badge", title: "Build a badge", file: "diy-badge.md", src: "docs/diy-badge.md", lede: "Three boards: the DIY Arduino build, V1 on a Pico 2, and V2 on the Baochip. E-paper, two buttons, a wire, USB to the phone." },
-  { id: "v1-board", title: "The board", file: "v1-board.md", src: "hardware/v1/README.md", lede: "What is on the first board you can order, where the pins go, and what to check before ordering." },
-  { id: "manufacturing", title: "From breadboard to board", file: "manufacturing.md", src: "docs/manufacturing.md", lede: "How a custom board gets made, what ours needs, and the order to do it in." },
-  { id: "rp2350", title: "The Pico 2 firmware", file: "rp2350.md", src: "crates/rp2350/README.md", lede: "The badge code running on a Raspberry Pi Pico 2: the board layer, the drivers, and the three links." },
-  { group: "Ideas" },
-  { id: "gatherings", title: "Cards for every gathering", file: "gatherings.md", src: "docs/gatherings.md", lede: "What happens when everyone carries one: storage, messages from old circles, a web of trust, and a social network with no accounts." },
-  { id: "attested-data", title: "Attested readings", file: "attested-data.md", src: "docs/attested-data.md", lede: "A survey of what a network of signed sensor readings could be for, and what has to be decided before designing it." },
-  { group: "Project" },
-  { id: "plan", title: "Roadmap", file: "plan.md", src: "docs/plan.md", lede: "What is built, what is next, and what is waiting." },
-  { group: "Reference" },
-  { id: "web", title: "Browser app", file: "web.md", src: "web/README.md", lede: "Running and building the app." },
-  { id: "station", title: "The feed", file: "station.md", src: "crates/station/README.md", lede: "Running the relay." },
-  { id: "chat-cli", title: "Chat CLI", file: "chat-cli.md", src: "crates/chat/README.md", lede: "A terminal chat client for trying the protocol." },
-  { id: "host", title: "Simulator", file: "host.md", src: "crates/host/README.md", lede: "A desktop stand-in for the badge." },
-  { id: "adapters", title: "Adapters", file: "adapters.md", src: "crates/ADAPTERS.md", lede: "HPKE, age, and WireGuard." },
-];
-const PAGES = DOCS.filter((d) => d.id);
+import { DOCS, ARCHIVED } from './catalog.js';
+const NAV_PAGES = DOCS.filter(d => d.id);
+const PAGES = [...NAV_PAGES, ...ARCHIVED];
 
 const nav = document.getElementById("nav");
 const content = document.getElementById("content");
@@ -69,7 +43,7 @@ function groupOf(d) {
     if (x.group) g = x.group;
     if (x === d) return g;
   }
-  return g;
+  return d.category || g;
 }
 
 function slug(s) {
@@ -166,9 +140,9 @@ async function figures(root) {
 }
 
 function pager(d) {
-  const i = PAGES.indexOf(d);
-  const prev = PAGES[i - 1];
-  const next = PAGES[i + 1];
+  const i = NAV_PAGES.indexOf(d);
+  const prev = NAV_PAGES[i - 1];
+  const next = i >= 0 ? NAV_PAGES[i + 1] : NAV_PAGES[0];
   const p = document.createElement("nav");
   p.className = "pager";
   p.setAttribute("aria-label", "Previous and next");
@@ -198,7 +172,12 @@ let lastId = null;
 async function render() {
   const d = current();
   const sub = location.hash.includes("#", 2) ? location.hash.slice(location.hash.indexOf("#", 2) + 1) : "";
-  for (const a of document.querySelectorAll(".docs-nav a")) a.classList.toggle("on", a.dataset.id === d.id);
+  for (const a of document.querySelectorAll('.docs-nav a')) {
+    const active = a.dataset.id === d.id;
+    a.classList.toggle('on', active);
+    if (active) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  }
   document.title = `${d.title} · Cahoots docs`;
   drawerLabel.textContent = d.title;
   drawer.open = false;

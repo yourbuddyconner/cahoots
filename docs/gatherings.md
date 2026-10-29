@@ -30,7 +30,7 @@ A message arrives on the feed for a circle made in 2027. Nobody has used it in y
 
 - **The seal verifies, so the sender holds that pad.** This is unconditional: no computer can forge it.
 - **The bytes came from seat 3's region of the pad.** That is only a claim. Everyone in the room holds the whole pad, and anyone with a copy could spend from seat 3's region.
-- **Which member it is can be settled by the pair key.** Hello words do it live, on a call (built). For a written message, the same key can add a sixteen-byte tag per recipient, so that you, specifically, know seat 3 wrote it. Nobody else in the room can forge that tag. It is as strong as X-Wing rather than unconditional. This is the sender proof that the federation profile ([use cases §5.2](use-cases.md)) promised, without the extra touches it was going to cost. *Proposed: a `tags` extension to the message format.*
+- **Which member it is can be settled by the pair key.** Hello words do it live, on a call (built). For a written message, the same key can add a sixteen-byte tag per recipient, so that you, specifically, know seat 3 wrote it. Nobody else in the room can forge that tag. It is as strong as X-Wing rather than unconditional. This is the sender proof that an earlier federation proposal explored, without additional touches during the ceremony. *Proposed: a `tags` extension to the message format.*
 
 So the mystery has a shape. A message that verifies under the pad came from someone in the room, or from someone who took a card. A message that also verifies under a pair key came from that member, or from whoever holds that member's card and knows its PIN. The more rooms you shared with someone, the more cards an impostor would need.
 

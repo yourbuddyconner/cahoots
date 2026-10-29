@@ -1,55 +1,83 @@
-# Ceremony guide
+# Create a circle
 
-How to run a ceremony with a group, using the app on phones. One person hosts. It takes about five minutes for four people.
+A ceremony creates the secret your circle will share. Everyone takes part on their own device, then checks that the devices agree.
 
-![The ceremony in six steps](diagrams/ceremony.svg)
+## Before you begin
 
-## What you need
+- Gather two to eight phones or laptops in the same room.
+- Open the [app](https://cahoots.network/app/) on each device.
+- Turn up screen brightness and make sure there is enough light to scan.
+- Keep each device open until the circle is saved. Reloading during the ceremony loses that device’s progress.
 
-- Two to eight phones or laptops in the same room, each with a camera. Open https://cahoots.network/app on each one.
-- Enough light to scan a screen. Turn screen brightness up.
-- Nobody else looking at the screens. The codes you show each other are not secret, but the room is the point.
+The QR codes carry encrypted contributions, not the shared secret in plaintext. You still need to check the words at the end.
 
-## Before you start
+## 1. Set up the group
 
-The host opens **Start a ceremony** and fills in three things:
+One person selects **Start a ceremony** and chooses:
 
-1. **Name.** Anything the group will recognise, such as the name of the meetup.
-2. **People in the room.** Count every device that will take part, including the host's.
-3. **Secret size.** Small is enough for a first try and is the quickest to scan. Larger sizes hold more messages but take longer at step 2.
+- **Name:** something everyone will recognize.
+- **People in the room:** the number of participating devices, including the host.
+- **Secret size:** choose **Small** for a first try. Larger sizes take longer to exchange.
 
-Leave **Advanced** alone unless you know you want it. It holds one option, a hosted software member. That means a program running in a secure enclave joins as one of the members and gets its own copy of the secret. Use it only if the group has decided to work with such a program. Everyone's screen shows that it is on before they confirm.
+Leave the hosted software member option under **Advanced** off for a circle made only of people. Enabling it gives a program a seat and a copy of the secret; everyone should agree before using it.
 
-If someone has a file of hardware randomness to mix in, they add it on their own device at the next step, from **Add hardware randomness**. It is optional.
+The host continues, keeps seat 1, and selects **Make my contribution**.
 
-## During
+Everyone else selects **Join one**, scans the host’s code, and chooses a different seat number. Say your number aloud to avoid duplicates. Then select **Make my contribution**.
 
-**Seats.** The host taps **Continue**, keeps seat 1, and taps **Make my contribution**. The host's screen now shows a code. Everyone else opens **Join one**, scans the host's code, and picks a seat that nobody else has. Say your seat number out loud so two people do not take the same one. Then tap **Make my contribution**.
+Hardware randomness is optional. If you have a suitable file, add it on your own device through **Add hardware randomness**. It is not needed for a first test.
 
-**Step 1, Commit.** Every screen shows a short looping animation and a line saying whose codes are still needed. Show your animation to each of those people, and scan theirs. The order does not matter. Each scan gives a short buzz and a green note. When your screen has everyone, it moves on by itself.
+## 2. Exchange commitments
 
-**Step 2, Reveal.** Every screen now shows a longer animation. Scan each person's animation. Hold both phones still until the bar fills, then move to the next person. This is the slow step. When your screen has everyone, it moves on by itself.
+The **Commit** screen shows a looping code and lists the members whose codes you still need.
 
-**Step 3, Sign.** Every screen shows a short animation again: its signature on the list of seats. Show it to each person and scan theirs, as at step 1. When your screen has everyone's, it keeps showing yours for the people still scanning. Tap **They have scanned it** once they have.
+Show your code to each member and scan theirs. Order does not matter. Your device advances when it has all the commitments.
 
-**Step 4, Check.** Every screen shows six words. One person reads them out loud. Everyone else checks that their own screen shows the same six, in the same order. If they match, everyone taps **They match**. If anyone sees different words, everyone taps **They differ** and you start again from the beginning. Do not keep a secret that did not match.
+A commitment prevents a member from changing their contribution after seeing everyone else’s.
 
-If someone is still scanning at step 2 after you moved on, your reveal is one tap away: **Someone still needs my reveal**. If they are still at step 3 after you reached the words, tap **Someone still needs my signature**.
+## 3. Exchange reveals
 
-## After
+The **Reveal** screen shows a longer sequence of codes. Scan every other member’s sequence.
 
-- Each device keeps the shared secret, its own signing key for this circle, and the signed list of seats. The random bytes each person contributed are erased.
-- Each device shows a label next to the name. The label is per device: **TRNG** on a phone that mixed in hardware randomness, **CSPRNG** on one that used only its own. It says where that device's randomness came from. It is not a warning.
-- The group can now send messages and chat. Nothing about the ceremony has to happen again until the secret runs low, and the app warns you when it does.
+Hold the devices still until the progress bar fills. This is usually the longest step. Your device advances when it has everyone’s reveal.
 
-## If something goes wrong
+If someone still needs yours after you have moved on, use **Someone still needs my reveal** from the menu.
 
-- **Someone scanned a code for their own seat.** Two people picked the same seat. One of them leaves the ceremony from the menu and joins again with a different seat.
-- **A phone reloaded or the app was closed.** That person's ceremony is gone. Everyone starts again from the beginning. The ceremony lives only in memory until the check words match.
-- **A signature does not check out.** The scan was garbled or the code is from someone else. Ask them to show it again.
-- **The ceremony stopped on its own.** A reveal did not match its commitment. Nothing was kept. Start again. If it happens twice, one device may be faulty.
-- **No camera.** Every scan has a paste fallback in the menu. Copy the code as text on one device and paste it on the other, over any channel you like. The codes are not secret.
+## 4. Exchange signatures
 
-## Badges
+The **Sign** screen shows another short sequence. Show yours to everyone and scan theirs.
 
-The hardware badge replaces scanning with stacking. Put the cards in a pile: magnets line each one up on the one below, and the pile passes the codes through the pads. The bottom card names the circle. The top card's screen says "stack the cards" and shows its seat. Press both buttons together on the top card to start. Each card's screen shows the commits, reveals and signatures as they arrive. When the words appear, each card asks "keep this circle?". Press both buttons to keep it. Either button alone asks "discard this circle?", and both buttons there discard it; one button goes back to the words. Then lift your card off and read the six words from its screen. The steps and the words are the same as on a phone; the seats come from the pile, so nobody says a number out loud. This section will grow once the first ceremonies have run on real badges.
+Your device keeps showing its signature after it has collected the others. Wait for everyone to finish scanning before selecting **They have scanned it** or **Everyone has scanned it**.
+
+Signatures record which seats belong to the circle.
+
+## 5. Check the words and save
+
+Every device shows six words. One person reads them aloud. Everyone checks all six words, in the same order, on their own screen.
+
+- If every screen agrees, select **They match** on each device. The circle is saved.
+- If any word differs, select **They differ · start over**. Everyone must restart. Do not keep that circle.
+
+If someone still needs your signature, use **Someone still needs my signature** before saving.
+
+## Send your first message
+
+Open the saved circle and select **Send a message**. Pass its encrypted code or text to another member, who opens **Read a message**.
+
+For ongoing chat, follow [Run a relay](relay.md). Saving a circle does not automatically connect it to a relay.
+
+## Troubleshooting
+
+| Problem | What to do |
+|---|---|
+| Two people chose the same seat | One leaves the ceremony and rejoins with an unused number. |
+| Scanning is slow | Increase brightness, reduce glare, and hold both devices still. Wait for the progress bar to finish. |
+| A device has no camera | Use the copy and paste options in the menu to exchange the same data. |
+| A device reloads or closes | Restart the ceremony on every device. Unsaved progress cannot be recovered. |
+| A signature is rejected | Check whose code you are scanning and try again. |
+| A reveal fails its commitment check | Restart. The device refuses to save the circle. |
+| The six words differ | Discard the ceremony on every device and start again. |
+
+Camera scanning has not been verified end to end. The browser’s automated checks exercise the paste path; use that if scanning fails.
+
+For badges, see [Hardware](hardware.md). Multi-badge ceremonies remain development work; the phone guide does not establish that a hardware pile has been tested.

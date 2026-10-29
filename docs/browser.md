@@ -1,0 +1,58 @@
+# Use the browser app
+
+The [Cahoots app](https://cahoots.network/app/) runs on phones and laptops. It stores circles and message history in that browser on that device.
+
+First, [create a circle](ceremony-guide.md) with someone in person.
+
+## Send a short message
+
+1. Open a saved circle.
+2. Select **Send a message** and enter your text.
+3. Pass the encrypted QR code or copyable text to another member.
+4. The recipient opens the same circle, selects **Read a message**, and scans or pastes it.
+
+This uses **pure-pad mode**: fresh secret bytes encrypt each message and are then consumed. It works without a relay. Passing a message over another service does not give that service the circle’s secret.
+
+A message can be read once by each receiving device. Reading it again is refused as reuse. The app keeps a local history of messages it has already read.
+
+## Use group chat
+
+Chat is a separate mode. It uses conventional encryption with keys seeded from the circle’s secret, so it can carry many messages without consuming one secret byte per text byte.
+
+1. Have one member [run a relay](relay.md).
+2. Open **Chat** in the saved circle.
+3. Set **Relay address** to a URL every member can reach.
+4. Use the same relay for all members of that circle.
+
+There is no default relay. If the app says **Chat needs a relay**, creating the circle succeeded; the delivery service is the missing step.
+
+The relay receives encrypted messages. It does not receive the secret. It can still observe traffic and stop delivering messages.
+
+### Rotate chat keys
+
+An **epoch** is a period using one set of chat keys. Starting an epoch spends 32 secret bytes. Chat starts the first one when needed and rotates after 1,000 of your own messages in an epoch.
+
+Use **Start a new epoch** in the chat menu to rotate sooner. Automatic rotation after a time interval is not implemented.
+
+## Check someone on a call
+
+Open **Hello words** in the circle and choose the person you are calling.
+
+The screen shows two words for you to say, two for them to say, and a hello number. Both devices must use the same number. If needed, set it from the menu.
+
+Compare the responses. On a later call, or if something feels wrong, both people select **Next hello** and compare the new words.
+
+Hello words verify access to the pair’s key, rather than the sound of someone’s voice. They do not protect against someone who has the other person’s unlocked device. They use a different kind of key from pure-pad messages; see [Security and limits](security.md).
+
+## Understand local storage
+
+A saved circle contains secret material. Chat history also contains plaintext on the device.
+
+- Use the same browser and browser profile to return to your circles.
+- Clearing site data can remove circles and history.
+- The relay is not a backup of your keys and cannot restore a lost circle.
+- Browser storage does not provide reliable physical erasure. A compromised browser or operating system can expose secrets and history.
+
+Do not restore or copy a circle’s send state onto a second device and use both copies. Reusing pad ranges breaks the protocol’s security guarantees. Create a new circle when you need a fresh start.
+
+For local builds, WebAssembly details, and exchange formats, see the [browser client README](../web/README.md).

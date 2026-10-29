@@ -126,13 +126,11 @@ def head(title, description, url, image, article=None):
             out.append(f'<meta property="article:author" content="{e(article["author"])}">')
     out += [
         f'<link rel="canonical" href="{url}">',
-        f'<link rel="alternate" type="application/rss+xml" title="Cahoots blog" href="{SITE}/blog/feed.xml">',
+        f'<link rel="alternate" type="application/rss+xml" title="Cahoots journal" href="{SITE}/blog/feed.xml">',
         '<link rel="icon" href="/assets/mark.svg" type="image/svg+xml">',
-        '<link rel="preconnect" href="https://fonts.googleapis.com">',
-        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>',
-        f'<link href="{FONTS}" rel="stylesheet">',
         '<link rel="stylesheet" href="/style.css">',
         f'<link rel="stylesheet" href="/blog/blog.css?v={CSS_V}">',
+        '<link rel="stylesheet" href="/brand.css">',
         "</head>",
     ]
     return "\n".join(out)
@@ -140,7 +138,7 @@ def head(title, description, url, image, article=None):
 
 TOP = f"""<header class="top">
   <div class="wrap">
-    <a class="brand" href="/"><img src="/assets/mark.svg" alt="" width="22" height="22"><span>Cahoots</span><span class="brand-sub">Blog</span></a>
+    <a class="brand" href="/"><img src="/assets/mark.svg" alt="" width="22" height="22"><span>cahoots</span><span class="brand-sub">Journal</span></a>
     <nav aria-label="Primary">
       <a href="/">Home</a>
       <a href="/docs/">Docs</a>
@@ -153,12 +151,12 @@ TOP = f"""<header class="top">
 FOOT = f"""<footer>
   <div class="wrap foot">
     <div>
-      <a class="brand" href="/"><img src="/assets/mark.svg" alt="" width="22" height="22"><span>Cahoots</span></a>
-      <p class="fine"><em>In cahoots</em>: secretly working together. A group that shares a secret is a cahoot. Open source under MIT or Apache-2.0.</p>
+      <a class="brand" href="/"><img src="/assets/mark.svg" alt="" width="22" height="22"><span>cahoots</span></a>
+      <p class="fine">Made for people who trust each other. Open source under MIT or Apache-2.0.</p>
     </div>
     <div class="foot-links">
       <a href="/docs/">Docs</a>
-      <a href="/blog/">Blog</a>
+      <a href="/blog/">Journal</a>
       <a href="/app/">App</a>
       <a href="{GITHUB}">GitHub</a>
     </div>
@@ -287,11 +285,12 @@ def post_page(p, others):
     return f"""{head(p['title'], p['description'], url, image, article=p)}
 {BRAND_SUB_CSS}
 <body class="blog-body">
+<a class="skip" href="#main">Skip to content</a>
 {TOP}
-<main class="blog-wrap post-wrap">
+<main class="blog-wrap post-wrap" id="main">
   <div class="post-layout">
     <article class="post-main">
-      <a class="back" href="/blog/">{ICONS['back']}Blog</a>
+      <a class="back" href="/blog/">{ICONS['back']}Journal</a>
       <h1>{e(p['title'])}</h1>
       <div class="details">{tags}{'<span class="dot">·</span>' if tags else ''}<span class="date">{ICONS['cal']}<time datetime="{p['date'].isoformat()}">{long_date(p['date'])}</time></span>{author}</div>
       <img class="phero" src="{e(hero_src(p))}" alt="" width="1600" height="800">
@@ -339,14 +338,16 @@ def post_page(p, others):
 def index_page(posts):
     url = f"{SITE}/blog/"
     image = f"{SITE}/assets/og-blog.png"
-    return f"""{head("Cahoots blog", "Building Cahoots in the open: the protocol, the code, the hardware, and the mistakes.", url, image)}
+    return f"""{head("Cahoots journal", "Ideas, experiments, and progress on a network built between people.", url, image)}
 {BRAND_SUB_CSS}
 <body class="blog-body">
+<a class="skip" href="#main">Skip to content</a>
 {TOP}
-<main class="blog-wrap">
+<main class="blog-wrap" id="main">
   <header class="blog-head">
-    <h1>Blog</h1>
-    <p>Building Cahoots in the open: the protocol, the code, the hardware, and the mistakes.</p>
+    <p class="eyebrow">Notes from the workshop</p>
+    <h1>The Cahoots journal.</h1>
+    <p>Ideas, experiments, and progress on a network built between people.</p>
     <div class="pcta"><a class="btn small" href="/blog/feed.xml">{ICONS['rss']}RSS feed</a></div>
   </header>
   <div class="pgrid">
@@ -375,7 +376,7 @@ def feed(posts):
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
 <channel>
-  <title>Cahoots blog</title>
+  <title>Cahoots journal</title>
   <link>{SITE}/blog/</link>
   <atom:link href="{SITE}/blog/feed.xml" rel="self" type="application/rss+xml"/>
   <description>Building Cahoots in the open.</description>

@@ -115,3 +115,27 @@
 .cr-col li { font-size: 14.5px; line-height: 1.45; color: var(--fg-2); padding-left: 16px; position: relative; margin: 0; }
 .cr-col li::before { content: ""; position: absolute; left: 0; top: 0.6em; width: 6px; height: 6px; border-radius: 50%; background: var(--fg-3); }
 .cr-col--on li::before { background: var(--amber); }
+
+/* The journal shares the site's ink, paper, cobalt, and editorial type. */
+.blog-wrap{padding-top:64px}
+.blog-head{padding-bottom:40px;margin-bottom:48px}
+.blog-head h1{font-family:var(--serif);font-weight:400;letter-spacing:-.045em;margin-bottom:20px}
+.blog-head .eyebrow{font:10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--fg-3);margin-bottom:22px}
+.blog-head>p:not(.eyebrow){font-size:16px;max-width:500px;line-height:1.7}
+.pgrid{gap:56px 40px}.pcard-img,.phero{border-radius:4px;background:var(--bg-2)}
+.pcard h3{font-family:var(--serif);font-weight:400;font-size:30px;line-height:1.15;letter-spacing:-.035em}
+.pcard p{font-size:14px;line-height:1.8}
+.tag{background:var(--bg-2);border:1px solid var(--line);border-radius:3px;font-size:11px;padding:4px 8px}
+.details{font-size:12px}.details .role{font-size:11px}
+.avatar{background:var(--bg-3);color:var(--fg);font-family:var(--body)}
+.post-main h1{font-weight:400;max-width:20ch;font-family:var(--serif)}
+.post{line-height:1.85;font-size:17px}.post h2{font-weight:400}.post h3{font-family:var(--body);font-size:21px}
+.post strong{font-weight:600}.post a{text-decoration:underline;text-underline-offset:3px}
+.about,.follow,.cr,.cr-col,.post pre,.post img,.share a,.share .copy{border-radius:4px}
+.about{border-left:2px solid var(--amber);background:var(--bg-2);padding:24px}
+.toc{top:112px}.toc a{opacity:1;color:var(--fg-2);font-weight:400;font-size:12px}.toc a:hover,.toc a.on{color:var(--amber)}
+.toc-inner{border-left:1px solid var(--line);padding-left:20px}.toc-head{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase}
+.cr-col--on{border-color:var(--amber);box-shadow:none}.btn.small:hover{background:var(--bg-3)}
+.post table{border-collapse:collapse;display:block;max-width:100%;overflow:auto;font-size:14px}
+.post th,.post td{padding:10px 14px;border:1px solid var(--line);text-align:left}.post th{background:var(--bg-2)}
+@media(max-width:720px){.blog-wrap{padding-top:36px}.post{font-size:16px}.post-main h1{font-size:42px}.blog-head h1{font-size:46px}.share{flex-wrap:wrap}}

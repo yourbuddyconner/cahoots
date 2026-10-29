@@ -1,50 +1,55 @@
-# Device tiers: concentric rings of security
+# Device tiers
 
-Cahoots is open hardware and open protocol. Anyone can build a badge from whatever is on their bench, and a phone works with no hardware at all. The badge we make is the fully verified one. These tiers say what each kind of device protects, so that members know what they are getting and the software never claims more than the weakest device in the room can deliver.
+A device tier describes protection against theft and tampering. It does not describe message encryption strength or prove that a device has been independently verified.
 
-## The rule that makes tiers matter
+Every member holds the circle’s secret. One compromised member can expose it, so the least protected member limits the circle’s protection.
 
-Every member holds the whole pad. A circle's protection against device theft or tampering is therefore the protection of its least protected member. The circle tier is the minimum of its members' device tiers, and the ceremony shows it before anyone confirms.
+## Tiers at a glance
 
-The randomness label (`TRNG` when every device used hardware randomness, `CSPRNG` otherwise) is a separate question, and it is also decided by the weakest member. A circle carries both labels.
+| Tier | Intended protection | Current position |
+|---|---|---|
+| **T0: software** | Runs the protocol on a phone or laptop. The operating system controls secret storage. | The browser app is T0. Erasure is best effort. |
+| **T1: open microcontroller** | Uses raw storage and explicit overwrite of spent bytes. Firmware and flash remain accessible. | The unfused Nano ESP32 and current Pico 2 path belong here. Physical access can expose the pad. |
+| **T2: sealed microcontroller** | Uses a verified boot/storage configuration to protect flash; a secure element can bind the spend ledger to a counter. | A development goal. No current Cahoots board has established this protection. |
+| **T3: hardware key store** | Keeps wrapping keys inside a crypto engine and uses one-way counters for lockout and rollback protection. | A goal for the later Baochip design, not a current deployment. |
+| **T4: inspected hardware** | Adds inspection of the silicon against its published design and firmware agreed by the circle. | A design target, not a verified property of the current badge. |
 
-## The tiers
+These are intended properties. A board does not earn a tier simply because it includes a particular chip. Storage, boot, counters, firmware, and physical testing all matter.
 
-![Device tiers](diagrams/tiers.svg)
+For T2, flash encryption alone does not prevent restoring an older ledger. Without a protected counter, lockout and rollback protection may also be rolled back. T3 does not rule out attacks on the die or flaws in its controller. T4 still depends on the inspection and what happens between inspection and use.
 
-| Tier | Device | What it protects | What it does not |
-|---|---|---|---|
-| **T0 Software** | A phone or laptop browser running the PWA | The protocol: correct spends, erase before send, constant-time tags, reuse detection | Anything about the platform. Erasure is best effort. A compromised OS reads the pad. |
-| **T1 Open MCU** | Any microcontroller running `cahoots-hal` with a raw pad partition: the [DIY Arduino build](diy-badge.md) on an unfused Nano ESP32, and [V1](diy-badge.md) on a Pico 2 until the SE051's key work is done | Erase is real: spent bytes are overwritten in a raw partition and read back | A stolen device is a copy of the pad. Firmware can be replaced. The TRNG is whatever the chip has, with our health tests on top. |
-| **T2 Sealed MCU** | The same MCU with secure boot and flash encryption fused, or any MCU with a secure element beside it that holds the pad's wrapping key and a counter the ledger is bound to. V1 carries the SE051 on its first board, and reaches this tier when the chip holds the pad's key and the counter (being built, M4f in the [roadmap](plan.md)); no Cahoots board is at it today | A dumped flash image is ciphertext. Only signed firmware runs. A restored flash copy is refused because the counter is ahead. A thief needs the PIN before the lockout | Without a secure element, the lockout counter lives in flash and can be rolled back. With one, the firmware still decides when to burn an attempt. |
-| **T3 Key store** | A chip with a hardware key store, one-way counters, and a crypto engine that never exposes keys: the Baochip-1x, which is the chip in [V2](diy-badge.md) | The pad-wrapping key never leaves the engine. Failed PINs burn a one-way counter. After N failures the slot is erased and the pad with it. Boot stages lock the slot before the application runs | Physical attacks on the die. Flaws in the key-store controller, which still needs verification. |
-| **T4 Inspected** | A T3 device whose silicon a member has compared with the published design under an infrared microscope, running firmware whose hash the circle pinned | The chip is what the RTL says it is. The firmware is what the circle agreed to | Supply-chain attacks between inspection and use. The inspection itself is a skill. |
+## What the circle records
 
-Our badge targets T3 at launch and T4 for anyone willing to look.
+The manifest records each seat’s declared tier, and the ceremony commitment binds it. A member cannot change that declaration after committing.
 
-## What each tier changes in the software
+A declaration is still a claim. Chip attestation can add evidence about a seat key, but it does not attest to the complete device or its firmware. The screen for presenting the full tier information is planned.
 
-- **The ceremony screen** shows each member's tier and the resulting circle tier, next to the randomness label and the agent-seat warning, and members confirm all three. The tiers are in the manifest today; the screen that shows them is planned.
-- **The manifest** records each seat's declared tier, and the commitment binds it, so it cannot change after committing. It is a claim, like the sender index. A device with a key store chip can back the claim with the chip's own proof that the seat key lives inside it, shown in the room at the sign step (roadmap M4f); a phone cannot.
-- **The UI claim** follows the circle tier. A T0 circle says "erasure is best effort". A T2 or higher circle may say "a stolen device does not expose the pad without the PIN". No tier changes the confidentiality claim, which comes from the randomness label.
-- **The burn procedure** (`docs/use-cases.md`) applies to every tier. Higher tiers make it needed less often.
+## Randomness is a separate label
 
-## Assurance
+`TRNG` means every member contributed hardware randomness. `CSPRNG` means at least one used software randomness. This affects the pure-pad confidentiality claim; it does not turn a phone into a theft-resistant device.
 
-A tier says what a device protects. Assurance says how sure a verifier can be that the owner meant one act. Every approval carries one of the levels below: four numbered levels, with "key, attested" as a step within level 1.
+A higher device tier does not make chat information-theoretically secure. See [Security and limits](security.md).
+
+## Assurance for an operation
+
+Assurance describes evidence that an owner authorized one act. It travels separately from the device tier.
 
 | Level | Name | Meaning |
 |---|---|---|
-| 0 | claimed | Nothing was checked. |
-| 1 | key | A signature from a key under a grant. |
-| 1, attested | key, attested | As key, and the key's seat also holds a proof from a secure element that the key was made inside it. |
-| 2 | present | Both buttons pressed on a badge. |
-| 3 | present with PIN | Both buttons pressed after a PIN. |
+| 0 | Claimed | No authorization evidence was checked. |
+| 1 | Key | A signature from a key acting under a grant. |
+| 1, attested | Key, attested | Level 1 plus a secure-element proof about the seat key. |
+| 2 | Present | Both badge buttons were pressed. |
+| 3 | Present with PIN | Both buttons were pressed after PIN entry. |
 
-The "key, attested" rung sits between key and present. It proves that the seat key was generated inside an NXP SE051 secure element and cannot be copied out of it: the chip signs the key, its own serial number and a fresh value the laptop chose, and the laptop checks that signature back to NXP's root. It does not prove who holds the badge, since anyone holding it can ask for the proof, and it does not prove that the firmware on the badge is ours. A person pressing both buttons is the next rung, "present". Sharing an attestation shows which chip holds the key, so two circles that both see attestations from one badge can tell they share a member. NXP's root is not in the repository yet, so no real chip's attestation verifies today; the software chip's test root verifies only simulated badges and is reported as software, not hardware ([roots](../crates/objects/roots/README.md)).
+A higher numbered level satisfies a request for a lower one. “Key, attested” adds evidence within level 1; it does not establish owner presence.
 
-Higher includes lower: a level 3 approval satisfies a policy that asks for level 2. The device tier travels separately, in the manifest, so a verifier can ask for both. A policy elsewhere compares levels and never methods. It says "level 2 or more", and it does not name buttons or PINs. The objects are in [protocol](protocol.md#8-signed-objects).
+These levels describe the object/policy model, not a promise that every workflow is implemented. PIN entry and real-chip verification remain development work.
 
-## Building your own
+### Limits of attestation
 
-The HAL is four traits: `Entropy`, `PadStore`, `Display`, `Link` (`crates/hal`). A new board is a crate that implements them. The host simulator is the reference implementation and also the test harness: a board passes the device suite by completing a ceremony over its links against simulated peers. The tier a board earns is decided by what its `PadStore` and boot chain can do. What the crate says about itself does not count. The README for each target states its tier and why.
+The SE051 attestation design binds a key, chip identity, and fresh challenge to the chip maker’s certificate chain. It does not prove who is holding the badge or which application firmware is running.
+
+Sharing attestations can let two circles recognize that they have seen the same chip. NXP’s root certificate is not bundled in the repository, and real-chip attestation is not verified today. The software-chip test root verifies only simulated devices, which must be reported as software.
+
+For exact signed-object formats, see [the protocol](protocol.md#8-signed-objects). For hardware progress, see [Project status](status.md).
