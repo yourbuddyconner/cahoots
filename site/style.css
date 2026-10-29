@@ -69,7 +69,8 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .poster-title { position: absolute; left: 0; right: 0; top: 11%; padding: 0 var(--gutter); text-align: center; color: var(--on-sky); }
 .hero h1 { font-family: var(--serif); font-optical-sizing: auto; font-weight: 600; font-size: clamp(46px, 7.4vw, 116px); letter-spacing: -0.02em; line-height: 1; margin: 0; text-shadow: 0 2px 28px color-mix(in srgb, var(--sky-ink) 30%, transparent); }
 .poster-brand { display: inline-flex; align-items: center; gap: 10px; margin: clamp(14px, 2.2vw, 26px) 0 0; font-family: var(--display); font-weight: 600; font-size: clamp(17px, 1.6vw, 22px); letter-spacing: -0.01em; }
-.poster-brand img { width: clamp(24px, 2.2vw, 30px); height: auto; border-radius: 6px; }
+/* The mark in the headline's white: the rings of assets/mark.svg without its dark tile. */
+.poster-brand svg { width: clamp(24px, 2.2vw, 30px); height: auto; }
 .hero-copy { position: relative; padding-top: clamp(32px, 5vh, 52px); }
 .hero .eyebrow { margin-bottom: 14px; }
 .lede { font-size: clamp(16px, 1.4vw, 19px); color: var(--fg-2); max-width: 880px; margin: 0 0 24px; }

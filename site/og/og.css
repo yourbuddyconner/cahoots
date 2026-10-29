@@ -19,6 +19,6 @@ body.scene .card { padding: 58px 72px 0; justify-content: flex-start; align-item
 body.scene h1 { font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: 104px; line-height: 1; letter-spacing: -0.02em; margin: 0; max-width: none; color: var(--on-sky); text-shadow: 0 2px 28px rgba(30, 47, 79, 0.3); }
 body.scene h1.sm { font-size: 74px; line-height: 1.02; }
 body.scene .brand { color: var(--on-sky); font-size: 28px; }
-body.scene .brand img { border-radius: 7px; }
+body.scene .brand svg { width: 34px; height: 34px; }
 body.scene .brand .sub { color: var(--on-sky); opacity: 0.85; }
 body.scene .brand .sub::before { color: rgba(255, 255, 255, 0.6); }

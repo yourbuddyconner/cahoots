@@ -219,9 +219,9 @@ def sky(rng):
         f'<rect width="{POSTER_W}" height="{PARAPET + 10}" fill="url(#sky)"/>',
     ]
     # The low sun behind the right-hand cloud, and its glow on the haze.
-    out.append(circle(900, 486, 140, P_CLOUD, op(0.12)))
-    out.append(circle(900, 486, 80, P_CLOUD, op(0.22)))
-    out.append(circle(900, 486, 40, P_CLOUD))
+    out.append(circle(900, 506, 140, P_CLOUD, op(0.12)))
+    out.append(circle(900, 506, 80, P_CLOUD, op(0.22)))
+    out.append(circle(900, 506, 40, P_CLOUD))
     out.append('<g clip-path="url(#above)">')
     # The left tower.
     out += cumulus(rng, [(-120, 300), (-40, 150), (60, 70), (170, 34), (280, 64), (370, 150), (420, 236),
@@ -458,7 +458,7 @@ def lights():
     poles = [(150, 330), (1450, 330)]
     for px, py in poles:
         out.append(f'<rect x="{px - 5}" y="{py - 6}" width="10" height="{POSTER_H - py}" fill="{P_NAVY}"/>')
-    strands = [((150, 336), (1450, 336), 150), ((150, 336), (-40, 292), 30), ((1450, 336), (1640, 286), 30)]
+    strands = [((150, 336), (1450, 336), 110), ((150, 336), (-40, 292), 30), ((1450, 336), (1640, 286), 30)]
     for (x0, y0), (x1, y1), sag in strands:
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2 + sag * 2
         out.append(f'<path d="M{x0} {y0}Q{n(cx)} {n(cy)} {x1} {y1}" fill="none" stroke="{P_NAVY}" stroke-width="2.5"/>')
@@ -502,8 +502,8 @@ def poster():
         out += arms_back(x, y, jacket, skin, reach)
     out += table_things()
     # Two at the sides.
-    out += person_side(cx - 268, 662, 1, P_TERRA, P_CREAM, P_NAVY, "bun", P_CLOUD)
-    out += person_side(cx + 268, 662, -1, P_GREEN, P_TERRA, P_CREAM, "short", P_CLOUD)
+    out += person_side(cx - 268, 662, 1, P_GREEN, P_CREAM, P_NAVY, "bun", P_CLOUD)
+    out += person_side(cx + 268, 662, -1, P_AMBER, P_TERRA, P_CREAM, "short", P_CLOUD)
     out += planter(-20, 250, 760, rng, (120, 520))
     out += planter(1360, 1640, 770, rng, None)
     out += lights()
