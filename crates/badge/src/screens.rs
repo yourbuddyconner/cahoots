@@ -308,6 +308,28 @@ pub fn git_signature(author: &str, subject: &str, verified: bool, circle: &str) 
     s.done()
 }
 
+/// The question a request to sign a file asks. `preview` is the file's first line when the
+/// badge was given the file and it is text, "binary" when it is not, or the hash the laptop
+/// sent when the file was too big to show, marked "(laptop)" then; `size` says how big.
+pub fn file_signature(
+    namespace: &str,
+    size: &str,
+    preview: &str,
+    verified: bool,
+    circle: &str,
+) -> Screen {
+    let mut s = Draw::new();
+    s.title("sign a file");
+    let mark = if verified { "" } else { LAPTOP };
+    let w = cols(&FONT_8X13);
+    s.centered(&FONT_8X13, 42, &fit("in ", namespace, "", w));
+    s.centered(&FONT_8X13, 62, &fit("", size, "", w));
+    s.two_rows(&FONT_8X13, 86, &fit("", preview, mark, 2 * w));
+    s.centered(&FONT_8X13, 130, &fit("", circle, "", w));
+    s.footer(Some("refuse"), Some("A+B  allow"), Some("refuse"));
+    s.done()
+}
+
 /// `n` and a noun, in plain words: "no handles", "1 handle", "2 handles".
 fn count(n: usize, one: &str, many: &str) -> String {
     match n {

@@ -6,6 +6,12 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
 
+[features]
+# The laptop may press the badge's buttons over USB (frame kind 29). For the bench only: a
+# badge built with this answers consent prompts from a cable, which defeats the point of
+# the buttons, so the boot line says BENCH BUILD and release firmware never sets it.
+bench = []
+
 [dependencies]
 cahoots-core = { path = "../core", default-features = false }
 cahoots-hal = { path = "../hal" }

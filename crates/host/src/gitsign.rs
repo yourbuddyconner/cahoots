@@ -102,7 +102,7 @@ fn sign(args: &[String]) -> Result<(), String> {
 
 /// The public key in `path`, as `ssh-add -L` prints it, or in `<path>.pub` when `path` is a
 /// private key file.
-fn read_key(path: &Path) -> Result<ssh_key::PublicKey, String> {
+pub fn read_key(path: &Path) -> Result<ssh_key::PublicKey, String> {
     let parse = |p: &Path| -> Option<ssh_key::PublicKey> {
         let text = std::fs::read_to_string(p).ok()?;
         let line = text
@@ -118,8 +118,8 @@ fn read_key(path: &Path) -> Result<ssh_key::PublicKey, String> {
         .ok_or_else(|| format!("{}: no public key in it", path.display()))
 }
 
-/// One armored signature over `content`.
-fn sign_one(
+/// One armored signature over `content`, with the content shown to the badge.
+pub fn sign_one(
     socket: &Path,
     key: &ssh_key::PublicKey,
     namespace: &str,

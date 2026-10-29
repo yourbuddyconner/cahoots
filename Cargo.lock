@@ -499,6 +499,7 @@ dependencies = [
  "cahoots-objects",
  "getrandom 0.3.4",
  "hmac 0.12.1",
+ "libc",
  "p256",
  "png",
  "rand_core 0.6.4",

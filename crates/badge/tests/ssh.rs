@@ -699,12 +699,13 @@ fn serve_refuses_what_it_cannot_describe_without_asking() {
         host: None,
         content: None,
     };
-    let other_namespace = ChipRequest::SshSign {
+    // A file whose content does not hash to the request.
+    let file_mismatched = ChipRequest::SshSign {
         data: SshSig::signed_data("file", HashAlg::Sha512, b"x").unwrap(),
         host: None,
-        content: None,
+        content: Some(b"y".to_vec()),
     };
-    for op in [mismatched, garbage, other_key, other_namespace] {
+    for op in [mismatched, garbage, other_key, file_mismatched] {
         let r = ask_now(&mut badge, &mut laptop, id, op);
         assert_eq!(
             r,
@@ -713,6 +714,35 @@ fn serve_refuses_what_it_cannot_describe_without_asking() {
             }
         );
     }
+    // A file in another namespace is asked about, not refused. Without the content the
+    // badge shows the hash as the laptop's word; with it, the file's first line and size.
+    let notes = b"Release notes for 1.4\n\nFixed the thing.\n";
+    let file_hash_only = ChipRequest::SshSign {
+        data: SshSig::signed_data("file", HashAlg::Sha512, notes).unwrap(),
+        host: None,
+        content: None,
+    };
+    signature_of(ask(&mut badge, &mut laptop, id, file_hash_only, Press::Both));
+    let shown = prompt(&mut badge);
+    assert!(shown.iter().any(|l| l == "sign a file"), "{shown:?}");
+    assert!(shown.iter().any(|l| l == "in file"), "{shown:?}");
+    assert!(shown.iter().any(|l| l.starts_with("sha512 ") && l.ends_with("(laptop)")), "{shown:?}");
+    let file_shown = ChipRequest::SshSign {
+        data: SshSig::signed_data("release", HashAlg::Sha512, notes).unwrap(),
+        host: None,
+        content: Some(notes.to_vec()),
+    };
+    let data = SshSig::signed_data("release", HashAlg::Sha512, notes).unwrap();
+    assert_verifies(
+        &public,
+        &data,
+        &signature_of(ask(&mut badge, &mut laptop, id, file_shown, Press::Both)),
+    );
+    let shown = prompt(&mut badge);
+    assert!(shown.iter().any(|l| l == "in release"), "{shown:?}");
+    assert!(shown.iter().any(|l| l == "40 bytes"), "{shown:?}");
+    assert!(shown.iter().any(|l| l == "Release notes for 1.4"), "{shown:?}");
+    assert!(!shown.iter().any(|l| l.contains("(laptop)")), "{shown:?}");
     // The good request still works after them.
     let data = userauth(SESSION, "git", &blob);
     let op = ChipRequest::SshSign {

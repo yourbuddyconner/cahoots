@@ -25,4 +25,5 @@ pub mod gitsign;
 pub mod link;
 pub mod pile;
 pub mod roster;
+pub mod sign;
 pub mod store;

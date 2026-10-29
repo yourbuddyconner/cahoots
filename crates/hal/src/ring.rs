@@ -255,6 +255,16 @@ impl<L: Link> RingCeremony<L> {
 
     /// Send on every link that has a peer, except `except`: the link a frame arrived on.
     fn send_except(&mut self, kind: u8, index: u8, body: &[u8], except: Option<usize>) {
+        // Nothing to send to (the top card of a pile forwarding away from its only
+        // neighbour): build no frame, which on a badge is a reveal-sized allocation.
+        let any = self
+            .links
+            .iter()
+            .enumerate()
+            .any(|(k, l)| Some(k) != except && l.peer_present());
+        if !any {
+            return;
+        }
         let mut payload = Vec::with_capacity(1 + body.len());
         payload.push(index);
         payload.extend_from_slice(body);
@@ -330,7 +340,7 @@ impl<L: Link> RingCeremony<L> {
         self.drain_links();
         for k in 0..self.links.len() {
             loop {
-                let (kind, index, body, used) = match frame::decode(&self.rx[k]) {
+                let (kind, used) = match frame::decode(&self.rx[k]) {
                     Ok((f, used)) => {
                         if f.kind >= crate::pile::KIND_FIRST {
                             // The pile layer, or a laptop's keep-alive ping, talking during
@@ -341,7 +351,7 @@ impl<L: Link> RingCeremony<L> {
                         if f.payload.is_empty() {
                             return Err(self.abort(RingError::Protocol));
                         }
-                        (f.kind, f.payload[0], f.payload[1..].to_vec(), used)
+                        (f.kind, used)
                     }
                     Err(FrameError::Incomplete) => break,
                     Err(FrameError::Crc) => {
@@ -350,8 +360,16 @@ impl<L: Link> RingCeremony<L> {
                         continue;
                     }
                 };
-                self.rx[k].drain(..used);
+                // Take the frame out of the receive buffer before handling it, so a 20 KiB
+                // reveal is held once, not twice, on a board with a small heap.
+                let bytes: Vec<u8> = self.rx[k].drain(..used).collect();
+                let (f, _) = frame::decode(&bytes).expect("decoded a moment ago");
+                let (index, body) = (f.payload[0], &f.payload[1..]);
                 self.handle(kind, index, body, k)?;
+            }
+            // A receive buffer that grew to hold reveals keeps its capacity otherwise.
+            if self.rx[k].capacity() > 4096 && self.rx[k].len() <= 1024 {
+                self.rx[k].shrink_to(4096);
             }
         }
         self.maybe_reveal()?;
@@ -363,7 +381,7 @@ impl<L: Link> RingCeremony<L> {
         })
     }
 
-    fn handle(&mut self, kind: u8, index: u8, body: Vec<u8>, from: usize) -> Result<(), RingError> {
+    fn handle(&mut self, kind: u8, index: u8, body: &[u8], from: usize) -> Result<(), RingError> {
         if kind >= crate::pile::KIND_FIRST {
             // The pile layer talking after the ceremony began. Not ours.
             return Ok(());
@@ -374,12 +392,12 @@ impl<L: Link> RingCeremony<L> {
         let i = usize::from(index);
         match kind {
             k if k == Frame::Params as u8 => {
-                if body != self.params_bytes {
+                if body != &self.params_bytes[..] {
                     return Err(self.abort(RingError::ParamsMismatch));
                 }
                 if !self.seen_params[i] {
                     self.seen_params[i] = true;
-                    self.send_except(kind, index, &body, Some(from));
+                    self.send_except(kind, index, body, Some(from));
                 }
             }
             k if k == Frame::Commit as u8 => {
@@ -401,16 +419,16 @@ impl<L: Link> RingCeremony<L> {
                 }
                 if !self.seen_commit[i] {
                     self.seen_commit[i] = true;
-                    self.send_except(kind, index, &body, Some(from));
+                    self.send_except(kind, index, body, Some(from));
                 }
             }
             k if k == Frame::Reveal as u8 => {
                 // Ours is marked when we send it; a copy from a peer is never needed.
                 if index != self.index
                     && !self.seen_reveal[i]
-                    && self.first_sight(kind, index, &body, from)
+                    && self.first_sight(kind, index, body, from)
                 {
-                    self.pending_reveals.push((index, Zeroizing::new(body)));
+                    self.pending_reveals.push((index, Zeroizing::new(body.to_vec())));
                 }
             }
             k if k == Frame::Attest as u8 => {
@@ -419,9 +437,9 @@ impl<L: Link> RingCeremony<L> {
                 }
                 if index != self.index
                     && !self.seen_attest[i]
-                    && self.first_sight(kind, index, &body, from)
+                    && self.first_sight(kind, index, body, from)
                 {
-                    self.pending_attestations.push((index, body));
+                    self.pending_attestations.push((index, body.to_vec()));
                 }
             }
             k if k == Frame::Abort as u8 => {

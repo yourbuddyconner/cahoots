@@ -83,11 +83,21 @@ impl Board for PicoBoard {
     }
 
     fn press(&mut self) -> Press {
+        #[cfg(feature = "bench")]
+        if let Some(p) = link::bench_press() {
+            log!("bench: the laptop pressed {p:?}");
+            return p;
+        }
         self.buttons.press()
     }
 
     fn a_down(&self) -> bool {
         self.buttons.a.is_down()
+    }
+
+    #[cfg(feature = "bench")]
+    fn screen_drawn(&mut self) {
+        log!("drawn");
     }
 
     fn delay_ms(&mut self, ms: u32) {

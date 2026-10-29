@@ -289,10 +289,55 @@ impl<'a> BadgeApps<'a> {
                 };
                 Ok(screens::ssh_login(user, &check, name))
             }
-            Signed::Sig { namespace, .. } => {
-                if namespace != GIT_NAMESPACE {
-                    return Err(ErrorCode::Unparseable);
+            Signed::Sig {
+                namespace,
+                hash_alg,
+                hash,
+            } if namespace != GIT_NAMESPACE => {
+                // Any other namespace is a file (or stdin) someone signs on purpose. With
+                // the content, the badge checks the hash and shows the first line; without
+                // it (a file too big to send), the badge shows the hash and says the laptop
+                // chose it. A signature in one namespace means nothing in another, so this
+                // never signs a login or a commit.
+                match content {
+                    Some(bytes) => {
+                        if !ssh::check_content(&signed, bytes) {
+                            return Err(ErrorCode::Unparseable);
+                        }
+                        let preview = match core::str::from_utf8(bytes) {
+                            Ok(text) => {
+                                let line = text.lines().find(|l| !l.trim().is_empty());
+                                match line {
+                                    Some(l) => alloc::string::String::from(l.trim()),
+                                    None => alloc::string::String::from("empty text"),
+                                }
+                            }
+                            Err(_) => alloc::string::String::from("binary"),
+                        };
+                        Ok(screens::file_signature(
+                            namespace,
+                            &size_words(bytes.len()),
+                            &preview,
+                            true,
+                            name,
+                        ))
+                    }
+                    None => {
+                        let mut digest = alloc::string::String::new();
+                        for b in hash.iter().take(6) {
+                            digest.push_str(&alloc::format!("{b:02x}"));
+                        }
+                        Ok(screens::file_signature(
+                            namespace,
+                            "size not sent",
+                            &alloc::format!("{hash_alg} {digest}"),
+                            false,
+                            name,
+                        ))
+                    }
                 }
+            }
+            Signed::Sig { .. } => {
                 match content {
                     Some(text) => {
                         if !ssh::check_content(&signed, text) {
@@ -312,6 +357,17 @@ impl<'a> BadgeApps<'a> {
                 }
             }
         }
+    }
+}
+
+/// A size in plain words: "312 bytes", "4.2 KiB", "1.5 MiB".
+fn size_words(n: usize) -> alloc::string::String {
+    if n < 1024 {
+        alloc::format!("{n} bytes")
+    } else if n < 1024 * 1024 {
+        alloc::format!("{:.1} KiB", n as f32 / 1024.0)
+    } else {
+        alloc::format!("{:.1} MiB", n as f32 / (1024.0 * 1024.0))
     }
 }
 

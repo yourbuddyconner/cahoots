@@ -148,6 +148,22 @@ git config --global gpg.ssh.allowedSignersFile ~/.ssh/allowed_signers
 
 `git-sign` finds the agent through `SSH_AUTH_SOCK` (or `CAHOOTS_AGENT_SOCK`, which wins when both are set), so the agent must be running.
 
+### Signing a file
+
+```sh
+cahoots-host sign --file release.tar.gz --circle sf            # writes release.tar.gz.sig
+cahoots-host sign --file notes.txt --circle sf --namespace notes
+```
+
+The signature is the SSH signature format (`-----BEGIN SSH SIGNATURE-----`), in the namespace `file` unless `--namespace` says otherwise, so anyone checks it with OpenSSH alone:
+
+```sh
+echo 'you@example.com namespaces="file" ecdsa-sha2-nistp256 AAAA...' > allowed_signers
+ssh-keygen -Y verify -f allowed_signers -I you@example.com -n file -s release.tar.gz.sig < release.tar.gz
+```
+
+What the badge shows depends on the file's size. Up to 12 KiB, the file goes to the badge, which checks that the hash it is asked to sign is the hash of that file and shows "sign a file", the namespace, the size, and the file's first line (or "binary"). Bigger than that, the badge is sent only the hash, and shows it marked "(laptop)": it is signing what the laptop says the file is. `ssh-keygen -Y sign` through the agent does the same for any namespace but `git`, which still needs the commit text. A file signature can never be mistaken for a login or a commit: the signature names its namespace, and a verifier checks it.
+
 ### A circle as `authorized_keys`
 
 ```sh
@@ -187,6 +203,10 @@ cahoots-host grant --serial /dev/cu.usbmodem1101 --circle sf --to <33-byte key h
 ```
 
 Builds a root grant from this seat to the key `--to`, asks the badge to sign it with the seat key, and writes the signed grant to `--out`, or as hex to stdout. The JSON form goes to stderr. With `--v2`, the payload is a CBOR Web Token (`docs/protocol.md` section 8.3). The badge shows the grantee's short key id and the log position marked "(laptop)", and shows the purposes, the budget and whether the grantee may delegate.
+
+### The bench
+
+With a real board on `--serial`, `CAHOOTS_BENCH=new-circle` or `CAHOOTS_BENCH=serve` in the environment makes the serial link press the badge's buttons for that goal, by reading the badge's screen lines, when the firmware was built with its `bench` feature. `CAHOOTS_FRAMES=1` prints every frame that crosses the port and dumps the bytes received to `/tmp/cahoots-rx-<label>.bin`. `scripts/bench.sh` puts it together; see the [Pico 2 README](../rp2350/README.md#the-bench-hands-off).
 
 ### Tests
 

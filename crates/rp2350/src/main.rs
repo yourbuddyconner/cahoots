@@ -50,7 +50,7 @@ pub static HEAP: Heap = Heap::empty();
 /// sealed reveals were in flight. The post-quantum sealing wants well over 100 KiB of
 /// stack, and the stack grows down from the top of the 512 KiB; this leaves it about
 /// 185 KiB. The board logs both as it goes.
-const HEAP_SIZE: usize = 320 * 1024;
+const HEAP_SIZE: usize = 384 * 1024;
 
 /// A fault that no handler caught: record where, as the panic handler does, so the next
 /// boot shows it and the host's log sees it. A stack overflow lands here through the stack
@@ -86,9 +86,13 @@ fn die(msg: alloc::string::String) -> ! {
         payload: msg.as_bytes(),
     };
     link::emergency_write(&cahoots_core::frame::encode(&fr));
-    loop {
+    // Give the log frame a moment to leave, then start over: the record is shown at the
+    // next boot. Spinning here would leave a faulted badge deaf to USB, with no way back
+    // but a hand on BOOTSEL.
+    for _ in 0..30_000_000u32 {
         core::hint::spin_loop();
     }
+    cortex_m::peripheral::SCB::sys_reset();
 }
 
 unsafe extern "C" {
@@ -161,6 +165,8 @@ fn main() -> ! {
         HEAP_SIZE / 1024,
         core::ptr::addr_of!(__ebss) as u32 + 4096
     );
+    #[cfg(feature = "bench")]
+    log!("BENCH BUILD: the laptop can press the buttons over USB; not for anyone's keys");
 
     // The e-paper on SPI0, V1's pins: CLK GP18, DIN GP19, CS GP17, DC GP16, RST GP20, BUSY GP21.
     let spi_pins: display::SpiPins = (pins.gpio19.reconfigure(), pins.gpio18.reconfigure());
@@ -201,6 +207,20 @@ fn main() -> ! {
             None
         }
     };
+    #[cfg(feature = "bench")]
+    let chip = chip.map(|mut c| {
+        // Give the laptop time to open the port, or the probe's lines are gone before
+        // anyone reads them.
+        for _ in 0..80 {
+            link::usb_pump();
+            let mut d = timer;
+            d.delay_ms(100);
+        }
+        for line in c.probe_counter() {
+            log!("probe: {line}");
+        }
+        c
+    });
 
     let entropy = Tested::new(
         entropy::Hw::new(pac.TRNG, &mut pac.RESETS),

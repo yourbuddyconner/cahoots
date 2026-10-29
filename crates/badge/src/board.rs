@@ -331,6 +331,9 @@ pub trait Board {
     fn display(&mut self) -> &mut Self::Display;
     /// The next gesture since the last call, consumed, or `Press::None`.
     fn press(&mut self) -> Press;
+    /// The screen's refresh is done. A board may log it; a bench driver presses only then,
+    /// since a gesture seen during the refresh is not taken as an answer.
+    fn screen_drawn(&mut self) {}
     /// Button A (left) is held right now (level). Used for the wipe at boot.
     fn a_down(&self) -> bool;
     fn delay_ms(&mut self, ms: u32);

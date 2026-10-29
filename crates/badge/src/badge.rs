@@ -1354,6 +1354,7 @@ fn respond<L: Link>(link: &mut L, seq: u32, response: &[u8]) {
 fn show<B: Board>(board: &mut B, screen: Screen) {
     board.note_screen(&screen.lines, screen.secret);
     board.display().draw(&screen.frame);
+    board.screen_drawn();
 }
 
 /// A status screen of one line.

@@ -151,7 +151,11 @@ impl BadgeClient {
     /// A real board on the serial port at `path`.
     pub fn serial(path: &str) -> Result<BadgeClient, ClientError> {
         SerialLink::open(path, "badge")
-            .map(|l| BadgeClient::Serial(Channel::new(l)))
+            .map(|mut l| {
+                // The bench driver, if on, walks the badge to its Serve page first.
+                l.settle(Duration::from_secs(90));
+                BadgeClient::Serial(Channel::new(l))
+            })
             .map_err(|e| ClientError::Open(format!("{path}: {e}")))
     }
 

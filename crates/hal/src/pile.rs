@@ -35,6 +35,9 @@ pub const KIND_FIRST: u8 = 16;
 pub const KIND_HELLO: u8 = 16;
 pub const KIND_SEAT: u8 = 17;
 pub const KIND_COUNT: u8 = 18;
+/// A button press from the laptop, for a firmware built with its `bench` feature and
+/// nothing else: payload `0` Left, `1` Right, `2` Both. A production badge ignores it.
+pub const KIND_PRESS: u8 = 29;
 pub const KIND_PING: u8 = 30;
 pub const KIND_LOG: u8 = 31;
 

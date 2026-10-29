@@ -274,6 +274,35 @@ impl<I: I2c, D: DelayNs> Se05xChip<I, D> {
         Ok(())
     }
 
+    /// Bench: try the counter commands on a scratch object and report each answer, so the
+    /// applet's expectations can be read off a boot log instead of guessed from the data
+    /// sheet. Leaves nothing behind.
+    pub fn probe_counter(&mut self) -> Vec<alloc::string::String> {
+        use alloc::format;
+        let id = KeyId::new(crate::ids::KeyKind::Epoch, 0xFF);
+        let mut out = Vec::new();
+        let _ = self.clear(id);
+        let mut run = |me: &mut Self, what: &str, cmd: WriteCounter| {
+            let r = me.se.run_command(&cmd, &mut me.buf).map_err(err);
+            let read = me.read_object(oid(id));
+            out.push(format!("{what}: {r:?}; read {read:?}"));
+        };
+        run(self, "size 8, value 0", WriteCounter { transient: false, policy: None, object_id: oid(id), data: Some(CounterSize::B8), value: Some(Be(0)) });
+        let _ = self.clear(id);
+        run(self, "size 8, no value", WriteCounter { transient: false, policy: None, object_id: oid(id), data: Some(CounterSize::B8), value: None });
+        run(self, "then increment (no size, no value)", WriteCounter { transient: false, policy: None, object_id: oid(id), data: None, value: None });
+        run(self, "then set value 5 (no size)", WriteCounter { transient: false, policy: None, object_id: oid(id), data: None, value: Some(Be(5)) });
+        let _ = self.clear(id);
+        run(self, "size 8, value 1", WriteCounter { transient: false, policy: None, object_id: oid(id), data: Some(CounterSize::B8), value: Some(Be(1)) });
+        let _ = self.clear(id);
+        run(self, "no size, value 0 on a fresh id", WriteCounter { transient: false, policy: None, object_id: oid(id), data: None, value: Some(Be(0)) });
+        let _ = self.clear(id);
+        run(self, "size 4, no value", WriteCounter { transient: false, policy: None, object_id: oid(id), data: Some(CounterSize::B4), value: None });
+        run(self, "then increment", WriteCounter { transient: false, policy: None, object_id: oid(id), data: None, value: None });
+        let _ = self.clear(id);
+        out
+    }
+
     /// The key's public key as the applet returns it: `04 || X || Y` for P-256, 32 bytes for
     /// Ed25519. An HMAC key or a counter has none.
     fn public_raw(&mut self, id: KeyId) -> Result<Vec<u8>, ChipError> {
@@ -497,7 +526,9 @@ impl<I: I2c, D: DelayNs> ChipOps for Se05xChip<I, D> {
     }
 
     /// An 8-byte counter, made fresh: the applet's counters only go up, so an old one is
-    /// deleted first.
+    /// deleted first. The applet (7.2.0, on the bench 2026-10-29) refuses a `WriteCounter`
+    /// that carries both a size and a value with 0x6A80, so the counter is created with its
+    /// size alone, at zero, and a starting value other than zero is a second write.
     fn put_counter(&mut self, id: KeyId, value: u64) -> Result<(), ChipError> {
         self.clear(id)?;
         self.se
@@ -507,17 +538,31 @@ impl<I: I2c, D: DelayNs> ChipOps for Se05xChip<I, D> {
                     policy: None,
                     object_id: oid(id),
                     data: Some(CounterSize::B8),
-                    value: Some(Be(value)),
+                    value: None,
                 },
                 &mut self.buf,
             )
             .map_err(err)?;
+        if value != 0 {
+            self.se
+                .run_command(
+                    &WriteCounter {
+                        transient: false,
+                        policy: None,
+                        object_id: oid(id),
+                        data: None,
+                        value: Some(Be(value)),
+                    },
+                    &mut self.buf,
+                )
+                .map_err(err)?;
+        }
         Ok(())
     }
 
     /// The driver has no increment command of its own: per the applet's APDU specification
     /// (AN12413), `WriteCounter` on an existing counter with neither size nor value adds
-    /// one. Then the counter is read back. Bench: confirm the increment.
+    /// one. Then the counter is read back. Confirmed on the bench, 2026-10-29: 0 became 1.
     fn counter_next(&mut self, id: KeyId) -> Result<u64, ChipError> {
         if !self.exists(id)? {
             return Err(ChipError::NoSuchKey);

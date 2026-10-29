@@ -18,7 +18,8 @@ use std::time::{Duration, Instant};
 
 pub type BoxLink = Box<dyn Link + Send>;
 
-/// How long a simulated card waits for its seat and the count before giving up.
+/// How long an all-simulated pile waits for its seat and the count before giving up. With a
+/// real board on top the pile waits for the person holding it, however long that takes.
 pub const PILE_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub struct Card {
@@ -30,6 +31,8 @@ pub struct Card {
     pub press: bool,
     pub dir: PathBuf,
     pub seed: Option<u64>,
+    /// Give up on the count after [`PILE_TIMEOUT`]. Off when a person's board is on top.
+    pub timeout: bool,
 }
 
 struct OsEntropy;
@@ -66,6 +69,7 @@ pub fn run_card(card: Card) -> Result<Device, DeviceError> {
         press,
         dir,
         seed,
+        timeout,
     } = card;
     let mut pile = Pile::new(down, up, &name, pad_len, false);
     let mut display = PngDisplay::new(&dir.join("display.png"), &name);
@@ -77,15 +81,20 @@ pub fn run_card(card: Card) -> Result<Device, DeviceError> {
     };
     let started = Instant::now();
     let mut pressed = false;
+    let mut seen = (None, None);
     let ready = loop {
         if let Some(r) = pile.poll().map_err(pile_err)? {
             break r;
+        }
+        if crate::link::trace_frames() && seen != (pile.seat(), pile.count()) {
+            seen = (pile.seat(), pile.count());
+            eprintln!("[{name}] pile: seat {:?} count {:?}", seen.0, seen.1);
         }
         if press && !pressed && pile.is_top() && pile.seat().is_some() {
             pile.start().map_err(pile_err)?;
             pressed = true;
         }
-        if started.elapsed() > PILE_TIMEOUT {
+        if timeout && started.elapsed() > PILE_TIMEOUT {
             return Err(DeviceError::State(format!(
                 "{name}: no count after {}s (seat {:?})",
                 PILE_TIMEOUT.as_secs(),
@@ -135,6 +144,8 @@ pub fn run_pile(
         downs[i + 1] = Some(Box::new(SocketLink::new(b)?));
     }
     if let Some(port) = serial {
+        // The bench driver, if on, presses Both on the badge once it is shown this seat.
+        std::env::set_var("CAHOOTS_BENCH_SEAT", (cards - 1).to_string());
         let link = SerialLink::open(port, "board")?;
         ups[simulated - 1] = Some(Box::new(link));
     }
@@ -152,6 +163,7 @@ pub fn run_pile(
             press: serial.is_none() && i == simulated - 1,
             dir: state.join(format!("card{i}")),
             seed: seed.map(|s| s.wrapping_add(i as u64)),
+            timeout: serial.is_none(),
         };
         handles.push(std::thread::spawn(move || run_card(card)));
     }

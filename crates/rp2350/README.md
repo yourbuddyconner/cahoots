@@ -104,15 +104,21 @@ A circle made on a badge with a chip keeps its seat key (P-256, made in the chip
 
 The driver is `crates/chip/src/se05x.rs`, which puts Nitrokey's [`se05x`](https://crates.io/crates/se05x) crate (0.4.2) behind the `ChipOps` trait the rest of the code calls. Every command runs in the default session.
 
-Not yet checked on a real chip: the order of the bytes in Ed25519 keys and signatures (nothing makes one today), that a counter goes up by one, the object ids of NXP's attestation key and certificate (`0xF0000012`, `0xF0000013`), and the exact bytes the chip signs in an attestation, which `crates/objects/src/attestation.rs` must match.
+Checked on a real chip (2026-10-29, applet 7.2.0): a counter goes up by one on a bare `WriteCounter`, and the applet refuses to create a counter with a size and a value in one command (0x6A80), so the driver creates it at zero and sets a value in a second write. Not yet checked: the order of the bytes in Ed25519 keys and signatures (nothing makes one today), the object ids of NXP's attestation key and certificate (`0xF0000012`, `0xF0000013`), and the exact bytes the chip signs in an attestation, which `crates/objects/src/attestation.rs` must match.
 
-### The license
+### The bench, hands off
+
+`scripts/bench.sh` runs the whole thing with nobody touching the board: it builds the firmware with its `bench` feature, flashes it, runs a ceremony with the laptop as two cards under the badge, then attests, starts the agent, signs a file and a git commit, and checks both. The `bench` feature lets the laptop press the badge's buttons with a `Press` frame (kind 29) on the USB link; the laptop's serial link (`cahoots-host`, with `CAHOOTS_BENCH=new-circle` or `serve`) reads the badge's screen lines and presses for the goal, and the firmware logs `drawn` after each refresh so a press is never one the badge throws away as made during the refresh. The boot line of such a build says `BENCH BUILD`; release firmware never has the feature, because a badge that takes presses from a cable has no consent. Bench builds also probe the chip's counter commands at boot and log the answers.
+
+Two things the bench taught about USB on macOS: a port handle opened after `picotool reboot` of a running badge can deliver nothing until the device enumerates again (a BOOTSEL flash cycle, or a replug), so the script never reboots a running badge and treats a silent port as a reason to flash; and the laptop's writes to the port must be non-blocking, or a badge that answers NAK while its inbox is full (flow control, so a 20 KiB reveal is never overwritten) holds the laptop in the kernel and both sides wait on each other.
+
+## The license
 
 The `se05x` crate is LGPL-3.0-only. This firmware is MIT OR Apache-2.0 and is one static binary that includes it. The LGPL allows that as long as a user can rebuild the binary with a changed copy of the library. Here they can: the repository is public, and `cargo build --release` in this directory makes the binary from public sources. The crate is used only here, in the firmware, and only behind `ChipOps`, so it can be replaced without changing anything above it. The workspace's default build does not include it.
 
 ## Memory
 
-520 KiB of SRAM holds a 320 KiB heap and the stack. A three-member ceremony with 16 KiB contributions peaked at 152 KB of heap and 41 KB of stack; the first build's 200 KiB heap ran out while the sealed reveals were in flight. The board logs its heap and its deepest stack use as it goes, and a stack limit register set at boot turns an overflow into a recorded hard fault instead of a corrupted heap. There is no PSRAM, so the pad and the reveals live in the heap, which is why the pad proposal is 16 KiB.
+520 KiB of SRAM holds a 384 KiB heap and the stack. A three-member ceremony with 16 KiB contributions peaked at 152 KB of heap and 41 KB of stack without the chip; with the chip, two reveals arriving at once pushed the first build's 320 KiB heap past its end (the 200 KiB before it ran out the same way), so the heap is now 384 KiB (432 KiB left the stack too little room: a hard fault with the stack-overflow bit set, 64 KB deep, right after the chip made the seat key), the ceremony takes each frame out of its receive buffer before handling it, and a card with nobody to forward to builds no frame. The board logs its heap and its deepest stack use as it goes, and a stack limit register set at boot turns an overflow into a recorded hard fault instead of a corrupted heap. There is no PSRAM, so the pad and the reveals live in the heap, which is why the pad proposal is 16 KiB.
 
 ## Done and not yet
 

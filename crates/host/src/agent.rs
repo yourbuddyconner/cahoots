@@ -474,24 +474,52 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// Call the agent at `socket` with `sign-with-content@cahoots`: sign `data` with the key
-/// `key` (an SSH public key blob), showing the badge `content`. The SSH signature blob, or an
-/// error in words.
-pub fn sign_with_content(
-    socket: &Path,
-    key: &[u8],
-    data: &[u8],
-    content: &[u8],
-) -> Result<Vec<u8>, String> {
-    let mut s = UnixStream::connect(socket)
-        .map_err(|e| format!("no agent at {}: {e}", socket.display()))?;
-    let mut msg = vec![SSH_AGENTC_EXTENSION];
-    put_string(&mut msg, SIGN_WITH_CONTENT.as_bytes());
+/// Ask the agent at `socket` for its keys: each as `(blob, comment)`.
+pub fn list_identities(socket: &Path) -> Result<Vec<(Vec<u8>, String)>, String> {
+    let reply = agent_call(socket, &[SSH_AGENTC_REQUEST_IDENTITIES])?;
+    if reply.first() != Some(&SSH_AGENT_IDENTITIES_ANSWER) {
+        return Err("agent: no identities answer".into());
+    }
+    let mut r = Reader(&reply[1..]);
+    let n = r.u32().ok_or("agent: a short answer")?;
+    let mut out = Vec::new();
+    for _ in 0..n {
+        let blob = r.string().ok_or("agent: a short answer")?.to_vec();
+        let comment = r.string().ok_or("agent: a short answer")?;
+        out.push((blob, String::from_utf8_lossy(comment).into_owned()));
+    }
+    Ok(out)
+}
+
+/// A plain `SSH_AGENTC_SIGN_REQUEST`: sign `data` with the key `key`, with nothing shown
+/// to the badge but what `data` itself says (for an `SSHSIG` envelope, its namespace and
+/// hash). The SSH signature blob, or an error in words.
+pub fn sign_plain(socket: &Path, key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
+    let mut msg = vec![SSH_AGENTC_SIGN_REQUEST];
     put_string(&mut msg, key);
     put_string(&mut msg, data);
-    put_string(&mut msg, content);
+    msg.extend_from_slice(&0u32.to_be_bytes());
+    let reply = agent_call(socket, &msg)?;
+    let mut r = Reader(&reply[1..]);
+    match reply[0] {
+        SSH_AGENT_SIGN_RESPONSE => {
+            let sig = r.string().ok_or("agent: a short answer")?.to_vec();
+            r.end().ok_or("agent: a long answer")?;
+            Ok(sig)
+        }
+        _ => Err(REFUSED.into()),
+    }
+}
+
+const REFUSED: &str = "the agent did not sign: refused on the badge, the key is not one the agent \
+                       holds, or the badge could not be asked (the agent's log says which)";
+
+/// One framed message to the agent and its framed answer.
+fn agent_call(socket: &Path, msg: &[u8]) -> Result<Vec<u8>, String> {
+    let mut s = UnixStream::connect(socket)
+        .map_err(|e| format!("no agent at {}: {e}", socket.display()))?;
     let mut framed = (msg.len() as u32).to_be_bytes().to_vec();
-    framed.extend_from_slice(&msg);
+    framed.extend_from_slice(msg);
     s.write_all(&framed).map_err(|e| format!("agent: {e}"))?;
     let mut len = [0u8; 4];
     s.read_exact(&mut len).map_err(|e| format!("agent: {e}"))?;
@@ -502,6 +530,24 @@ pub fn sign_with_content(
     let mut reply = vec![0u8; len];
     s.read_exact(&mut reply)
         .map_err(|e| format!("agent: {e}"))?;
+    Ok(reply)
+}
+
+/// Call the agent at `socket` with `sign-with-content@cahoots`: sign `data` with the key
+/// `key` (an SSH public key blob), showing the badge `content`. The SSH signature blob, or an
+/// error in words.
+pub fn sign_with_content(
+    socket: &Path,
+    key: &[u8],
+    data: &[u8],
+    content: &[u8],
+) -> Result<Vec<u8>, String> {
+    let mut msg = vec![SSH_AGENTC_EXTENSION];
+    put_string(&mut msg, SIGN_WITH_CONTENT.as_bytes());
+    put_string(&mut msg, key);
+    put_string(&mut msg, data);
+    put_string(&mut msg, content);
+    let reply = agent_call(socket, &msg)?;
     let mut r = Reader(&reply[1..]);
     match reply[0] {
         SSH_AGENT_SUCCESS => {
@@ -509,11 +555,7 @@ pub fn sign_with_content(
             r.end().ok_or("agent: a long answer")?;
             Ok(sig)
         }
-        _ => Err(
-            "the agent did not sign: refused on the badge, the key is not one the agent \
-                  holds, or the badge could not be asked (the agent's log says which)"
-                .into(),
-        ),
+        _ => Err(REFUSED.into()),
     }
 }
 

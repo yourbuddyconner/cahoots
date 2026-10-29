@@ -245,7 +245,7 @@ Messages are CBOR (RFC 8949), array-encoded. A request travels in a frame of kin
 | `GrantSign` | `grant` | `Signature`, a COSE_Sign1 |
 | `SealKey` | `label` | `Key { key }` |
 
-`host` is `{ host_key, session_id, host_sig, name, user }`, what the laptop learned from OpenSSH. The badge checks it before it trusts it. `content` is the text a git signature covers.
+`host` is `{ host_key, session_id, host_sig, name, user }`, what the laptop learned from OpenSSH. The badge checks it before it trusts it. `content` is the text a signature covers: a git commit (namespace `git`, which is refused without it) or a file in any other namespace. A file request without `content` is a signature over a hash the laptop chose, and the badge says so on its screen.
 
 Any request can get `Error { code }` as its response. The codes are `UnknownCircle`, `Exhausted`, `AlreadySpent`, `OutOfRange`, `Config`, `Storage`, `Malformed`, `Denied`, `Busy`, `NoChip` (the badge has no chip to do this with), `ChipError` (the chip failed) and `Unparseable` (the bytes to sign are not something the badge signs).
 

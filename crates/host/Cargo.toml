@@ -17,6 +17,7 @@ png = "0.17"
 base64 = "0.22"
 getrandom = "0.3"
 serialport = { version = "4", default-features = false }
+libc = "0.2"
 zeroize = { workspace = true, features = ["alloc"] }
 cahoots-chip = { workspace = true, features = ["std"] }
 cahoots-objects = { workspace = true, features = ["std"] }

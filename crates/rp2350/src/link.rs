@@ -25,6 +25,8 @@ use critical_section::Mutex;
 use rp235x_hal::gpio::bank0::{Gpio0, Gpio1, Gpio4, Gpio5};
 use rp235x_hal::gpio::{FunctionUart, Pin, PullDown};
 use rp235x_hal::pac::{interrupt, UART0, UART1};
+#[cfg(feature = "bench")]
+use cahoots_badge::board::Press;
 use rp235x_hal::uart::{Reader, Writer};
 use rp235x_hal::usb::UsbBus;
 use usb_device::class_prelude::{ControlOut, DescriptorWriter, InterfaceNumber, UsbBusAllocator, UsbClass};
@@ -383,16 +385,30 @@ impl UsbPort {
         let _ = self.dev.poll(&mut [&mut self.serial, &mut self.reset]);
         let mut buf = [0u8; 64];
         loop {
+            // Flow control: with no room for another packet, leave it on the endpoint. The
+            // hardware answers the host with NAK and the host sends it again later, so a
+            // 20 KiB reveal arriving while the badge redraws its screen waits instead of
+            // overwriting the one before it. An unread packet keeps the USB interrupt
+            // asserted (the driver clears OUT status only when the packet is read), so the
+            // interrupt is masked until the badge has taken bytes out of the inbox, or the
+            // handler would run back to back and the badge would never get to read them.
+            if self.inbox.len() + buf.len() > IN_CAP {
+                cortex_m::peripheral::NVIC::mask(interrupt::USBCTRL_IRQ);
+                break;
+            }
             match self.serial.read(&mut buf) {
                 Ok(n) if n > 0 => {
-                    while self.inbox.len() + n > IN_CAP {
-                        self.inbox.pop_front();
-                    }
                     self.inbox.extend(&buf[..n]);
                     self.last_rx = Some(Instant::now());
+                    #[cfg(feature = "bench")]
+                    critical_section::with(|cs| bench_scan(cs, &buf[..n]));
                 }
                 _ => break,
             }
+        }
+        if self.inbox.len() + buf.len() <= IN_CAP {
+            // SAFETY: the handler only touches `USB` inside its critical section.
+            unsafe { cortex_m::peripheral::NVIC::unmask(interrupt::USBCTRL_IRQ) };
         }
         while !self.pending.is_empty() {
             let (head, _) = self.pending.as_slices();
@@ -449,6 +465,52 @@ macro_rules! log {
 }
 
 /// Push queued USB bytes out. Called from every wait in the badge.
+#[cfg(feature = "bench")]
+static BENCH_PRESSES: Mutex<RefCell<VecDeque<Press>>> = Mutex::new(RefCell::new(VecDeque::new()));
+#[cfg(feature = "bench")]
+static BENCH_SCAN: Mutex<RefCell<Vec<u8>>> = Mutex::new(RefCell::new(Vec::new()));
+
+/// A press the laptop sent (bench builds only), consumed.
+#[cfg(feature = "bench")]
+pub fn bench_press() -> Option<Press> {
+    critical_section::with(|cs| BENCH_PRESSES.borrow_ref_mut(cs).pop_front())
+}
+
+/// Watch the USB byte stream for `Press` frames. The pile and the ceremony skip frame kinds
+/// they do not know, so the same bytes also go to them unchanged. A press frame is 14 bytes;
+/// the scan tries every offset of the last chunk plus a short tail, so a reveal's 20 KiB
+/// streams past without being parsed (a false match needs its CRC to agree, which it does
+/// not) and a press split across two chunks is still found.
+#[cfg(feature = "bench")]
+fn bench_scan(cs: critical_section::CriticalSection, bytes: &[u8]) {
+    use cahoots_core::frame::decode;
+    const TAIL: usize = 13;
+    let mut scan = BENCH_SCAN.borrow_ref_mut(cs);
+    scan.extend_from_slice(bytes);
+    let mut i = 0;
+    while i < scan.len() {
+        match decode(&scan[i..]) {
+            Ok((f, used)) if f.kind == cahoots_hal::pile::KIND_PRESS => {
+                let press = match f.payload.first() {
+                    Some(0) => Some(Press::Left),
+                    Some(1) => Some(Press::Right),
+                    Some(2) => Some(Press::Both),
+                    _ => None,
+                };
+                if let Some(p) = press {
+                    BENCH_PRESSES.borrow_ref_mut(cs).push_back(p);
+                }
+                i += used;
+            }
+            _ => i += 1,
+        }
+    }
+    if scan.len() > TAIL {
+        let cut = scan.len() - TAIL;
+        scan.drain(..cut);
+    }
+}
+
 pub fn usb_pump() {
     with_usb(|p| {
         p.queue_logs();

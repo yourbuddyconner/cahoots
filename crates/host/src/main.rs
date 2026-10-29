@@ -10,6 +10,7 @@
 //! cahoots-host badge --state /tmp/b0 --listen - --next /tmp/b1.sock --name sf --pad-len 16384 [--seed 1] [--chip soft]
 //! cahoots-host agent (--serial <port> | --sim <socket>) --circle <name>... [--socket <path>] [--known-hosts <path>]
 //! cahoots-host git-sign -Y sign -n git -f <key file> <file>
+//! cahoots-host sign --file <path> (--circle <name> | --key <pub file>) [--namespace file] [--out <path>]
 //! cahoots-host roster --ssh --circle <name> --state <dir>
 //! cahoots-host attest (--serial <port> | --sim <socket>) --circle <name> [--test-root] [--json]
 //! cahoots-host card set (--serial <port> | --sim <socket>) --circle <name> --name <text> [--handle kind=value]... [--endpoint purpose=value]... --out <file>
@@ -294,6 +295,38 @@ fn main() {
                 .map_err(|e| e.to_string())
         }
         "agent" => run_agent(&args),
+        "sign" => {
+            let file = PathBuf::from(args.req("--file"));
+            let namespace = args
+                .get("--namespace")
+                .unwrap_or(cahoots_host::sign::FILE_NAMESPACE)
+                .to_string();
+            let socket = std::env::var_os("CAHOOTS_AGENT_SOCK")
+                .or_else(|| std::env::var_os("SSH_AUTH_SOCK"))
+                .map(PathBuf::from)
+                .ok_or_else(|| String::from("no agent: set SSH_AUTH_SOCK to the socket `cahoots-host agent` printed"));
+            socket
+                .and_then(|socket| {
+                    let key = match (args.get("--circle"), args.get("--key")) {
+                        (Some(c), _) => cahoots_host::sign::key_for_circle(&socket, c)?,
+                        (None, Some(k)) => cahoots_host::gitsign::read_key(Path::new(k))?,
+                        (None, None) => return Err(String::from("say which key: --circle <name> or --key <pub file>")),
+                    };
+                    let out = args.get("--out").map(PathBuf::from);
+                    cahoots_host::sign::sign_file(&socket, &key, &namespace, &file, out.as_deref())
+                })
+                .map(|s| {
+                    println!("{}", s.sig_path.display());
+                    eprintln!(
+                        "signed {} in namespace {namespace}{}. To check it, put\n  you@example.com namespaces=\"{namespace}\" {}\nin an allowed_signers file and run\n  ssh-keygen -Y verify -f allowed_signers -I you@example.com -n {namespace} -s {} < {}",
+                        file.display(),
+                        if s.shown { "" } else { " (too big to show the badge; it signed the hash)" },
+                        s.key_line,
+                        s.sig_path.display(),
+                        file.display()
+                    );
+                })
+        }
         "roster" => {
             if !args.has("--ssh") {
                 eprintln!("roster prints authorized_keys lines: add --ssh");

@@ -32,13 +32,13 @@ A circle can also give a seat to a hosted software member, such as an AI agent. 
 On a V1 board with the NXP SE051 secure element, the chip makes and holds each circle's seat key, and the key never leaves it. With it, a badge can:
 
 - Show a proof from the chip that the seat key lives in it (attestation).
-- Sign SSH logins and git commits. A laptop program asks, the badge shows the user and host or the commit's author and subject, and it signs when both buttons are pressed.
+- Sign SSH logins, git commits and files. A laptop program asks, the badge shows the user and host, the commit's author and subject, or the file's first line and size, and it signs when both buttons are pressed.
 - Sign a contact card and share its circle's card seal key, so a circle can swap cards.
 - Sign grants as CBOR Web Tokens.
 
 A badge also keeps several circles at once, with nothing linking them, whether or not it has the chip: up to 16 on the Pico 2, and 4 on the Nano ESP32, which has no chip.
 
-All of this is built and tested against a software chip. The Pico 2 firmware has a driver for the real chip, built but not yet run on a board. Flashing it, a ceremony with a chip seat, attestation against NXP's root, and a verified commit still wait for the bench. See [the roadmap](docs/plan.md) (M4f) and the [host program](crates/host/README.md).
+All of this is built and tested against a software chip, and on 2026-10-29 a Pico 2 with the SE051 did it on the bench: a ceremony with its seat key made in the chip, then a file and a git commit signed by the chip and verified by `ssh-keygen` and `git`. Attestation against NXP's root still waits. See [the roadmap](docs/plan.md) (M4f) and the [host program](crates/host/README.md).
 
 ## Repository layout
 
