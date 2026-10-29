@@ -507,12 +507,14 @@ dependencies = [
 name = "cahoots-objects"
 version = "0.1.0"
 dependencies = [
+ "cahoots-chip",
  "cahoots-core",
  "hex",
  "minicbor",
  "p256",
  "serde_json",
  "sha2 0.10.9",
+ "x509-cert",
 ]
 
 [[package]]
@@ -986,6 +988,7 @@ dependencies = [
  "const-oid",
  "der_derive",
  "flagset",
+ "pem-rfc7468",
  "zeroize",
 ]
 
@@ -2058,6 +2061,15 @@ dependencies = [
  "elliptic-curve",
  "primeorder",
  "sha2 0.10.9",
+]
+
+[[package]]
+name = "pem-rfc7468"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88b39c9bfcfc231068454382784bb460aae594343fb030d46e9f50a645418412"
+dependencies = [
+ "base64ct",
 ]
 
 [[package]]

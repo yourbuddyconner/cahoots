@@ -37,8 +37,11 @@ A tier says what a device protects. Assurance says how sure a verifier can be th
 |---|---|---|
 | 0 | claimed | Nothing was checked. |
 | 1 | key | A signature from a key under a grant. |
+| 1, attested | key, attested | As key, and the key's seat also holds a proof from a secure element that the key was made inside it. |
 | 2 | present | Both buttons pressed on a badge. |
 | 3 | present with PIN | Both buttons pressed after a PIN. |
+
+The "key, attested" rung sits between key and present. It proves that the seat key was generated inside an NXP SE051 secure element and cannot be copied out of it: the chip signs the key, its own serial number and a fresh value the laptop chose, and the laptop checks that signature back to NXP's root. It does not prove who holds the badge, since anyone holding it can ask for the proof, and it does not prove that the firmware on the badge is ours. A person pressing both buttons is the next rung, "present". Until NXP's root is in the repository, only the software chip's test root is checked ([roots](../crates/objects/roots/README.md)).
 
 Higher includes lower: a level 3 approval satisfies a policy that asks for level 2. The device tier travels separately, in the manifest, so a verifier can ask for both. A policy elsewhere compares levels and never methods. It says "level 2 or more", and it does not name buttons or PINs. The objects are in [protocol](protocol.md#8-signed-objects).
 

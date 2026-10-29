@@ -1,0 +1,127 @@
+//! Checking a chip's attestation of a seat key against a root certificate.
+//!
+//! A laptop sends the badge a fresh 16-byte value. The chip signs the seat key, its own unique id,
+//! that value and a timestamp, and returns the signature with its attestation certificate. The
+//! verifier checks that the value came back, that the signature is good, and that the
+//! certificate is a root it trusts or was issued by one.
+
+use alloc::vec::Vec;
+use cahoots_chip::Attested;
+use p256::ecdsa::signature::Verifier;
+use p256::ecdsa::{DerSignature, Signature, VerifyingKey};
+use x509_cert::der::{Decode, DecodePem, Encode};
+use x509_cert::Certificate;
+
+/// The OID of ecdsa-with-SHA256.
+const ECDSA_SHA256: x509_cert::spki::ObjectIdentifier =
+    x509_cert::spki::ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
+
+/// NXP's attestation roots, as PEM.
+///
+/// Until `roots/nxp-se05x-attestation-root.pem` is replaced with NXP's root (see
+/// `roots/README.md`), this holds the software chip's test CA, so it verifies only the software
+/// chip.
+pub const NXP_ROOTS: &[&str] = &[include_str!("../roots/nxp-se05x-attestation-root.pem")];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttestError {
+    /// The signature over the attested payload does not verify, or the attestation key is not
+    /// the certificate's key.
+    Signature,
+    /// The certificate is not a trusted root and no trusted root issued it.
+    Chain,
+    /// The freshness value is not the one asked for.
+    Freshness,
+    /// A certificate, root or key does not parse.
+    Parse,
+}
+
+/// What a good attestation proves.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Verified {
+    /// The seat key, SEC1 compressed.
+    pub public: Vec<u8>,
+    /// The chip's unique id.
+    pub uid: Vec<u8>,
+    pub timestamp: Vec<u8>,
+}
+
+/// The bytes the attestation key signs.
+///
+/// This is the software chip's layout: `public || uid || freshness || timestamp`. The real
+/// SE051 signs a TLV structure from its attest read; its layout is confirmed with the first real
+/// bundle (Task 10, the bench) and replaces this function. Nothing else changes.
+fn attested_payload(att: &Attested) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(&att.public);
+    body.extend_from_slice(&att.uid);
+    body.extend_from_slice(&att.freshness);
+    body.extend_from_slice(&att.timestamp);
+    body
+}
+
+/// Check `att` against `roots` (PEM certificates) for the freshness value that was sent.
+pub fn verify(att: &Attested, freshness: &[u8; 16], roots: &[&str]) -> Result<Verified, AttestError> {
+    if &att.freshness != freshness {
+        return Err(AttestError::Freshness);
+    }
+    let cert = Certificate::from_der(&att.attest_cert_der).map_err(|_| AttestError::Parse)?;
+    let cert_key = cert.tbs_certificate.subject_public_key_info.subject_public_key.as_bytes();
+    if cert_key != Some(att.attest_public.as_slice()) {
+        return Err(AttestError::Signature);
+    }
+    let key = VerifyingKey::from_sec1_bytes(&att.attest_public).map_err(|_| AttestError::Parse)?;
+    // The software chip signs raw r || s; a real chip may return DER.
+    let sig = match Signature::from_slice(&att.signature) {
+        Ok(s) => s,
+        Err(_) => DerSignature::from_bytes(&att.signature)
+            .ok()
+            .and_then(|d| Signature::try_from(d.as_bytes()).ok())
+            .ok_or(AttestError::Signature)?,
+    };
+    key.verify(&attested_payload(att), &sig).map_err(|_| AttestError::Signature)?;
+
+    for pem in roots {
+        let root = Certificate::from_pem(pem.as_bytes()).map_err(|_| AttestError::Parse)?;
+        if trusts(&root, &cert, &att.attest_cert_der)? {
+            return Ok(Verified { public: att.public.clone(), uid: att.uid.clone(), timestamp: att.timestamp.clone() });
+        }
+    }
+    Err(AttestError::Chain)
+}
+
+/// Whether `root` is `cert` itself or issued it.
+fn trusts(root: &Certificate, cert: &Certificate, cert_der: &[u8]) -> Result<bool, AttestError> {
+    if root.to_der().map_err(|_| AttestError::Parse)? == cert_der {
+        return Ok(true);
+    }
+    if root.tbs_certificate.subject != cert.tbs_certificate.issuer {
+        return Ok(false);
+    }
+    if cert.signature_algorithm.oid != ECDSA_SHA256 || cert.tbs_certificate.signature.oid != ECDSA_SHA256 {
+        return Ok(false);
+    }
+    let Some(root_key) = root.tbs_certificate.subject_public_key_info.subject_public_key.as_bytes() else {
+        return Ok(false);
+    };
+    let Ok(root_key) = VerifyingKey::from_sec1_bytes(root_key) else { return Ok(false) };
+    let Some(sig_bytes) = cert.signature.as_bytes() else { return Ok(false) };
+    let Ok(sig) = DerSignature::from_bytes(sig_bytes) else { return Ok(false) };
+    let Ok(tbs) = cert.tbs_certificate.to_der() else { return Err(AttestError::Parse) };
+    Ok(root_key.verify(&tbs, &sig).is_ok())
+}
+
+/// The attestation as JSON for the bundle (informative; nothing verifies it).
+#[cfg(feature = "std")]
+pub fn to_json(att: &Attested) -> serde_json::Value {
+    use crate::json::hex;
+    serde_json::json!({
+        "public": hex(&att.public),
+        "uid": hex(&att.uid),
+        "freshness": hex(&att.freshness),
+        "timestamp": hex(&att.timestamp),
+        "signature": hex(&att.signature),
+        "attest_public": hex(&att.attest_public),
+        "attest_cert": hex(&att.attest_cert_der),
+    })
+}

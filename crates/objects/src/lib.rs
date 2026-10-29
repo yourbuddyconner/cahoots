@@ -18,6 +18,7 @@ extern crate alloc;
 
 pub mod approval;
 pub mod assurance;
+pub mod attestation;
 pub mod fact;
 pub mod grant;
 #[cfg(feature = "std")]

@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 
 use crate::{Approval, Fact, Grant, Receipt, VERSION};
 
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     bytes
         .iter()
