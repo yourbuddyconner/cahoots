@@ -1,0 +1,15 @@
+# The station image builds from the workspace root (crates/station/Dockerfile). Keep the context small.
+target
+**/target
+.git
+web/node_modules
+web/app/pkg
+web/e2e-out
+node_modules
+video
+site
+blog
+docs
+hardware
+*.bin
+*.pad
