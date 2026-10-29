@@ -99,18 +99,54 @@ class Punk(unittest.TestCase):
             self.assertTrue(0 <= x0 < x1 <= 24 and 0 <= y0 < y1 <= 24, layer)
             self.assertEqual(sum(w for w, _ in spec["traits"].values()), 256, layer)
             self.assertGreaterEqual(len(spec["traits"]), 2, layer)
-            for name, (_, sprite) in spec["traits"].items():
-                for x, y, ch in gen.sprite_pixels(sprite):
-                    self.assertIn(ch, "#o", (layer, name))
-                    self.assertTrue(x0 <= x < x1 and y0 <= y < y1, (layer, name, x, y))
+            for name in spec["traits"]:
+                for shape in gen.HEADS:
+                    for x, y, ch in gen.layer_pixels(layer, name, shape):
+                        self.assertIn(ch, "#o", (layer, name))
+                        self.assertTrue(x0 <= x < x1 and y0 <= y < y1, (layer, name, shape, x, y))
+
+    def test_eyes_and_mouth_keep_clear_of_the_outline(self):
+        """Plain eyes and the plain, smiling and moustached mouths keep a paper
+        cell between their ink and the head's outline, and never draw on it."""
+        for shape in gen.HEADS:
+            outline = {(x, y) for x, y, ch in gen.sprite_pixels(gen.head_sprite(shape)) if ch == "#"}
+            for layer, name in [("eyes", "plain"), ("mouth", "plain"), ("mouth", "smile"), ("mouth", "moustache")]:
+                for x, y, ch in gen.layer_pixels(layer, name, shape):
+                    self.assertNotIn((x, y), outline, (shape, layer, name, x, y))
+                    if ch == "#":
+                        near = {(x + dx, y + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
+                        self.assertFalse(near & outline, (shape, layer, name, x, y))
+
+    def test_dotted_skin_leaves_the_eye_band_clear(self):
+        for i in range(300):
+            seed = f"seed {i}".encode()
+            t = gen.punk_traits(seed)
+            shape, skin = t["head"].split(", ")
+            if skin != "dotted" or t["eyes"] != "plain":
+                continue
+            rows = gen.punk_pixels(seed)
+            dx = gen.FACE_SHIFT[shape]["eyes"][0]
+            for y in (9, 11, 13, 14):
+                self.assertEqual(rows[y][7 + dx:15 + dx], "." * 8, (seed, y))
 
     def test_hat_replaces_the_top_of_the_hair(self):
-        for i in range(200):
-            layers = dict(gen.punk_layers(f"seed {i}".encode()))
-            traits = gen.punk_traits(f"seed {i}".encode())
+        for i in range(300):
+            seed = f"seed {i}".encode()
+            layers = dict(gen.punk_layers(seed))
+            traits = gen.punk_traits(seed)
             brim = gen.HAT_BRIM.get(traits["hat"])
             if brim is not None:
-                self.assertTrue(all(y > brim for _, y, _ in layers["hair"]), traits)
+                if traits["hair"] not in gen.HAIR_UNDER_HAT:
+                    self.assertEqual(layers["hair"], [], traits)
+                for x, y, _ in layers["hair"]:
+                    self.assertTrue(y > brim and x >= gen.HAIR_UNDER_HAT_X, (traits, x, y))
+
+    def test_no_stray_hair_pixels(self):
+        for i in range(300):
+            hair = {(x, y) for x, y, ch in dict(gen.punk_layers(f"seed {i}".encode()))["hair"] if ch == "#"}
+            for x, y in hair:
+                near = {(x + dx, y + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)} - {(x, y)}
+                self.assertTrue(near & hair, (i, x, y))
 
     def test_twelve_seeds_twelve_punks(self):
         self.assertEqual(len(gen.PUNK_SEEDS), 12)

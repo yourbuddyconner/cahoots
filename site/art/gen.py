@@ -565,8 +565,8 @@ HEADS = {
         "______#sssssssss#_______",
         "______#sssssssss#_______",
         "______#ssssssssss#______",
-        "______#ssssssss#s#______",
-        "______#ssssssss#s#______",
+        "______#ssssssssss#______",
+        "______#ssssssssss#______",
         "______#ssssssssss#______",
         "______#sssssssss#_______",
         "______#sssssssss#_______",
@@ -592,8 +592,8 @@ HEADS = {
         "______#sssssssss#_______",
         "______#sssssssss#_______",
         "______#ssssssssss#______",
-        "______#ssssssss#s#______",
-        "______#ssssssss#s#______",
+        "______#ssssssssss#______",
+        "______#ssssssssss#______",
         "______#ssssssssss#______",
         "______#sssssssss#_______",
         "______#sssssssss#_______",
@@ -605,32 +605,32 @@ HEADS = {
         "____________#sss#_______",
         "____________#sss#_______",
     ]),
-    # Slimmer: one cell narrower at the front and a longer, thinner neck.
+    # Slim: set one cell further back, with a tapered jaw and a thin neck.
     "slim": (0, 0, [
         "________________________",
         "________________________",
         "________________________",
         "________________________",
         "________________________",
-        "________########________",
-        "_______#ssssssss#_______",
-        "_______#ssssssss#_______",
-        "_______#ssssssss#_______",
-        "_______#ssssssss#_______",
-        "_______#ssssssss#_______",
-        "_______#sssssssss#______",
-        "_______#sssssss#s#______",
-        "_______#sssssss#s#______",
-        "_______#sssssssss#______",
-        "_______#ssssssss#_______",
-        "_______#ssssssss#_______",
-        "_______#ssssssss#_______",
+        "_________#######________",
         "________#sssssss#_______",
-        "_________####sss#_______",
-        "_____________#ss#_______",
-        "_____________#ss#_______",
-        "_____________#ss#_______",
-        "_____________#ss#_______",
+        "_______#sssssssss#______",
+        "_______#sssssssss#______",
+        "_______#sssssssss#______",
+        "_______#sssssssss#______",
+        "_______#ssssssssss#_____",
+        "_______#ssssssssss#_____",
+        "_______#ssssssssss#_____",
+        "_______#ssssssssss#_____",
+        "_______#sssssssss#______",
+        "_______#sssssssss#______",
+        "________#ssssssss#______",
+        "_________#sssssss#______",
+        "__________#####ss#______",
+        "______________#ss#______",
+        "______________#ss#______",
+        "______________#ss#______",
+        "______________#ss#______",
     ]),
 }
 
@@ -738,7 +738,6 @@ PUNK_LAYERS = {
             "moustache": (34, (7, 15, [
                 "_###_",
                 "#####",
-                "#___#",
             ])),
             "beard": (40, (6, 15, [
                 "_______####",
@@ -774,11 +773,13 @@ PUNK_LAYERS = {
     "eyes": {
         "bounds": (5, 9, 19, 18),
         "traits": {
-            "plain": (120, (8, 10, [
-                "##__##",
-                "oo__oo",
-                "#o__#o",
-                "oo__oo",
+            "plain": (120, (7, 9, [
+                "oooooooo",
+                "o##oo##o",
+                "oooooooo",
+                "o#ooo#oo",
+                "oooooooo",
+                "oooooooo",
             ])),
             "shades": (56, (7, 11, [
                 "##########",
@@ -864,8 +865,30 @@ PUNK_LAYERS["head"]["traits"] = {
     for skin in SKINS
 }
 
-# The row of each hat's brim: hair on this row and above it is not drawn.
+# The row of each hat's brim: hair on this row and above it is not drawn, and
+# under a hat only short or long hair shows, at the back of the head from this
+# column; a mohawk or wild hair is hidden whole, so nothing spills past the brim.
 HAT_BRIM = {"beanie": 7, "cap": 7, "fedora": 7, "top hat": 7, "bandana": 6, "crown": 5}
+HAIR_UNDER_HAT_X = 15
+HAIR_UNDER_HAT = {"short", "long"}
+
+# How far the eyes and the mouth move on each head, as (dx, dy), so they keep a
+# cell of skin between them and the outline. The beard covers the jaw and stays put.
+FACE_SHIFT = {
+    "square": {"eyes": (0, 0), "mouth": (1, 0)},
+    "round": {"eyes": (0, 0), "mouth": (1, -1)},
+    "slim": {"eyes": (1, 0), "mouth": (2, -1)},
+}
+UNSHIFTED = {"beard"}
+
+
+def layer_pixels(layer, trait, shape):
+    """The cells one layer's trait draws on a head of this shape."""
+    px = sprite_pixels(PUNK_LAYERS[layer]["traits"][trait][1])
+    dx, dy = FACE_SHIFT[shape].get(layer, (0, 0))
+    if trait in UNSHIFTED:
+        dx = dy = 0
+    return [(x + dx, y + dy, ch) for x, y, ch in px]
 
 
 def sprite_pixels(sprite):
@@ -892,14 +915,24 @@ def punk_traits(seed):
 
 
 def punk_layers(seed):
-    """Each layer's cells for this seed, in drawing order, after the hat clips the hair."""
+    """Each layer's cells for this seed, in drawing order, after the hat clips the hair.
+
+    Under a hat only short or long hair below the brim at the back of the head is kept,
+    and any hair cell left with no hair beside it is dropped.
+    """
     traits = punk_traits(seed)
-    brim = HAT_BRIM.get(traits["hat"], -1)
+    shape = traits["head"].split(", ")[0]
     out = []
-    for layer, spec in PUNK_LAYERS.items():
-        px = list(sprite_pixels(spec["traits"][traits[layer]][1]))
+    for layer in PUNK_LAYERS:
+        px = layer_pixels(layer, traits[layer], shape)
+        if layer == "hair" and traits["hat"] in HAT_BRIM:
+            brim = HAT_BRIM[traits["hat"]]
+            keep = traits["hair"] in HAIR_UNDER_HAT
+            px = [(x, y, ch) for x, y, ch in px if keep and y > brim and x >= HAIR_UNDER_HAT_X]
         if layer == "hair":
-            px = [(x, y, ch) for x, y, ch in px if y > brim]
+            ink = {(x, y) for x, y, ch in px if ch == "#"}
+            px = [(x, y, ch) for x, y, ch in px
+                  if any((x + dx, y + dy) in ink for dx in (-1, 0, 1) for dy in (-1, 0, 1) if dx or dy)]
         out.append((layer, px))
     return out
 
