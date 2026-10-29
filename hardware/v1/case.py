@@ -50,10 +50,18 @@ for (x, y) in D.MAGNETS:
 # two openings in the end wall for the port cables, from the board's face up through the wall top
 for x in D.PORTS.values():
     tray = tray.cut(cq.Workplane("XY").workplane(offset=-0.2).center(x, -TH / 2 + C["wall"] / 2).rect(C["port_w"], C["wall"] + 1).extrude(z_wall_top + 1))
+# the expansion socket is on the back under the Qwiic socket: its opening continues below the board
+tray = tray.cut(cq.Workplane("XY").workplane(offset=z_board_bottom - C["port_h"]).center(D.PORTS["QW"], -TH / 2 + C["wall"] / 2).rect(C["port_w"], C["wall"] + 1).extrude(C["port_h"] + 0.5))
 # the window in the floor the pad half sits in, face down and flush with the outside
 pw_, ph_ = C["pogo_win"]
 pogo_c = (0, D.POGO_Y + D.POGO["d"] / 2 - D.POGO["pin_to_back"])
 tray = tray.cut(cq.Workplane("XY").workplane(offset=z_floor_bottom - 1).center(*pogo_c).rect(pw_, ph_).extrude(C["floor"] + 2))
+# openings in the floor under the two slide switches (on the back, facing the floor), so a fingernail reaches them
+sw_w, sw_h = C["switch_win"]
+for ref in ("SW1", "SW4"):
+    x, y = D.PARTS[ref]["at"]; rot = D.PARTS[ref]["rot"] % 180
+    w, h = (sw_w, sw_h) if rot == 0 else (sw_h, sw_w)
+    tray = tray.cut(cq.Workplane("XY").workplane(offset=z_floor_bottom - 1).center(x, y).rect(w, h).extrude(C["floor"] + 2))
 # a notch in the right wall for the Pico's USB socket
 ux, uy, uw, uh = C["usb"]
 tray = tray.cut(cq.Workplane("XY").workplane(offset=z_board_bottom - uh).center(ux + C["gap"] + C["wall"] / 2, uy).rect(C["wall"] + C["gap"] + 2, uw).extrude(uh + 0.5))
@@ -67,14 +75,19 @@ for sx in (-1, 1):
 lid = rrect(LW, LH, LR, z_skirt_bottom, z_lid_top)
 # hollow: the skirt wraps the tray wall, the plate sits on the wall top
 lid = lid.cut(rrect(TW + 2 * C["skirt_gap"], TH + 2 * C["skirt_gap"], TR + C["skirt_gap"], z_skirt_bottom - 1, z_wall_top))
-# the panel window: a rabbet 1 mm deep the panel glues into, glass flush with the top; the inner
-# opening shows the active area with a 1.5 mm lip holding the glass
+# the panel window: the panel sits on the board on tape, and the plate's opening shows the active
+# area with a lip over the panel's edge. Under the lip a frame comes down to just above the glass,
+# so the panel cannot lift, with a gap at the bottom edge where the flex leaves
 pc, pw, ph = D.PANEL["center"], D.PANEL["w"], D.PANEL["h"]
-lid = lid.cut(cq.Workplane("XY").workplane(offset=z_lid_top - 1.0 - 0.05).center(*pc).rect(pw + 0.3, ph + 0.3).extrude(2))
-lid = lid.cut(cq.Workplane("XY").workplane(offset=z_wall_top - 1).center(*pc).rect(pw - 3.0, ph - 3.0).extrude(C["lid_t"] + 2))
-# the flex's way down from the panel to the connector: open the lip on the bottom edge of the window
+lip = C["panel_lip"]
+lid = lid.cut(cq.Workplane("XY").workplane(offset=z_wall_top - 1).center(*pc).rect(pw - 2 * lip, ph - 2 * lip).extrude(C["lid_t"] + 2))
+z_glass = C["panel_tape"] + 1.0                       # the panel is 1.0 thick
+z_frame = z_glass + C["panel_press"]
 fx, fw = D.PANEL["flex_x"], D.PANEL["flex_w"]
-lid = lid.cut(cq.Workplane("XY").workplane(offset=z_wall_top - 1).center(fx, pc[1] - ph / 2 + 0.5).rect(fw + 1.0, 3.5).extrude(C["lid_t"] + 2))
+frame = (cq.Workplane("XY").workplane(offset=z_frame).center(*pc).rect(pw + 1.0, ph + 1.0).extrude(z_wall_top - z_frame)
+         .cut(cq.Workplane("XY").workplane(offset=z_frame - 1).center(*pc).rect(pw - 2 * lip, ph - 2 * lip).extrude(z_wall_top + 2))
+         .cut(cq.Workplane("XY").workplane(offset=z_frame - 1).center(fx, pc[1] - ph / 2).rect(fw + 2.0, 4.0).extrude(z_wall_top + 2)))
+lid = lid.union(frame)
 # button holes
 for ref in ("SW2", "SW3"):
     x, y = D.PARTS[ref]["at"]
@@ -120,3 +133,4 @@ export(tray, "tray", "0.88 0.92 0.97", 0.72)
 export(lid, "lid", "0.88 0.92 0.97", 0.72)
 print(f"tray {TW:.1f} x {TH:.1f} x {z_wall_top - z_floor_bottom:.1f} mm, lid {LW:.1f} x {LH:.1f}, badge {LW:.1f} x {LH:.1f} x {z_lid_top - z_floor_bottom:.1f} mm")
 print(f"pogo pins stand {D.POGO['tall'] + 1.4 - z_lid_top:.1f} mm above the lid; the pad half's face is flush with the floor at z {z_floor_bottom:.1f}")
+print(f"the panel's glass sits {z_lid_top - z_glass:.1f} mm below the lid's top, held by a frame {z_wall_top - z_frame:.2f} mm deep with a {lip} mm lip")

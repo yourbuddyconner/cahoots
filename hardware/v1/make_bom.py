@@ -8,8 +8,8 @@ import design as D
 
 rows = {}
 for ref, p in D.PARTS.items():
-    if p["symbol"] is None or ref.startswith(("P", "M")):
-        continue  # pads and magnet holes are the board itself
+    if p["symbol"] is None or ref.startswith(("P", "M", "ANT")):
+        continue  # pads, magnet holes and the antenna loop are the board itself
     key = (p["value"], p["footprint"], p["lcsc"])
     rows.setdefault(key, []).append(ref)
 out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bom.csv")

@@ -70,6 +70,23 @@ def custom_footprint(name):
         m.m_Offset.z = -(c["board_t"] + c["below"] + c["floor"]) + D.POGO["tall"]   # face flush with the floor's outside
         fp.Models().push_back(m)
         return fp
+    elif name == "NFC_loop":
+        # The loop's two ends are pads: 1 the outer end at the footprint origin, 2 the inner end; plated, so
+        # the inner end reaches the chip on the back without a via of its own. The turns are copper lines of
+        # the footprint itself, and the footprint is a net tie between its two pads: the loop is the one piece
+        # of copper that joins the ANT net (the switch side) to the LB net (the chip side).
+        pts = D.antenna_path(); x0, y0 = pts[0]; xi, yi = pts[-1]
+        for num, (x, y) in (("1", (0.0, 0.0)), ("2", (xi - x0, -(yi - y0)))):    # KiCad's y points down
+            pad = pcbnew.PAD(fp); pad.SetNumber(num); pad.SetShape(pcbnew.PAD_SHAPE_CIRCLE); pad.SetAttribute(pcbnew.PAD_ATTRIB_PTH)
+            pad.SetSize(MM(0.8, 0.8)); pad.SetDrillSize(MM(0.35, 0.35))
+            ls = pcbnew.LSET.AllCuMask(); ls.addLayer(pcbnew.F_Mask); ls.addLayer(pcbnew.B_Mask); pad.SetLayerSet(ls)
+            pad.SetPosition(MM(x, y)); fp.Add(pad)
+        for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+            t = pcbnew.PCB_SHAPE(fp); t.SetShape(pcbnew.SHAPE_T_SEGMENT); t.SetLayer(pcbnew.F_Cu)
+            t.SetStart(MM(ax - x0, -(ay - y0))); t.SetEnd(MM(bx - x0, -(by - y0))); t.SetWidth(pcbnew.FromMM(D.ANTENNA["width"])); fp.Add(t)
+        fp.AddNetTiePadGroup("1,2")
+        fp.SetAttributes(fp.GetAttributes() | pcbnew.FP_EXCLUDE_FROM_POS_FILES | pcbnew.FP_EXCLUDE_FROM_BOM)
+        return fp
     elif name == "Magnet_NPTH_D5.1mm":
         pad.SetNumber(""); pad.SetShape(pcbnew.PAD_SHAPE_CIRCLE); pad.SetAttribute(pcbnew.PAD_ATTRIB_NPTH)
         pad.SetSize(MM(5.1, 5.1)); pad.SetDrillSize(MM(5.1, 5.1)); pad.SetLayerSet(pcbnew.LSET.AllCuMask())
@@ -116,9 +133,14 @@ for ref, p in D.PARTS.items():
         m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KICAD10_3DMODEL_DIR}/Battery.3dshapes/BatteryHolder_Keystone_3034_1x20mm.step"
         m.m_Offset.x = 12.4   # the BS-07 footprint's origin is its pin 1; its cell centre, and the Keystone model's origin, is 12.4 mm along
         fp.Models().push_back(m)
+    if ref in ("J2", "J3", "J5", "J6", "C14"):
+        for pad in fp.Pads():
+            pad.SetLocalZoneConnection(pcbnew.ZONE_CONNECTION_FULL)   # solid into the pour: the sockets at the edge and the decoupling capacitor, whose ground pads sit where the pour has room for one spoke
     if ref in ("SW2", "SW3"):
         # the XKB footprint ships without a 3D model; borrow the 6 x 6 x 5 switch's for the renders
         m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KICAD10_3DMODEL_DIR}/Button_Switch_SMD.3dshapes/SW_Push_1TS009xxxx-xxxx-xxxx_6x6x5mm.step"; fp.Models().push_back(m)
+    if p["symbol"] is None:
+        fp.SetAttributes(fp.GetAttributes() | pcbnew.FP_EXCLUDE_FROM_POS_FILES | pcbnew.FP_EXCLUDE_FROM_BOM)
     pads = {pad.GetNumber(): pad for pad in fp.Pads()}
     for num, net in p["pins"].items():
         if num not in pads:
@@ -145,6 +167,7 @@ def layer_of(pad):
     return pcbnew.B_Cu if pad.IsOnLayer(pcbnew.B_Cu) else pcbnew.F_Cu
 
 for net, steps in getattr(D, "MANUAL", {}).items():
+    net = net.split("@")[0]
     cur = None   # (VECTOR2I, layer)
     last_x = None
     for step in steps:
@@ -158,7 +181,7 @@ for net, steps in getattr(D, "MANUAL", {}).items():
             v = pcbnew.PCB_VIA(board); v.SetPosition(pos); v.SetWidth(pcbnew.FromMM(0.6)); v.SetDrill(pcbnew.FromMM(0.3))
             v.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu); v.SetNet(nets[net]); v.SetLocked(True); board.Add(v)
             # a via joins both layers: the track to it stays on the current layer, the next starts on the other
-            if cur is not None:
+            if cur is not None and cur[0] != pos:
                 t = pcbnew.PCB_TRACK(board); t.SetStart(cur[0]); t.SetEnd(pos); t.SetLayer(cur[1]); t.SetWidth(pcbnew.FromMM(0.25)); t.SetNet(nets[net]); t.SetLocked(True); board.Add(t)
             cur = (pos, pcbnew.F_Cu if cur is None or cur[1] == pcbnew.B_Cu else pcbnew.B_Cu)
             continue
@@ -194,6 +217,7 @@ panel.Reference().SetLayer(pcbnew.F_Fab); panel.Value().SetLayer(pcbnew.F_Fab)
 m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KIPRJMOD}/models/panel.wrl"
 m.m_Offset.z = D.CASE["above"] + D.CASE["lid_t"] - 1.0   # glued into the lid's window, glass flush with the top
 panel.Models().push_back(m)
+panel.SetAttributes(panel.GetAttributes() | pcbnew.FP_EXCLUDE_FROM_POS_FILES | pcbnew.FP_EXCLUDE_FROM_BOM)
 board.Add(panel); panel.SetPosition(P(*D.PANEL["center"]))
 
 # ---- the case, when case.py has made it: two transparent models so the 3D view shows the badge whole ----
@@ -205,6 +229,7 @@ if os.path.exists(os.path.join(case_dir, "lid.wrl")):
         m = pcbnew.FP_3DMODEL(); m.m_Filename = "${KIPRJMOD}/case/" + name + ".wrl"
         m.m_Scale.x = m.m_Scale.y = m.m_Scale.z = 1 / 2.54   # case.py writes millimetres; KiCad reads VRML as 0.1 inch
         case.Models().push_back(m)
+    case.SetAttributes(case.GetAttributes() | pcbnew.FP_EXCLUDE_FROM_POS_FILES | pcbnew.FP_EXCLUDE_FROM_BOM)
     board.Add(case); case.SetPosition(P(0, 0))
 
 # ---- panel outline and flex on the front silkscreen ----
@@ -244,6 +269,47 @@ for layer in (pcbnew.F_Cu, pcbnew.B_Cu):
     z.SetLocalClearance(pcbnew.FromMM(0.3)); z.SetMinThickness(pcbnew.FromMM(0.25)); z.SetPadConnection(pcbnew.ZONE_CONNECTION_THERMAL)
     board.Add(z)
 
+# ---- escape stubs out of fine-pitch pads, from design.STUBS ----
+for ref, nums in getattr(D, "STUBS", {}).items():
+    fp = next(f for f in board.GetFootprints() if f.GetReference() == ref)
+    c = fp.GetPosition()
+    sides = {}
+    for num in nums:
+        pad = pad_of(ref, num); pos = pad.GetPosition()
+        dx, dy = pos.x - c.x, pos.y - c.y
+        if abs(dx) > abs(dy): dx, dy = (1 if dx > 0 else -1), 0
+        else: dx, dy = 0, (1 if dy > 0 else -1)
+        sides.setdefault((dx, dy), []).append((pos.y if dx else pos.x, pad))
+    for (dx, dy), pads in sides.items():
+        for i, (_, pad) in enumerate(sorted(pads, key=lambda q: q[0])):
+            pos = pad.GetPosition(); L = pcbnew.FromMM(D.STUB_LEN0 + i * D.STUB_STEP)
+            end = VECTOR2I(pos.x + dx * L, pos.y + dy * L)
+            t = pcbnew.PCB_TRACK(board); t.SetStart(pos); t.SetEnd(end); t.SetLayer(layer_of(pad)); t.SetWidth(pcbnew.FromMM(D.STUB_W)); t.SetNet(pad.GetNet()); t.SetLocked(True); board.Add(t)
+
+# ---- the loop's keep-outs: no pour under or beside the turns on either layer, and on the front no pour
+# inside the loop at all, so the only copper plate inside it is the Pico's own. Fills only: the Pico's
+# castellations sit in the side bands and need their vias, and the turns themselves leave no room for one ----
+_a = D.ANTENNA; _k = _a["keepout"]; _in = _a["turns"] * (_a["width"] + _a["gap"]) + _k
+_ox0, _oy0, _ox1, _oy1 = _a["x0"] - _k, _a["y0"] - _k, _a["x1"] + _k, _a["y1"] + _k
+_ix0, _iy0, _ix1, _iy1 = _a["x0"] + _in, _a["y0"] + _in, _a["x1"] - _in, _a["y1"] - _in
+def rule_area(rect, layers, fills=True, vias=False, tracks=False):
+    k = pcbnew.ZONE(board); k.SetIsRuleArea(True); k.SetDoNotAllowTracks(tracks); k.SetDoNotAllowVias(vias)
+    k.SetDoNotAllowZoneFills(fills); k.SetDoNotAllowPads(False); k.SetDoNotAllowFootprints(False)
+    k.SetLayerSet(lset(*layers)); o = k.Outline(); o.NewOutline()
+    x0, y0, x1, y1 = rect
+    for x, y in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]:
+        o.Append(P(x, y))
+    board.Add(k)
+for band in [(_ox0, _oy1, _ox1, _iy1), (_ox0, _iy0, _ox1, _oy0), (_ox0, _oy1, _ix0, _oy0), (_ix1, _oy1, _ox1, _oy0)]:
+    rule_area(band, (pcbnew.F_Cu, pcbnew.B_Cu))
+rule_area((_ix0, _iy1, _ix1, _iy0), (pcbnew.F_Cu,))
+# and the turns themselves, exactly: no tracks or vias on the front where the loop's copper is, so the
+# router (which does not see a footprint's copper lines) keeps out of it
+_t = _a["turns"] * (_a["width"] + _a["gap"]) - _a["gap"] + _a["width"]   # the band of turns, outer edge to inner edge
+_tx0, _ty0, _tx1, _ty1 = _a["x0"] - _a["width"] / 2, _a["y0"] - _a["width"] / 2, _a["x1"] + _a["width"] / 2, _a["y1"] + _a["width"] / 2
+for band in [(_tx0, _ty1, _tx1, _ty1 - _t), (_tx0, _ty0 + _t, _tx1, _ty0), (_tx0, _ty1, _tx0 + _t, _ty0), (_tx1 - _t, _ty1, _tx1, _ty0)]:
+    rule_area(band, (pcbnew.F_Cu,), fills=True, vias=True, tracks=True)
+
 # ---- keep-out bands along the edge, so routing stays 0.45 mm in: the fab's minimum is 0.3 ----
 BAND = 0.45
 for (x0, y0, x1, y1) in [(-hw, hh, hw, hh - BAND), (-hw, -hh + BAND, hw, -hh), (-hw, hh, -hw + BAND, -hh), (hw - BAND, hh, hw, -hh)]:
@@ -256,7 +322,7 @@ for (x0, y0, x1, y1) in [(-hw, hh, hw, hh - BAND), (-hw, -hh + BAND, hw, -hh), (
     board.Add(k)
 
 # ---- rules: minimums here, the default net class in v1.kicad_pro ----
-ds.m_MinClearance = pcbnew.FromMM(0.2); ds.m_TrackMinWidth = pcbnew.FromMM(0.15)
+ds.m_MinClearance = pcbnew.FromMM(0.127); ds.m_TrackMinWidth = pcbnew.FromMM(0.127)   # JLCPCB's floor; the net class in v1.kicad_pro keeps routing at 0.25 / 0.2
 ds.m_ViasMinSize = pcbnew.FromMM(0.5); ds.m_MinThroughDrill = pcbnew.FromMM(0.3); ds.m_CopperEdgeClearance = pcbnew.FromMM(0.3)
 board.Save(OUT)
 

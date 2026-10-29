@@ -20,6 +20,8 @@ if sys.argv[1] == "export":
     for z in list(board.Zones()):
         if not z.GetIsRuleArea():
             board.Remove(z)
+        elif not (z.GetDoNotAllowTracks() or z.GetDoNotAllowVias()):
+            board.Remove(z)   # a pour-only rule area would reach Freerouting as a full keepout
     ok = pcbnew.ExportSpecctraDSN(board, DSN)
     # Mark the hand routes as protected, or the router treats them as its own and moves them.
     import re
@@ -37,7 +39,7 @@ elif sys.argv[1] == "import":
         z.SetMinThickness(pcbnew.FromMM(0.2)); z.SetLocalClearance(pcbnew.FromMM(0.25))
     # The router necks tracks down between the connector's pads; keep every track at the fab's floor or wider.
     for t in board.GetTracks():
-        if t.GetClass() in ("PCB_TRACK", "PCB_ARC") and t.GetWidth() < pcbnew.FromMM(0.15):
+        if t.GetClass() in ("PCB_TRACK", "PCB_ARC") and t.GetWidth() < pcbnew.FromMM(0.15) and not t.IsLocked():
             t.SetWidth(pcbnew.FromMM(0.15))
     filler = pcbnew.ZONE_FILLER(board)
     filler.Fill(board.Zones())

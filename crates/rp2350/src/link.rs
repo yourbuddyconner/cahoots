@@ -20,6 +20,7 @@ use cahoots_core::frame::{encode, Frame};
 use cahoots_hal::pile::KIND_LOG;
 use cahoots_hal::Link;
 use core::cell::RefCell;
+use core::sync::atomic::{AtomicU32, Ordering};
 use critical_section::Mutex;
 use rp235x_hal::gpio::bank0::{Gpio0, Gpio1, Gpio4, Gpio5};
 use rp235x_hal::gpio::{FunctionUart, Pin, PullDown};
@@ -32,8 +33,13 @@ use usb_device::device::UsbDevice;
 use usbd_serial::SerialPort;
 
 pub const PRESENT_FOR: Duration = Duration::from_secs(2);
-const OUT_CAP: usize = 64 * 1024;
-const IN_CAP: usize = 64 * 1024;
+/// Every queue is allocated to its full size once, at boot. A queue that grew as bytes
+/// arrived would copy itself inside the UART interrupt, with interrupts off for far longer
+/// than the 32-byte hardware FIFO covers at `PILE_BAUD`, and the bytes arriving meanwhile
+/// would be lost: that was how a 20 KB reveal failed where a 1.3 KB commit passed. The
+/// sizes fit the largest frame of a ceremony, a sealed reveal, with room to spare.
+const OUT_CAP: usize = 24 * 1024;
+const IN_CAP: usize = 24 * 1024;
 
 pub type Uart0Pins = (
     Pin<Gpio0, FunctionUart, PullDown>,
@@ -64,14 +70,14 @@ pub fn init_uarts(up: (Reader<UART0, Uart0Pins>, Writer<UART0, Uart0Pins>), down
         *UART_UP.borrow_ref_mut(cs) = Some(UartPort {
             rx,
             tx,
-            inbox: VecDeque::new(),
+            inbox: VecDeque::with_capacity(IN_CAP),
         });
         let (mut rx, tx) = down;
         rx.enable_rx_interrupt();
         *UART_DOWN.borrow_ref_mut(cs) = Some(UartPort {
             rx,
             tx,
-            inbox: VecDeque::new(),
+            inbox: VecDeque::with_capacity(IN_CAP),
         });
     });
     // SAFETY: the handlers below only touch the statics under the critical section.
@@ -84,7 +90,9 @@ pub fn init_uarts(up: (Reader<UART0, Uart0Pins>, Writer<UART0, Uart0Pins>), down
 
 impl<D: rp235x_hal::uart::UartDevice, P: rp235x_hal::uart::ValidUartPinout<D>> UartPort<D, P> {
     /// Drain the FIFO into the inbox. Called from the interrupt and before every read.
-    fn pull(&mut self) {
+    /// Returns how many bytes arrived.
+    fn pull(&mut self) -> usize {
+        let mut total = 0;
         let mut buf = [0u8; 32];
         loop {
             let n = match self.rx.read_raw(&mut buf) {
@@ -95,11 +103,14 @@ impl<D: rp235x_hal::uart::UartDevice, P: rp235x_hal::uart::ValidUartPinout<D>> U
             if n == 0 {
                 break;
             }
-            self.inbox.extend(&buf[..n]);
-            while self.inbox.len() > IN_CAP {
+            total += n;
+            // Never past the capacity allocated at boot: the oldest bytes go first.
+            while self.inbox.len() + n > IN_CAP {
                 self.inbox.pop_front();
             }
+            self.inbox.extend(&buf[..n]);
         }
+        total
     }
 }
 
@@ -107,7 +118,9 @@ impl<D: rp235x_hal::uart::UartDevice, P: rp235x_hal::uart::ValidUartPinout<D>> U
 fn UART0_IRQ() {
     critical_section::with(|cs| {
         if let Some(p) = UART_UP.borrow_ref_mut(cs).as_mut() {
-            p.pull();
+            if p.pull() > 0 {
+                UP_SEEN.store((crate::clock::now_us() / 1000) as u32, Ordering::Relaxed);
+            }
         }
     });
 }
@@ -116,25 +129,35 @@ fn UART0_IRQ() {
 fn UART1_IRQ() {
     critical_section::with(|cs| {
         if let Some(p) = UART_DOWN.borrow_ref_mut(cs).as_mut() {
-            p.pull();
+            if p.pull() > 0 {
+                DOWN_SEEN.store((crate::clock::now_us() / 1000) as u32, Ordering::Relaxed);
+            }
         }
     });
 }
 
-/// Whether a peer's TX holds an RX pin. An idle UART line is high all the time, and one
-/// carrying bytes is high for the stop bit of every byte and most data bits, so a peer is
-/// a line that is high for a good share of a window a little over a byte long at
-/// `PILE_BAUD`. An empty connector sits on its pull-down and reads low, with at most the
-/// odd glitch, so a single high sample is not a peer and a single low one is not an
-/// absence.
-fn line_present(gpio: u8) -> bool {
-    line_highs(gpio) >= NEEDED
+/// Whether a peer's TX holds an RX pin. An idle UART line is high; one carrying bytes is
+/// low for most of a zero byte, and a frame can be a kilobyte of them, so the level at any
+/// instant says nothing. A peer is present if the pin was high, or delivered a byte, within
+/// the last `PEER_HOLD`. An empty connector sits on its pull-down and never does either.
+fn line_present(gpio: u8, seen: &AtomicU32) -> bool {
+    let now = (crate::clock::now_us() / 1000) as u32;
+    if gpio_high(gpio) {
+        seen.store(now, Ordering::Relaxed);
+        return true;
+    }
+    now.wrapping_sub(seen.load(Ordering::Relaxed)) < PEER_HOLD_MS
 }
 
-const SAMPLES: u32 = 64;
-const NEEDED: u32 = 24;
+const PEER_HOLD_MS: u32 = 500;
+/// When each RX line was last seen high or last delivered a byte, in milliseconds since
+/// boot; `u32::MAX / 2` at boot so that nothing counts as seen until it is.
+static UP_SEEN: AtomicU32 = AtomicU32::new(u32::MAX / 2);
+static DOWN_SEEN: AtomicU32 = AtomicU32::new(u32::MAX / 2);
 
-/// How many of `SAMPLES` reads of the pin, 4 µs apart, were high.
+const SAMPLES: u32 = 64;
+
+/// How many of `SAMPLES` reads of the pin, 4 µs apart, were high: for the self-test.
 pub fn line_highs(gpio: u8) -> u32 {
     let mut highs = 0;
     for _ in 0..SAMPLES {
@@ -160,6 +183,11 @@ pub fn links_selftest() -> String {
 
 static DOWN_WAS_UART: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 static USB_WAS_PRESENT: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// For the boot-time probes: whether the laptop is listening yet.
+pub fn host_present() -> bool {
+    usb_present()
+}
 
 /// Whether the laptop is there, logging each change, since a frame sent while it is not is
 /// dropped on purpose and that must be visible.
@@ -190,9 +218,9 @@ impl Link for UpLink {
             take(&mut p.inbox, buf)
         })
     }
-    /// GP1 held high by the peer's TX.
+    /// GP1 held high by the peer's TX, or bytes from it lately.
     fn peer_present(&self) -> bool {
-        line_present(1)
+        line_present(1, &UP_SEEN)
     }
 }
 
@@ -235,7 +263,7 @@ fn take(q: &mut VecDeque<u8>, buf: &mut [u8]) -> usize {
 
 /// Logs each time the link down changes between the cable and USB.
 fn uart_down_present() -> bool {
-    let now = line_present(5);
+    let now = line_present(5, &DOWN_SEEN);
     let was = DOWN_WAS_UART.swap(now, core::sync::atomic::Ordering::Relaxed);
     if now != was {
         log_line(alloc::format!(
@@ -328,8 +356,8 @@ pub fn init_usb(bus: UsbBus) {
             dev,
             serial,
             reset,
-            pending: VecDeque::new(),
-            inbox: VecDeque::new(),
+            pending: VecDeque::with_capacity(OUT_CAP),
+            inbox: VecDeque::with_capacity(IN_CAP),
             logs: VecDeque::new(),
             last_rx: None,
             seq: 0,
@@ -341,12 +369,18 @@ pub fn init_usb(bus: UsbBus) {
 impl UsbPort {
     fn queue_logs(&mut self) {
         while let Some(l) = self.logs.pop_front() {
-            self.pending.extend(l);
+            self.push_pending(&l);
         }
-        while self.pending.len() > OUT_CAP {
+    }
+
+    /// Queue bytes to go out, never past the capacity allocated at boot: the oldest go first.
+    fn push_pending(&mut self, bytes: &[u8]) {
+        let bytes = &bytes[bytes.len().saturating_sub(OUT_CAP)..];
+        while self.pending.len() + bytes.len() > OUT_CAP {
             self.pending.pop_front();
             self.dropped = self.dropped.wrapping_add(1);
         }
+        self.pending.extend(bytes);
     }
 
     /// Run the device, take what arrived, push what is queued.
@@ -356,11 +390,11 @@ impl UsbPort {
         loop {
             match self.serial.read(&mut buf) {
                 Ok(n) if n > 0 => {
-                    self.inbox.extend(&buf[..n]);
-                    self.last_rx = Some(Instant::now());
-                    while self.inbox.len() > IN_CAP {
+                    while self.inbox.len() + n > IN_CAP {
                         self.inbox.pop_front();
                     }
+                    self.inbox.extend(&buf[..n]);
+                    self.last_rx = Some(Instant::now());
                 }
                 _ => break,
             }
@@ -407,7 +441,8 @@ pub fn log_line(s: String) {
         p.seq = p.seq.wrapping_add(1);
         p.logs.push_back(encode(&f));
         p.queue_logs();
-        p.service();
+        // Not serviced here: the badge's next wait pushes it out, and this keeps the
+        // critical section a log line holds short.
     });
 }
 
@@ -436,8 +471,7 @@ impl Link for DownLink {
         } else {
             with_usb(|p| {
                 p.queue_logs();
-                p.pending.extend(frame);
-                p.queue_logs();
+                p.push_pending(frame);
                 p.service();
             });
             log_line(alloc::format!("usb: sent {} bytes down", frame.len()));
@@ -488,7 +522,7 @@ pub fn emergency_write(bytes: &[u8]) {
         };
         let Some(p) = port.as_mut() else { return };
         p.pending.clear();
-        p.pending.extend(bytes);
+        p.push_pending(bytes);
         for _ in 0..200_000u32 {
             p.service();
             if p.pending.is_empty() {

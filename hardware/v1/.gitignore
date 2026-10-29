@@ -9,3 +9,4 @@ v1-drc.rpt
 __pycache__/
 *.kicad-save-*
 .history/
+~*.lck

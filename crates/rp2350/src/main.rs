@@ -17,6 +17,7 @@ mod display;
 mod entropy;
 mod store;
 
+mod se;
 use alloc::format;
 use board::PicoBoard;
 use buttons::{Button, Buttons};
@@ -26,6 +27,7 @@ use cahoots_hal::Display as _;
 use embedded_alloc::LlffHeap as Heap;
 use rp235x_hal as hal;
 use rp235x_hal::fugit::RateExtU32;
+use embedded_hal::delay::DelayNs as _;
 use rp235x_hal::uart::{DataBits, StopBits, UartConfig, UartPeripheral};
 use rp235x_hal::Clock;
 
@@ -37,8 +39,11 @@ pub static IMAGE_DEF: hal::block::ImageDef = hal::block::ImageDef::secure_exe();
 /// The Pico 2's crystal.
 const XTAL_FREQ_HZ: u32 = 12_000_000;
 /// The pile UARTs. Short cables on a bench or V1's pogo pair; the laptop link is USB and
-/// ignores this.
-const PILE_BAUD: u32 = 921_600;
+/// ignores this. Bytes are taken by interrupt from a 32-byte FIFO, and the badge holds
+/// interrupts off for up to a few hundred microseconds at a time, so the rate is set where
+/// the FIFO rides that out: at 115200 the handler has over a millisecond, and a ceremony
+/// still crosses a hop in about two seconds.
+const PILE_BAUD: u32 = 115_200;
 
 #[global_allocator]
 pub static HEAP: Heap = Heap::empty();
@@ -144,6 +149,12 @@ fn main() -> ! {
         .enable(cfg(), clocks.peripheral_clock.freq())
         .expect("uart1")
         .split();
+    // Interrupt at four bytes in the FIFO rather than sixteen, for the most slack.
+    // SAFETY: a register write on peripherals this program owns.
+    unsafe {
+        (*hal::pac::UART0::ptr()).uartifls().write(|w| w.rxiflsel().bits(0));
+        (*hal::pac::UART1::ptr()).uartifls().write(|w| w.rxiflsel().bits(0));
+    }
     link::init_uarts(up, down);
     log!(
         "cahoots rp2350 {} on a Raspberry Pi Pico 2; heap {} KiB, stack to {:#x}",
@@ -171,6 +182,26 @@ fn main() -> ! {
     let _a = pins.gpio14.into_pull_up_input();
     let _b = pins.gpio15.into_pull_up_input();
     let btn = Buttons::new(Button::new(14), Button::new(15));
+
+    // The SE051 (for now the Click board) on I2C0, V1's pins: SDA GP8, SCL GP9, ENA GP2 held
+    // high. A sign of life at boot, once the laptop is listening so the lines are not lost.
+    let _ena = pins.gpio2.into_push_pull_output_in_state(hal::gpio::PinState::High);
+    let sda: hal::gpio::Pin<hal::gpio::bank0::Gpio8, hal::gpio::FunctionI2C, hal::gpio::PullUp> = pins.gpio8.reconfigure();
+    let scl: hal::gpio::Pin<hal::gpio::bank0::Gpio9, hal::gpio::FunctionI2C, hal::gpio::PullUp> = pins.gpio9.reconfigure();
+    let mut i2c = hal::I2C::i2c0(pac.I2C0, sda, scl, 100.kHz(), &mut pac.RESETS, &clocks.system_clock);
+    {
+        let mut d = timer;
+        for _ in 0..300 {
+            link::usb_pump();
+            if link::host_present() {
+                break;
+            }
+            d.delay_ms(10);
+        }
+        for line in se::probe(&mut i2c, &mut d) {
+            log!("{line}");
+        }
+    }
 
     let entropy = Tested::new(
         entropy::Hw::new(pac.TRNG, &mut pac.RESETS),

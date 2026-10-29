@@ -58,7 +58,7 @@ def find(node, key):
 _libcache = {}
 def lib_symbol(lib, name):
     if lib == "cahoots":
-        return pico_symbol()
+        return {"Pico2": pico_symbol, "SE051": se051_symbol}[name]()
     if lib not in _libcache:
         _libcache[lib] = parse(open(os.path.join(SYM_DIR, lib + ".kicad_sym")).read())
     syms = {s[1].strip('"'): s for s in find(_libcache[lib], "symbol")}
@@ -100,6 +100,32 @@ def pico_symbol():
                 ' (property "Value" "Pico2" (at 0 -30 0) (effects (font (size 1.27 1.27))))'
                 ' (property "Footprint" "" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))'
                 ' (property "Datasheet" "https://datasheets.raspberrypi.com/pico/pico-2-datasheet.pdf" (at 0 0 0) (effects (font (size 1.27 1.27)) hide)))')
+    sym.append(body)
+    return sym
+
+SE051_PINS = {1: "LB", 2: "n.c.", 3: "IO1", 4: "n.c.", 5: "n.c.", 6: "n.c.", 7: "n.c.", 8: "n.c.", 9: "SDA", 10: "SCL",
+              11: "ENA", 12: "VIN", 13: "CLK", 14: "RST_N", 15: "VOUT", 16: "IO2", 17: "LA", 18: "VCC", 19: "VSS", 20: "n.c.", 21: "EP"}
+
+def se051_symbol():
+    """The SE051 as a box: pins 1-10 down the left, 11-20 up the right, the centre pad below."""
+    pins = []
+    for n in range(1, 22):
+        name = SE051_PINS[n]
+        kind = "power_in" if name in ("VIN", "VCC", "VSS", "EP") else "power_out" if name == "VOUT" else "input" if name in ("ENA", "RST_N", "CLK") else "bidirectional"
+        if n <= 10:
+            x, y, ang = -15.24, 11.43 - (n - 1) * G, 0
+        elif n <= 20:
+            x, y, ang = 15.24, 11.43 - (20 - n) * G, 180
+        else:
+            x, y, ang = 0, -17.78, 90
+        pins.append(parse(f'(pin {kind} line (at {x} {y} {ang}) (length 5.08) (name "{name}" (effects (font (size 1.27 1.27)))) (number "{n}" (effects (font (size 1.27 1.27)))))'))
+    body = parse('(symbol "SE051_1_1" (rectangle (start -10.16 15.24) (end 10.16 -12.7) (stroke (width 0.254) (type default)) (fill (type background))))')
+    body += pins
+    sym = parse('(symbol "cahoots:SE051" (pin_names (offset 1.016)) (exclude_from_sim no) (in_bom yes) (on_board yes)'
+                ' (property "Reference" "U" (at 0 17 0) (effects (font (size 1.27 1.27))))'
+                ' (property "Value" "SE051" (at 0 -15 0) (effects (font (size 1.27 1.27))))'
+                ' (property "Footprint" "" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))'
+                ' (property "Datasheet" "https://www.nxp.com/docs/en/data-sheet/SE051.pdf" (at 0 0 0) (effects (font (size 1.27 1.27)) hide)))')
     sym.append(body)
     return sym
 
@@ -321,6 +347,31 @@ EX, EY = 190.5, 205.74
 text("Peripherals. J5: Qwiic / STEMMA QT, pin 1 GND, 2 3V3, 3 SDA, 4 SCL, on I2C0. J6: spare GPIO, 3V3 and GND for whatever a firmware fork needs.", EX - 10.16, EY - 13.97, 1.3)
 labelled_block("J5", EX, EY + 5.08, ref_at=(4, -9), val_at=(4, 9))
 labelled_block("J6", EX + 40.64, EY + 5.08, ref_at=(4, -14), val_at=(4, 14))
+
+# The secure element: SE051 on I2C0 with its pull-ups, decoupling and enable, then the antenna
+# switch and the loop. The loop is copper on the board, drawn by make_pcb.py from design.ANTENNA.
+SX, SY = 25.4, 205.74
+text("Secure element: NXP SE051 on I2C0. ENA low is deep power-down; R5 holds it on. VOUT ties to VCC (SE_VCC), as the data sheet asks when ENA is used.", SX, SY - 13.97, 1.3)
+text("Antenna: C15 (27 pF) and C16 (not fitted, trim) across LA/LB at the chip, SW4 opens the LA line, ANT1 is the four-turn loop on the front.", SX, SY - 10.16, 1.3)
+labelled_block("U2", SX + 20.32, SY + 12.7, ref_at=(-6, -22), val_at=(-6, 20))
+for i, (ref, top, bottom) in enumerate([("C13", "3V3", "GND"), ("C14", "SE_VCC", "GND"), ("C15", "LA", "LB"), ("C16", "LA", "LB")]):
+    c = place(ref, SX + 63.5 + i * 15.24, SY + 7.62, ref_at=(2, -1.5), val_at=(2, 1.5))
+    a, b = c["1"][0], c["2"][0]
+    route(a, (a[0], a[1] - G)); label(top, (a[0], a[1] - G), 270)
+    if bottom == "GND":
+        power("GND", b)
+    else:
+        route(b, (b[0], b[1] + G)); label(bottom, (b[0], b[1] + G), 90)
+for i, (ref, top, bottom) in enumerate([("R3", "3V3", "I2C_SDA"), ("R4", "3V3", "I2C_SCL"), ("R5", "3V3", "SE_ENA")]):
+    r = place(ref, SX + 63.5 + i * 15.24, SY + 25.4, ref_at=(2, -1.5), val_at=(2, 1.5))
+    a, b = r["1"][0], r["2"][0]
+    route(b, (b[0], b[1] - G)); label(top, (b[0], b[1] - G), 270)
+    route(a, (a[0], a[1] + G)); label(bottom, (a[0], a[1] + G), 90)
+sw4 = place("SW4", SX + 124.46, SY + 7.62, mirror="y", ref_at=(-3, -5), val_at=(-3, 5))
+route(sw4["1"][0], (sw4["1"][0][0] - G, sw4["1"][0][1])); label("LA", (sw4["1"][0][0] - G, sw4["1"][0][1]), 180)
+route(sw4["2"][0], (sw4["2"][0][0] + G, sw4["2"][0][1])); label("ANT", (sw4["2"][0][0] + G, sw4["2"][0][1]), 0)
+no_connect(sw4["3"][0])
+labelled_block("ANT1", SX + 149.86, SY + 7.62, ref_at=(3, -6), val_at=(3, 6))
 
 text("Cahoots badge V1: a board a Raspberry Pi Pico 2 solders onto. 54 x 86 mm, two layers. Labels with the same name are one net.", 25.4, 228.6, 1.5)
 text("design.py is the source; make_sch.py and make_pcb.py draw it; check.py confirms the schematic, the table and the board agree.", 25.4, 233, 1.5)
