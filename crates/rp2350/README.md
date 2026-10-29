@@ -15,6 +15,8 @@ The pin map is V1's, from [hardware/v1/design.py](../../hardware/v1/design.py), 
 | link up: UART0 TX, RX | GP0, GP1 | 1, 2 |
 | link down: UART1 TX, RX | GP4, GP5 | 6, 7 |
 | link to the laptop | USB | |
+| SE051 SDA, SCL (I2C0, 400 kHz) | GP8, GP9 | 11, 12 |
+| SE051 enable, held high | GP2 | 4 |
 
 The pile links are crossed between boards: this board's GP0 to the board above's GP5, this board's GP1 to the board above's GP4, ground to ground. Each RX pin carries a pull-down, so a connected peer's idle-high TX is the detect line.
 
@@ -84,6 +86,7 @@ The program may use the first 2 MiB (`memory.x`). Above it, by offset from the s
 | trace | 0x312000 | 4 KiB | the last 4 KiB of log lines and screens before a panic, written with the panic record |
 | circles | 0x313000 | 15 x 4 KiB | the records of circles 2 to 16, one sector each, as the first's |
 | places | 0x322000 | 15 x 56 KiB | for circles 2 to 16, one block each: a 48 KiB pad, then an 8 KiB ledger (512 spends) |
+| chip record | 0x3F4000 | 4 KiB | `CAHC`, a length and the chip record: which chip slots hold a circle's seat key, root and epoch counter |
 
 The badge holds up to 16 circles. Each has its own record, pad and ledger, and keeps its place until it is forgotten; a new circle takes the lowest free place. The first place is where firmware from before many circles kept its one circle, so flashing over keeps it. A pad in any place but the first can be at most 48 KiB; the Pico proposes 16 KiB.
 
@@ -91,7 +94,21 @@ The chip runs from this flash, so every erase and program hands the bus to the b
 
 Reading the trace after a panic: `picotool save -r 0x10312000 0x10313000 trace.bin` with the board in BOOTSEL, then strip the `0xFF`. Unlike the Nano, the trace is kept in RAM while the board runs and written to flash only by the panic handler, because a flash program holds interrupts off for milliseconds and the UART FIFOs hold about a third of one.
 
-The pad is plaintext on flash. The key store chip (roadmap M4f) is what changes that.
+The pad is plaintext on flash. The chip holds the seat keys and roots of circles made with it, but not the pad.
+
+## The chip
+
+The NXP SE051 (for now on a MikroE Click board) sits on I2C0, GP8 and GP9, at 400 kHz, with its enable pin GP2 held high. At boot the firmware wakes it, selects its applet and, once in the chip's life, creates the P-256 curve object. The self-test then shows `se051: applet x.y.z, N circles`, where N is the number of seat keys in the chip. If nothing answers, the line is `se051: not found` and the badge runs as it did before the chip: the seat key and the root stay in the circle record.
+
+A circle made on a badge with a chip keeps its seat key (P-256, made in the chip and never out of it), its root (an HMAC key that can be used but not read) and its chat epoch counter in the chip, at object ids `0x4C41_01ss`, `0x4C41_02ss` and `0x4C41_03ss` for chip slot `ss`. The chip record above says which slots are in use; at boot the badge deletes any Cahoots object in a slot the record does not know.
+
+The driver is `crates/chip/src/se05x.rs`, which puts Nitrokey's [`se05x`](https://crates.io/crates/se05x) crate (0.4.2) behind the `ChipOps` trait the rest of the code calls. Every command runs in the default session.
+
+Not yet checked on a real chip: the order of the bytes in Ed25519 keys and signatures (nothing makes one today), that a counter goes up by one, the object ids of NXP's attestation key and certificate (`0xF0000012`, `0xF0000013`), and the exact bytes the chip signs in an attestation, which `crates/objects/src/attestation.rs` must match.
+
+### The license
+
+The `se05x` crate is LGPL-3.0-only. This firmware is MIT OR Apache-2.0 and is one static binary that includes it. The LGPL allows that as long as a user can rebuild the binary with a changed copy of the library. Here they can: the repository is public, and `cargo build --release` in this directory makes the binary from public sources. The crate is used only here, in the firmware, and only behind `ChipOps`, so it can be replaced without changing anything above it. The workspace's default build does not include it.
 
 ## Memory
 
@@ -99,7 +116,7 @@ The pad is plaintext on flash. The key store chip (roadmap M4f) is what changes 
 
 ## Done and not yet
 
-On 2026-10-27 a Pico 2 on a breadboard ran a three-member ceremony with the laptop as the two cards below it, showed the same six words as the laptop, kept the circle, and read it back from flash after a reflash. PIN entry, the key store chip, and the QR screen are the same open items as on the Nano.
+On 2026-10-27 a Pico 2 on a breadboard ran a three-member ceremony with the laptop as the two cards below it, showed the same six words as the laptop, kept the circle, and read it back from flash after a reflash. PIN entry and the QR screen are the same open items as on the Nano. The chip's driver is built but not yet run on the board: flashing, a ceremony with the chip, an attestation checked against NXP's root, and ssh and git signing remain for the bench.
 
 Twice in seven runs the count the top card sends down after Both never reached the laptop, and the ceremony waited at one commit. The log now says when the USB host is taken for absent (no byte for two seconds, after which frames down are dropped on purpose) and how many bytes each frame down was, so the next time it happens the log says why.
 

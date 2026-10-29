@@ -13,12 +13,25 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use cahoots_badge::board::{assign_places, place_for};
+use cahoots_badge::chip::ChipRecord;
 use cahoots_badge::{screens, Board, BoardError, Circle, Press};
+use cahoots_chip::se05x::Se05xChip;
+use cahoots_chip::{ChipOps, KeyId, KeyKind};
 use cahoots_core::circle_id::CircleId;
 use cahoots_hal::health::Tested;
 use cahoots_hal::{Display, Link};
 use embedded_hal::delay::DelayNs;
+use rp235x_hal::gpio::bank0::{Gpio2, Gpio8, Gpio9};
+use rp235x_hal::gpio::{FunctionI2C, FunctionSioOutput, Pin, PullDown, PullUp};
+use rp235x_hal::pac::I2C0;
 use rp235x_hal::timer::{CopyableTimer0, Timer};
+
+/// The SE051's bus: I2C0 on GP8 (SDA) and GP9 (SCL).
+pub type Sda = Pin<Gpio8, FunctionI2C, PullUp>;
+pub type Scl = Pin<Gpio9, FunctionI2C, PullUp>;
+pub type ChipBus = rp235x_hal::I2C<I2C0, (Sda, Scl)>;
+/// The SE051 through the `se05x` driver.
+pub type Chip = Se05xChip<ChipBus, Timer<CopyableTimer0>>;
 
 /// This board's proposal for a circle, used only if it is the bottom of the pile.
 const NAME: &str = "pico";
@@ -35,6 +48,10 @@ pub struct PicoBoard {
     pub heap_logged: usize,
     /// The place a pad was written to for a circle not stored yet.
     pub pending: Option<(CircleId, usize)>,
+    /// The SE051, or `None` when it did not answer at boot.
+    pub chip: Option<Chip>,
+    /// The SE051's enable pin, held high for as long as the board runs.
+    pub _chip_enable: Pin<Gpio2, FunctionSioOutput, PullDown>,
 }
 
 impl PicoBoard {
@@ -192,7 +209,23 @@ impl Board for PicoBoard {
             state(self.buttons.b.is_down())
         );
         self.buttons.clear();
-        vec![flash, buttons, link::links_selftest()]
+        vec![flash, buttons, link::links_selftest(), self.selftest_chip()]
+    }
+
+    fn chip(&mut self) -> Option<&mut dyn ChipOps> {
+        self.chip.as_mut().map(|c| c as &mut dyn ChipOps)
+    }
+
+    fn chip_record_load(&mut self) -> Result<Option<ChipRecord>, BoardError> {
+        match store::load_chip_record() {
+            Ok(None) => Ok(None),
+            Ok(Some(body)) => ChipRecord::decode(&body).map(Some).map_err(|_| BoardError::Storage),
+            Err(()) => Err(BoardError::Storage),
+        }
+    }
+
+    fn chip_record_store(&mut self, r: &ChipRecord) -> Result<(), BoardError> {
+        store::save_chip_record(&r.encode()).map_err(|()| BoardError::Storage)
     }
 
     fn log(&mut self, line: &str) {
@@ -207,6 +240,29 @@ impl Board for PicoBoard {
             return;
         }
         log!("screen: {}", lines.join(" | "));
+    }
+}
+
+impl PicoBoard {
+    /// `se051: applet x.y.z, N circles`, N the seat keys the chip holds; `se051: not found`
+    /// when it did not answer at boot. A chip that answered at boot but not now is dropped,
+    /// so the badge runs without one.
+    fn selftest_chip(&mut self) -> String {
+        let Some(chip) = self.chip.as_mut() else {
+            return "se051: not found".into();
+        };
+        let line = chip.version().and_then(|v| {
+            let seats = chip
+                .ids()?
+                .iter()
+                .filter(|id| KeyId::parse(id.0).is_some_and(|(k, _)| k == KeyKind::Seat))
+                .count();
+            Ok(format!("se051: applet {}.{}.{}, {seats} circles", v.major, v.minor, v.patch))
+        });
+        line.unwrap_or_else(|e| {
+            self.chip = None;
+            format!("se051: not found ({e:?})")
+        })
     }
 }
 

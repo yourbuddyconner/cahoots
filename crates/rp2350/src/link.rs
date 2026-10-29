@@ -184,11 +184,6 @@ pub fn links_selftest() -> String {
 static DOWN_WAS_UART: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 static USB_WAS_PRESENT: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
-/// For the boot-time probes: whether the laptop is listening yet.
-pub fn host_present() -> bool {
-    usb_present()
-}
-
 /// Whether the laptop is there, logging each change, since a frame sent while it is not is
 /// dropped on purpose and that must be visible.
 fn usb_present() -> bool {

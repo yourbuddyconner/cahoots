@@ -7,6 +7,8 @@ extern crate alloc;
 
 pub mod ids;
 pub mod ops;
+#[cfg(feature = "se05x")]
+pub mod se05x;
 pub mod soft;
 pub mod testca;
 

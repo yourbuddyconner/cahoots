@@ -17,7 +17,6 @@ mod display;
 mod entropy;
 mod store;
 
-mod se;
 use alloc::format;
 use board::PicoBoard;
 use buttons::{Button, Buttons};
@@ -184,24 +183,24 @@ fn main() -> ! {
     let btn = Buttons::new(Button::new(14), Button::new(15));
 
     // The SE051 (for now the Click board) on I2C0, V1's pins: SDA GP8, SCL GP9, ENA GP2 held
-    // high. A sign of life at boot, once the laptop is listening so the lines are not lost.
-    let _ena = pins.gpio2.into_push_pull_output_in_state(hal::gpio::PinState::High);
-    let sda: hal::gpio::Pin<hal::gpio::bank0::Gpio8, hal::gpio::FunctionI2C, hal::gpio::PullUp> = pins.gpio8.reconfigure();
-    let scl: hal::gpio::Pin<hal::gpio::bank0::Gpio9, hal::gpio::FunctionI2C, hal::gpio::PullUp> = pins.gpio9.reconfigure();
-    let mut i2c = hal::I2C::i2c0(pac.I2C0, sda, scl, 100.kHz(), &mut pac.RESETS, &clocks.system_clock);
+    // high for as long as the board runs. No answer leaves the badge without a chip: seat
+    // keys and roots stay in software, as before the chip.
+    let ena = pins.gpio2.into_push_pull_output_in_state(hal::gpio::PinState::High);
+    let sda: board::Sda = pins.gpio8.reconfigure();
+    let scl: board::Scl = pins.gpio9.reconfigure();
+    let i2c = hal::I2C::i2c0(pac.I2C0, sda, scl, 400.kHz(), &mut pac.RESETS, &clocks.system_clock);
+    // The chip wants a moment after its enable pin rises before it answers.
     {
         let mut d = timer;
-        for _ in 0..300 {
-            link::usb_pump();
-            if link::host_present() {
-                break;
-            }
-            d.delay_ms(10);
-        }
-        for line in se::probe(&mut i2c, &mut d) {
-            log!("{line}");
-        }
+        d.delay_ms(10);
     }
+    let chip = match cahoots_chip::se05x::Se05xChip::new(i2c, timer) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            log!("se051: no answer ({e:?})");
+            None
+        }
+    };
 
     let entropy = Tested::new(
         entropy::Hw::new(pac.TRNG, &mut pac.RESETS),
@@ -215,6 +214,8 @@ fn main() -> ! {
         stack_logged: 0,
         heap_logged: 0,
         pending: None,
+        chip,
+        _chip_enable: ena,
     });
     badge.boot();
     loop {

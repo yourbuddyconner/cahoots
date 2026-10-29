@@ -20,7 +20,8 @@
 //! `0x20_0000`, the 64 KiB ledger at `0x30_0000` and the record sector at `0x31_0000`. Places
 //! 1 to 15 have a record sector each from `0x31_3000`, after the panic and trace sectors, and
 //! from `0x32_2000` a 56 KiB block each: a 48 KiB pad region and an 8 KiB ledger (512
-//! spends). The last block ends at `0x3F_4000`, under the 4 MiB the flash has. So a circle in
+//! spends). The last block ends at `0x3F_4000`, under the 4 MiB the flash has, and the chip
+//! record takes the sector there. So a circle in
 //! place 0 may have a pad of up to 1 MiB and one in any other place up to 48 KiB; the Pico
 //! proposes 16 KiB.
 
@@ -55,6 +56,11 @@ const BLOCK_LEDGER_CAP: u32 = 0x2000;
 const BLOCK: u32 = BLOCK_PAD_CAP + BLOCK_LEDGER_CAP;
 const _: () = assert!(BLOCKS_BASE + (PLACES as u32 - 1) * BLOCK <= 0x40_0000);
 const _: () = assert!(RECORDS_BASE + (PLACES as u32 - 1) * SECTOR <= BLOCKS_BASE);
+/// The chip record (`cahoots_badge::chip::ChipRecord`): which chip slots the badge made
+/// objects in. One sector after the last place's block, in the free space under 4 MiB.
+pub const CHIP_RECORD_BASE: u32 = 0x3F_4000;
+const _: () = assert!(BLOCKS_BASE + (PLACES as u32 - 1) * BLOCK <= CHIP_RECORD_BASE);
+const _: () = assert!(CHIP_RECORD_BASE + SECTOR <= 0x40_0000);
 /// One sector after the circle record: the message of the last panic, shown at the next boot.
 pub const PANIC_BASE: u32 = 0x31_1000;
 /// One sector after the panic record: the last log lines and screens before a panic,
@@ -340,6 +346,40 @@ pub fn wipe(p: usize, pad_len: u32) -> Result<(), ()> {
     erase_circle(p)?;
     erase_sectors(at.pad, pad_len.clamp(SECTOR, at.pad_cap))?;
     erase_sectors(at.ledger, at.ledger_cap)
+}
+
+const CHIP_MAGIC: &[u8; 4] = b"CAHC";
+
+/// The chip record's bytes: `Ok(None)` if the sector is blank, `Err` if it holds something
+/// that is not a chip record. The bytes are `CAHC`, a little-endian u16 length and the body.
+pub fn load_chip_record() -> Result<Option<Vec<u8>>, ()> {
+    let mut head = [0u8; 6];
+    read_any(CHIP_RECORD_BASE, &mut head);
+    if head == [0xFF; 6] {
+        return Ok(None);
+    }
+    if &head[..4] != CHIP_MAGIC {
+        return Err(());
+    }
+    let len = u16::from_le_bytes([head[4], head[5]]) as usize;
+    if len > SECTOR as usize - 6 {
+        return Err(());
+    }
+    let mut body = vec![0u8; len];
+    read_any(CHIP_RECORD_BASE + 6, &mut body);
+    Ok(Some(body))
+}
+
+/// Replace the chip record, rewritten whole in its sector.
+pub fn save_chip_record(body: &[u8]) -> Result<(), ()> {
+    if body.len() > SECTOR as usize - 6 {
+        return Err(());
+    }
+    let mut rec = Vec::with_capacity(6 + body.len());
+    rec.extend_from_slice(CHIP_MAGIC);
+    rec.extend_from_slice(&(body.len() as u16).to_le_bytes());
+    rec.extend_from_slice(body);
+    erase_sectors(CHIP_RECORD_BASE, SECTOR).and_then(|()| program_any(CHIP_RECORD_BASE, &rec))
 }
 
 const PANIC_MAGIC: &[u8; 4] = b"CAHP";

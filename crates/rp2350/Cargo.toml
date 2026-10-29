@@ -10,6 +10,7 @@ publish = false
 cahoots-core = { path = "../core", default-features = false }
 cahoots-hal = { path = "../hal" }
 cahoots-badge = { path = "../badge", default-features = false }
+cahoots-chip = { path = "../chip", default-features = false, features = ["se05x"] }
 cortex-m = "0.7.7"
 cortex-m-rt = "0.7.5"
 critical-section = "1.2.0"
