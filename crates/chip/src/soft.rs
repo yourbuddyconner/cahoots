@@ -67,17 +67,13 @@ pub struct SoftChip {
 }
 
 impl SoftChip {
-    /// A chip with an empty store. Under `std` the key generator is seeded from the system;
-    /// without it, from a fixed seed (see [`SoftChip::with_seed`]).
+    /// A chip with an empty store, its key generator seeded from the system. Only with `std`:
+    /// without it there is no entropy, so callers must pass a seed to [`SoftChip::with_seed`].
+    #[cfg(feature = "std")]
     pub fn new() -> SoftChip {
-        #[cfg(feature = "std")]
-        {
-            let mut seed = [0u8; 32];
-            let _ = getrandom::getrandom(&mut seed);
-            SoftChip::with_seed(seed)
-        }
-        #[cfg(not(feature = "std"))]
-        SoftChip::with_seed([0u8; 32])
+        let mut seed = [0u8; 32];
+        getrandom::getrandom(&mut seed).expect("the system has no randomness");
+        SoftChip::with_seed(seed)
     }
 
     /// A chip whose generated keys and random bytes follow from `seed`, for repeatable tests.
@@ -95,6 +91,7 @@ impl SoftChip {
     }
 }
 
+#[cfg(feature = "std")]
 impl Default for SoftChip {
     fn default() -> Self {
         SoftChip::new()
