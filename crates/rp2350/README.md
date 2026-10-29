@@ -2,7 +2,7 @@
 
 The Cahoots badge on a Raspberry Pi Pico 2: the RP2350 with 4 MiB of flash, the Waveshare 1.54" V2 e-paper, two tactile switches, the micro-USB port as the link to a laptop, and two UARTs as the links up and down a pile. It runs the same `cahoots-badge` code as the desktop simulator and the Nano; this crate is the board under it (`src/board.rs`) and the drivers: the e-paper over SPI, the buttons, the chip's true random number generator, the flash regions, and the three links.
 
-The pin map is V1's, from [hardware/v1/design.py](../../hardware/v1/design.py), so this firmware runs unchanged on the V1 board when it arrives. The wiring diagrams are in [Build a badge](../../docs/diy-badge.md#raspberry-pi-pico-2).
+The pin map is V1's, from [hardware/v1/design.py](../../hardware/v1/design.py), so this firmware runs unchanged on the V1 board when the boards arrive. Today it runs a ceremony on a breadboard with the Waveshare e-paper, and probes the SE051 at boot through a Mikroe Click board. The wiring diagrams are in [Build a badge](../../docs/diy-badge.md#raspberry-pi-pico-2).
 
 ## Wiring
 

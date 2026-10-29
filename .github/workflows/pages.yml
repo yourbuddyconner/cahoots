@@ -46,6 +46,8 @@ jobs:
           cp crates/chat/README.md "$out/docs/md/chat-cli.md"
           cp crates/host/README.md "$out/docs/md/host.md"
           cp crates/ADAPTERS.md "$out/docs/md/adapters.md"
+          cp crates/rp2350/README.md "$out/docs/md/rp2350.md"
+          cp hardware/v1/README.md "$out/docs/md/v1-board.md"
           cp -r web/app/. "$out/app/"
           rm -f "$out/app/pkg/.gitignore"
           touch "$out/.nojekyll"

@@ -1,12 +1,12 @@
 # V1: the first badge you can order
 
-A 54 × 86 mm two-layer board that a Raspberry Pi Pico 2 solders onto. Front: the raw 1.54" e-paper (Good Display GDEY0154D67) on its 24-pin flex, two tactile switches, the pin half of a magnetic pogo connector at the top end with its pins up through the lid, two JST-SH sockets and a Qwiic socket at the bottom edge, and a four-turn NFC loop around the panel. Back: the Pico 2 crosswise with its USB at the right edge, a CR2032 holder, a power switch, the panel's boost circuit, the NXP SE051 secure element with a switch that opens its antenna, a 10-pin expansion socket, four pockets for 5 × 2 mm magnets.
+A 54 × 86 mm two-layer board that a Raspberry Pi Pico 2 solders onto. Front: the raw 1.54" e-paper (Good Display GDEY0154D67) on its 24-pin flex, two tactile switches, the pin half of a magnetic pogo connector at the top end with its pins up through the lid, two JST-SH sockets and a Qwiic socket at the bottom edge, and a three-turn NFC loop around the board's edge. Back: the Pico 2 crosswise with its USB at the right edge, a CR2032 holder, a power switch, the panel's boost circuit, the NXP SE051 secure element with a switch that opens its antenna, a 10-pin expansion socket, four pockets for 5 × 2 mm magnets.
 
 The plan it belongs to is [docs/manufacturing.md](../../docs/manufacturing.md). The hand-built version that comes first, a Pico 2 and the Waveshare module on a proto board, uses the same pin map; the table is at the bottom.
 
 ## Status
 
-Drawn, checked and quoted (2026-10-27, with the secure element and the loop), not yet ordered. The schematic passes KiCad's electrical check, the board passes its design rule check, the three agree on every net (`check.py`), and every part in `bom.csv` is in JLCPCB's stock under the code written next to it (checked 2026-10-27 through ProvenMetal). What has not happened: a person looking at the 3D view and a 1:1 printout, and the flex connector's contact side confirmed against the panel's flex. See the review list.
+Drawn, checked and quoted (2026-10-27, with the secure element and the loop): five boards, through ProvenMetal at JLCPCB, about to be ordered and not yet received. The schematic passes KiCad's electrical check, the board passes its design rule check, the three agree on every net (`check.py`), and every part in `bom.csv` is in JLCPCB's stock under the code written next to it (checked 2026-10-27 through ProvenMetal). What has not happened: a person looking at the 3D view and a 1:1 printout, and the flex connector's contact side confirmed against the panel's flex. See the review list.
 
 ## Files
 

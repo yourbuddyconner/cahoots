@@ -119,16 +119,7 @@ Two things make mesh bootstrap harder than WireGuard between two servers.
 
 ### 5.1 Control message subtypes
 
-Now normative: [protocol](protocol.md) section 4.3. Implemented in `crates/core/src/control.rs` and used by `cahoots-wg`. The table is kept here for the discussion that follows.
-
-A `control` message's plaintext begins with one subtype byte.
-
-| Subtype | Name | Payload |
-|---|---|---|
-| `0` | `peer` | `proto (u8) | pubkey_len (u8) | pubkey | endpoint_len (u8) | endpoint (UTF-8) | allowed_len (u8) | allowed_ips (UTF-8)`. `proto`: `0` WireGuard, `1` Reticulum, `2` Yggdrasil, `3` Meshtastic. |
-| `1` | `psk` | `purpose (u8) | peer_a (u8) | peer_b (u8) | offset (u32)`. The issuing member's slice is the message's own slice. `purpose`: `0` WireGuard, `1` TLS, `2` MLS, `3` Wi-Fi/802.11s, `4` Meshtastic, `5` other. |
-| `2` | `rotate` | `purpose (u8) | peer_a (u8) | peer_b (u8) | not_after (u64 unix seconds)` |
-| `3` | `slice-transfer` | `member (u8)`. Announces that the member's slice now lives on a node, not a badge. Informational. |
+The control message subtypes (`peer`, `psk`, `rotate`, `slice-transfer`) are specified in [protocol](protocol.md#43-control-messages), section 4.3, and implemented in `crates/core/src/control.rs` and used by `cahoots-wg`.
 
 The `context` bound into the PSK HKDF salt is the `purpose` byte followed by the two peer indices, so a PSK issued for WireGuard between A and B cannot be reused for TLS or for another pair.
 

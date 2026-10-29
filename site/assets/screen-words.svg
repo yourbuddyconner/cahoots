@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace">
+<title>The badge showing the six check words of the circle rooftop</title>
+<rect width="200" height="200" fill="#f0dcbd"/>
+<g fill="#0a0a0b">
+<text x="4" y="17" font-size="13">rooftop</text>
+<text x="196" y="17" font-size="13" text-anchor="end">TRNG · T1</text>
+<rect x="0" y="26" width="200" height="1"/>
+<text class="word" x="100" y="50" font-size="22" font-weight="700" text-anchor="middle">orbit</text>
+<text class="word" x="100" y="78" font-size="22" font-weight="700" text-anchor="middle">maple</text>
+<text class="word" x="100" y="106" font-size="22" font-weight="700" text-anchor="middle">fossil</text>
+<text class="word" x="100" y="134" font-size="22" font-weight="700" text-anchor="middle">drum</text>
+<text class="word" x="100" y="162" font-size="22" font-weight="700" text-anchor="middle">velvet</text>
+<text class="word" x="100" y="190" font-size="22" font-weight="700" text-anchor="middle">harbor</text>
+</g>
+</svg>

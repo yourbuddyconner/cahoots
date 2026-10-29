@@ -1,7 +1,7 @@
 {
   "name": "Cahoots",
   "short_name": "Cahoots",
-  "description": "Make a shared secret with people in the room, then send messages nothing can break. Works offline.",
+  "description": "A private network for people who have met in person.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
