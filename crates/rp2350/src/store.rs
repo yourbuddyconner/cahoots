@@ -333,9 +333,11 @@ pub fn erase_circle(p: usize) -> Result<(), ()> {
     erase_sectors(at, SECTOR)
 }
 
-/// Forget the circle in place `p`'s pad and ledger: the ledger, and the pad's sectors.
+/// Forget the circle in place `p`: its record first, so no record is ever left over a blank
+/// pad, then the pad's sectors, then the ledger.
 pub fn wipe(p: usize, pad_len: u32) -> Result<(), ()> {
     let at = place(p);
+    erase_circle(p)?;
     erase_sectors(at.pad, pad_len.clamp(SECTOR, at.pad_cap))?;
     erase_sectors(at.ledger, at.ledger_cap)
 }

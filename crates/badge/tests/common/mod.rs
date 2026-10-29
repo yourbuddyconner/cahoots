@@ -176,6 +176,8 @@ pub struct FakeBoard {
     pub pending: Option<(CircleId, usize)>,
     /// The name this card proposes for a circle when it is the bottom of the pile.
     pub name: String,
+    /// `forget` fails at the ledger erase, after the record and the pad are gone.
+    pub fail_ledger_erase: bool,
     /// The gestures `press()` hands out, one per call, then `Press::None`.
     pub presses: VecDeque<Press>,
     pub a_down: bool,
@@ -217,6 +219,7 @@ impl FakeBoard {
             ],
             pending: None,
             name: "fakes".into(),
+            fail_ledger_erase: false,
             presses: VecDeque::new(),
             a_down: false,
             release_at_ms: 3000,
@@ -369,12 +372,23 @@ impl Board for FakeBoard {
     fn load_circle(&self) -> Option<Circle> {
         self.circle.clone()
     }
+    /// The record, then the pad, then the ledger, as a flash board does. With
+    /// `fail_ledger_erase`, the ledger erase fails after the pad is erased.
     fn forget(&mut self, circle: &CircleId, pad_len: u32) -> Result<(), BoardError> {
         let p = self.place(circle).ok_or(BoardError::Storage)?;
+        if p == 0 {
+            self.circle = None;
+        } else {
+            self.more[p - 1].circle = None;
+        }
+        let fail = self.fail_ledger_erase;
         let (pad, records) = self.region(p);
-        records.fill(0xFF);
         let n = (pad_len as usize).min(pad.len());
         pad[..n].fill(0);
+        if fail {
+            return Err(BoardError::Storage);
+        }
+        records.fill(0xFF);
         Ok(())
     }
     fn write_pad(&mut self, circle: &CircleId, pad: &[u8]) -> Result<VecPad, BoardError> {

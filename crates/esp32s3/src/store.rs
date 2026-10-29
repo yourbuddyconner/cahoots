@@ -307,8 +307,10 @@ pub fn erase_circle(flash: &SharedFlash, p: usize) -> Result<(), ()> {
     erase_sectors(&mut f, at, SECTOR)
 }
 
-/// Forget the circle in place `p`'s pad and ledger: the ledger, and the pad's sectors.
+/// Forget the circle in place `p`: its record first, so no record is ever left over a blank
+/// pad, then the pad's sectors, then the ledger.
 pub fn wipe(flash: &SharedFlash, p: usize, pad_len: u32) -> Result<(), ()> {
+    erase_circle(flash, p)?;
     let at = place(p);
     let mut f = flash.borrow_mut();
     erase_sectors(&mut f, at.pad, pad_len.clamp(SECTOR, PAD_CAP))?;

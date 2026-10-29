@@ -613,3 +613,106 @@ fn a_board_with_one_record_holds_one_circle() {
     assert_eq!(b.board().load_circles(), Vec::<Circle>::new());
     assert!(b.board().0.pad.iter().all(|&x| x == 0));
 }
+
+#[test]
+fn a_failed_forget_never_leaves_a_record_over_a_blank_pad() {
+    let mut board = two_stored();
+    board.fail_ledger_erase = true;
+    let other = board.more[0].circle.clone().unwrap();
+    let gone = board.circle.clone().unwrap().circle_id;
+    let mut b = Badge::new(board);
+    b.boot();
+    b.idle_step();
+    // Open "fakes", then Left to Forget, Both to ask, Both to forget: the ledger erase fails.
+    press(&mut b, Press::Both);
+    press(&mut b, Press::Left);
+    press(&mut b, Press::Both);
+    press(&mut b, Press::Both);
+    assert!(b.board().log.iter().any(|l| l.starts_with("forget: ")), "{:?}", b.board().log);
+    // The record went first: the circle is not held, and only the other one is.
+    assert_eq!(b.circles(), std::slice::from_ref(&other));
+    assert_eq!(b.board().load_circles(), vec![other.clone()]);
+    assert!(b.board().pad.iter().all(|&x| x == 0));
+
+    // Serving: nothing is answered for the forgotten circle; the other still is.
+    b.board().fail_ledger_erase = false;
+    let (mut laptop, down) = cable();
+    b.board().links = Some((down, FakeLink::open()));
+    b.idle_step();
+    assert!(b.board().shows("other  tier 1"));
+    press(&mut b, Press::Right);
+    press(&mut b, Press::Right);
+    press(&mut b, Press::Both);
+    assert!(b.board().shows("serving"));
+    for req in [
+        Request::Psk { circle: gone, context: b"wg".to_vec() },
+        Request::Spend { circle: gone, len: 32 },
+    ] {
+        let r = ask(&mut b, &mut laptop, 7, &req);
+        assert_eq!(r, Response::Error { code: ErrorCode::UnknownCircle });
+    }
+    match ask(&mut b, &mut laptop, 8, &Request::Remaining { circle: gone }) {
+        Response::Remaining { bytes, .. } => assert_eq!(bytes, 0),
+        other => panic!("{other:?}"),
+    }
+    match ask(&mut b, &mut laptop, 9, &Request::Identify) {
+        Response::Identity { circles, .. } => {
+            assert_eq!(circles.len(), 1);
+            assert_eq!(circles[0].circle_id, other.circle_id);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_held_at_boot_forgets_every_record_even_when_an_erase_fails() {
+    let mut board = two_stored();
+    board.fail_ledger_erase = true;
+    board.a_down = true;
+    let mut b = Badge::new(board);
+    b.boot();
+    assert!(b.circles().is_empty());
+    assert!(b.board().load_circles().is_empty());
+    assert!(b.board().log.iter().any(|l| l == "wipe failed"));
+}
+
+#[test]
+fn boot_deletes_a_stray_slot_and_the_next_circle_gets_a_clean_one() {
+    let (mut b, _t1, _t2) = two_circles(true);
+    let chip = b.board().chip.as_mut().unwrap();
+    let stray = chip.generate(id(KeyKind::Seat, 2), cahoots_chip::Curve::P256).unwrap();
+    chip.put_hmac_key(id(KeyKind::Root, 2), &[7; 32]).unwrap();
+    assert_eq!(chip.ids().unwrap().len(), 8);
+    b.boot();
+    // Slot 2 is deleted and logged; slots 0 and 1 stay with their circles.
+    let chip = b.board().chip.as_mut().unwrap();
+    let mut slots: Vec<u8> = chip.ids().unwrap().iter().map(|k| k.0 as u8).collect();
+    slots.sort();
+    assert_eq!(slots, vec![0, 0, 0, 1, 1, 1]);
+    let log = &b.board().log;
+    assert_eq!(
+        log.iter().filter(|l| l.contains("slot 2 is not in the chip record, deleted")).count(),
+        2,
+        "{log:?}"
+    );
+    assert_eq!(b.circles().len(), 2);
+
+    // A third circle takes slot 2, made new: not the stray key, and no stray root.
+    b.idle_step();
+    press(&mut b, Press::Left);
+    assert!(b.board().shows("> new circle"));
+    b.board().name = "third".into();
+    b.board().presses.push_back(Press::Both);
+    let t3 = ceremony(&mut b, 0x5851_F42D_4C95_7F2D, |b| {
+        b.idle_step();
+        None
+    });
+    let third = b.circles().iter().find(|c| c.params.name == "third").unwrap().clone();
+    assert_eq!(third.chip_slot, Some(2));
+    let chip = b.board().chip.as_mut().unwrap();
+    assert_ne!(chip.public(id(KeyKind::Seat, 2)).unwrap(), stray);
+    let from_chip = chip.hmac(id(KeyKind::Root, 2), &chat(&third.circle_id)).unwrap();
+    assert_eq!(from_chip, chat_key(&t3.circle().unwrap().root.unwrap(), &third.circle_id, 0));
+    let record = b.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(record.slots.len(), 3);
+}

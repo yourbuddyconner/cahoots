@@ -494,16 +494,21 @@ impl Board for HostBoard {
         Ok(())
     }
 
-    /// Erases the circle's ledger and the first `pad_len` bytes of its pad. Its file goes in
-    /// the next `store_circles`.
+    /// Removes the circle's file first, then erases the first `pad_len` bytes of its pad and
+    /// its ledger.
     fn forget(&mut self, circle: &CircleId, pad_len: u32) -> Result<(), BoardError> {
-        let (_, pad, ledger) = self.place_files(self.place(circle)?);
-        FileRecordStore::create(&ledger, LEDGER_BYTES).map_err(|_| BoardError::Storage)?;
+        let (record, pad, ledger) = self.place_files(self.place(circle)?);
+        match std::fs::remove_file(&record) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return Err(BoardError::Storage),
+        }
         if pad.exists() {
             let mut store = FilePadStore::open(&pad).map_err(|_| BoardError::Storage)?;
             let n = pad_len.min(store.len());
             store.erase(0, n).map_err(|_| BoardError::Storage)?;
         }
+        FileRecordStore::create(&ledger, LEDGER_BYTES).map_err(|_| BoardError::Storage)?;
         Ok(())
     }
 

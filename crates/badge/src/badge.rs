@@ -375,17 +375,29 @@ impl<B: Board> Badge<B> {
     /// The wipe at boot: every circle's pad and ledger, the list of records, every chip
     /// object and the chip record. Returns the circles left: none, or all of them if a
     /// write failed.
+    ///
+    /// Each circle's record goes before its pad, inside [`Board::forget`]; every circle is
+    /// tried even if one fails, and the chip is wiped either way: a circle whose record is
+    /// gone is never served, so its keys have nothing left to answer for.
     fn forget_all(&mut self, circles: &[Circle]) -> Vec<Circle> {
         let mut ok = true;
         for c in circles {
             ok &= self.board.forget(&c.circle_id, c.params.pad_len).is_ok();
         }
-        ok = ok && self.board.store_circles(&[]).is_ok();
+        ok &= self.board.store_circles(&[]).is_ok();
+        let left = self.board.load_circles();
+        let left_slots: Vec<u8> = left.iter().filter_map(|c| c.chip_slot).collect();
         if !ok {
             self.board.log("wipe failed");
-            return self.board.load_circles();
+            if !left_slots.is_empty() {
+                // A circle whose record could not be erased keeps its chip keys.
+                return left;
+            }
         }
         self.forget_chip();
+        if !ok {
+            return left;
+        }
         self.board.log("A held at boot: every circle forgotten");
         let what = if circles.len() == 1 {
             "circle forgotten"
@@ -399,10 +411,29 @@ impl<B: Board> Badge<B> {
         Vec::new()
     }
 
-    /// Forget one circle and nothing else: its chip objects and chip record entry first,
-    /// then its pad and ledger, then its record. A failure part way leaves the circle listed,
-    /// so forgetting it again finishes the job.
+    /// Forget one circle and nothing else: its record first (inside [`Board::forget`]), then
+    /// its pad and ledger, then its chip objects and chip record entry. A record never stays
+    /// over a blank pad: a failure after the record is gone leaves only bytes in a free place,
+    /// or chip objects that a slot no circle names, which are not served.
     fn forget_circle(&mut self, c: &Circle) -> Result<(), String> {
+        let forgot = self
+            .board
+            .forget(&c.circle_id, c.params.pad_len)
+            .map_err(|_| String::from("flash: forgetting failed"));
+        let rest: Vec<Circle> = self
+            .circles
+            .iter()
+            .filter(|x| x.circle_id != c.circle_id)
+            .cloned()
+            .collect();
+        let stored = self
+            .board
+            .store_circles(&rest)
+            .map_err(|_| String::from("flash: circle records failed"));
+        if self.board.load_circles().iter().any(|x| x.circle_id == c.circle_id) {
+            // The record is still there, so is everything behind it.
+            return forgot.and(stored).and(Err(String::from("flash: record not erased")));
+        }
         if let Some(slot) = c.chip_slot {
             if let Some(chip) = self.board.chip() {
                 chip::delete_slot(chip, slot).map_err(|e| format!("chip: {e:?}"))?;
@@ -420,18 +451,7 @@ impl<B: Board> Badge<B> {
                     .log("chip record: unreadable, left as it is"),
             }
         }
-        self.board
-            .forget(&c.circle_id, c.params.pad_len)
-            .map_err(|_| String::from("flash: pad erase failed"))?;
-        let rest: Vec<Circle> = self
-            .circles
-            .iter()
-            .filter(|x| x.circle_id != c.circle_id)
-            .cloned()
-            .collect();
-        self.board
-            .store_circles(&rest)
-            .map_err(|_| String::from("flash: circle records failed"))
+        forgot.and(stored)
     }
 
     /// One pass: find the pile, run the ceremony, keep or discard the result. Steps until

@@ -370,9 +370,10 @@ pub trait Board {
         let _ = c;
         Err(BoardError::Storage)
     }
-    /// Forget circle `circle`: its ledger and the `pad_len` bytes of its pad. A board with
-    /// one record erases the record too; a board with many erases it in the next
-    /// [`Board::store_circles`], which leaves the circle out.
+    /// Forget circle `circle`: its record first, then the `pad_len` bytes of its pad and its
+    /// ledger. The record goes first so that a failure or a power loss part way never leaves
+    /// a record over a blank pad, which would serve the erased bytes as keys; pad bytes left
+    /// in a free place are overwritten by the next [`Board::write_pad`] there.
     fn forget(&mut self, circle: &CircleId, pad_len: u32) -> Result<(), BoardError>;
     /// Store a new pad for circle `circle` and return a handle to it. On a board with many
     /// places, a circle not stored yet takes the lowest free place, and keeps it when the
