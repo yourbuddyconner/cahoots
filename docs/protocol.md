@@ -145,6 +145,14 @@ The manifest ID is the SHA-256 of the canonical bytes. A decoder MUST refuse any
 
 Implementation: `crates/core/src/manifest.rs`.
 
+### 3.6 The circle root
+
+A circle root is a 32-byte secret that every member computes and no outsider can. It is `HKDF-SHA256(ikm, salt, info)`, where `ikm` is the content key of each seat's reveal joined in seat order, `salt` is the circle ID, and `info` is `cahoots/root/v1`. The content key of a reveal is the key that reveal is encrypted under. Every member opens every reveal, so every member holds all of them. The pairwise X-Wing secrets are not used, because they differ for each pair of members.
+
+Two keys come from the root. The card seal key is `HMAC-SHA256(root, "seal/card" || circle_id)`. The chat key is `HMAC-SHA256(root, "chat" || circle_id || epoch)`, with the epoch as a big-endian u64. A badge with a chip makes the root in the chip. A reveal sealed again under another content key is refused as a conflicting reveal, so the root cannot change after the manifest is signed.
+
+Implementation: `crates/core`.
+
 ## 4. Messages
 
 Each message spends `32 + len` bytes from the sender's slice, starting at the sender's next unused offset `o`.

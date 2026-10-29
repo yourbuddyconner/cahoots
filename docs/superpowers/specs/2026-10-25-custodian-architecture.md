@@ -1,5 +1,7 @@
 # Custodian architecture: design
 
+*Later work: what a badge does with its seat keys, and the `Chip` family of requests, is in the [chip apps design](2026-10-28-chip-apps-design.md). The wire messages are in [protocol](../../protocol.md) section 6.*
+
 *Written 2026-10-25 from a discussion with Conner. Decisions he made: software and the V1 board edits proceed in parallel; a stored pad is not portable between custodians (only the contract and the ledger semantics are shared); animated QR stays RaptorQ; the display contract stays `show_words`, `show_qr`, `show_status`.*
 
 ## The idea

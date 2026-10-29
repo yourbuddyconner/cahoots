@@ -27,6 +27,18 @@ Ciphertext travels over the **Numbers Station**, an append-only public feed. Any
 
 A circle can also give a seat to a hosted software member, such as an AI agent. That member's copy of the pad lives inside a [Turnkey Verifiable Cloud (TVC)](https://docs.turnkey.com/features/verifiable-cloud/overview) enclave, and a pinned policy decides each read and send. This integration is optional. Circles without a hosted seat have a simple guarantee: nobody who runs the feed can read the circle.
 
+## A badge with the chip
+
+On a V1 board with the NXP SE051 secure element, the chip makes and holds each circle's seat key, and the key never leaves it. With it, a badge can:
+
+- Show a proof from the chip that the seat key lives in it (attestation).
+- Sign SSH logins and git commits. A laptop program asks, the badge shows the user and host or the commit's author and subject, and it signs when both buttons are pressed.
+- Sign a contact card and share its circle's card seal key, so a circle can swap cards.
+- Sign grants as CBOR Web Tokens.
+- Keep up to 16 circles on the Pico 2, and 4 on the Nano, with nothing linking them.
+
+All of this is built and tested against a software chip. The Pico 2 firmware drives the real chip, but flashing it, a ceremony with a chip seat, attestation against NXP's root, and a verified commit still wait for the bench. See [the roadmap](docs/plan.md) (M4f) and the [host program](crates/host/README.md).
+
 ## Repository layout
 
 Every Rust crate lives under `crates/`. The PWA lives under `web/app`.
@@ -36,7 +48,8 @@ Every Rust crate lives under `crates/`. The PWA lives under `web/app`.
 | `crates/core` | `cahoots-core` | The protocol: parameters, commit-then-reveal ceremony, XOR combine, check words, circle ID, message codec with one-time Poly1305, spent-range ledger, spend ordering, touch-link framing. `no_std` + `alloc`. | done (M1) |
 | `crates/vectors` | `cahoots-vectors` | JSON test vectors generated from core. Every client must reproduce them. | done (M1) |
 | `crates/objects` | `cahoots-objects` | The four objects a seat signs, as canonical CBOR in COSE_Sign1: grants, approvals, facts and receipts, each verified against the circle's signed manifest, with a JSON projection and vectors. `no_std`. | done (M1c) |
-| `crates/custodian` | `cahoots-custodian` | The `Custodian` trait (`psk`, `spend`, `remaining`), the CBOR request and response messages, and `serve`, which answers a request only when the device consents. `no_std`. | done (M4e) |
+| `crates/custodian` | `cahoots-custodian` | The `Custodian` trait (`psk`, `spend`, `remaining`), the CBOR request and response messages, and `serve`, which answers a request only when the device consents. The `Chip` family (attest, sign for SSH, sign a card or a grant, release a seal key) is in [protocol](docs/protocol.md) section 6; a laptop program and a badge must come from the same release. `no_std`. | done (M4e) |
+| `crates/chip` | `cahoots-chip` | The `ChipOps` trait a badge's key store speaks, a software chip for tests, and the SE051 backend (feature `se05x`) the Pico 2 uses. `no_std`. | done in software (M4f); the chip on the bench is not |
 | `crates/provider` | `cahoots-provider` | The memory and encrypted-file custodians, the HKDF session-key derivation, and the old `PadProvider` name for `Custodian`. | done (S1) |
 | `crates/hpke` | `cahoots-hpke` | HPKE `mode_psk` adapter (X25519 and X-Wing suites). | done (S1) |
 | `crates/age-plugin-cahoots` | `age-plugin-cahoots` | age plugin: recipient `cahoots:<circle>`. | done (S1), untested against the `age` CLI |
