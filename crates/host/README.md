@@ -154,7 +154,7 @@ git config --global gpg.ssh.allowedSignersFile ~/.ssh/allowed_signers
 cahoots-host roster --ssh --circle sf --state /tmp/b1 >> ~/.ssh/authorized_keys
 ```
 
-One line per seat, comment `cahoots:<circle>:<seat>`, from the circle's sealed manifest. The manifest comes from a card's state directory: a simulated badge's, or any simulated card's from a `pile` run with a real board on top, since every seat keeps the same manifest. The badge's `Identify` answer names its circles but carries no manifest. Every seat's signature on the manifest is checked before anything is printed.
+One line per seat, comment `cahoots:<circle>:<seat>`, from the circle's sealed manifest. The manifest comes from a card's state directory: a simulated badge's, or any simulated card's from a `pile` run with a real board on top, since every seat keeps the same manifest. A badge keeps its first circle in `circle.txt` and the others in `circle-<k>.txt`; `roster` and `card` find the circle by name in any of them. The badge's `Identify` answer names its circles but carries no manifest. Every seat's signature on the manifest is checked before anything is printed.
 
 ### Attesting a seat key
 
@@ -190,4 +190,4 @@ Builds a root grant from this seat to the key `--to`, asks the badge to sign it 
 
 ### Tests
 
-`tests/agent.rs` runs a ceremony between two simulated badges with software chips, serves the top one, starts the agent as a process, and checks the identity, a signature that verifies, a refusal, an unknown key, and the host named from `session-bind@openssh.com` and `known_hosts`. `tests/gitsign.rs` signs a commit text the way git calls `gpg.ssh.program` and checks the result with `ssh-key` and `ssh-keygen -Y verify`. `tests/roster.rs` checks the `authorized_keys` lines against the manifest, `tests/attest.rs` the attestation of a software chip, and `tests/card.rs` a card set, fetched and shown, and a version 2 grant that verifies against the manifest.
+`tests/agent.rs` runs a ceremony between two simulated badges with software chips, serves the top one, starts the agent as a process, and checks the identity, a signature that verifies, a refusal, an unknown key, and the host named from `session-bind@openssh.com` and `known_hosts`. `tests/gitsign.rs` signs a commit text the way git calls `gpg.ssh.program` and checks the result with `ssh-key` and `ssh-keygen -Y verify`. `tests/roster.rs` checks the `authorized_keys` lines against the manifest and finds a circle kept in `circle-2.txt`, `tests/attest.rs` the attestation of a software chip, and `tests/card.rs` a card set, fetched and shown, and a version 2 grant that verifies against the manifest.

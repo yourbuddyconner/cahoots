@@ -50,13 +50,19 @@ pub fn press(dir: &Path, buttons: &str) {
 /// Two simulated badges with software chips run a ceremony and keep the circle "bench". The
 /// bottom card is seat 0, the top card seat 1. Returns their state directories.
 pub fn chip_ceremony(root: &Path) -> (PathBuf, PathBuf) {
+    chip_ceremony_named(root, "bench")
+}
+
+/// [`chip_ceremony`] for a circle named `name`.
+pub fn chip_ceremony_named(root: &Path, name: &str) -> (PathBuf, PathBuf) {
     let bottom = root.join("bottom");
     let top = root.join("top");
     let sock = root.join("top.sock").to_str().unwrap().to_string();
     let spawn = |dir: PathBuf, listen: String, next: String, seed: u64| {
+        let name = name.to_string();
         std::thread::spawn(move || {
             let board =
-                HostBoard::new(&dir, &listen, &next, "bench", PAD_LEN, Some(seed)).with_soft_chip();
+                HostBoard::new(&dir, &listen, &next, &name, PAD_LEN, Some(seed)).with_soft_chip();
             let mut badge = Badge::new(board);
             badge.boot();
             badge.run_once().unwrap();

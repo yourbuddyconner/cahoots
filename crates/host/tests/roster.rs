@@ -59,3 +59,53 @@ fn roster_prints_authorized_keys() {
     assert!(!out.status.success());
     assert!(out.stdout.is_empty());
 }
+
+/// A badge keeps its first circle in `circle.txt` and the others in `circle-<k>.txt`; roster
+/// finds a circle by name in any of them.
+#[test]
+fn roster_finds_a_circle_in_any_place() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (bench, _) = chip_ceremony_named(&tmp.path().join("one"), "bench");
+    let (lab, _) = chip_ceremony_named(&tmp.path().join("two"), "lab");
+    let both = tmp.path().join("both");
+    std::fs::create_dir(&both).unwrap();
+    std::fs::copy(bench.join("circle.txt"), both.join("circle.txt")).unwrap();
+    std::fs::copy(lab.join("circle.txt"), both.join("circle-2.txt")).unwrap();
+
+    let roster = |circle: &str| {
+        Command::new(HOST)
+            .args(["roster", "--ssh", "--circle", circle, "--state"])
+            .arg(&both)
+            .output()
+            .unwrap()
+    };
+    for (circle, from) in [("bench", &bench), ("lab", &lab)] {
+        let out = roster(circle);
+        assert!(
+            out.status.success(),
+            "{circle}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let text = String::from_utf8(out.stdout).unwrap();
+        let alone = Command::new(HOST)
+            .args(["roster", "--ssh", "--circle", circle, "--state"])
+            .arg(from)
+            .output()
+            .unwrap();
+        assert_eq!(text, String::from_utf8(alone.stdout).unwrap());
+        assert_eq!(text.lines().count(), 2, "{text}");
+        assert!(
+            text.lines()
+                .all(|l| l.contains(&format!(" cahoots:{circle}:"))),
+            "{text}"
+        );
+    }
+    // The second place's circle is read from circle-2.txt.
+    let lab_manifest = cahoots_host::roster::manifest(&both, "lab").unwrap();
+    assert_eq!(lab_manifest.params.name, "lab");
+
+    let out = roster("elsewhere");
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("bench, lab"), "{err}");
+}

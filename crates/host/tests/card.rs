@@ -133,6 +133,27 @@ fn card_set_fetch_and_grant_v2() {
     let shown: serde_json::Value = serde_json::from_slice(&shown.stdout).unwrap();
     assert_eq!(shown, json);
 
+    // A circle kept in a later place (`circle-<k>.txt`, as a badge with several circles keeps
+    // them) is found as well.
+    let later = tmp.path().join("later");
+    std::fs::create_dir(&later).unwrap();
+    std::fs::copy(bottom.join("circle.txt"), later.join("circle-5.txt")).unwrap();
+    let shown = Command::new(HOST)
+        .args(["card", "show", "--circle", "bench", "--state"])
+        .arg(&later)
+        .arg(out_dir.join("1.card"))
+        .output()
+        .unwrap();
+    assert!(
+        shown.status.success(),
+        "{}",
+        String::from_utf8_lossy(&shown.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&shown.stdout).unwrap(),
+        json
+    );
+
     // A version 2 grant, signed by the chip's seat key, verifies against the manifest.
     let grantee = cahoots_core::seat::SeatKey::from_seed(&[0x44; 32])
         .unwrap()
