@@ -1,6 +1,7 @@
 //! [`BadgeClient`]: send a custodian [`Request`] to a badge and wait for its [`Response`].
 //!
-//! The badge answers on its down link while its Serve page is serving. A request goes out as a
+//! The badge answers on its down link from its menu; the first request after it is plugged in
+//! waits for its holder to allow the laptop on the badge's screen. A request goes out as a
 //! `KIND_REQUEST` frame with a sequence number; the answer is the `KIND_RESPONSE` frame that
 //! echoes it. Frames with another number (a late answer to a request that timed out) and any
 //! other bytes are skipped.
@@ -71,6 +72,9 @@ pub struct Channel<L: Link> {
     link: L,
     seq: u32,
     rx: Vec<u8>,
+    /// The badge has answered something other than Busy on this link: its holder has
+    /// allowed the laptop, so requests nobody is asked about come back quickly.
+    answered: bool,
 }
 
 impl<L: Link> Channel<L> {
@@ -81,6 +85,7 @@ impl<L: Link> Channel<L> {
             // same link is not taken for this one's.
             seq: std::process::id().wrapping_mul(0x9E37_79B9),
             rx: Vec::new(),
+            answered: false,
         }
     }
 
@@ -151,11 +156,7 @@ impl BadgeClient {
     /// A real board on the serial port at `path`.
     pub fn serial(path: &str) -> Result<BadgeClient, ClientError> {
         SerialLink::open(path, "badge")
-            .map(|mut l| {
-                // The bench driver, if on, walks the badge to its Serve page first.
-                l.settle(Duration::from_secs(90));
-                BadgeClient::Serial(Channel::new(l))
-            })
+            .map(|l| BadgeClient::Serial(Channel::new(l)))
             .map_err(|e| ClientError::Open(format!("{path}: {e}")))
     }
 
@@ -178,9 +179,14 @@ impl BadgeClient {
     }
 
     /// Send `req` and wait for the answer: [`ASK_TIMEOUT`] for a request the holder is asked
-    /// about, [`QUICK_TIMEOUT`] for the rest.
+    /// about, and for the first request on this link, since the badge asks its holder
+    /// whether to allow the laptop at all; [`QUICK_TIMEOUT`] for the rest.
     pub fn request(&mut self, req: Request) -> Result<Response, ClientError> {
-        let timeout = if asks(&req) {
+        let first = !match self {
+            BadgeClient::Serial(c) => c.answered,
+            BadgeClient::Sim(c) => c.answered,
+        };
+        let timeout = if asks(&req) || first {
             ASK_TIMEOUT
         } else {
             QUICK_TIMEOUT
@@ -210,6 +216,12 @@ impl BadgeClient {
                     code: ErrorCode::Busy
                 }
             );
+            if !busy {
+                match self {
+                    BadgeClient::Serial(c) => c.answered = true,
+                    BadgeClient::Sim(c) => c.answered = true,
+                }
+            }
             if !busy || asks(&req) || Instant::now() + BUSY_RETRY >= deadline {
                 return Ok(answer);
             }
@@ -232,7 +244,7 @@ pub fn describe_error(code: ErrorCode) -> &'static str {
     match code {
         ErrorCode::Denied => "refused on the badge",
         ErrorCode::Busy => {
-            "the badge is busy: it is not serving (choose Serve and press both buttons) or is asking about another request"
+            "the badge is busy: it is asking about another request, or this laptop was refused on it (unplug it and plug it back in to be asked again)"
         }
         ErrorCode::UnknownCircle => "the badge does not hold that circle",
         ErrorCode::NoChip => "the badge cannot do this: the key is not in a chip, or the circle keeps no root",

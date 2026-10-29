@@ -95,8 +95,8 @@ fn two_circles(chip: bool) -> (Badge<FakeBoard>, Badge<FakeBoard>, Badge<FakeBoa
 
     // The menu of the first circle; the Circles page; the list; "new circle".
     b.idle_step();
-    assert!(b.board().shows("1/5"));
-    for _ in 0..3 {
+    assert!(b.board().shows("1/4"));
+    for _ in 0..2 {
         press(&mut b, Press::Right);
     }
     assert!(b.board().shows("circles"));
@@ -117,13 +117,40 @@ fn two_circles(chip: bool) -> (Badge<FakeBoard>, Badge<FakeBoard>, Badge<FakeBoa
     (b, t1, t2)
 }
 
-/// The laptop end of `b`'s down link, with `b` on its Serve page and serving.
+/// Allow the laptop on `b`'s down link: its first request (Identify) draws the question
+/// about the laptop, Both allows it until it is unplugged, and the request is answered.
+fn connect(b: &mut Badge<FakeBoard>, laptop: &mut FakeLink) {
+    let payload = Request::Identify.encode();
+    laptop.send(&frame::encode(&Frame {
+        kind: KIND_REQUEST,
+        seq: 900,
+        payload: &payload,
+    }));
+    b.idle_step();
+    assert!(b.board().shows("a laptop"), "{:?}", b.board().last());
+    press(b, Press::Both);
+    let mut bytes = Vec::new();
+    let mut buf = [0u8; 256];
+    loop {
+        let n = laptop.recv(&mut buf);
+        if n == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buf[..n]);
+    }
+    let (f, _) = frame::decode(&bytes).expect("the held request's answer");
+    assert_eq!((f.kind, f.seq), (KIND_RESPONSE, 900));
+    assert!(matches!(Response::decode(f.payload), Ok(Response::Identity { .. })));
+}
+
+/// The laptop end of `b`'s down link, with `b` in the first circle's menu and the laptop
+/// allowed.
 fn serve(b: &mut Badge<FakeBoard>) -> FakeLink {
-    let (laptop, down) = cable();
+    let (mut laptop, down) = cable();
     b.board().links = Some((down, FakeLink::open()));
     // Back to the list and into the first circle's menu, which takes the links.
     let mut n = 0;
-    while !b.board().shows("4/5") {
+    while !b.board().shows("3/4") {
         press(b, Press::Right);
         n += 1;
         assert!(n < 20, "{:?}", b.board().last());
@@ -137,11 +164,7 @@ fn serve(b: &mut Badge<FakeBoard>) -> FakeLink {
         assert!(n < 20, "{:?}", b.board().last());
     }
     press(b, Press::Both);
-    press(b, Press::Right);
-    press(b, Press::Right);
-    assert!(b.board().shows("serve a laptop"));
-    press(b, Press::Both);
-    assert!(b.board().shows("serving"));
+    connect(b, &mut laptop);
     laptop
 }
 
@@ -249,11 +272,13 @@ fn two_ceremonies_two_records() {
         }
     }
 
-    // A reboot lists both, and the list comes first.
+    // A reboot opens the first circle's menu, and its list shows both.
     b.boot();
     assert_eq!(b.circles(), &circles[..]);
     assert_eq!(b.board().chip.as_mut().unwrap().ids().unwrap().len(), 6);
     b.idle_step();
+    assert!(b.board().shows("first  tier 1"), "{:?}", b.board().last());
+    to_the_list(&mut b);
     assert!(b.board().shows("> first"));
     assert!(b.board().shows("  second"));
 }
@@ -300,13 +325,22 @@ fn two_stored() -> FakeBoard {
     board
 }
 
+/// From the menu's words page to the list of circles: Right twice to the Circles page, Both.
+fn to_the_list(b: &mut Badge<FakeBoard>) {
+    press(b, Press::Right);
+    press(b, Press::Right);
+    assert!(b.board().shows("circles"), "{:?}", b.board().last());
+    press(b, Press::Both);
+}
+
 #[test]
 fn chooser_navigation() {
     let mut b = Badge::new(two_stored());
     b.boot();
-    // Two circles: no words at boot; the list is the first page.
-    assert!(b.board().words().is_empty());
+    // Two circles: the first one's menu opens; the list is on its Circles page.
     b.idle_step();
+    assert!(b.board().shows("fakes  tier 1"));
+    to_the_list(&mut b);
     assert_eq!(
         b.board().last(),
         ["circles", "> fakes", "  other", "  new circle", "prev  A+B  open  next"]
@@ -324,7 +358,7 @@ fn chooser_navigation() {
     // Both opens that circle's menu, on its words page.
     press(&mut b, Press::Both);
     assert!(b.board().shows("other  tier 1"));
-    assert!(b.board().shows("1/5"));
+    assert!(b.board().shows("1/4"));
     assert_eq!(b.circle().unwrap().params.name, "other");
     // Its Circles page goes back to the list, with it marked.
     press(&mut b, Press::Left);
@@ -343,7 +377,7 @@ fn one_circle_opens_its_menu_without_the_list() {
     let mut b = Badge::new(board);
     b.boot();
     b.idle_step();
-    assert!(b.board().shows("1/5"));
+    assert!(b.board().shows("1/4"));
     assert!(!b.board().screens.iter().any(|l| l.iter().any(|x| x == "circles")));
 }
 
@@ -354,6 +388,7 @@ fn a_full_board_offers_no_new_circle() {
     let mut b = Badge::new(board);
     b.boot();
     b.idle_step();
+    to_the_list(&mut b);
     assert_eq!(b.board().last(), ["circles", "> fakes", "  other", "prev  A+B  open  next"]);
 }
 
@@ -362,6 +397,7 @@ fn left_or_right_in_the_pile_goes_back_to_the_list() {
     let mut b = Badge::new(two_stored());
     b.boot();
     b.idle_step();
+    to_the_list(&mut b);
     press(&mut b, Press::Left);
     assert!(b.board().shows("> new circle"));
     press(&mut b, Press::Both);
@@ -394,7 +430,7 @@ fn forget_one_keeps_the_other() {
     assert!(b.board().shows("first"));
     assert!(b.board().shows("back  A+B  forget  back"));
     press(&mut b, Press::Right);
-    assert!(b.board().shows("5/5"));
+    assert!(b.board().shows("4/4"));
     assert_eq!(b.circles().len(), 2);
     press(&mut b, Press::Both);
     press(&mut b, Press::Both);
@@ -519,7 +555,7 @@ fn unknown_circle_chip_request() {
     // A spend for a circle the badge does not hold is refused without asking.
     let r = ask(&mut b, &mut laptop, 6, &Request::Psk { circle: stranger, context: b"wg".to_vec() });
     assert_eq!(r, Response::Error { code: ErrorCode::UnknownCircle });
-    assert!(b.board().shows("serving"));
+    assert!(b.board().shows("1/4"));
 }
 
 /// A board with one record: only `load_circle`, `save_circle` and `forget`, through the
@@ -597,7 +633,7 @@ fn a_board_with_one_record_holds_one_circle() {
     assert_eq!(b.board().max_circles(), 1);
     b.idle_step();
     // Circles page: the list has the one circle and no "new circle".
-    for _ in 0..3 {
+    for _ in 0..2 {
         b.board().0.presses.push_back(Press::Right);
         b.idle_step();
     }
@@ -640,10 +676,7 @@ fn a_failed_forget_never_leaves_a_record_over_a_blank_pad() {
     b.board().links = Some((down, FakeLink::open()));
     b.idle_step();
     assert!(b.board().shows("other  tier 1"));
-    press(&mut b, Press::Right);
-    press(&mut b, Press::Right);
-    press(&mut b, Press::Both);
-    assert!(b.board().shows("serving"));
+    connect(&mut b, &mut laptop);
     for req in [
         Request::Psk { circle: gone, context: b"wg".to_vec() },
         Request::Spend { circle: gone, len: 32 },
@@ -699,6 +732,7 @@ fn boot_deletes_a_stray_slot_and_the_next_circle_gets_a_clean_one() {
 
     // A third circle takes slot 2, made new: not the stray key, and no stray root.
     b.idle_step();
+    to_the_list(&mut b);
     press(&mut b, Press::Left);
     assert!(b.board().shows("> new circle"));
     b.board().name = "third".into();

@@ -81,7 +81,7 @@ fn sign_shows_a_small_file_and_hashes_a_big_one() {
 
     // A big binary file, in a namespace of the caller's choosing: signed by its hash, which
     // the badge shows as the laptop's word.
-    wait_line(&top, "serving");
+    wait_line(&top, "1/4");
     let big = tmp.path().join("build.bin");
     let bytes: Vec<u8> = (0..40_000u32).map(|i| (i.wrapping_mul(2654435761) >> 13) as u8).collect();
     std::fs::write(&big, &bytes).unwrap();
@@ -114,7 +114,7 @@ fn sign_shows_a_small_file_and_hashes_a_big_one() {
     }
 
     // Refused on the badge: no signature.
-    wait_line(&top, "serving");
+    wait_line(&top, "1/4");
     let other = tmp.path().join("other.txt");
     std::fs::write(&other, "do not sign\n").unwrap();
     let run = Command::new(HOST)

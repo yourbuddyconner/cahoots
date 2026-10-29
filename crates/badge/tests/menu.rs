@@ -1,6 +1,6 @@
-//! The idle menu: a ring of pages (the words, a key as a code, serving a laptop on the down
-//! link, the list of circles, forgetting this circle), Left and Right to turn the page, Both
-//! to select.
+//! The idle menu: a ring of pages (the words, a key as a code, the list of circles, forgetting
+//! this circle), Left and Right to turn the page, Both to select; and the laptop on the down
+//! link, answered on every page once it has been allowed with Both.
 
 mod common;
 
@@ -34,17 +34,21 @@ fn press(badge: &mut Badge<FakeBoard>, gesture: Press) {
 /// The words page has no title: its six words are the page.
 fn on_page(badge: &mut Badge<FakeBoard>, page: usize, title: &str) -> bool {
     let b = badge.board();
-    b.shows(&format!("{page}/5")) && (title.is_empty() || b.shows(title))
+    b.shows(&format!("{page}/4")) && (title.is_empty() || b.shows(title))
 }
 
-/// Right twice to the Serve page, then Both to start serving.
+/// In the menu with the laptop allowed: its first request (Identify) draws the question
+/// about the laptop, Both allows it, and the request is answered.
 fn serving() -> (Badge<FakeBoard>, FakeLink, CircleId) {
-    let (mut badge, laptop, id) = in_the_menu();
-    press(&mut badge, Press::Right);
-    press(&mut badge, Press::Right);
-    assert!(on_page(&mut badge, 3, "serve a laptop"));
+    let (mut badge, mut laptop, id) = in_the_menu();
+    send(&mut laptop, 900, &Request::Identify);
+    badge.idle_step();
+    assert!(badge.board().shows("a laptop"), "{:?}", badge.board().last());
+    assert!(responses(&mut laptop).is_empty());
     press(&mut badge, Press::Both);
-    assert!(badge.board().shows("serving"));
+    let got = responses(&mut laptop);
+    assert!(matches!(got.as_slice(), [(900, Response::Identity { .. })]), "{got:?}");
+    assert!(on_page(&mut badge, 1, ""));
     (badge, laptop, id)
 }
 
@@ -116,19 +120,15 @@ fn left_and_right_walk_the_page_ring() {
     assert!(on_page(&mut badge, 2, "key as code"));
     assert!(badge.board().shows("Both to spend 32 bytes"));
     press(&mut badge, Press::Right);
-    assert!(on_page(&mut badge, 3, "serve a laptop"));
+    assert!(on_page(&mut badge, 3, "circles"));
     press(&mut badge, Press::Right);
-    assert!(on_page(&mut badge, 4, "circles"));
-    press(&mut badge, Press::Right);
-    assert!(on_page(&mut badge, 5, "forget this circle"));
+    assert!(on_page(&mut badge, 4, "forget this circle"));
     press(&mut badge, Press::Right);
     assert!(on_page(&mut badge, 1, ""));
     press(&mut badge, Press::Left);
-    assert!(on_page(&mut badge, 5, "forget this circle"));
+    assert!(on_page(&mut badge, 4, "forget this circle"));
     press(&mut badge, Press::Left);
-    assert!(on_page(&mut badge, 4, "circles"));
-    press(&mut badge, Press::Left);
-    assert!(on_page(&mut badge, 3, "serve a laptop"));
+    assert!(on_page(&mut badge, 3, "circles"));
     press(&mut badge, Press::Left);
     assert!(on_page(&mut badge, 2, "key as code"));
     press(&mut badge, Press::Left);
@@ -153,7 +153,7 @@ fn no_gesture_draws_nothing() {
 fn both_on_the_key_page_spends_32_bytes_and_shows_the_code() {
     let (mut badge, mut laptop, id) = serving();
     let before = remaining(&mut badge, &mut laptop, id);
-    press(&mut badge, Press::Left);
+    press(&mut badge, Press::Right);
     assert!(on_page(&mut badge, 2, "key as code"));
     press(&mut badge, Press::Both);
     assert_eq!(badge.board().codes().len(), 1);
@@ -185,9 +185,7 @@ fn both_on_the_key_page_spends_32_bytes_and_shows_the_code() {
     press(&mut badge, Press::Left);
     assert!(on_page(&mut badge, 2, "key as code"));
     assert_eq!(badge.board().codes().len(), 2);
-    // Serving stopped when the page turned, so ask on the Serve page.
-    press(&mut badge, Press::Right);
-    press(&mut badge, Press::Both);
+    // The laptop is answered on any page.
     assert_eq!(remaining(&mut badge, &mut laptop, id), before - 2 * 32);
 }
 
@@ -195,15 +193,10 @@ fn both_on_the_key_page_spends_32_bytes_and_shows_the_code() {
 fn both_on_the_words_page_spends_nothing() {
     let (mut badge, mut laptop, id) = serving();
     let before = remaining(&mut badge, &mut laptop, id);
-    press(&mut badge, Press::Left);
-    press(&mut badge, Press::Left);
     assert!(on_page(&mut badge, 1, ""));
     press(&mut badge, Press::Both);
     press(&mut badge, Press::Both);
     assert!(badge.board().codes().is_empty());
-    press(&mut badge, Press::Right);
-    press(&mut badge, Press::Right);
-    press(&mut badge, Press::Both);
     assert_eq!(remaining(&mut badge, &mut laptop, id), before);
 }
 
@@ -249,24 +242,32 @@ fn serve_answers_identify_without_a_prompt() {
         }
         other => panic!("not an identity: {other:?}"),
     }
-    assert!(on_page(&mut badge, 3, "serve a laptop"));
+    assert!(on_page(&mut badge, 1, ""));
 }
 
 #[test]
-fn the_serve_page_shows_listening_once_a_laptop_is_present() {
-    let (mut badge, laptop, _) = in_the_menu();
-    laptop.present.set(false);
-    press(&mut badge, Press::Right);
-    press(&mut badge, Press::Right);
-    assert!(on_page(&mut badge, 3, "serve a laptop"));
-    assert!(!badge.board().shows("a laptop is listening"));
-    laptop.present.set(true);
-    badge.idle_step();
-    assert!(on_page(&mut badge, 3, "serve a laptop"));
-    assert!(badge.board().shows("a laptop is listening"));
-    laptop.present.set(false);
-    badge.idle_step();
-    assert!(!badge.board().shows("a laptop is listening"));
+fn refusing_the_laptop_answers_busy_and_the_next_request_asks_again() {
+    for single in [Press::Left, Press::Right] {
+        let (mut badge, mut laptop, _) = in_the_menu();
+        send(&mut laptop, 1, &Request::Identify);
+        badge.idle_step();
+        assert!(badge.board().shows("a laptop"));
+        assert!(badge.board().shows("allow until"), "{:?}", badge.board().last());
+        press(&mut badge, single);
+        assert_eq!(
+            responses(&mut laptop),
+            vec![(1, Response::Error { code: ErrorCode::Busy })],
+            "{single:?}"
+        );
+        assert!(on_page(&mut badge, 1, ""));
+        // Not allowed: the next request asks again, and Both answers it.
+        send(&mut laptop, 2, &Request::Identify);
+        badge.idle_step();
+        assert!(badge.board().shows("a laptop"));
+        press(&mut badge, Press::Both);
+        let got = responses(&mut laptop);
+        assert!(matches!(got.as_slice(), [(2, Response::Identity { .. })]), "{got:?}");
+    }
 }
 
 #[test]
@@ -286,7 +287,7 @@ fn serve_psk_waits_for_both() {
         matches!(got.as_slice(), [(3, Response::Psk { handle, .. })] if handle.circle_id == id),
         "{got:?}"
     );
-    assert!(on_page(&mut badge, 3, "serve a laptop"));
+    assert!(on_page(&mut badge, 1, ""));
     assert_eq!(remaining(&mut badge, &mut laptop, id), before - 32);
 }
 
@@ -307,7 +308,7 @@ fn a_single_press_refuses_consent_and_both_allows() {
             )],
             "{single:?}"
         );
-        assert!(on_page(&mut badge, 3, "serve a laptop"), "{single:?}");
+        assert!(on_page(&mut badge, 1, ""), "{single:?}");
         assert_eq!(remaining(&mut badge, &mut laptop, id), before);
 
         // Still serving: the next request is asked and Both allows it.
@@ -338,38 +339,39 @@ fn spend_prompt_names_the_length() {
 }
 
 #[test]
-fn a_request_outside_serve_is_busy() {
+fn the_first_request_is_held_while_the_badge_asks_about_the_laptop() {
     let (mut badge, mut laptop, _) = in_the_menu();
     send(&mut laptop, 1, &Request::Identify);
     badge.idle_step();
-    assert_eq!(
-        responses(&mut laptop),
-        vec![(
-            1,
-            Response::Error {
-                code: ErrorCode::Busy
-            }
-        )]
-    );
-}
-
-#[test]
-fn turning_off_the_serve_page_stops_serving() {
-    let (mut badge, mut laptop, _) = serving();
-    press(&mut badge, Press::Right);
-    assert!(on_page(&mut badge, 4, "circles"));
-    press(&mut badge, Press::Left);
+    assert!(responses(&mut laptop).is_empty());
+    assert!(badge.board().shows("a laptop"));
+    // Another request while the question is up is busy; the held one is not lost.
     send(&mut laptop, 2, &Request::Identify);
     badge.idle_step();
     assert_eq!(
         responses(&mut laptop),
-        vec![(
-            2,
-            Response::Error {
-                code: ErrorCode::Busy
-            }
-        )]
+        vec![(2, Response::Error { code: ErrorCode::Busy })]
     );
+    press(&mut badge, Press::Both);
+    let got = responses(&mut laptop);
+    assert!(matches!(got.as_slice(), [(1, Response::Identity { .. })]), "{got:?}");
+    assert!(on_page(&mut badge, 1, ""));
+}
+
+#[test]
+fn unplugging_the_laptop_forgets_that_it_was_allowed() {
+    let (mut badge, mut laptop, _) = serving();
+    laptop.present.set(false);
+    badge.idle_step();
+    laptop.present.set(true);
+    badge.idle_step();
+    send(&mut laptop, 2, &Request::Identify);
+    badge.idle_step();
+    assert!(responses(&mut laptop).is_empty());
+    assert!(badge.board().shows("a laptop"));
+    press(&mut badge, Press::Both);
+    let got = responses(&mut laptop);
+    assert!(matches!(got.as_slice(), [(2, Response::Identity { .. })]), "{got:?}");
 }
 
 #[test]

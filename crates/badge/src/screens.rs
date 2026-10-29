@@ -271,6 +271,17 @@ pub fn consent(len: u32, circle: &str) -> Screen {
     s.done()
 }
 
+/// The question the first request from a laptop asks: whether to answer that laptop at all,
+/// until it is unplugged. Each spend or signature still asks on its own.
+pub fn connect_prompt() -> Screen {
+    let mut s = Draw::new();
+    s.title("a laptop");
+    s.centered(&FONT_8X13, 56, "wants to use this badge");
+    s.wrapped_centered(&FONT_9X18_BOLD, 84, "allow until unplugged?");
+    s.footer(Some("refuse"), Some("A+B  allow"), Some("refuse"));
+    s.done()
+}
+
 /// The question a request to sign an ssh login asks: the user from the request, which the
 /// badge read itself, the host the laptop names (or "host not named"), and the circle.
 pub fn ssh_login(user: &str, host: &HostCheck, circle: &str) -> Screen {

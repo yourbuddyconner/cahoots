@@ -501,15 +501,17 @@ fn serving(chip: bool) -> (Badge<FakeBoard>, FakeLink, CircleId, SeatPublic) {
     } else {
         soft_seat().public()
     };
-    let (laptop, down) = cable();
+    let (mut laptop, down) = cable();
     board.links = Some((down, FakeLink::open()));
     let mut badge = Badge::new(board);
     badge.boot();
     badge.idle_step();
-    press(&mut badge, Press::Right);
-    press(&mut badge, Press::Right);
+    send(&mut laptop, 900, &Request::Identify);
+    badge.idle_step();
+    assert!(badge.board().shows("a laptop"), "{:?}", badge.board().last());
     press(&mut badge, Press::Both);
-    assert!(badge.board().shows("serving"));
+    let got = responses(&mut laptop);
+    assert!(matches!(got.as_slice(), [(900, Response::Identity { .. })]), "{got:?}");
     (badge, laptop, id, public)
 }
 

@@ -405,7 +405,7 @@ fn run_agent(args: &Args) -> Result<(), String> {
     println!("SSH_AUTH_SOCK={}; export SSH_AUTH_SOCK;", socket.display());
     use std::io::Write;
     let _ = std::io::stdout().flush();
-    eprintln!("agent: the badge must be on its Serve page, serving, to answer");
+    eprintln!("agent: the badge asks once, on its screen, whether to allow this laptop until it is unplugged");
     Arc::new(Agent::new(badge, circles, known_hosts))
         .serve(listener)
         .map_err(|e| e.to_string())

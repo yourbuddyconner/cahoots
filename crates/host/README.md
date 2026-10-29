@@ -103,7 +103,7 @@ cp target/release/cahoots-host target/release/cahoots-host-git-sign ~/.local/bin
 
 ### Start the agent
 
-Put the badge on its Serve page and press both buttons, so it answers the laptop. Then:
+Plug the badge in. The first thing the laptop asks it makes the badge ask you, on its screen, whether to allow this laptop until it is unplugged; both buttons say yes. After that it answers from any page of its menu, and each signature still asks on its own. Then:
 
 ```sh
 eval "$(cahoots-host agent --serial /dev/cu.usbmodem1101 --circle sf)"   # a real board

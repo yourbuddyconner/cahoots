@@ -84,13 +84,16 @@ fn a_host_board_in_serve_answers_identify_on_its_down_link() {
         }
     };
 
-    // The words page, then Right twice to Serve, then Both to start serving.
-    wait_screen(&dir, "1/5");
-    std::fs::write(dir.join("buttons.tmp"), "R\nR\nB\n").unwrap();
-    std::fs::rename(dir.join("buttons.tmp"), dir.join("buttons.txt")).unwrap();
-    // The line "serving" appears only once serving has started: before it, the Serve page
-    // shows "Both to start serving" instead, and "a laptop is listening" shows either way.
-    wait_screen(&dir, "serving");
+    // The words page. The first request makes the badge ask about the laptop; Both allows it.
+    wait_screen(&dir, "1/4");
+    let _presser = {
+        let dir = dir.clone();
+        std::thread::spawn(move || {
+            wait_screen(&dir, "a laptop");
+            std::fs::write(dir.join("buttons.tmp"), "B\n").unwrap();
+            std::fs::rename(dir.join("buttons.tmp"), dir.join("buttons.txt")).unwrap();
+        })
+    };
 
     let payload = Request::Identify.encode();
     laptop

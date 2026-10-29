@@ -162,7 +162,6 @@ const POLL_MS: u32 = 10;
 enum Page {
     Words,
     Key,
-    Serve,
     /// Both shows the list of circles, where another circle opens or a new one starts.
     Circles,
     /// Both asks, then forgets this circle and nothing else.
@@ -170,16 +169,15 @@ enum Page {
 }
 
 impl Page {
-    const ALL: [Page; 5] = [Page::Words, Page::Key, Page::Serve, Page::Circles, Page::Forget];
+    const ALL: [Page; 4] = [Page::Words, Page::Key, Page::Circles, Page::Forget];
 
     /// The page's place in the ring, from 0.
     fn index(self) -> usize {
         match self {
             Page::Words => 0,
             Page::Key => 1,
-            Page::Serve => 2,
-            Page::Circles => 3,
-            Page::Forget => 4,
+            Page::Circles => 2,
+            Page::Forget => 3,
         }
     }
 
@@ -195,7 +193,6 @@ impl Page {
         match self {
             Page::Words => "words",
             Page::Key => "key as code",
-            Page::Serve => "serve a laptop",
             Page::Circles => "circles",
             Page::Forget => "forget this circle",
         }
@@ -212,14 +209,18 @@ struct Pending {
 }
 
 /// The idle menu of one circle, built when it is entered. It holds every circle's pad, since
-/// Serve answers for any circle the badge holds.
+/// the badge answers the laptop for any circle it holds.
 struct Menu<B: Board> {
     pads: Pads<CirclePad<B>>,
     down: B::Link,
     rx: Vec<u8>,
     page: Page,
-    /// Both was pressed on the Serve page: requests on the down link are answered.
-    serving: bool,
+    /// The laptop on the down link was allowed, with Both, since it was plugged in. The
+    /// first request after a plug-in asks; unplugging forgets the answer.
+    connected: bool,
+    /// The request that arrived before the laptop was allowed, held while the badge asks
+    /// whether to allow the laptop at all. Answered or refused with that answer.
+    connect: Option<Pending>,
     pending: Option<Pending>,
     /// Whether the down link reported a peer on the last step, so a change is logged once.
     peer_seen: bool,
@@ -895,14 +896,18 @@ impl<B: Board> Badge<B> {
     /// One poll of the idle loop, for a badge that holds a circle. Call it in a loop. Does
     /// nothing until a circle is stored. Ends with a 1 ms delay.
     ///
-    /// With one circle, its menu opens; with more, the list of circles comes first: Left and
-    /// Right move, Both opens that circle's menu, and the last entry, "new circle", starts a
-    /// pass for one more while the board has room. The menu is a ring of pages, Words, Key,
-    /// Serve, Circles and Forget: Left and Right turn the page, Both selects. Both on Key
-    /// spends 32 bytes and shows them as a code; Both on Serve answers custodian requests
-    /// from the down link for any circle the badge holds, each spend or signature allowed by
-    /// Both or refused by Left or Right; Both on Circles goes back to the list; Both on
-    /// Forget asks, and Both again forgets this circle and nothing else.
+    /// The current circle's menu opens: a ring of pages, Words, Key, Circles and Forget,
+    /// Left and Right to turn the page, Both to select. Both on Key spends 32 bytes and
+    /// shows them as a code; Both on Circles shows the list, where Left and Right move, Both
+    /// opens that circle's menu, and the last entry, "new circle", starts a pass for one
+    /// more while the board has room; Both on Forget asks, and Both again forgets this
+    /// circle and nothing else.
+    ///
+    /// On every page, the badge answers custodian requests from the laptop on the down link
+    /// for any circle it holds. The first request after the laptop was plugged in asks
+    /// whether to allow that laptop at all, with Both, until it is unplugged; after that,
+    /// each spend or signature asks on its own, allowed by Both or refused by Left or
+    /// Right, and the rest are answered as they come.
     pub fn idle_step(&mut self) {
         if self.circles.is_empty() {
             return;
@@ -910,19 +915,11 @@ impl<B: Board> Badge<B> {
         let idle = core::mem::replace(&mut self.idle, Idle::Off);
         self.idle = match idle {
             Idle::Off => {
-                if self.circles.len() == 1 || self.open_current {
-                    self.open_current = false;
-                    if self.current >= self.circles.len() {
-                        self.current = 0;
-                    }
-                    self.enter_menu()
-                } else {
-                    self.current = self.current.min(self.circles.len() - 1);
-                    self.show_chooser(self.current);
-                    Idle::Choose {
-                        index: self.current,
-                    }
+                self.open_current = false;
+                if self.current >= self.circles.len() {
+                    self.current = 0;
                 }
+                self.enter_menu()
             }
             Idle::Choose { index } => self.choose_step(index),
             Idle::NewCircle => self.new_circle_step(),
@@ -1092,7 +1089,8 @@ impl<B: Board> Badge<B> {
             down,
             rx: Vec::new(),
             page: Page::Words,
-            serving: false,
+            connected: false,
+            connect: None,
             pending: None,
             peer_seen: false,
             covered: false,
@@ -1115,9 +1113,8 @@ impl<B: Board> Badge<B> {
         cards: &mut Vec<(CircleId, Vec<u8>)>,
     ) -> MenuAction {
         let c = &circles[current];
-        let asked = m.pending.is_some();
+        let asked = m.pending.is_some() || m.connect.is_some();
         let present = m.down.peer_present();
-        let mut redraw = false;
         if present != m.peer_seen {
             m.peer_seen = present;
             board.log(if present {
@@ -1125,7 +1122,14 @@ impl<B: Board> Badge<B> {
             } else {
                 "down link: nothing plugged in"
             });
-            redraw = m.page == Page::Serve && !m.covered && !m.confirm_forget;
+            if !present {
+                // Whatever was allowed was allowed for that laptop while it was plugged in.
+                m.connected = false;
+                if m.connect.take().is_some() {
+                    m.covered = false;
+                    show_page(board, c, m);
+                }
+            }
         }
         // Read a chunk and decode after each, so `rx` never holds more than one request
         // frame and one chunk, whatever arrives.
@@ -1148,6 +1152,28 @@ impl<B: Board> Badge<B> {
         }
 
         let gesture = board.press();
+        if let Some(p) = m.connect.take() {
+            match gesture {
+                Press::None => m.connect = Some(p),
+                Press::Both => {
+                    m.connected = true;
+                    board.log("laptop allowed until unplugged");
+                    m.covered = false;
+                    show_page(board, c, m);
+                    Self::handle_request(board, circles, m, p.seq, p.request);
+                }
+                Press::Left | Press::Right => {
+                    board.log("laptop refused");
+                    let busy = Response::Error {
+                        code: ErrorCode::Busy,
+                    };
+                    respond(&mut m.down, p.seq, &busy.encode());
+                    m.covered = false;
+                    show_page(board, c, m);
+                }
+            }
+            return MenuAction::Stay;
+        }
         if let Some(p) = &m.pending {
             let yes = match gesture {
                 Press::None => return MenuAction::Stay,
@@ -1199,18 +1225,13 @@ impl<B: Board> Badge<B> {
         }
 
         match gesture {
-            Press::None => {
-                if redraw {
-                    show_page(board, c, m);
-                }
-            }
+            Press::None => {}
             Press::Left | Press::Right => {
                 m.page = if gesture == Press::Left {
                     m.page.previous()
                 } else {
                     m.page.next()
                 };
-                m.serving = false;
                 show_page(board, c, m);
             }
             Press::Both => match m.page {
@@ -1221,11 +1242,6 @@ impl<B: Board> Badge<B> {
                         Err(e) => show_status(board, &format!("key: {e:?}")),
                     }
                     m.covered = true;
-                }
-                Page::Serve => {
-                    m.serving = true;
-                    board.log("serving the down link");
-                    show_page(board, c, m);
                 }
                 Page::Circles => return MenuAction::Choose,
                 Page::Forget => {
@@ -1264,13 +1280,32 @@ impl<B: Board> Badge<B> {
             if kind != KIND_REQUEST {
                 continue;
             }
-            if !m.serving || m.pending.is_some() {
+            if m.pending.is_some() || m.connect.is_some() {
                 let busy = Response::Error {
                     code: ErrorCode::Busy,
                 };
                 respond(&mut m.down, seq, &busy.encode());
                 continue;
             }
+            if !m.connected {
+                // The first request since the laptop was plugged in: ask about the laptop
+                // before anything else, and hold the request for the answer.
+                show(board, screens::connect_prompt());
+                m.connect = Some(Pending {
+                    seq,
+                    request: payload,
+                    chip: false,
+                });
+                continue;
+            }
+            Self::handle_request(board, circles, m, seq, payload);
+        }
+    }
+
+    /// Answer `payload` (a request frame's payload with sequence `seq`) now, or draw its
+    /// question and hold it for the holder's answer.
+    fn handle_request(board: &mut B, circles: &[Circle], m: &mut Menu<B>, seq: u32, payload: Vec<u8>) {
+        {
             let req = Request::decode(&payload).ok();
             // A request longer than its kind allows is refused before the holder is asked:
             // `serve` would refuse it after the answer, and the question would be wasted.
@@ -1280,7 +1315,7 @@ impl<B: Board> Badge<B> {
                     code: ErrorCode::Malformed,
                 };
                 respond(&mut m.down, seq, &malformed.encode());
-                continue;
+                return;
             }
             let ask = match &req {
                 Some(Request::Chip { circle, op }) => {
@@ -1381,17 +1416,6 @@ fn show_page<B: Board>(board: &mut B, c: &Circle, m: &Menu<B>) {
             return;
         }
         Page::Key => vec!["Both to spend 32 bytes"],
-        Page::Serve => {
-            let mut body = vec![if m.serving {
-                "serving"
-            } else {
-                "Both to start serving"
-            }];
-            if m.peer_seen {
-                body.push("a laptop is listening");
-            }
-            body
-        }
         Page::Circles => vec!["Both to list the circles"],
         Page::Forget => vec!["Both to forget this circle", "the others stay"],
     };

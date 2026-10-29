@@ -126,11 +126,14 @@ pub fn badge_on(dir: &Path, sock: &Path) -> Serving {
 }
 
 impl Serving {
-    /// From the words page, Right twice to Serve and Both to start serving.
+    /// Once the menu is up, allow the laptop when the badge asks: its first request draws
+    /// "a laptop ... allow until unplugged?", and Both answers it.
     pub fn start(&self) {
-        wait_line(&self.dir, "1/5");
-        press(&self.dir, "R R B");
-        wait_line(&self.dir, "serving");
+        let dir = self.dir.clone();
+        std::thread::spawn(move || {
+            wait_line(&dir, "a laptop");
+            press(&dir, "B");
+        });
     }
 }
 

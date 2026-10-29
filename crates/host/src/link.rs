@@ -174,7 +174,7 @@ pub struct SerialLink {
 pub enum Goal {
     /// Through the menu to the pile, count it when the badge is the top card, keep the words.
     NewCircle,
-    /// Open a circle and start serving the laptop; allow every consent prompt.
+    /// Leave the menu alone and allow every prompt: the laptop itself, then each operation.
     Serve,
 }
 
@@ -191,8 +191,6 @@ pub struct Bench {
     last: String,
     opened: std::time::Instant,
     nudged: bool,
-    /// The badge said "serving the down link" since the port opened.
-    serving: bool,
     /// A press for a consent prompt, sent once the badge says the prompt is drawn: a
     /// gesture seen during the refresh is thrown away as not an answer.
     after_draw: Option<u8>,
@@ -217,7 +215,6 @@ impl Bench {
             last: String::new(),
             opened: std::time::Instant::now(),
             nudged: false,
-            serving: false,
             after_draw: None,
             due: None,
         })
@@ -232,10 +229,6 @@ impl Bench {
             }
             _ => None,
         }
-    }
-
-    pub fn goal(&self) -> Goal {
-        self.goal
     }
 
     /// A badge that was already sitting on a screen when the port opened logs nothing until
@@ -291,15 +284,17 @@ impl Bench {
                 _ => None,
             };
         }
+        if self.goal == Goal::Serve {
+            // Nothing to walk to: the badge answers from any page.
+            return None;
+        }
         if title == "circles" {
             // The list: `> name` marks the chosen entry.
             let chosen = fields.iter().find(|f| f.starts_with("> ")).map(|f| &f[2..]);
-            return match (self.goal, chosen) {
-                (Goal::NewCircle, Some("new circle")) => Some(2),
-                (Goal::NewCircle, Some(_)) => Some(1),
-                (Goal::Serve, Some("new circle")) => Some(1),
-                (Goal::Serve, Some(_)) => Some(2),
-                _ => None,
+            return match chosen {
+                Some("new circle") => Some(2),
+                Some(_) => Some(1),
+                None => None,
             };
         }
         // A circle's menu: `name  tier n | k/5 | page title | ...`. The words page logs no
@@ -309,11 +304,7 @@ impl Bench {
             .is_some_and(|f| f.split_once('/').is_some_and(|(a, b)| a.parse::<u8>().is_ok() && b.parse::<u8>().is_ok()));
         if is_menu || footer.contains("A+B  choose") {
             let page = fields.get(2).copied().unwrap_or("");
-            let want = match self.goal {
-                Goal::NewCircle => "circles",
-                Goal::Serve => "serve a laptop",
-            };
-            return Some(if page == want { 2 } else { 1 });
+            return Some(if page == "circles" { 2 } else { 1 });
         }
         None
     }
@@ -359,28 +350,6 @@ impl SerialLink {
             errors: 0,
             bench: Bench::from_env(),
         })
-    }
-
-    /// With the bench driver steering toward Serve: drive the badge's menu until it says it
-    /// is serving, or `timeout` passes. Without the driver, or with another goal, returns
-    /// at once. True when the badge is serving.
-    pub fn settle(&mut self, timeout: std::time::Duration) -> bool {
-        if self.bench.as_ref().map(Bench::goal) != Some(Goal::Serve) {
-            return true;
-        }
-        let deadline = std::time::Instant::now() + timeout;
-        let mut buf = [0u8; 256];
-        loop {
-            self.recv(&mut buf);
-            if self.bench.as_ref().is_some_and(|b| b.serving) {
-                return true;
-            }
-            if std::time::Instant::now() > deadline {
-                eprintln!("[{}] bench: the badge is not serving after {} s", self.label, timeout.as_secs());
-                return false;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
     }
 
     fn press(&mut self, code: u8) {
@@ -473,9 +442,6 @@ impl SerialLink {
                 for line in logs {
                     eprintln!("[{}] {line}", self.label);
                     if let Some(b) = self.bench.as_mut() {
-                        if line == "serving the down link" || line.starts_with("screen: serving") {
-                            b.serving = true;
-                        }
                         presses.extend(b.react(&line));
                     }
                 }
