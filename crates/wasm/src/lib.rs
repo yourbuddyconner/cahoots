@@ -121,6 +121,7 @@ fn ceremony_err(e: CeremonyError) -> String {
         CeremonyError::BadTier => "bad-tier".into(),
         CeremonyError::Corrupted(i) => format!("corrupted:{i}"),
         CeremonyError::CommitMismatch(i) => format!("commit-mismatch:{i}"),
+        CeremonyError::ConflictingReveal(i) => format!("conflicting-reveal:{i}"),
         CeremonyError::BadAttestation(i) => format!("bad-attestation:{i}"),
         CeremonyError::ConflictingAttestation(i) => format!("conflicting-attestation:{i}"),
         CeremonyError::Aborted => "aborted".into(),

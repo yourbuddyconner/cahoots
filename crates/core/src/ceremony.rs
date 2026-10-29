@@ -67,6 +67,10 @@ pub enum CeremonyError {
     Corrupted(u8),
     /// A reveal did not match its commitment. The ceremony is aborted.
     CommitMismatch(u8),
+    /// A second reveal from a member already revealed that matches its commitment but was
+    /// sealed again, under another content key or other encapsulations. The first is kept and
+    /// nothing changed: the root and pair keys never move once a reveal is held.
+    ConflictingReveal(u8),
     /// An attestation that does not verify against the member's seat key, our manifest
     /// bytes, and its key id. Nothing changed; receive it again.
     BadAttestation(u8),
@@ -600,6 +604,8 @@ impl Ceremony {
     /// commitment is derived from the opened contribution, KEM key, seat key, and tier. That is safe for the
     /// receiver because its own contribution was fixed before it showed anyone anything.
     /// Our own reveal is a no-op. A re-forwarded reveal after completion is still verified.
+    /// An identical re-forward is accepted; a second, differently sealed reveal from a member
+    /// already held is `ConflictingReveal` and changes nothing.
     pub fn add_reveal(&mut self, from: u8, blob: &[u8]) -> Result<(), CeremonyError> {
         if self.phase == Phase::Aborted {
             return Err(CeremonyError::Aborted);
@@ -651,8 +657,24 @@ impl Ceremony {
                 self.store_commitment(from, c, opened.public_key, opened.seat_public, opened.tier)?;
             }
         }
-        self.received[i] = Some(opened.shared.clone());
-        self.content_keys[i] = Some(opened.content_key.clone());
+        // The commitment binds the contribution but not the content key or the encapsulations,
+        // so the sender could seal the same contribution again and both blobs would verify.
+        // Keep the first: a later one with another content key or X-Wing secret is refused and
+        // changes nothing, so the root and the pair keys never move.
+        let conflicts = |held: &Option<Zeroizing<[u8; 32]>>, new: &Zeroizing<[u8; 32]>| {
+            held.as_ref().is_some_and(|h| h.as_ref() != new.as_ref())
+        };
+        if conflicts(&self.content_keys[i], &opened.content_key)
+            || conflicts(&self.received[i], &opened.shared)
+        {
+            return Err(CeremonyError::ConflictingReveal(from));
+        }
+        if self.received[i].is_none() {
+            self.received[i] = Some(opened.shared.clone());
+        }
+        if self.content_keys[i].is_none() {
+            self.content_keys[i] = Some(opened.content_key.clone());
+        }
         if self.phase == Phase::Commit {
             if !self.pending.iter().any(|(j, _)| *j == from) {
                 self.pending.push((from, opened.contribution));

@@ -327,3 +327,98 @@ fn a_seat_public_that_is_not_a_point_is_refused() {
         Some(CeremonyError::BadKey(0))
     );
 }
+
+/// Member 1 seals the same contribution a second time under another content key and other
+/// encapsulations. Both blobs match its commitment, so without a check the second would replace
+/// the content key (and the pair-key secret) member 0 holds, and the root would move.
+#[test]
+fn a_second_different_reveal_from_one_sender_is_refused_and_the_root_does_not_move() {
+    let mut devs: Vec<Ceremony> = (0..3)
+        .map(|i| {
+            Ceremony::new(
+                params(),
+                i,
+                contribution(i, 0),
+                kem_seed(i),
+                seat_seed(i),
+                i % 5,
+            )
+            .unwrap()
+        })
+        .collect();
+    let mut twin = Ceremony::new(
+        params(),
+        1,
+        contribution(1, 0),
+        kem_seed(1),
+        seat_seed(1),
+        1,
+    )
+    .unwrap();
+    exchange_commitments(&mut devs);
+    let commits: Vec<_> = devs
+        .iter()
+        .map(|d| {
+            let i = d.index();
+            (
+                i,
+                d.my_commitment(),
+                *d.my_public_key(),
+                d.my_seat_public(),
+                i % 5,
+            )
+        })
+        .collect();
+    for (j, c, pk, sp, t) in &commits {
+        twin.add_commitment(*j, *c, pk, &sp.0, *t).unwrap();
+    }
+    let first = devs[1].my_reveal(&mut filler(1)).unwrap().to_vec();
+    let second = twin.my_reveal(&mut filler(99)).unwrap().to_vec();
+    assert_ne!(first, second);
+
+    // In Reveal: the first is kept, the second refused, nothing changes.
+    devs[0].my_reveal(&mut filler(0)).unwrap();
+    devs[0].add_reveal(1, &first).unwrap();
+    assert_eq!(
+        devs[0].add_reveal(1, &second),
+        Err(CeremonyError::ConflictingReveal(1))
+    );
+    assert_eq!(devs[0].phase(), Phase::Reveal);
+
+    exchange_reveals(&mut devs);
+    assert_eq!(devs[0].phase(), Phase::Attest);
+    let root = root_of(&devs[0]);
+    assert_eq!(*devs[0].circle_root().unwrap(), root);
+    assert_eq!(*devs[1].circle_root().unwrap(), root);
+
+    // After Attest: still refused, root unchanged; an identical re-forward is accepted.
+    assert_eq!(
+        devs[0].add_reveal(1, &second),
+        Err(CeremonyError::ConflictingReveal(1))
+    );
+    assert_eq!(devs[0].phase(), Phase::Attest);
+    assert_eq!(root_of(&devs[0]), root);
+    devs[0].add_reveal(1, &first).unwrap();
+
+    exchange_attestations(&mut devs);
+    assert_eq!(
+        devs[0].add_reveal(1, &second),
+        Err(CeremonyError::ConflictingReveal(1))
+    );
+    assert_eq!(devs[0].phase(), Phase::Complete);
+    let pair_keys: Vec<_> = devs
+        .into_iter()
+        .map(|d| {
+            let r = d.finish().unwrap();
+            assert_eq!(r.root.as_deref(), Some(&root));
+            r.pair_keys
+        })
+        .collect();
+    // Member 0's pair key with member 1 is still the one member 1 derived: the second blob's
+    // X-Wing secret did not replace the first.
+    assert_eq!(
+        pair_keys[0][1].as_deref(),
+        pair_keys[1][0].as_deref(),
+        "pair key 0<->1 agrees"
+    );
+}
