@@ -70,10 +70,10 @@ What the unit costs at five hundred: a bill of materials around $25 to $35, so a
 
 ## In what order
 
-1. Finish the firmware on the Nano and run the first ceremony with the laptop as the pile. In progress.
-2. Order a Pico 2 and port the four board modules to it: the USB link, the flash store, the random source, the pins. A week.
+1. Finish the firmware on the Nano and run the first ceremony with the laptop as the pile. Done.
+2. Order a Pico 2 and port the four board modules to it: the USB link, the flash store, the random source, the pins. Done: the Pico 2 runs a ceremony on a breadboard.
 3. Measure power during a ceremony and a refresh, on both chips. One afternoon. That decides the battery and the thickness.
-4. Review and order V1 around the Pico 2 footprint. The design is drawn and checked. Ten units for the first meetup, the pile mechanics tested for real.
+4. Review and order V1 around the Pico 2 footprint. The design is drawn and checked, and five boards are quoted and about to be ordered. They are for the first meetup, the pile mechanics tested for real.
 5. December: Dabao boards arrive. Port the firmware; measure the Baochip's power and height.
 6. Brief a hardware engineer for V2 with the measurements, the V1 lessons and the benchmark from the DIY guide. Three spins.
 7. Crowd Supply for the first run.
