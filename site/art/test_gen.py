@@ -1,6 +1,6 @@
 """Tests for the art script. Run from the repo root:
 
-    python3 -m unittest site/art/test_gen.py
+    python3 -m unittest discover -s site/art
 """
 import re
 import sys

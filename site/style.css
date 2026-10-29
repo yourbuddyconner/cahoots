@@ -69,7 +69,6 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .hero h1 { text-shadow: 0 2px 30px color-mix(in srgb, var(--bg) 85%, transparent); margin-bottom: 18px; }
 .hero .eyebrow { color: var(--fg-2); margin-bottom: 14px; text-shadow: 0 1px 12px var(--bg); }
 .lede { font-size: clamp(16px, 1.4vw, 19px); color: var(--fg-2); max-width: 880px; margin: 0 0 24px; }
-.lede b { color: var(--fg); font-weight: 400; }
 .cta { display: flex; gap: 10px; flex-wrap: wrap; margin: 0; }
 .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 10px; text-decoration: none; font-weight: 500; font-size: 14.5px; border: 1px solid var(--line-2); color: var(--fg); transition: border-color .15s, background .15s; }
 .btn:hover { border-color: color-mix(in srgb, var(--fg) 30%, transparent); }

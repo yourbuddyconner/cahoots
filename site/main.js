@@ -14,7 +14,7 @@ if (ticker) {
 }
 const sample = document.getElementById("station-sample");
 if (sample) {
-  const lines = [];
-  for (let r = 0; r < 6; r++) lines.push(groups(8).join(" "));
-  sample.textContent = lines.join("\n");
+  // One run of forty groups, wrapped by the card's width: eight to a row on a wide screen,
+  // five on a phone, so no row is left half full.
+  sample.textContent = groups(40).join(" ");
 }
