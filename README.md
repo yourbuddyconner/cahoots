@@ -1,6 +1,6 @@
 # Cahoots
 
-Cahoots makes encryption keys in person. A group meets once, builds a shared pad of random bytes with hardware badges or phones, and then spends those bytes as keys for the tools it already runs: WireGuard tunnels, encrypted files, group chat, approvals, and short messages that no amount of computing power can read. Keys rotate from the pad for years with no server in between.
+Cahoots is a private network that only exists between people who have met in person. Meeting takes five minutes in a room: your devices make a shared secret that nobody outside the room has seen. After that you can message, log in and tunnel to each other with keys that no server ever had, and the keys rotate from that secret for years.
 
 ## The mental model
 
@@ -17,7 +17,7 @@ The hard part is getting the same random file to every member without anyone els
 
 ![The ceremony in six steps](docs/diagrams/ceremony.svg)
 
-The group is now a **cahoot** (a circle). The pad is a key budget. Spending 32 bytes seeds a session of any size in WireGuard, HPKE, age, or the pad-seeded chat. An attacker then has to break both the math and the pad. Spending one byte per byte encrypts a short message that nothing can break. The device records every spend in a ledger and erases the bytes, so no key is ever used twice.
+The group is now a **circle**. The pad is a key budget. Spending 32 bytes seeds a session of any size in WireGuard, HPKE, age, or the pad-seeded chat. An attacker then has to break both the math and the pad. Spending one byte per byte encrypts a short message that nothing can break. The device records every spend in a ledger and erases the bytes, so no key is ever used twice.
 
 ![The pad: everyone holds all of it, each member sends from their own part](docs/diagrams/pad.svg)
 

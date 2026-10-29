@@ -2,7 +2,7 @@
 
 The words these documents use, in plain terms. Where a term has a precise definition, the [protocol](protocol.md) wins.
 
-**Cahoot, circle.** A group of people who made one secret together at a ceremony. The code says circle. The app says cahoot.
+**Circle.** A group of people who made one secret together at a ceremony. The app calls it a cahoot.
 
 **Ceremony.** The in-person meeting where a group makes its secret. Six steps: set up, draw, swap, mix, sign, say the words. In the app, set up is the New ceremony and Join screens, draw and swap happen on the Commit and Reveal screens, sign is the Sign screen, and mix and say the words are the Check screen. See the [ceremony guide](ceremony-guide.md).
 
@@ -48,6 +48,12 @@ The words these documents use, in plain terms. Where a term has a precise defini
 
 **Badge.** The device Cahoots is designed around: a credit-card-sized board with a small screen, a wired touch link, and a hardware random number generator.
 
+**Card.** The badge in its wallet form. V1 is a board in a printed case; V2 is the card.
+
+**Sigil.** The picture a badge draws from its own randomness and shows at rest, so people recognise each other's at a glance. It is being built (roadmap item M4i in [the plan](plan.md)).
+
+**Contact card.** A page on the badge with a code that a phone camera reads. It is part of the idle screen being built (roadmap item M4i in [the plan](plan.md)); a tag on the board is also planned to carry it, or a link, for a phone with no app ([manufacturing](manufacturing.md)).
+
 **Touch link.** The wired connection between two badges, through magnetic pins. It is how badges exchange commitments and contributions. No radio is used.
 
 **Device tier.** T0 to T4: how well a device protects the pad once it holds one, from a phone (T0) to inspected silicon (T4). A group is as protected as its least protected device. See [device tiers](tiers.md).
@@ -63,6 +69,8 @@ The words these documents use, in plain terms. Where a term has a precise defini
 **Grant, approval, fact, receipt.** The four things a seat signs, as CBOR with a COSE signature, defined in [protocol section 8](protocol.md). A grant lets another key ask for named purposes in this circle until a log position, and can be passed on only narrower. An approval is one seat's yes or no to one exact operation, over the fields the device showed. A fact is an attested reading in an envelope. A receipt records a spend.
 
 **Assurance.** How sure a verifier can be that an owner meant one act, on a four-level scale from claimed, through key and present, to present with a PIN. A policy asks for a level and never for a method. See [device tiers](tiers.md).
+
+**Attested.** Said of a reading or a key whose origin a chip vouches for. The assurance level for it is being designed with the chip work and is not in [device tiers](tiers.md) yet.
 
 **Log position.** The place in the circle's feed that every grant, approval and fact names as its time, instead of a clock. Checkpoints that make it checkable from outside are planned (roadmap C6).
 
