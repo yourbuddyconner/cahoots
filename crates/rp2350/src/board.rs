@@ -260,8 +260,9 @@ impl PicoBoard {
             Ok(format!("se051: applet {}.{}.{}, {seats} circles", v.major, v.minor, v.patch))
         });
         line.unwrap_or_else(|e| {
+            log!("se051: answered at boot, not now ({e:?})");
             self.chip = None;
-            format!("se051: not found ({e:?})")
+            "se051: not found".into()
         })
     }
 }

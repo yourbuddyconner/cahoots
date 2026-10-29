@@ -9,7 +9,9 @@ repository.workspace = true
 
 [features]
 default = ["std"]
-std = ["p256/std", "sha2/std", "hmac/std", "dep:getrandom"]
+# `SoftChip::new()`, seeded from the system. The crate stays no_std either way; on bare metal
+# (`target_os = "none"`) there is no system source, so the feature adds nothing there.
+std = ["dep:getrandom"]
 # The SE051 backend over I2C, for the firmware only. The driver is LGPL-3.0-only; see
 # crates/rp2350/README.md.
 se05x = ["dep:se05x", "dep:embedded-hal"]
@@ -21,9 +23,11 @@ hmac = { version = "0.12", default-features = false }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "arithmetic"] }
 ed25519-dalek = { version = "2", default-features = false, features = ["alloc", "rand_core", "zeroize"] }
 rand_core = { version = "0.6", default-features = false }
-getrandom = { version = "0.2", optional = true }
 se05x = { version = "=0.4.2", optional = true, default-features = false }
 embedded-hal = { version = "1.0", optional = true }
+
+[target.'cfg(not(target_os = "none"))'.dependencies]
+getrandom = { version = "0.2", optional = true }
 
 [dev-dependencies]
 x509-cert = { version = "0.2", default-features = false }
