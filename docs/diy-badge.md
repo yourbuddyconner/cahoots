@@ -7,7 +7,7 @@ Three boards exist or are drawn.
 | Board | What it is | Tier | Status |
 |---|---|---|---|
 | **The DIY Arduino build** | An Arduino Nano ESP32, a Waveshare 1.54" e-paper module and two buttons on jumper wires. The firmware runs here. | T1 | On the bench. Runs the pile and the ceremony with a laptop standing in for the other cards. |
-| **V1** | A 54 × 86 mm board that a Raspberry Pi Pico 2 solders onto, with the raw panel, two switches, a coin cell, magnets and pogo pins for the pile, in a printed tray. | T1 | Drawn and checked in KiCad. Not reviewed or ordered. |
+| **V1** | A 54 × 86 mm board that a Raspberry Pi Pico 2 solders onto, with the raw panel, two switches, a coin cell, magnets and pogo pins for the pile, in a printed tray. | T1 today, chip being wired | Drawn and checked in KiCad, with the NXP SE051 on the board. Five are quoted and about to be ordered. |
 | **V2** | The card: the Baochip-1x on a credit-card board about 3 mm thick, the e-paper glass on top, magnets and pads for the pile. | T3; T4 for anyone who inspects the chip | Designed once the power and chip questions are answered. Baochip boards ship 15 December 2026. |
 
 All three run the same Rust core and the same ceremony. The four trait implementations are the only part that belongs to a board.
@@ -103,7 +103,7 @@ V1 is the first badge anyone can order: a complete badge, designed with low risk
 
 On the board: the raw 1.54" panel (Good Display GDEY0154D67) on its 24-pin flex with the boost circuit from the panel's reference schematic, two tactile switches, a CR2032 holder behind a slide switch, a five-pin magnetic pogo pair (Adafruit 5413) for the pile, and two JST-SH UART sockets at the bottom edge for a cable to a badge on the bench or a laptop. The pin half of the pogo pair stands on the board with its pins up through the lid, and the pad half sits in the tray floor. Stack two badges and the lower one's pins meet the upper one's pads, with the magnets holding them. The case is a clear PETG tray and a snap-fit lid, printed from the same part table. The badge is 13.4 mm thick, and 15 mm in its case.
 
-V1 has no secure element and no flash encryption. Those are V2's questions. V1 is T1.
+V1 carries the NXP SE051 secure element on I2C0, with an NFC loop round the board's edge; see [the board's README](../hardware/v1/README.md). The firmware does not yet use the chip to hold the pad's key or to attest, so V1 is T1 today and the chip is being wired. It has no flash encryption of its own.
 
 The design, the pin map, the case and the review list before ordering are in [hardware/v1](../hardware/v1/README.md). The plan it belongs to, with the costs and the order of work, is [docs/manufacturing.md](manufacturing.md). The firmware is [`crates/rp2350`](../crates/rp2350/README.md), already on V1's pin map; the display driver and the pile and ceremony code are shared with the Nano and the simulator.
 

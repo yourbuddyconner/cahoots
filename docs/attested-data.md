@@ -4,7 +4,7 @@
 
 ## 1. The primitive
 
-The NXP SE051 planned for V1 ([roadmap M4f](plan.md)) has a second I2C bus on which it is the controller. The badge's microcontroller can ask the chip to read a sensor on that bus. The chip does the read itself and returns the bytes together with a signature over them, a counter from inside the chip, and a nonce the badge supplied. The signing key lives in the chip and never leaves it. NXP calls this an attested read.
+The NXP SE051 on V1 ([roadmap M4f](plan.md), the attestation being built) has a second I2C bus on which it is the controller. The badge's microcontroller can ask the chip to read a sensor on that bus. The chip does the read itself and returns the bytes together with a signature over them, a counter from inside the chip, and a nonce the badge supplied. The signing key lives in the chip and never leaves it. NXP calls this an attested read.
 
 What the signature proves: these bytes came over the chip's own wires from a device at this address, in answer to this nonce, after every reading with a lower counter. The microcontroller between the sensor and the world never had a chance to change them, reorder them or replay them.
 
