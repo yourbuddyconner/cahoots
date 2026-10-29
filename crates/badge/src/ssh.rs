@@ -326,7 +326,8 @@ pub fn encode_signature(sig: &[u8; 64]) -> Vec<u8> {
 }
 
 /// What the badge reads from a commit's text: the author's name and the subject line.
-/// `None` if the text is not a commit (it has no `tree` line first, or no `author` line).
+/// `None` if the text is not a commit (it has no `tree` line first, or no `author` line), or
+/// it has more than one `author` line.
 pub fn describe_commit(content: &[u8]) -> Option<(String, String)> {
     let text = String::from_utf8_lossy(content);
     let mut lines = text.split('\n');
@@ -339,6 +340,11 @@ pub fn describe_commit(content: &[u8]) -> Option<(String, String)> {
             break;
         }
         if let Some(rest) = line.strip_prefix("author ") {
+            // git shows the first author; text with two (git fsck's multipleAuthors) could
+            // show one name here and another there, so it is refused.
+            if author.is_some() {
+                return None;
+            }
             // "Name <email> time zone": the name is before the address.
             let name = rest.split(" <").next().unwrap_or(rest).trim();
             author = Some(String::from(name));

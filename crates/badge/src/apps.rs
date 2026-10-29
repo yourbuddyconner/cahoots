@@ -169,12 +169,8 @@ impl<'a> BadgeApps<'a> {
                         };
                         Ok(screens::git_signature(&author, subject, true, name))
                     }
-                    None => Ok(screens::git_signature(
-                        "author not sent",
-                        "subject not sent",
-                        false,
-                        name,
-                    )),
+                    // Without the commit text the badge cannot say what it would sign.
+                    None => Err(ErrorCode::Unparseable),
                 }
             }
         }

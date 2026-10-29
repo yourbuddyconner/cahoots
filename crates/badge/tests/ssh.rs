@@ -421,13 +421,13 @@ fn git_screen_lines() {
             "refuse  A+B  allow  refuse"
         ]
     );
-    let s = screens::git_signature("author not sent", "subject not sent", false, "fakes");
+    let s = screens::git_signature("Ada Lovelace", "Fix the parser", false, "fakes");
     assert_eq!(
         s.lines,
         [
             "sign a git commit",
-            "author not sent (laptop)",
-            "subject not sent (laptop)",
+            "Ada Lovelace (laptop)",
+            "Fix the parser (laptop)",
             "fakes",
             "refuse  A+B  allow  refuse"
         ]
@@ -642,19 +642,37 @@ fn serve_signs_a_git_commit_whose_content_matches() {
 }
 
 #[test]
-fn serve_git_without_content_says_so() {
-    let (mut badge, mut laptop, id, public) = serving(true);
-    let data = sshsig(COMMIT.as_bytes(), HashAlg::Sha512);
+fn serve_refuses_git_without_content_without_asking() {
+    // The badge cannot describe a commit it was not sent: no screen, no signature.
+    let (mut badge, mut laptop, id, _) = serving(true);
     let op = ChipRequest::SshSign {
-        data: data.clone(),
+        data: sshsig(COMMIT.as_bytes(), HashAlg::Sha512),
         host: None,
         content: None,
     };
-    let r = ask(&mut badge, &mut laptop, id, op, Press::Both);
-    let prompt = prompt(&mut badge);
-    assert_eq!(prompt[1], "author not sent (laptop)");
-    assert_eq!(prompt[2], "subject not sent (laptop)");
-    assert_verifies(&public, &data, &signature_of(r));
+    let r = ask_now(&mut badge, &mut laptop, id, op);
+    assert_eq!(r, Response::Error { code: ErrorCode::Unparseable });
+}
+
+#[test]
+fn commit_text_with_two_authors_is_refused() {
+    // git shows the first author; a second one must not let the badge show another name.
+    let two = "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n\
+author Ada Lovelace <ada@example.com> 1700000000 +0000\n\
+author Mallory <m@example.com> 1700000000 +0000\n\
+committer Ada Lovelace <ada@example.com> 1700000000 +0000\n\
+\n\
+Fix the parser\n";
+    assert_eq!(ssh::describe_commit(two.as_bytes()), None);
+    assert!(ssh::describe_commit(COMMIT.as_bytes()).is_some());
+    let (mut badge, mut laptop, id, _) = serving(true);
+    let op = ChipRequest::SshSign {
+        data: sshsig(two.as_bytes(), HashAlg::Sha512),
+        host: None,
+        content: Some(two.as_bytes().to_vec()),
+    };
+    let r = ask_now(&mut badge, &mut laptop, id, op);
+    assert_eq!(r, Response::Error { code: ErrorCode::Unparseable });
 }
 
 #[test]
