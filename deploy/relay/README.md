@@ -19,11 +19,13 @@ The relay holds no keys and no membership. It stores ciphertext by circle and se
 Once, from the repository root, with `flyctl` signed in:
 
 ```sh
-fly launch --config deploy/relay/fly.toml --copy-config --no-deploy --name cahoots-relay --region sjc
-fly volumes create station_data --size 1 --region sjc --app cahoots-relay
-fly deploy --config deploy/relay/fly.toml
+fly apps create cahoots-relay
+fly volumes create station_data --size 1 --region sjc --app cahoots-relay --yes
+fly deploy --config deploy/relay/fly.toml --dockerfile crates/station/Dockerfile --app cahoots-relay .
 fly certs add relay.cahoots.network --app cahoots-relay
 ```
+
+The trailing `.` makes the repository root the build context, which the Dockerfile needs; `.dockerignore` keeps `target/` out of it. Fly appends the `[processes]` command to the image's `ENTRYPOINT`, so the config lists only the flags.
 
 Then add the DNS records `fly certs add` prints (an `A` and an `AAAA`, or a `CNAME`, for `relay.cahoots.network`). Check:
 
@@ -34,7 +36,7 @@ curl https://relay.cahoots.network/v1/head
 
 The first answers `ok`; the second answers `{"seq":null,"hash":"…"}` on an empty log.
 
-Updates: `fly deploy --config deploy/relay/fly.toml` from a checkout of `main`. The log on the volume is replayed and chain-verified on every start; a broken file refuses to start, which is the point.
+Updates: the same `fly deploy` line from a checkout of `main`. Deployed for the first time on 2026-10-29 (app `cahoots-relay`, region sjc, one shared-cpu-1x machine, a 1 GB volume). The log on the volume is replayed and chain-verified on every start; a broken file refuses to start, which is the point.
 
 ## Any other host
 
