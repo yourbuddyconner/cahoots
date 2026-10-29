@@ -10,9 +10,12 @@ An append-only, hash-chained public relay for circle ciphertext. Anyone can read
 - Accepts chat messages (version byte 2) without a reuse check. An epoch pointer appears in many chat messages by design, so reuse protection for epochs lives in each member's ledger.
 - Serves a read-only live feed page at `/` for a big screen, with no external assets.
 
+- Limits each client address to a burst and a rate of posts and of reads (`--posts-per-minute`, default 120; `--reads-per-minute`, default 600; 0 for none), answering `429 {"error":"rate"}` with `Retry-After: 10` past them. Behind a proxy, `--trust-forwarded` takes the client address from `Fly-Client-IP` or the first `X-Forwarded-For` entry; without it those headers are ignored, so a client cannot pick its own bucket.
+- Refuses posts with `507 {"error":"full"}` once the log file reaches `--max-log-bytes` (0, the default, for no cap). Reads keep working. The log is never truncated.
+
 ## What it does not do
 
-- Rate limiting per circle or per client. Add it at the front proxy for now.
+- Rate limiting per circle. The limit is per client address.
 - Any decryption, tag verification, or membership check. It has no key material at all.
 - Authentication of posters. Anyone can post bytes that parse. The circle's tags make a message real; the station only orders and keeps it.
 
@@ -41,6 +44,8 @@ docker run -p 8080:8080 -v station-data:/data cahoots-station
 | `GET /v1/feed` | `after=<seq>` | up to 500 entries across all circles, for the display page |
 | `GET /healthz` | | `ok` |
 
+Any request under `/v1` can also answer `429 {"error":"rate"}` (over the per-client limit) and a post `507 {"error":"full"}` (the log has reached its cap).
+
 `circle_id` is 32 hex characters and must match the circle ID inside the message header.
 
 An entry on the wire and on disk:
@@ -64,6 +69,10 @@ Clients that keep the last head they saw can detect a rollback: a later head who
 
 - **Pure pad, version byte 1.** Parsed with `cahoots_core::message::parse`. The spent range is `[offset, offset + 32 + len)`.
 - **Chat, version byte 2.** `version | circle_id (16) | epoch_id (5) | sender (1) | counter (u32) | len (u32) | type (1) | ciphertext`, where the ciphertext is exactly `len + 16` bytes. Only the length arithmetic is checked.
+
+## Deploying as the default relay
+
+The app ships pointing at `relay.cahoots.network`. The recipe for that host, and for a relay of your own, is in [deploy/relay](../../deploy/relay/README.md).
 
 ## Deploying as a [TVC](https://docs.turnkey.com/features/verifiable-cloud/overview) workload
 

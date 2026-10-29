@@ -45,7 +45,8 @@ const friendly = (e) => {
 };
 const CHAT_LABEL = 'End-to-end encrypted, pad-hedged';
 const CHAT_CLAIM = 'The pad seeds the keys and ChaCha20-Poly1305 encrypts. The relay sees ciphertext and traffic shape only.';
-const DEFAULT_RELAY = '';
+// The relay the app ships with. A circle can point at another one from the chat menu.
+const DEFAULT_RELAY = 'https://relay.cahoots.network';
 const POLL_WAIT_MS = 25000;
 const QR_PACKET = 300;   // payload bytes per animated frame: ~77 modules per side, readable by phone cameras
 const QR_FPS = 10;
@@ -92,7 +93,8 @@ const saveMessage = (m) => tx('messages', 'readwrite', (s) => s.add(m));
 const loadMessages = (id) => tx('messages', 'readonly', (s) => s.index('circle').getAll(id));
 const saveChat = (m) => tx('chat', 'readwrite', (s) => s.add(m));
 const loadChat = (id) => tx('chat', 'readonly', (s) => s.index('circle').getAll(id));
-const loadSettings = async (id) => (await tx('settings', 'readonly', (s) => s.get(id))) || { id, relay: DEFAULT_RELAY };
+// A circle saved before the app shipped a default relay has an empty address; it gets the default.
+const loadSettings = async (id) => { const s = (await tx('settings', 'readonly', (s) => s.get(id))) || { id }; if (!s.relay) s.relay = DEFAULT_RELAY; return s; };
 const saveSettings = (row) => tx('settings', 'readwrite', (s) => s.put(row));
 const nameOf = (settings, seat) => settings.names?.[seat] || `Seat ${seat + 1}`;
 
@@ -677,9 +679,9 @@ async function screenCircle(id) {
         budget(circle),
         low ? notice('Less than 10% of your share is left. Plan a new ceremony.') : null,
         h('div', { class: 'rows' },
+          h('a', { class: 'row-item', href: `#/chat/${id}` }, h('div', {}, h('b', {}, 'Chat'), h('span', {}, 'end-to-end encrypted · the relay only carries ciphertext')), h('span', { class: 'arrow' }, '›')),
           h('a', { class: 'row-item', href: `#/c/${id}/send` }, h('div', {}, h('b', {}, 'Send a message'), h('span', {}, 'short · unbreakable · shown as a code to scan or paste')), h('span', { class: 'arrow' }, '›')),
           h('a', { class: 'row-item', href: `#/c/${id}/read` }, h('div', {}, h('b', {}, 'Read a message'), h('span', {}, 'scan a code or paste one')), h('span', { class: 'arrow' }, '›')),
-          h('a', { class: 'row-item', href: `#/chat/${id}` }, h('div', {}, h('b', {}, 'Chat'), h('span', {}, 'over a relay you run · end-to-end encrypted')), h('span', { class: 'arrow' }, '›')),
           h('a', { class: 'row-item', href: `#/c/${id}/hello` }, h('div', {}, h('b', {}, 'Hello words'), h('span', {}, 'on a call, know it is really them · two words each')), h('span', { class: 'arrow' }, '›')),
           h('a', { class: 'row-item', href: `#/c/${id}/history` }, h('div', {}, h('b', {}, 'History'), h('span', {}, 'messages on this device')), h('span', { class: 'arrow' }, '›')))),
     ],
@@ -857,7 +859,8 @@ async function screenChat(id) {
   const bubble = (m) => m.dir === 'rejected'
     ? h('div', { class: 'bubble rejected' }, `rejected · ${friendly(m.reason)} · seq ${m.seq}`)
     : h('div', { class: `bubble ${m.dir}` }, h('div', { class: 'meta' }, `${m.dir === 'out' ? 'you' : nameOf(settings, m.sender)} · ${new Date(m.ts).toLocaleTimeString()}`), h('div', {}, m.text));
-  const append = (m) => { list.append(bubble(m)); list.scrollTop = list.scrollHeight; };
+  const empty = h('p', { class: 'muted center' }, 'No messages yet.');
+  const append = (m) => { empty.remove(); list.append(bubble(m)); list.scrollTop = list.scrollHeight; };
   const history = await loadChat(id);
   for (const m of history) append(m);
   const titleSub = h('small', {}, `${CHAT_LABEL} · ${epoch()}`);
@@ -866,9 +869,10 @@ async function screenChat(id) {
     const relayIn = input({ type: 'url', value: settings.relay, placeholder: 'https://relay.example.com', autocapitalize: 'off', autocomplete: 'off' });
     return h('div', { class: 'stack' },
       h('h2', {}, 'Relay'),
-      h('p', { class: 'muted' }, 'Chat needs a Numbers Station relay that every member can reach. It only ever sees encrypted messages. Run one with cahoots-station, or use one a member runs.'),
+      h('p', { class: 'muted' }, `Messages travel through a relay that every member can reach. It only ever sees encrypted messages. The app ships with ${DEFAULT_RELAY.replace('https://', '')}. Every member of this cahoot must use the same relay, so change it together.`),
       field('Relay address', relayIn),
-      btn('Save and connect', async () => { settings.relay = relayIn.value.trim(); await saveSettings({ id, relay: settings.relay }); close(); chatRun++; screenChat(id); }, 'primary'));
+      btn('Save and connect', async () => { settings.relay = relayIn.value.trim() || DEFAULT_RELAY; await saveSettings({ id, relay: settings.relay }); close(); chatRun++; screenChat(id); }, 'primary'),
+      settings.relay !== DEFAULT_RELAY ? btn('Use the default relay', async () => { settings.relay = DEFAULT_RELAY; await saveSettings({ id, relay: settings.relay }); close(); chatRun++; screenChat(id); }) : null);
   });
 
   const post = async (bytes) => {
@@ -907,7 +911,7 @@ async function screenChat(id) {
         data = await res.json();
         st.textContent = `connected · last seq ${circle.relay_seq() ?? 'none'}`;
       } catch (e) {
-        st.textContent = 'Relay unreachable. Retrying.';
+        st.textContent = `Cannot reach ${relayBase().replace('https://', '')}. Retrying. If this keeps up, check the address in the menu.`;
         await new Promise((r) => setTimeout(r, 3000));
         continue;
       }
@@ -946,7 +950,7 @@ async function screenChat(id) {
         h('p', { class: 'muted' }, `Starting a new epoch rotates everyone's keys and costs 32 secret bytes. ${kib(circle.remaining())} of your share left. The seat shown on a message is a chain label, not a proof of who typed.`),
         btn('Start a new epoch', async () => { try { circle.rotate_epoch(); await saveCircle(circle); titleSub.textContent = `${CHAT_LABEL} · ${epoch()}`; toast('New epoch started', 'ok'); close(); } catch (e) { st.textContent = friendly(e); } }),
         btn('Relay address', () => { close(); relaySheet(); }))),
-    body: relayBase() ? [history.length ? null : h('p', { class: 'muted center' }, 'No messages yet.'), list, st] : [noRelay],
+    body: relayBase() ? [history.length ? null : empty, list, st] : [noRelay],
     actions: relayBase() ? [h('div', { class: 'composer' }, inp, sendBtn)] : [],
   });
   el.querySelector('.bar .title').append(titleSub);

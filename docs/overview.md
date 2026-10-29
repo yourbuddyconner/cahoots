@@ -19,16 +19,16 @@ You need two phones or laptops. No badge is required.
 1. Open the [browser app](https://cahoots.network/app/) on both devices.
 2. One person selects **Start a ceremony**. The other selects **Join one**.
 3. Follow [Create a circle](ceremony-guide.md) to exchange codes and check the words.
-4. Send a short message by QR code or paste. For ongoing chat, [connect a relay](relay.md).
+4. Open **Chat** and talk. Messages travel through the default relay, which only ever sees encrypted bytes. To send something without any server, use **Send a message** by QR code or paste.
 
-The meeting that creates the circle is called a **ceremony**. It exchanges keys; it does not set up a chat server. Chat needs a relay that every member can reach. There is no default relay.
+The meeting that creates the circle is called a **ceremony**. It exchanges keys; it does not set up a chat server. Chat uses a relay that every member can reach. The app ships with one; a member can [run their own](relay.md) instead.
 
 ## Two ways to send messages
 
 | In the app | How it works | What you need |
 |---|---|---|
 | **Send a message** | Encrypts a short message directly with unused bytes of the shared secret. Each message consumes those bytes. | A way to pass the encrypted code or text to another member. |
-| **Chat** | Uses a small amount of the secret to seed encryption keys for many messages. | A running relay and its address. |
+| **Chat** | Uses a small amount of the secret to seed encryption keys for many messages. | A relay every member can reach. The app ships with one. |
 
 These have different security properties. Chat uses conventional encryption; it is not a one-time pad. See [Security and limits](security.md) before relying on either mode.
 

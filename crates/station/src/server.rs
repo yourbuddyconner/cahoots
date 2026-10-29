@@ -1,6 +1,7 @@
 //! HTTP surface over the log. Long-polling is a `tokio::sync::Notify` that fires on every
 //! append; pollers re-check the log and return as soon as something new exists.
 
+use crate::limits::{self, Limiter, Limits};
 use crate::log::{EntryRecord, Log, LogError};
 use crate::rules::{RuleError, Submission, MAX_BODY};
 use axum::body::Bytes;
@@ -23,18 +24,36 @@ const PAGE_LIMIT: usize = 500;
 pub struct State {
     log: Arc<Mutex<Log>>,
     notify: Arc<Notify>,
+    limiter: Limiter,
+    /// Refuse posts once the log file is this large. `None` for no cap.
+    max_log_bytes: Option<u64>,
 }
 
 impl State {
     pub fn open(path: &std::path::Path) -> Result<Self, LogError> {
+        Self::open_with(path, Limits::default(), None)
+    }
+
+    pub fn open_with(
+        path: &std::path::Path,
+        limits: Limits,
+        max_log_bytes: Option<u64>,
+    ) -> Result<Self, LogError> {
         Ok(State {
             log: Arc::new(Mutex::new(Log::open(path)?)),
             notify: Arc::new(Notify::new()),
+            limiter: Limiter::new(limits),
+            max_log_bytes,
         })
+    }
+
+    pub fn limits(&self) -> Limits {
+        self.limiter.limits()
     }
 }
 
 pub fn app(state: State) -> Router {
+    let limiter = state.limiter.clone();
     Router::new()
         .route("/", get(index))
         .route("/healthz", get(|| async { "ok" }))
@@ -47,6 +66,7 @@ pub fn app(state: State) -> Router {
         .route("/v1/circles/:circle/head", get(circle_head))
         .route("/v1/feed", get(feed))
         .with_state(state)
+        .layer(axum::middleware::from_fn_with_state(limiter, limits::limit))
         .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY + 1))
         // The feed is public by design: ciphertext only. Any origin may read and post.
         .layer(
@@ -105,7 +125,17 @@ async fn post_message(
         }
         Err(e) => return err(StatusCode::BAD_REQUEST, "malformed", e),
     };
-    let result = st.log.lock().unwrap().append(sub, now_ms());
+    let result = {
+        let mut log = st.log.lock().unwrap();
+        if st.max_log_bytes.is_some_and(|cap| log.bytes() >= cap) {
+            return err(
+                StatusCode::INSUFFICIENT_STORAGE,
+                "full",
+                "this relay's log has reached its size cap; the operator must grow it",
+            );
+        }
+        log.append(sub, now_ms())
+    };
     match result {
         Ok(entry) => {
             st.notify.notify_waiters();

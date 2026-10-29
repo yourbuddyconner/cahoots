@@ -2,6 +2,8 @@
 
 *Written 2026-10-28 from a conversation with Conner. The flagship of the network is a messaging app: a circle of people who met in person get a group chat that is better than Signal or Telegram for the things that matter most to them, and the card in their wallet holds the keys. This is the design for its first version. It is a design to plan from, not yet a plan; building it is its own run.*
 
+> **Status, 2026-10-29.** Superseded in part. The product order in the [roadmap](../../plan.md#the-first-product-what-ships-first) makes the browser app on a phone the phone client and does not require a card to chat. What stays from this design: the circle root in the chip, chat keys per epoch, rotation as a message, and the four-word check on pairing. What changes: pairing becomes scoped enrollment (E1), a request the badge approves over USB or an animated code, with NFC as one possible transport later. A native iOS app is not in the first product.
+
 ## The idea
 
 Today's browser app runs ceremonies and a pad-seeded chat on a phone that holds everything. The phone app keeps the ceremony and the chat and moves the keys onto the card. A member taps their card on their phone to get the key for the chat they are looking at; when the circle rotates its key, the rotation is a message everyone sees, and the next tap fetches the new one. The chip on the card computes chat keys from a circle root that never leaves silicon, so a lost or seized phone holds one epoch of one chat, and nothing that reaches the pad, the seat key or the other circles.

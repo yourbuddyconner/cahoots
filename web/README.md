@@ -14,7 +14,7 @@ A commitment code carries the circle parameters, so a joiner scans any member wh
 |---|---|
 | `crates/wasm/` | `cahoots-wasm`: wasm-bindgen API over the core. Ceremony, `Circle` (pad + ledger + label + chat session + relay cursor) with pure-pad send/receive, chat send/receive, epoch rotation, and export/import for IndexedDB; RaptorQ fountain coding for animated QR; QR rendering to SVG; bucket padding; base64url. Also compiles natively, so `cargo test -p cahoots-wasm` exercises the whole API. |
 | `app/` | The static PWA: `index.html`, `app.js` (ES module), `styles.css`, `sw.js` (network-first service worker with a cache fallback; bump `VERSION` on every release), `manifest.json`, icons. |
-| `e2e.mjs` | End-to-end check: two isolated browser contexts run a full ceremony through the paste fallbacks and exchange a message. `node web/e2e.mjs`. |
+| `e2e.mjs` | End-to-end check: two isolated browser contexts run a full ceremony through the paste fallbacks, chat through a Numbers Station the script starts, and exchange a pure-pad message. `cargo build -p cahoots-station && node web/e2e.mjs`. |
 | `app/pkg/` | Build output of `wasm-pack`. Not committed. |
 
 ## Build and run
@@ -52,7 +52,7 @@ The words come from the pair keys made during the sealed reveal step, so a cahoo
 
 **Chat** on a cahoot's screen opens the chat for that circle. The header reads "End-to-end encrypted, pad-hedged": the pad seeds the keys and ChaCha20-Poly1305 encrypts, per `docs/chat.md`. The relay sees ciphertext and traffic shape only.
 
-- **Relay.** The chat needs a running Numbers Station (`cargo run -p cahoots-station -- --listen 127.0.0.1:8080 --log station.jsonl`). There is no default: until a relay address is set for the circle (the empty state's button, or **Relay address** in the menu), the chat screen explains what a relay is and shows nothing else. The address is stored per circle in IndexedDB. The screen long-polls `GET /v1/circles/{id}/messages?after=<seq>&wait=25000` while open and posts sealed messages as raw bytes.
+- **Relay.** The app ships pointing at `https://relay.cahoots.network` (`DEFAULT_RELAY` in `app.js`). **Relay address** in the menu sets another one per circle, stored in IndexedDB, and **Use the default relay** switches back; a circle saved before the default existed gets it on load. For a local relay: `cargo run -p cahoots-station -- --listen 127.0.0.1:8080 --log station.jsonl`. The screen long-polls `GET /v1/circles/{id}/messages?after=<seq>&wait=25000` while open and posts sealed messages as raw bytes.
 - **Epochs.** The first send spends 32 pad bytes to start an epoch. **Start a new epoch** in the menu spends 32 more. Peers switch to the newest epoch they see; the subtitle under the circle name shows the current one. Rotation also happens on its own after 1000 of your own messages in an epoch.
 - **Padding.** Plaintext is padded to 64, 256, 1024, or 4096 bytes before encryption.
 - **Rejections** show inline and muted as `rejected · <reason> · seq N`, where the reason is the friendly text for the error (see `friendly()` in `app.js`). Your own messages coming back from the relay are skipped by sender index.
@@ -73,7 +73,7 @@ The words come from the pair keys made during the sealed reveal step, so a cahoo
 
 ## What was verified
 
-2026-10-21, `web/e2e.mjs` in headless Chrome, a phone-sized context and a desktop one: a two-member ceremony through the paste fallbacks, including the late-joiner path where the host takes the joiner's reveal as commitment and reveal; identical check words; a one-time-pad message decrypted on the other member; the same message refused as reuse on a second read; no console errors. The script runs in about ten seconds and is the check to run before a release.
+2026-10-29, `web/e2e.mjs` in headless Chrome, a phone-sized context and a desktop one: a two-member ceremony through the paste fallbacks, including the late-joiner path where the host takes the joiner's reveal as commitment and reveal; identical check words; hello words; a chat through a station the script starts, with the relay address set from the menu and a message each way; a one-time-pad message decrypted on the other member; the same message refused as reuse on a second read; no console errors. The script runs in about ten seconds and is the check to run before a release.
 
 2026-10-20, by hand
 

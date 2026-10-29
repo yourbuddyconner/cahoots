@@ -100,6 +100,8 @@ pub struct Log {
     file: File,
     entries: Vec<Entry>,
     spent: SpentRanges,
+    /// Bytes on disk, kept in step with every append.
+    bytes: u64,
 }
 
 impl Log {
@@ -110,10 +112,12 @@ impl Log {
             .append(true)
             .read(true)
             .open(path)?;
+        let bytes = file.metadata()?.len();
         let mut log = Log {
             file,
             entries: Vec::new(),
             spent: HashMap::new(),
+            bytes,
         };
         let reader = BufReader::new(File::open(path)?);
         for (i, line) in reader.lines().enumerate() {
@@ -210,8 +214,14 @@ impl Log {
         line.push('\n');
         self.file.write_all(line.as_bytes())?;
         self.file.sync_data()?;
+        self.bytes += line.len() as u64;
         self.entries.push(entry.clone());
         Ok(entry)
+    }
+
+    /// Size of the log file in bytes.
+    pub fn bytes(&self) -> u64 {
+        self.bytes
     }
 
     pub fn head(&self) -> Head {

@@ -19,12 +19,11 @@ A message can be read once by each receiving device. Reading it again is refused
 
 Chat is a separate mode. It uses conventional encryption with keys seeded from the circle’s secret, so it can carry many messages without consuming one secret byte per text byte.
 
-1. Have one member [run a relay](relay.md).
-2. Open **Chat** in the saved circle.
-3. Set **Relay address** to a URL every member can reach.
-4. Use the same relay for all members of that circle.
+1. Open **Chat** in the saved circle.
+2. Type a message. It travels through the default relay, `relay.cahoots.network`.
+3. To use a relay a member [runs](relay.md), set **Relay address** from the menu, and have every member of the circle set the same one.
 
-There is no default relay. If the app says **Chat needs a relay**, creating the circle succeeded; the delivery service is the missing step.
+If the status line says the relay cannot be reached, creating the circle still succeeded; delivery is the missing step. Check the address in the menu or try again later.
 
 The relay receives encrypted messages. It does not receive the secret. It can still observe traffic and stop delivering messages.
 

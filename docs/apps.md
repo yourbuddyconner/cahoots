@@ -10,12 +10,12 @@ These are available on a saved circle’s screen in the [browser app](https://ca
 
 | Tool | Use it to | What to expect |
 |---|---|---|
-| **Chat** | Keep talking after the meeting. | Encrypted group chat through a relay you supply. No default relay is configured. |
+| **Chat** | Keep talking after the meeting. | Encrypted group chat through a relay. The app ships with `relay.cahoots.network`; a member can run their own instead. |
 | **Send a message** / **Read a message** | Exchange short text by QR code or paste. | Uses the pad directly; consumes secret bytes for each message. No relay needed. |
 | **Hello words** | Check someone during a call. | Compare fresh words derived from the pair’s key. Both devices use the same hello number. |
 | **History** | Revisit messages this device has read or sent. | Local history, not a backup service. |
 
-For most groups, the next step is [connect a relay and start chatting](relay.md). For a quick test without a server, exchange a short message. The [browser guide](browser.md) walks through each tool.
+For most groups, the next step is to open Chat. For a quick test without any server, exchange a short message. To use your own relay, see [run a relay](relay.md). The [browser guide](browser.md) walks through each tool.
 
 ## Connect other tools
 

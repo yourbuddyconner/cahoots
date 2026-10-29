@@ -1,8 +1,11 @@
 // End-to-end check of the browser app: two isolated browser contexts run a full ceremony through the
-// paste fallbacks (headless Chrome has no camera), then exchange a one-time-pad message.
-//   node web/e2e.mjs            (needs the wasm build in web/app/pkg and `npm install` in web/)
+// paste fallbacks (headless Chrome has no camera), exchange a one-time-pad message, then chat through
+// a Numbers Station started here.
+//   node web/e2e.mjs            (needs the wasm build in web/app/pkg, `npm install` in web/, and
+//                                `cargo build -p cahoots-station`)
 // Screenshots land in web/e2e-out/.
 import { createRequire } from "node:module";
+import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { createReadStream, existsSync, mkdirSync, statSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
@@ -25,15 +28,29 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}/`;
 
+// A relay of our own. The app ships pointing at relay.cahoots.network; the test never reaches it.
+const stationBin = join(here, "..", "target", "debug", "cahoots-station");
+if (!existsSync(stationBin)) { console.error("build the relay first: cargo build -p cahoots-station"); process.exit(1); }
+const freePort = await new Promise((r) => { const s = createServer(); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => r(p)); }); });
+const stationUrl = `http://127.0.0.1:${freePort}`;
+const station = spawn(stationBin, ["--listen", `127.0.0.1:${freePort}`, "--log", join(out, "station.jsonl")], { stdio: ["ignore", "ignore", "inherit"] });
+for (let i = 0; ; i++) {
+  try { if ((await fetch(`${stationUrl}/healthz`)).ok) break; } catch {}
+  if (i > 100) { console.error("the relay did not start"); process.exit(1); }
+  await new Promise((r) => setTimeout(r, 100));
+}
+
 const browser = await chromium.launch({ channel: "chrome" });
 const errors = [];
 async function person(name, viewport) {
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, isMobile: viewport.width < 500, hasTouch: viewport.width < 500 });
   // Capture what the app copies, since headless clipboards are unreliable.
   await ctx.addInitScript(() => { navigator.clipboard.writeText = (t) => { window.__clip = t; return Promise.resolve(); }; });
+  await ctx.route("https://relay.cahoots.network/**", (r) => r.abort());
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`${name}: ${e.message}`));
-  page.on("console", (m) => { if (m.type() === "error") errors.push(`${name} console: ${m.text()}`); });
+  // The app's first poll goes to the shipped default relay, which this test blocks; that failed load is expected.
+  page.on("console", (m) => { if (m.type() === "error" && !(m.location()?.url || "").includes("relay.cahoots.network")) errors.push(`${name} console: ${m.text()}`); });
   await page.goto(base);
   await page.waitForSelector(".screen");
   let shot = 0;
@@ -50,7 +67,7 @@ const onFail = async (e) => {
   console.error("failed:", e.message);
   for (const p of people) { try { await p.page.screenshot({ path: join(out, `${p.name}-FAIL.png`) }); console.error(p.name, "title:", await p.page.$eval(".bar .title", (x) => x.textContent), "status:", await p.page.$eval(".status", (x) => x.textContent).catch(() => "")); } catch {} }
   if (errors.length) console.error("page errors:\n" + errors.join("\n"));
-  await browser.close(); server.close(); process.exit(1);
+  await browser.close(); server.close(); station.kill(); process.exit(1);
 };
 process.on("unhandledRejection", onFail);
 process.on("uncaughtException", onFail);
@@ -161,6 +178,32 @@ if (jMine3 !== jMine2) throw new Error("hello number did not survive a reload");
 await L.page.click('button[aria-label="Back"]'); await L.page.waitForSelector(".budget");
 await J.page.click('button[aria-label="Back"]'); await J.page.waitForSelector(".budget");
 
+
+// Chat: the app opens on its default relay; each member points it at the one started here, then they talk.
+const setRelay = async (p) => {
+  await p.page.click("text=Chat"); await p.page.waitForSelector(".chatlist");
+  await p.menu(); await p.page.click('button:text-is("Relay address")');
+  await p.page.fill('input[type="url"]', stationUrl);
+  await p.page.click('button:text-is("Save and connect")');
+  await p.page.waitForSelector('.status:has-text("connected")');
+};
+await setRelay(L); await setRelay(J);
+await L.snap("chat-empty");
+await L.page.fill('input[placeholder="Message"]', "hello from the ring");
+await L.page.click('button:text-is("Send")');
+await L.page.waitForSelector('.bubble.out:has-text("hello from the ring")');
+await J.page.waitForSelector('.bubble.in:has-text("hello from the ring")', { timeout: 15000 });
+await J.page.fill('input[placeholder="Message"]', "reading you");
+await J.page.keyboard.press("Enter");
+await L.page.waitForSelector('.bubble.in:has-text("reading you")', { timeout: 15000 });
+const rejected = await L.page.$$(".bubble.rejected");
+if (rejected.length) throw new Error(`${rejected.length} rejected chat messages`);
+await L.snap("chat"); await J.snap("chat");
+const headRes = await (await fetch(`${stationUrl}/v1/head`)).json();
+if (headRes.seq !== 1) throw new Error(`relay head seq ${headRes.seq}, expected 1 (two messages)`);
+await L.page.click('button[aria-label="Back"]'); await L.page.waitForSelector(".budget");
+await J.page.click('button[aria-label="Back"]'); await J.page.waitForSelector(".budget");
+
 // Leader sends a one-time-pad message as text; joiner reads it.
 await L.page.click("text=Send a message");
 await L.snap("send");
@@ -191,5 +234,6 @@ await L.snap("home-with-cahoot");
 
 await browser.close();
 server.close();
+station.kill();
 if (errors.length) { console.error("page errors:\n" + errors.join("\n")); process.exit(1); }
-console.log("e2e ok: two-member ceremony with signatures, OTP message, replay refused. Screenshots in", out);
+console.log("e2e ok: two-member ceremony with signatures, chat through a relay, OTP message, replay refused. Screenshots in", out);
