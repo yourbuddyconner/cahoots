@@ -91,7 +91,45 @@ try {
   const sw = await phone.evaluate(() => document.documentElement.scrollWidth);
   check("no console errors at 390 px", perrors.length === 0, perrors.join("; "));
   check("at 390 px the page is no wider than 390", sw <= 390, `scrollWidth ${sw}`);
+  const shotDir = join(repo0(), ".superpowers/sdd/2026-10-28-site-and-docs/shots/task4");
+  function repo0() { return resolve(here, ".."); }
+  const pf = await phone.evaluate(() => {
+    const img = document.querySelector(".scene img");
+    const apps = [...document.querySelectorAll(".app")].map((a) => a.getBoundingClientRect());
+    const t = document.querySelector(".ticker");
+    const tr = t?.getBoundingClientRect();
+    const ts = t && getComputedStyle(t);
+    return {
+      pos: img ? getComputedStyle(img).objectPosition : null,
+      fit: img ? getComputedStyle(img).objectFit : null,
+      lefts: apps.map((r) => Math.round(r.left)),
+      stacked: apps.every((r, i) => i === 0 || r.top >= apps[i - 1].bottom - 1),
+      ticker: !!t && tr.width > 0 && tr.height > 0 && ts.display !== "none" && ts.visibility !== "hidden",
+    };
+  });
+  check("at 390 px the hero image is cropped from the centre", pf.fit === "cover" && /^(50%|center)/.test(pf.pos ?? ""), `${pf.fit} ${pf.pos}`);
+  check("at 390 px the five .app cards share one left edge", pf.lefts.length === 5 && new Set(pf.lefts).size === 1, pf.lefts.join(","));
+  check("at 390 px each .app card sits below the previous", pf.stacked);
+  check("at 390 px the ticker is visible", pf.ticker);
+  mkdirSync(shotDir, { recursive: true });
+  await phone.screenshot({ path: join(shotDir, "phone.png"), fullPage: true });
+  const running = (pg) => pg.evaluate(() => {
+    const tr = document.querySelector(".ticker-track");
+    return tr.getAnimations().filter((a) => a.playState === "running").length;
+  });
+  check("without reduced motion the ticker animates", (await running(phone)) > 0);
   await pctx.close();
+  const rctx = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: "reduce" });
+  const rp = await rctx.newPage();
+  await rp.emulateMedia({ reducedMotion: "reduce" });
+  await rp.goto(base, { waitUntil: "load" });
+  await rp.waitForTimeout(300);
+  const ra = await rp.evaluate(() => {
+    const tr = document.querySelector(".ticker-track");
+    return { n: tr.getAnimations().filter((a) => a.playState === "running").length, name: getComputedStyle(tr).animationName };
+  });
+  check("with reduced motion the ticker track has no running animation", ra.n === 0, `${ra.n} running, animation-name ${ra.name}`);
+  await rctx.close();
 
   // Docs shell. Assemble a temp _site the way .github/workflows/pages.yml does (keep the two lists in step),
   // then open every DOCS id as a hash route.
