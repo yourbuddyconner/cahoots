@@ -1,28 +1,34 @@
 // Renders the repository's markdown docs. The deploy workflow copies docs/*.md and
 // selected crate READMEs into site/docs/md/, and docs/diagrams into site/docs/diagrams/.
 // Routes are #/<name>, with #/<name>#<heading> for a section.
+// src is the file's path in the repository; links inside it are relative to that.
 const DOCS = [
   { group: "Start here" },
-  { id: "readme", title: "Overview", file: "readme.md", lede: "What Cahoots is and how the pieces fit." },
-  { id: "use-cases", title: "What it is for", file: "use-cases.md", lede: "Concrete uses, from group chat to bootstrapping a network." },
-  { id: "gatherings", title: "Cards for every gathering", file: "gatherings.md", lede: "What happens when everyone carries one: storage, messages from old circles, a web of trust, and a social network with no accounts." },
-  { id: "attested-data", title: "Attested readings", file: "attested-data.md", lede: "A survey of what a network of signed sensor readings could be for, and what has to be decided before designing it." },
-  { id: "ceremony-guide", title: "Ceremony guide", file: "ceremony-guide.md", lede: "How to run a ceremony with a group." },
-  { id: "tiers", title: "Device tiers", file: "tiers.md", lede: "What each kind of device protects, from a phone to inspected silicon." },
-  { id: "diy-badge", title: "Build a badge", file: "diy-badge.md", lede: "Three boards: the DIY Arduino build, V1 on a Pico 2, and V2 on the Baochip. E-paper, two buttons, a wire, USB to the phone." },
-  { id: "glossary", title: "Glossary", file: "glossary.md", lede: "The words these pages use, in plain terms." },
-  { group: "Specification" },
-  { id: "protocol", title: "Protocol v1", file: "protocol.md", lede: "The normative description of the ceremony, messages, and storage.", spec: true },
-  { id: "chat", title: "Chat", file: "chat.md", lede: "Keys from the pad, forward secrecy per sender, messages over the feed.", spec: true },
-  { id: "threat-model", title: "Threat model", file: "threat-model.md", lede: "What is covered, what is not, and what the app may claim." },
+  { id: "readme", title: "Overview", file: "readme.md", src: "README.md", lede: "What Cahoots is and how the pieces fit." },
+  { id: "use-cases", title: "What you get", file: "use-cases.md", src: "docs/use-cases.md", lede: "Concrete uses, from group chat to bootstrapping a network." },
+  { id: "ceremony-guide", title: "Ceremony guide", file: "ceremony-guide.md", src: "docs/ceremony-guide.md", lede: "How to run a ceremony with a group." },
+  { id: "glossary", title: "Glossary", file: "glossary.md", src: "docs/glossary.md", lede: "The words these pages use, in plain terms." },
+  { group: "The system" },
+  { id: "protocol", title: "Protocol v1", file: "protocol.md", src: "docs/protocol.md", lede: "The normative description of the ceremony, messages, and storage.", spec: true },
+  { id: "chat", title: "Chat", file: "chat.md", src: "docs/chat.md", lede: "Keys from the pad, forward secrecy per sender, messages over the feed.", spec: true },
+  { id: "threat-model", title: "Threat model", file: "threat-model.md", src: "docs/threat-model.md", lede: "What is covered, what is not, and what the app may claim." },
+  { id: "tiers", title: "Device assurance", file: "tiers.md", src: "docs/tiers.md", lede: "What each kind of device protects, from a phone to inspected silicon." },
+  { group: "The card" },
+  { id: "diy-badge", title: "Build a badge", file: "diy-badge.md", src: "docs/diy-badge.md", lede: "Three boards: the DIY Arduino build, V1 on a Pico 2, and V2 on the Baochip. E-paper, two buttons, a wire, USB to the phone." },
+  { id: "v1-board", title: "The board", file: "v1-board.md", src: "hardware/v1/README.md", lede: "What is on the first board you can order, where the pins go, and what to check before ordering." },
+  { id: "manufacturing", title: "From breadboard to board", file: "manufacturing.md", src: "docs/manufacturing.md", lede: "How a custom board gets made, what ours needs, and the order to do it in." },
+  { id: "rp2350", title: "The Pico 2 firmware", file: "rp2350.md", src: "crates/rp2350/README.md", lede: "The badge code running on a Raspberry Pi Pico 2: the board layer, the drivers, and the three links." },
+  { group: "Ideas" },
+  { id: "gatherings", title: "Cards for every gathering", file: "gatherings.md", src: "docs/gatherings.md", lede: "What happens when everyone carries one: storage, messages from old circles, a web of trust, and a social network with no accounts." },
+  { id: "attested-data", title: "Attested readings", file: "attested-data.md", src: "docs/attested-data.md", lede: "A survey of what a network of signed sensor readings could be for, and what has to be decided before designing it." },
   { group: "Project" },
-  { id: "plan", title: "Roadmap", file: "plan.md", lede: "What is built, what is next, and what is waiting." },
+  { id: "plan", title: "Roadmap", file: "plan.md", src: "docs/plan.md", lede: "What is built, what is next, and what is waiting." },
   { group: "Reference" },
-  { id: "web", title: "Browser app", file: "web.md", lede: "Running and building the app." },
-  { id: "station", title: "The feed", file: "station.md", lede: "Running the relay." },
-  { id: "chat-cli", title: "Chat CLI", file: "chat-cli.md", lede: "A terminal chat client for trying the protocol." },
-  { id: "host", title: "Simulator", file: "host.md", lede: "A desktop stand-in for the badge." },
-  { id: "adapters", title: "Adapters", file: "adapters.md", lede: "HPKE, age, and WireGuard." },
+  { id: "web", title: "Browser app", file: "web.md", src: "web/README.md", lede: "Running and building the app." },
+  { id: "station", title: "The feed", file: "station.md", src: "crates/station/README.md", lede: "Running the relay." },
+  { id: "chat-cli", title: "Chat CLI", file: "chat-cli.md", src: "crates/chat/README.md", lede: "A terminal chat client for trying the protocol." },
+  { id: "host", title: "Simulator", file: "host.md", src: "crates/host/README.md", lede: "A desktop stand-in for the badge." },
+  { id: "adapters", title: "Adapters", file: "adapters.md", src: "crates/ADAPTERS.md", lede: "HPKE, age, and WireGuard." },
 ];
 const PAGES = DOCS.filter((d) => d.id);
 
@@ -70,18 +76,22 @@ function slug(s) {
   return s.toLowerCase().replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-");
 }
 
-// Links inside the markdown point at repo paths like docs/protocol.md. Map them to routes.
-function rewriteLinks(root) {
+// Links inside the markdown are relative to the file's place in the repository. Resolve each one
+// there: a link to a published doc becomes a route, anything else lands on GitHub at its real path.
+const REPO = "https://github.com/yourbuddyconner/cahoots/blob/main/";
+function rewriteLinks(root, d) {
+  const from = new URL(d.src, "https://repo.invalid/");
   for (const a of root.querySelectorAll("a[href]")) {
     const href = a.getAttribute("href");
-    const m = href.match(/(?:^|\/)([a-z0-9-]+)\.md(#.*)?$/i);
-    if (m) {
-      const d = PAGES.find((x) => x.file === `${m[1].toLowerCase()}.md`);
-      if (d) a.setAttribute("href", `#/${d.id}${m[2] || ""}`);
-      else a.setAttribute("href", `https://github.com/yourbuddyconner/cahoots/blob/main/${href}`);
-    } else if (/^https?:/.test(href)) {
+    if (/^https?:/.test(href)) {
       a.setAttribute("rel", "noopener");
+      continue;
     }
+    if (href.startsWith("#") || /^[a-z]+:/i.test(href)) continue;
+    const u = new URL(href, from);
+    const path = decodeURIComponent(u.pathname.slice(1));
+    const target = PAGES.find((x) => x.src.toLowerCase() === path.toLowerCase());
+    a.setAttribute("href", target ? `#/${target.id}${u.hash}` : `${REPO}${path}${u.hash}`);
   }
 }
 
@@ -216,7 +226,7 @@ async function render() {
         l.textContent = d.lede;
         head.appendChild(l);
       }
-      rewriteLinks(content);
+      rewriteLinks(content, d);
       headings(content);
       await figures(content);
       content.appendChild(pager(d));

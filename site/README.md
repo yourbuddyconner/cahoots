@@ -5,7 +5,10 @@ The landing page, docs site and blog. Static files, no bundler. Deployed to GitH
 ## Preview locally
 
 ```sh
-mkdir -p site/docs/md && cp README.md site/docs/md/readme.md && cp docs/*.md site/docs/md/
+mkdir -p site/docs/md site/docs/diagrams && cp README.md site/docs/md/readme.md && cp docs/*.md site/docs/md/ && cp docs/diagrams/*.svg site/docs/diagrams/
+cp web/README.md site/docs/md/web.md && cp crates/station/README.md site/docs/md/station.md && cp crates/chat/README.md site/docs/md/chat-cli.md
+cp crates/host/README.md site/docs/md/host.md && cp crates/ADAPTERS.md site/docs/md/adapters.md
+cp crates/rp2350/README.md site/docs/md/rp2350.md && cp hardware/v1/README.md site/docs/md/v1-board.md
 python3 scripts/build-blog.py --out site      # needs `pip install markdown`; add --skip-og without Chrome
 cd site && python3 -m http.server 8787
 ```
