@@ -14,7 +14,7 @@
 //! A handle's `kind` is a short text (`email`, `github`, `nostr`, `x`), 1 to 16 bytes. An
 //! endpoint's `purpose` is a [`cahoots_core::control::Purpose`] byte (0 to 5), or
 //! [`PURPOSE_SSH`] or [`PURPOSE_CHAT`]; its value is text the laptop knows how to use. Values
-//! are 1 to 256 bytes.
+//! are 1 to 256 bytes. The whole encoded card is at most [`MAX_CARD_LEN`] bytes.
 //!
 //! Signed by the seat with kid `[seat]`. The signed card travels sealed: AES-256-GCM under the
 //! circle's card seal key, `HMAC-SHA256(root, "seal/card" || circle_id)`, which the badge
@@ -47,6 +47,11 @@ pub const MAX_NAME: usize = 64;
 pub const MAX_KIND: usize = 16;
 pub const MAX_VALUE: usize = 256;
 pub const MAX_ENTRIES: usize = 16;
+/// The longest encoded card. The per-field limits allow about 8.5 KB, but a request other than
+/// an ssh signature may be at most 4096 bytes once encoded
+/// (`cahoots_custodian::wire::MAX_SMALL_REQUEST_LEN`), and the request that carries a card adds
+/// a few dozen bytes; 4000 leaves room for them, so a card that encodes fits its request.
+pub const MAX_CARD_LEN: usize = 4000;
 
 /// The length of the sealed form's nonce.
 pub const NONCE_LEN: usize = 12;
@@ -89,8 +94,16 @@ fn text_ok(s: &str, max: usize) -> bool {
 }
 
 impl Card {
-    /// The canonical CBOR payload.
-    pub fn encode(&self) -> Vec<u8> {
+    /// The canonical CBOR payload. `Malformed` when it is longer than [`MAX_CARD_LEN`].
+    pub fn encode(&self) -> Result<Vec<u8>, ObjectError> {
+        let bytes = self.encode_unchecked();
+        if bytes.len() > MAX_CARD_LEN {
+            return Err(ObjectError::Malformed);
+        }
+        Ok(bytes)
+    }
+
+    fn encode_unchecked(&self) -> Vec<u8> {
         encode_with(|e| self.write(e))
     }
 
@@ -112,9 +125,13 @@ impl Card {
         Ok(())
     }
 
-    /// Parse a canonical payload. Anything past the limits in the table is `Malformed`.
+    /// Parse a canonical payload. Anything past the limits in the table, or longer than
+    /// [`MAX_CARD_LEN`], is `Malformed`.
     pub fn decode(bytes: &[u8]) -> Result<Card, ObjectError> {
         let m = ObjectError::Malformed;
+        if bytes.len() > MAX_CARD_LEN {
+            return Err(m);
+        }
         let mut r = Reader::open(bytes, 7)?;
         let circle_id = r.array()?;
         let seat = r.u8()?;
@@ -171,13 +188,14 @@ impl Card {
             log: r.u64()?,
         };
         r.finish()?;
-        let encoded = card.encode();
+        let encoded = card.encode_unchecked();
         canonical(card, encoded, bytes)
     }
 
-    /// Sign as a COSE_Sign1 with the payload embedded; `kid` is `[seat]`.
-    pub fn sign<S: SeatSigner>(&self, key: S, kid: &[u8]) -> Vec<u8> {
-        cose::sign1(key, kid, &self.encode(), DOMAIN, false)
+    /// Sign as a COSE_Sign1 with the payload embedded; `kid` is `[seat]`. `Malformed` when
+    /// the card is longer than [`MAX_CARD_LEN`].
+    pub fn sign<S: SeatSigner>(&self, key: S, kid: &[u8]) -> Result<Vec<u8>, ObjectError> {
+        Ok(cose::sign1(key, kid, &self.encode()?, DOMAIN, false))
     }
 
     /// Verify a signed card against the manifest: the kid's seat signed it, the card names

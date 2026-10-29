@@ -130,21 +130,25 @@ pub fn build(
         log,
     };
     // The badge refuses what does not decode: say why here instead.
-    Card::decode(&c.encode()).map_err(|_| {
+    c.encode().and_then(|b| Card::decode(&b)).map_err(|_| {
         format!(
-            "the card is outside its limits: a name of 1 to {} bytes, at most {} handles and {} endpoints, kinds of at most {} bytes and values of at most {}",
+            "the card is outside its limits: a name of 1 to {} bytes, at most {} handles and {} endpoints, kinds of at most {} bytes, values of at most {}, and {} bytes in all",
             card::MAX_NAME,
             card::MAX_ENTRIES,
             card::MAX_ENTRIES,
             card::MAX_KIND,
-            card::MAX_VALUE
+            card::MAX_VALUE,
+            card::MAX_CARD_LEN
         )
     })
 }
 
 /// `card set`: sign the card on the badge, seal it, and write it to `out`.
 pub fn set(badge: &mut BadgeClient, info: &CircleInfo, c: &Card, out: &Path) -> Result<(), String> {
-    let signed = signature(chip(badge, info, ChipRequest::Card { card: c.encode() })?)?;
+    let bytes = c
+        .encode()
+        .map_err(|_| format!("the card is longer than {} bytes", card::MAX_CARD_LEN))?;
+    let signed = signature(chip(badge, info, ChipRequest::Card { card: bytes })?)?;
     let key = seal_key(badge, info)?;
     let sealed = card::seal(&signed, &key).map_err(|e| format!("seal: {e:?}"))?;
     std::fs::write(out, sealed).map_err(|e| format!("{}: {e}", out.display()))

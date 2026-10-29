@@ -13,7 +13,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::wire::{ChipRequest, ChipResponse, ErrorCode, Request, Response, MAX_SMALL_REQUEST_LEN};
+use crate::wire::{ChipRequest, ChipResponse, ErrorCode, Request, Response};
 use crate::{ChipApps, Custodian};
 
 /// Permission to spend. The device decides how to ask: a button, a prompt, or nothing.
@@ -46,14 +46,7 @@ pub fn serve<C: Custodian + ChipApps, K: Consent>(
         Err(code) => return err(code).encode(),
     };
     // Only a request to sign for ssh may be long; it can carry the text of a commit.
-    let long_ok = matches!(
-        req,
-        Request::Chip {
-            op: ChipRequest::SshSign { .. },
-            ..
-        }
-    );
-    if request.len() > MAX_SMALL_REQUEST_LEN && !long_ok {
+    if !req.length_ok(request.len()) {
         return err(ErrorCode::Malformed).encode();
     }
     let spends = match &req {

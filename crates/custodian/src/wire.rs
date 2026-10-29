@@ -116,6 +116,27 @@ pub enum ChipRequest {
     },
 }
 
+impl Request {
+    /// Whether this request, `encoded_len` bytes long on the wire, is within the length its
+    /// kind allows: [`MAX_REQUEST_LEN`] for an `SshSign`, [`MAX_SMALL_REQUEST_LEN`] for
+    /// anything else. A badge checks this before it asks its holder anything.
+    pub fn length_ok(&self, encoded_len: usize) -> bool {
+        let long_ok = matches!(
+            self,
+            Request::Chip {
+                op: ChipRequest::SshSign { .. },
+                ..
+            }
+        );
+        encoded_len
+            <= if long_ok {
+                MAX_REQUEST_LEN
+            } else {
+                MAX_SMALL_REQUEST_LEN
+            }
+    }
+}
+
 impl ChipRequest {
     /// True when the badge asks its holder before answering.
     pub fn needs_consent(&self) -> bool {

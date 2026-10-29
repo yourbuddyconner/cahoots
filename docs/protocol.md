@@ -249,7 +249,7 @@ Messages are CBOR (RFC 8949), array-encoded. A request travels in a frame of kin
 
 Any request can get `Error { code }` as its response. The codes are `UnknownCircle`, `Exhausted`, `AlreadySpent`, `OutOfRange`, `Config`, `Storage`, `Malformed`, `Denied`, `Busy`, `NoChip` (the badge has no chip to do this with), `ChipError` (the chip failed) and `Unparseable` (the bytes to sign are not something the badge signs).
 
-A request is at most 16 KiB. Only `SshSign` may be longer than 4 KiB; any other request over 4 KiB is `Malformed`.
+A request is at most 16 KiB. Only `SshSign` may be longer than 4 KiB; any other request over 4 KiB is `Malformed`, and a badge refuses it before it asks its owner anything.
 
 The laptop program and the badge firmware must come from the same release. `Identity` gained the field `chip`, and a decoder rejects any message that does not re-encode to the same bytes, so a laptop program from before it calls a new badge's `Identity` malformed.
 
@@ -411,7 +411,7 @@ Domain `cahoots/card/v1`. A seat's profile for its circle: a name, handles, and 
 | 5 | endpoints: array of `[purpose uint, value tstr]`, at most 16 |
 | 6 | log, uint, the log position the laptop names |
 
-A handle's kind is a short text such as `email`, `github`, `nostr` or `x`, 1 to 16 bytes. An endpoint's purpose is a purpose byte 0 to 5, 6 for ssh, or 7 for chat. Its value is a text the laptop knows how to use: an address, a host, a chat address. Values are 1 to 256 bytes. Signed by the seat with kid `[seat]`.
+A handle's kind is a short text such as `email`, `github`, `nostr` or `x`, 1 to 16 bytes. An endpoint's purpose is a purpose byte 0 to 5, 6 for ssh, or 7 for chat. Its value is a text the laptop knows how to use: an address, a host, a chat address. Values are 1 to 256 bytes. The whole encoded card is at most 4000 bytes, so the request that carries it stays under 4 KiB; a longer one is `Malformed`. Signed by the seat with kid `[seat]`.
 
 A signed card travels sealed for the circle, as a file for now. The sealed form is a random 12-byte nonce, then AES-256-GCM of the signed card under the card seal key, with additional data `cahoots/card/v1`. The card seal key is `HMAC-SHA256(root, "seal/card" || circle_id)`. The badge computes it from the circle root, in the chip when the root is there, and gives it to the laptop only after its holder presses both buttons. The screen shows "key for seal/card". The badge never seals. Before it signs a card, the badge checks that the card names the requested circle and the badge's own seat. Its screen then shows the name and how many handles and endpoints the card has.
 

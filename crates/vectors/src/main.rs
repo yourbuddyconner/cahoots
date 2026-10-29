@@ -582,7 +582,7 @@ fn object_vectors() -> Value {
         ],
         log: 45,
     };
-    let card_signed = contact.sign(seat_key, &[seat]);
+    let card_signed = contact.sign(seat_key, &[seat]).unwrap();
     assert_eq!(Card::verify(&card_signed, &manifest).unwrap(), contact);
     let circle_root: [u8; 32] = fill(560, 32).try_into().unwrap();
     let seal_key = cahoots_core::root::seal_key(&circle_root, cahoots_core::root::SEAL_CARD, &circle);
@@ -596,7 +596,7 @@ fn object_vectors() -> Value {
         "handles": contact.handles.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
         "endpoints": contact.endpoints.iter().map(|(p, v)| json!([p, v])).collect::<Vec<_>>(),
         "log": contact.log,
-    }), contact.encode(), &card_signed, contact.to_json());
+    }), contact.encode().unwrap(), &card_signed, contact.to_json());
     card_vector["seal"] = json!({
         "root": hex::encode(circle_root),
         "key": hex::encode(seal_key),

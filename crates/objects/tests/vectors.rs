@@ -277,8 +277,10 @@ fn the_card_is_reproduced() {
             .collect(),
         log: uint(&i["log"]),
     };
-    let signed = c.sign(&key(&v["seat_seeds"][usize::from(c.seat)]), &[c.seat]);
-    check(&v["card"], c.encode(), &signed, c.to_json());
+    let signed = c
+        .sign(&key(&v["seat_seeds"][usize::from(c.seat)]), &[c.seat])
+        .unwrap();
+    check(&v["card"], c.encode().unwrap(), &signed, c.to_json());
     assert_eq!(Card::verify(&signed, &m).unwrap(), c);
 
     let s = &v["card"]["seal"];

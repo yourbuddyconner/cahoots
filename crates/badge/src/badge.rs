@@ -1272,6 +1272,16 @@ impl<B: Board> Badge<B> {
                 continue;
             }
             let req = Request::decode(&payload).ok();
+            // A request longer than its kind allows is refused before the holder is asked:
+            // `serve` would refuse it after the answer, and the question would be wasted.
+            if req.as_ref().is_some_and(|r| !r.length_ok(payload.len())) {
+                board.log("request refused: too long");
+                let malformed = Response::Error {
+                    code: ErrorCode::Malformed,
+                };
+                respond(&mut m.down, seq, &malformed.encode());
+                continue;
+            }
             let ask = match &req {
                 Some(Request::Chip { circle, op }) => {
                     BadgeApps::new(circles, board.chip()).prompt(circle, op)

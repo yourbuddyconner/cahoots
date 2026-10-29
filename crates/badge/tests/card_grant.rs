@@ -266,7 +266,9 @@ fn serve_card_and_grant_sign() {
             &mut badge,
             &mut laptop,
             id,
-            ChipRequest::Card { card: c.encode() },
+            ChipRequest::Card {
+                card: c.encode().unwrap(),
+            },
             Press::Both,
         );
         assert_eq!(
@@ -360,7 +362,9 @@ fn serve_card_and_grant_sign() {
 
         // A single press refuses each.
         for op in [
-            ChipRequest::Card { card: c.encode() },
+            ChipRequest::Card {
+                card: c.encode().unwrap(),
+            },
             ChipRequest::GrantSign {
                 grant: g.encode_v2(),
             },
@@ -387,12 +391,12 @@ fn what_the_badge_cannot_describe_is_refused_without_asking() {
     let mut other = my_card(id);
     other.circle_id = [0xee; 16];
     ops.push(ChipRequest::Card {
-        card: other.encode(),
+        card: other.encode().unwrap(),
     });
     let mut other = my_card(id);
     other.seat = 2;
     ops.push(ChipRequest::Card {
-        card: other.encode(),
+        card: other.encode().unwrap(),
     });
     // A grant for another circle, from another seat, or delegated: the badge signs root
     // grants of its own seat only.
@@ -425,7 +429,7 @@ fn what_the_badge_cannot_describe_is_refused_without_asking() {
     // A circle the badge does not hold.
     for op in [
         ChipRequest::Card {
-            card: my_card(id).encode(),
+            card: my_card(id).encode().unwrap(),
         },
         ChipRequest::SealKey {
             label: "seal/card".into(),
@@ -470,4 +474,54 @@ fn a_circle_without_a_root_has_no_seal_key() {
 
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// A request longer than 4 KiB that is not an ssh signature is refused before the holder is
+/// asked, and so is a card over the card length cap that still fits in a request.
+#[test]
+fn a_long_request_is_refused_before_asking() {
+    use cahoots_custodian::wire::MAX_SMALL_REQUEST_LEN;
+    let (mut badge, mut laptop, id, _) = serving(true);
+    for op in [
+        ChipRequest::Card {
+            card: vec![1; MAX_SMALL_REQUEST_LEN],
+        },
+        ChipRequest::GrantSign {
+            grant: vec![1; MAX_SMALL_REQUEST_LEN],
+        },
+        ChipRequest::SealKey {
+            label: "x".repeat(MAX_SMALL_REQUEST_LEN),
+        },
+    ] {
+        let r = ask_now(&mut badge, &mut laptop, id, op.clone());
+        assert_eq!(r, refused(ErrorCode::Malformed), "{op:?}");
+    }
+
+    // A card of about 4050 bytes: the request carrying it is under 4 KiB and every field is
+    // within its limit, but the card is over MAX_CARD_LEN, so it is not a card the badge signs.
+    let raw = |n: u8| {
+        let mut card = vec![0xa7, 0x00, 0x01, 0x01, 0x50];
+        card.extend_from_slice(&id);
+        card.extend_from_slice(&[0x02, 0x01, 0x03, 0x63]);
+        card.extend_from_slice(b"Ada");
+        card.extend_from_slice(&[0x04, 0x80 + n]);
+        for i in 0..n {
+            card.extend_from_slice(&[0x82, 0x62, b'k', b'a' + i, 0x78, 245]);
+            card.extend(std::iter::repeat_n(b'v', 245));
+        }
+        card.extend_from_slice(&[0x05, 0x80, 0x06, 0x03]);
+        card
+    };
+    // With one handle fewer it is a card, so the form is right and only the length is wrong.
+    assert_eq!(Card::decode(&raw(15)).unwrap().handles.len(), 15);
+    let card = raw(16);
+    assert!(card.len() > card::MAX_CARD_LEN, "{}", card.len());
+    let req = Request::Chip {
+        circle: id,
+        op: ChipRequest::Card { card: card.clone() },
+    };
+    assert!(req.encode().len() <= MAX_SMALL_REQUEST_LEN);
+    let r = ask_now(&mut badge, &mut laptop, id, ChipRequest::Card { card });
+    assert_eq!(r, refused(ErrorCode::Unparseable));
+    assert_eq!(badge.signed_card(&id), None);
 }
