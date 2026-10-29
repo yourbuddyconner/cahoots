@@ -11,10 +11,12 @@
 //!   file in `delay_ms` and removes it, so each press is delivered once. Write it in one go
 //!   (for example `echo B > buttons.txt`, or write a side file and rename it in).
 //! - `a_down`: while this file exists, button A is held.
+//! - `chip.cbor`: the chip record (see `cahoots_badge::chip`), once a chip has made a key.
 
 use crate::display::PngDisplay;
 use crate::link::{Absent, SocketLink};
 use crate::store::{FilePadStore, FileRecordStore};
+use cahoots_badge::chip::ChipRecord;
 use cahoots_badge::{word_indices, Board, BoardError, Circle, Press};
 use cahoots_core::checkwords::WORDLIST;
 use cahoots_core::params::CircleParams;
@@ -296,19 +298,33 @@ impl Board for HostBoard {
             <[u8; 32]>::try_from(&Zeroizing::new(unhex(field("seat_key")?)?)[..]).ok()?;
         let tier = field("tier")?.parse().ok()?;
         let manifest = unhex(field("manifest")?)?;
+        // Both optional: a file from before the chip has neither. One that does not parse
+        // makes the file no circle.
+        let chip_slot = match field("chip_slot") {
+            Some(v) => Some(v.parse().ok()?),
+            None => None,
+        };
+        let root = match field("root") {
+            Some(v) => Some(<[u8; 32]>::try_from(&Zeroizing::new(unhex(v)?)[..]).ok()?),
+            None => None,
+        };
         Some(Circle {
             params,
             seat,
             circle_id,
             words,
             seat_key,
+            chip_slot,
+            root,
             tier,
             manifest,
         })
     }
 
     /// Writes `circle.txt` in the format `Device::from_result` writes. The seat key goes in
-    /// as plaintext hex, as the pad sits in `pad.bin`: a simulated badge is tier 0.
+    /// as plaintext hex, as the pad sits in `pad.bin`: a simulated badge is tier 0. A
+    /// `chip_slot=` line says the seat key is in the chip, and a `root=` line holds the circle
+    /// root of a badge without one; each is written only when set.
     fn save_circle(&mut self, c: &Circle) -> Result<(), BoardError> {
         let words: Vec<&str> = c
             .words
@@ -325,6 +341,13 @@ impl Board for HostBoard {
             c.tier,
             hex(&c.manifest)
         ));
+        let mut txt = txt;
+        if let Some(slot) = c.chip_slot {
+            txt.push_str(&format!("chip_slot={slot}\n"));
+        }
+        if let Some(root) = &c.root {
+            txt.push_str(&format!("root={}\n", *Zeroizing::new(hex(root))));
+        }
         std::fs::write(self.dir.join("circle.txt"), txt.as_bytes()).map_err(|_| BoardError::Storage)
     }
 
@@ -398,6 +421,16 @@ impl Board for HostBoard {
             eprintln!("[{}] {}", self.name, lines.join("\n"));
         }
         self.display.note(lines);
+    }
+
+    /// `chip.cbor`, or `None` if it is missing or does not decode.
+    fn chip_record_load(&mut self) -> Option<ChipRecord> {
+        let bytes = std::fs::read(self.dir.join("chip.cbor")).ok()?;
+        ChipRecord::decode(&bytes).ok()
+    }
+
+    fn chip_record_store(&mut self, r: &ChipRecord) -> Result<(), BoardError> {
+        std::fs::write(self.dir.join("chip.cbor"), r.encode()).map_err(|_| BoardError::Storage)
     }
 }
 

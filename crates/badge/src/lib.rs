@@ -7,6 +7,7 @@ extern crate alloc;
 
 pub mod badge;
 pub mod board;
+pub mod chip;
 pub mod screens;
 
 pub use badge::{Badge, Step};

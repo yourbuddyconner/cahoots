@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
+use cahoots_badge::chip::ChipRecord;
 use cahoots_badge::{word_indices, Board, BoardError, Circle, Press};
+use cahoots_chip::{ChipOps, SoftChip};
 use cahoots_core::checkwords::{check_words, WORDLIST};
 use cahoots_core::circle_id::circle_id;
 use cahoots_core::params::CircleParams;
@@ -170,6 +172,10 @@ pub struct FakeBoard {
     pub selftest_lines: Vec<String>,
     /// The `(down, up)` links handed out by the next `links()` call; open ends when `None`.
     pub links: Option<(FakeLink, FakeLink)>,
+    /// The board's chip, if it has one.
+    pub chip: Option<SoftChip>,
+    /// The chip record as stored: its CBOR encoding, so a test sees what a board would keep.
+    pub chip_record: Option<Vec<u8>>,
 }
 
 impl FakeBoard {
@@ -192,6 +198,8 @@ impl FakeBoard {
             log: Vec::new(),
             selftest_lines: vec!["fake: ok".into()],
             links: None,
+            chip: None,
+            chip_record: None,
         }
     }
 
@@ -243,6 +251,8 @@ impl FakeBoard {
             circle_id: circle_id(&pad),
             words: word_indices(&check_words(&params, &pad)).unwrap(),
             seat_key: [7; 32],
+            chip_slot: None,
+            root: None,
             tier: FAKE_TIER,
             // The menu never reads the manifest; a kept circle's is checked in ceremony.rs.
             manifest: Vec::new(),
@@ -325,5 +335,15 @@ impl Board for FakeBoard {
     }
     fn note_screen(&mut self, lines: &[String], _secret: bool) {
         self.screens.push(lines.to_vec());
+    }
+    fn chip(&mut self) -> Option<&mut dyn ChipOps> {
+        self.chip.as_mut().map(|c| c as &mut dyn ChipOps)
+    }
+    fn chip_record_load(&mut self) -> Option<ChipRecord> {
+        ChipRecord::decode(self.chip_record.as_ref()?).ok()
+    }
+    fn chip_record_store(&mut self, r: &ChipRecord) -> Result<(), BoardError> {
+        self.chip_record = Some(r.encode());
+        Ok(())
     }
 }

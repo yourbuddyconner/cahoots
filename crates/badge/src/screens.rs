@@ -88,6 +88,21 @@ pub fn ceremony(commits: u8, reveals: u8, attestations: u8, n: u8) -> Screen {
     s.done()
 }
 
+/// Shown while the ceremony makes this card's seat key: where the key is made, in the chip
+/// or in software. Nothing is asked and no button does anything, so the footer says to wait.
+pub fn making_key(in_chip: bool) -> Screen {
+    let mut s = Draw::new();
+    s.title("making a key");
+    s.centered(&FONT_9X18_BOLD, 66, "this circle's key");
+    s.centered(
+        &FONT_10X20,
+        96,
+        if in_chip { "in the chip" } else { "in software" },
+    );
+    s.footer_note("one moment");
+    s.done()
+}
+
 /// The six check words, one per row in the large face, under the circle's header.
 pub fn words(circle: &str, tier: &str, words: &[&str; 6]) -> Screen {
     let mut s = Draw::new();
@@ -384,6 +399,16 @@ impl Draw {
         }
         let legend: Vec<String> = [left, both, right].iter().flatten().map(|s| String::from(*s)).collect();
         self.lines.push(legend.join("  "));
+    }
+
+    /// The footer of a screen no button acts on: the rule, and `note` in the middle.
+    fn footer_note(&mut self, note: &str) {
+        let _ = Line::new(Point::new(0, FOOT_Y), Point::new(W - 1, FOOT_Y))
+            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+            .draw(&mut Canvas(&mut self.frame));
+        let at = Point::new(W / 2, FOOT_Y + 6);
+        self.text(&FONT_6X13_BOLD, at, Alignment::Center, BinaryColor::On, note);
+        self.lines.push(String::from(note));
     }
 
     /// A labelled progress bar with its top at `y`: the label on the left, `have/n` on

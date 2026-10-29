@@ -1,13 +1,16 @@
 //! [`Badge`]: the boot screen, the pile and the ceremony, and the idle menu.
 
 use crate::board::{Board, Circle, Press};
+use crate::chip::{self, ChipSeat, SlotEntry};
 use crate::screens::{self, Screen};
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use cahoots_chip::{Curve, KeyId, KeyKind};
 use cahoots_core::ceremony::CeremonyResult;
+use cahoots_core::seat::SeatPublic;
 use cahoots_core::frame::{self, Frame, FrameError};
 use cahoots_core::pad::Pad;
 use cahoots_core::params::CircleParams;
@@ -218,6 +221,9 @@ pub struct Badge<B: Board> {
     circle: Option<Circle>,
     state: State<B::Link>,
     idle: Idle<B>,
+    /// The chip slot of the seat key this pass made, until the circle is kept. A pass that
+    /// fails or is discarded deletes the slot's objects.
+    chip_slot: Option<u8>,
 }
 
 impl<B: Board> Badge<B> {
@@ -227,6 +233,7 @@ impl<B: Board> Badge<B> {
             circle: None,
             state: State::Idle,
             idle: Idle::Off,
+            chip_slot: None,
         }
     }
 
@@ -259,6 +266,7 @@ impl<B: Board> Badge<B> {
         for l in &lines {
             self.board.log(l);
         }
+        self.reconcile_chip();
         // A must already be held at power-on to mean "forget the circle". Sample it before
         // the wait: a Both that ends the wait holds A down too, and must not wipe.
         let held_at_power_on = self.board.a_down();
@@ -279,6 +287,7 @@ impl<B: Board> Badge<B> {
             let pad_len = circle.as_ref().map_or(0, |c| c.params.pad_len);
             match self.board.wipe(pad_len) {
                 Ok(()) => {
+                    self.forget_chip();
                     self.board.log("A held at boot: circle forgotten");
                     show(
                         &mut self.board,
@@ -326,8 +335,106 @@ impl<B: Board> Badge<B> {
                 self.state = next;
                 step
             }
-            Err(e) => Step::Failed(e),
+            Err(e) => {
+                self.drop_chip_seat();
+                Step::Failed(e)
+            }
         }
+    }
+
+    /// At boot: delete every chip object in a slot the chip record does not know, and log it.
+    fn reconcile_chip(&mut self) {
+        if self.board.chip().is_none() {
+            return;
+        }
+        let stored = self.board.chip_record_load();
+        let mut record = stored.clone().unwrap_or_default();
+        let Some(chip) = self.board.chip() else {
+            return;
+        };
+        let lines = record.reconcile(chip);
+        for l in &lines {
+            self.board.log(l);
+        }
+        if stored.is_some_and(|s| s != record) && self.board.chip_record_store(&record).is_err() {
+            self.board.log("chip record: write failed");
+        }
+    }
+
+    /// The wipe at boot: every chip object and the chip record go with the circle.
+    fn forget_chip(&mut self) {
+        let Some(chip) = self.board.chip() else {
+            return;
+        };
+        if let Err(e) = chip::delete_all(chip) {
+            self.board.log(&format!("chip: wipe failed: {e:?}"));
+        }
+        let empty = chip::ChipRecord::default();
+        if self.board.chip_record_store(&empty).is_err() {
+            self.board.log("chip record: write failed");
+        }
+    }
+
+    /// Make this pass's seat key in the chip, in the chip record's lowest free slot. Anything
+    /// left in that slot is deleted first: the record does not know it, so it is not reused.
+    fn make_chip_seat(&mut self) -> Result<(u8, SeatPublic), String> {
+        let record = self.board.chip_record_load().unwrap_or_default();
+        let slot = record.next_free_slot().ok_or("chip: every slot is in use")?;
+        let chip = self.board.chip().ok_or("chip: not found")?;
+        chip::delete_slot(chip, slot).map_err(|e| format!("chip: {e:?}"))?;
+        let public = chip
+            .generate(KeyId::new(KeyKind::Seat, slot), Curve::P256)
+            .map_err(|e| format!("chip: key not made: {e:?}"))?;
+        // Set before the parse, so a failure below still deletes the key.
+        self.chip_slot = Some(slot);
+        let public = SeatPublic::parse(&public).map_err(|_| "chip: bad public key")?;
+        self.board
+            .log(&format!("seat key made in the chip, slot {slot}"));
+        Ok((slot, public))
+    }
+
+    /// At the keep: the root and the epoch counter go into the chip beside the seat key, and
+    /// the chip record learns the slot.
+    fn keep_in_chip(&mut self, slot: u8, circle_id: &CircleId, root: &[u8; 32]) -> Result<(), String> {
+        let chip = self.board.chip().ok_or("chip: not found")?;
+        chip.put_hmac_key(KeyId::new(KeyKind::Root, slot), root)
+            .map_err(|e| format!("chip: root not stored: {e:?}"))?;
+        chip.put_counter(KeyId::new(KeyKind::Epoch, slot), 0)
+            .map_err(|e| format!("chip: counter not stored: {e:?}"))?;
+        let mut record = self.board.chip_record_load().unwrap_or_default();
+        record.insert(SlotEntry {
+            slot,
+            circle_id: *circle_id,
+            has_seat: true,
+            has_root: true,
+            has_epoch: true,
+        });
+        self.board
+            .chip_record_store(&record)
+            .map_err(|_| String::from("flash: chip record failed"))
+    }
+
+    /// A pass that made a chip key ended without keeping it: delete the slot's objects and
+    /// any record entry for it.
+    fn drop_chip_seat(&mut self) {
+        let Some(slot) = self.chip_slot.take() else {
+            return;
+        };
+        if let Some(chip) = self.board.chip() {
+            if let Err(e) = chip::delete_slot(chip, slot) {
+                self.board
+                    .log(&format!("chip: slot {slot} not deleted: {e:?}"));
+            }
+        }
+        if let Some(mut record) = self.board.chip_record_load() {
+            if record.entry(slot).is_some() {
+                record.remove(slot);
+                if self.board.chip_record_store(&record).is_err() {
+                    self.board.log("chip record: write failed");
+                }
+            }
+        }
+        self.board.log(&format!("chip: slot {slot} deleted"));
     }
 
     fn advance(&mut self, state: State<B::Link>) -> Result<(State<B::Link>, Step), String> {
@@ -355,9 +462,17 @@ impl<B: Board> Badge<B> {
                         &format!("seat {seat} of {}: {}", params.n, params.name),
                     );
                     let tier = self.board.tier();
-                    let mut ring = pile
-                        .into_ceremony(ready, self.board.entropy(), tier)
-                        .map_err(|e| format!("ceremony: {e:?}"))?;
+                    // The commitment binds the seat key, so it is made now: in the chip if
+                    // the board has one, otherwise by the ceremony, in software.
+                    let in_chip = self.board.chip().is_some();
+                    show(&mut self.board, screens::making_key(in_chip));
+                    let ring = if in_chip {
+                        let (_, public) = self.make_chip_seat()?;
+                        pile.into_ceremony_with_seat(ready, self.board.entropy(), public, tier)
+                    } else {
+                        pile.into_ceremony(ready, self.board.entropy(), tier)
+                    };
+                    let mut ring = ring.map_err(|e| format!("ceremony: {e:?}"))?;
                     show_status(&mut self.board, "ceremony: waiting for the others");
                     ring.start();
                     let state = State::Ceremony {
@@ -397,7 +512,19 @@ impl<B: Board> Badge<B> {
                 // No gesture means anything during the ceremony; drop them so none is
                 // taken as an answer to the keep prompt.
                 let _ = self.board.press();
-                let step = ring.poll().map_err(|e| {
+                let step = match self.chip_slot {
+                    Some(slot) => {
+                        let chip = self.board.chip().ok_or("chip: not found")?;
+                        let mut seat = ChipSeat::new(chip, KeyId::new(KeyKind::Seat, slot));
+                        let step = ring.poll_signing(&mut seat);
+                        if let Some(e) = seat.error {
+                            self.board.log(&format!("chip: signing failed: {e:?}"));
+                        }
+                        step
+                    }
+                    None => ring.poll(),
+                };
+                let step = step.map_err(|e| {
                     show_status(&mut self.board, "ceremony: ABORTED");
                     format!("ceremony: {e:?}")
                 })?;
@@ -477,23 +604,41 @@ impl<B: Board> Badge<B> {
                         .map_err(|_| "flash: ledger erase failed")?;
                     let words = crate::board::word_indices(&result.check_words)
                         .ok_or("words: not in the word list")?;
+                    let root = result.root.as_ref().ok_or("ceremony: no circle root")?;
+                    // A chip keeps the seat key and the root; the record keeps only the slot.
+                    // Without a chip the record keeps both.
+                    let (seat_key, chip_slot, root) = match self.chip_slot {
+                        Some(slot) => {
+                            self.keep_in_chip(slot, &result.circle_id, root)?;
+                            ([0u8; 32], Some(slot), None)
+                        }
+                        None => (
+                            // This ceremony was built from a seed, so it holds the key.
+                            *result
+                                .seat_key
+                                .as_ref()
+                                .ok_or("ceremony: no seat key")?
+                                .to_bytes(),
+                            None,
+                            Some(**root),
+                        ),
+                    };
                     let circle = Circle {
                         params: result.params.clone(),
                         seat,
                         circle_id: result.circle_id,
                         words,
-                        // This ceremony was built from a seed, so it holds the key.
-                        seat_key: *result
-                            .seat_key
-                            .as_ref()
-                            .ok_or("ceremony: no seat key")?
-                            .to_bytes(),
+                        seat_key,
+                        chip_slot,
+                        root,
                         tier: result.tier,
                         manifest: result.manifest.encode(),
                     };
                     self.board
                         .save_circle(&circle)
                         .map_err(|_| "flash: circle record failed")?;
+                    // Kept: the slot belongs to the circle now.
+                    self.chip_slot = None;
                     self.board
                         .log(&format!("saved: {} seat {seat}", circle.params.name));
                     show_status(&mut self.board, "saved. read the words aloud");
@@ -510,6 +655,7 @@ impl<B: Board> Badge<B> {
             State::ConfirmDiscard { result, seat } => match self.board.press() {
                 Press::Both => {
                     drop(result);
+                    self.drop_chip_seat();
                     self.board.log("discarded");
                     show_status(&mut self.board, "discarded");
                     Ok((State::Idle, Step::Discarded))

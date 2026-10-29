@@ -41,7 +41,7 @@ use cahoots_core::ceremony::{Ceremony, CeremonyError, CeremonyResult, Phase};
 use cahoots_core::frame::{self, FrameError};
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::{randomness_len, KEM_SEED_LEN, PUBLIC_KEY_LEN};
-use cahoots_core::seat::SeatKey;
+use cahoots_core::seat::{SeatKey, SeatPublic, SeatSigner};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
@@ -145,7 +145,35 @@ impl<L: Link> RingCeremony<L> {
         index: u8,
         entropy: &mut dyn Entropy,
         links: Vec<L>,
+        buffered: Vec<Vec<u8>>,
+        tier: u8,
+    ) -> Result<Self, RingError> {
+        Self::build(params, index, entropy, links, buffered, None, tier)
+    }
+
+    /// Like [`new_buffered`](Self::new_buffered), for a seat key held outside (a chip): no
+    /// seat seed is drawn, and the commitment binds `seat_public`. The manifest is signed only
+    /// through [`poll_signing`](Self::poll_signing): poll with the signer for `seat_public`, or
+    /// the ceremony waits at its attestation forever.
+    pub fn with_seat_public(
+        params: CircleParams,
+        index: u8,
+        entropy: &mut dyn Entropy,
+        links: Vec<L>,
+        buffered: Vec<Vec<u8>>,
+        seat_public: SeatPublic,
+        tier: u8,
+    ) -> Result<Self, RingError> {
+        Self::build(params, index, entropy, links, buffered, Some(seat_public), tier)
+    }
+
+    fn build(
+        params: CircleParams,
+        index: u8,
+        entropy: &mut dyn Entropy,
+        links: Vec<L>,
         mut buffered: Vec<Vec<u8>>,
+        seat_public: Option<SeatPublic>,
         tier: u8,
     ) -> Result<Self, RingError> {
         buffered.resize(links.len(), Vec::new());
@@ -156,31 +184,32 @@ impl<L: Link> RingCeremony<L> {
         // The seat seed follows the KEM seed; a seed that is not a valid scalar is redrawn, a
         // few times only: a source that keeps failing is stuck.
         let mut seat_seed = Zeroizing::new([0u8; 32]);
-        let mut valid = false;
-        for _ in 0..SEAT_SEED_TRIES {
-            entropy
-                .fill(seat_seed.as_mut())
-                .map_err(RingError::Health)?;
-            if SeatKey::from_seed(&seat_seed).is_ok() {
-                valid = true;
-                break;
+        if seat_public.is_none() {
+            let mut valid = false;
+            for _ in 0..SEAT_SEED_TRIES {
+                entropy
+                    .fill(seat_seed.as_mut())
+                    .map_err(RingError::Health)?;
+                if SeatKey::from_seed(&seat_seed).is_ok() {
+                    valid = true;
+                    break;
+                }
             }
-        }
-        if !valid {
-            return Err(RingError::Health(HealthError::RepetitionCount));
+            if !valid {
+                return Err(RingError::Health(HealthError::RepetitionCount));
+            }
         }
         let mut reveal_rand = Zeroizing::new(vec![0u8; randomness_len(params.n)]);
         entropy.fill(&mut reveal_rand).map_err(RingError::Health)?;
         let n = params.n;
         let params_bytes = params.encode();
-        let ceremony = Ceremony::new(
-            params,
-            index,
-            core::mem::take(&mut *contribution),
-            *kem_seed,
-            *seat_seed,
-            tier,
-        )?;
+        let contribution = core::mem::take(&mut *contribution);
+        let ceremony = match seat_public {
+            None => Ceremony::new(params, index, contribution, *kem_seed, *seat_seed, tier)?,
+            Some(p) => {
+                Ceremony::with_seat_public(params, index, contribution, *kem_seed, p, tier)?
+            }
+        };
         Ok(RingCeremony {
             links,
             ceremony,
@@ -282,6 +311,19 @@ impl<L: Link> RingCeremony<L> {
 
     /// Pull bytes from the link, process complete frames, and advance. Call repeatedly.
     pub fn poll(&mut self) -> Result<Step, RingError> {
+        self.poll_inner(None)
+    }
+
+    /// Like [`poll`](Self::poll), for a ceremony built with
+    /// [`with_seat_public`](Self::with_seat_public): once every reveal is in, the manifest is
+    /// signed with `signer`. A signature that does not verify under the committed seat key
+    /// aborts the ceremony with `BadAttestation`. For a ceremony that holds its own key the
+    /// signer is never asked.
+    pub fn poll_signing(&mut self, signer: &mut dyn SeatSigner) -> Result<Step, RingError> {
+        self.poll_inner(Some(signer))
+    }
+
+    fn poll_inner(&mut self, signer: Option<&mut dyn SeatSigner>) -> Result<Step, RingError> {
         if let Some(e) = self.aborted {
             return Err(e);
         }
@@ -313,7 +355,7 @@ impl<L: Link> RingCeremony<L> {
             }
         }
         self.maybe_reveal()?;
-        self.maybe_attest()?;
+        self.maybe_attest(signer)?;
         Ok(if self.ceremony.phase() == Phase::Complete {
             Step::Complete
         } else {
@@ -460,18 +502,25 @@ impl<L: Link> RingCeremony<L> {
 
     /// Once every reveal is in, send our attestation of the manifest and apply any buffered
     /// attestations.
-    fn maybe_attest(&mut self) -> Result<(), RingError> {
+    fn maybe_attest(&mut self, signer: Option<&mut dyn SeatSigner>) -> Result<(), RingError> {
         if !matches!(self.ceremony.phase(), Phase::Attest | Phase::Complete) {
             return Ok(());
         }
         if !self.attested_self {
-            self.attested_self = true;
-            self.seen_attest[usize::from(self.index)] = true;
-            let a = self
-                .ceremony
-                .my_attestation()
-                .expect("in Attest phase or later");
-            self.send(Frame::Attest, self.index, &a);
+            if self.ceremony.my_attestation().is_none() {
+                // The key is held outside: sign now, if the caller passed the signer.
+                if let Some(signer) = signer {
+                    if let Err(e) = self.ceremony.sign_manifest(signer) {
+                        return Err(self.abort(RingError::Ceremony(e)));
+                    }
+                }
+            }
+            // Without a signature yet, wait; others' attestations are applied below.
+            if let Some(a) = self.ceremony.my_attestation() {
+                self.attested_self = true;
+                self.seen_attest[usize::from(self.index)] = true;
+                self.send(Frame::Attest, self.index, &a);
+            }
         }
         let pending = core::mem::take(&mut self.pending_attestations);
         for (idx, a) in pending {

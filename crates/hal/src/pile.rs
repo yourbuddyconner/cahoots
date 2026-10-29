@@ -28,6 +28,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use cahoots_core::frame::{self, FrameError};
 use cahoots_core::params::{CircleParams, ParamsError};
+use cahoots_core::seat::SeatPublic;
 
 /// Kinds from here up belong to the pile layer.
 pub const KIND_FIRST: u8 = 16;
@@ -274,6 +275,29 @@ impl<L: Link> Pile<L> {
             entropy,
             vec![down, up],
             vec![rx_down, rx_up],
+            tier,
+        )
+    }
+
+    /// Like [`into_ceremony`](Self::into_ceremony), for a seat key held outside (a chip) whose
+    /// public key is `seat_public`. Poll the ceremony with
+    /// [`RingCeremony::poll_signing`].
+    pub fn into_ceremony_with_seat(
+        self,
+        ready: Ready,
+        entropy: &mut dyn Entropy,
+        seat_public: SeatPublic,
+        tier: u8,
+    ) -> Result<RingCeremony<L>, RingError> {
+        let [down, up] = self.links;
+        let [rx_down, rx_up] = self.rx;
+        RingCeremony::with_seat_public(
+            ready.params,
+            ready.seat,
+            entropy,
+            vec![down, up],
+            vec![rx_down, rx_up],
+            seat_public,
             tier,
         )
     }

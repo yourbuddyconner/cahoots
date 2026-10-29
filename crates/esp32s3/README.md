@@ -100,7 +100,7 @@ listening loses it.
 |---|---|---|---|
 | pad | 0x300000 | 1 MiB | the pad, written once onto erased sectors; spent ranges are programmed to zero in place |
 | ledger | 0x400000 | 64 KiB | `hal::ledger` records, 16 bytes each, appended onto erased flash |
-| circle | 0x410000 | 4 KiB | `CAH2`: params, seat, circle id, the six check words, the seat key (32 bytes, plaintext like the pad), the tier and the encoded manifest; under 2.5 KiB for n = 8, and a record over 4 KiB is refused |
+| circle | 0x410000 | 4 KiB | `CAH3`: params, seat, circle id, the six check words, the seat key (32 bytes, plaintext like the pad; zeros when the key is in a chip), the tier, the encoded manifest, the chip slot and the circle root (when there is no chip); under 2.5 KiB for n = 8, and a record over 4 KiB is refused. A `CAH2` record, without the last two, still loads |
 
 A circle record from older firmware (`CAH1`, before the seat key and the manifest) loads as no circle, so the board goes to the pile; keeping a new circle overwrites the old record, pad and ledger.
 

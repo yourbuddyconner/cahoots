@@ -1,14 +1,16 @@
 //! The [`Board`] trait: everything the badge needs from the hardware under it.
 
+use crate::chip::ChipRecord;
 use alloc::string::String;
 use alloc::vec::Vec;
+use cahoots_chip::ChipOps;
 use cahoots_core::checkwords::WORDLIST;
 use cahoots_core::circle_id::CircleId;
 use cahoots_core::params::CircleParams;
 use cahoots_hal::ledger::RecordStore;
 use cahoots_hal::{Display, Entropy, Link, PadStore};
 use core::fmt;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 /// A board-level storage or link failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,8 +38,13 @@ pub enum Press {
 /// check words the ceremony produced, this seat's signing key, the tier it declared and the
 /// sealed manifest every seat signed.
 ///
-/// The seat key is a secret. `Debug` leaves it out, and the record zeroizes it on drop.
-/// A board stores it as it stores the pad: in plaintext on a tier 0 or tier 1 board.
+/// The seat key and the root are secrets. `Debug` leaves them out, and the record zeroizes
+/// them on drop. A board stores them as it stores the pad: in plaintext on a tier 0 or tier 1
+/// board.
+///
+/// On a badge with a chip the seat key and the root live in the chip, in slot `chip_slot`:
+/// then `seat_key` is all zeros and `root` is `None`. A record written before the chip
+/// (`CAH2`) loads with neither, and signs with its software seat key as before.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Circle {
     pub params: CircleParams,
@@ -46,8 +53,13 @@ pub struct Circle {
     /// The check words as indices into `WORDLIST`. Stored at keep time, because spending
     /// erases pad bytes and words worked out from the pad later would differ.
     pub words: [u16; 6],
-    /// This seat's signing key, the seed `cahoots_core::seat::SeatKey::from_seed` reads.
+    /// This seat's signing key, the seed `cahoots_core::seat::SeatKey::from_seed` reads. All
+    /// zeros when `chip_slot` is set: the key is in the chip.
     pub seat_key: [u8; 32],
+    /// The chip slot that holds this circle's seat key, root and epoch counter, if any.
+    pub chip_slot: Option<u8>,
+    /// The circle root (`cahoots_core::root`), kept here by a badge without a chip.
+    pub root: Option<[u8; 32]>,
     /// The tier this badge declared in the ceremony.
     pub tier: u8,
     /// The encoded `cahoots_core::manifest::SealedManifest`.
@@ -61,6 +73,7 @@ impl fmt::Debug for Circle {
             .field("seat", &self.seat)
             .field("circle_id", &self.circle_id)
             .field("words", &self.words)
+            .field("chip_slot", &self.chip_slot)
             .field("tier", &self.tier)
             .field("manifest", &self.manifest)
             .finish_non_exhaustive()
@@ -70,6 +83,9 @@ impl fmt::Debug for Circle {
 impl Drop for Circle {
     fn drop(&mut self) {
         self.seat_key.zeroize();
+        if let Some(root) = self.root.as_mut() {
+            root.zeroize();
+        }
     }
 }
 
@@ -79,6 +95,159 @@ impl Circle {
         self.words
             .map(|i| WORDLIST[usize::from(i) % WORDLIST.len()])
     }
+
+    /// The record a flash board stores, rewritten whole:
+    ///
+    /// `CAH3 | len u16 LE | params | seat | circle id | words | seat key 32 | tier u8 |
+    /// manifest len u16 LE | manifest | flags u8 | slot u8 | root 32`
+    ///
+    /// `len` counts everything after itself; `words` is the six `u16` indices into
+    /// `WORDLIST`, little-endian; `manifest` is the encoded `SealedManifest`. `flags` bit 0
+    /// says `slot` is a chip slot, bit 1 that `root` is the circle root; an absent one is
+    /// written as zeros. Without the last 34 bytes, and with the magic `CAH2`, it is the
+    /// record from before the chip, which [`Circle::decode_record`] still reads.
+    ///
+    /// `None` if the record would not fit [`RECORD_MAX`] bytes. The result holds the seat key
+    /// and the root: it zeroizes on drop.
+    pub fn encode_record(&self) -> Option<Zeroizing<Vec<u8>>> {
+        let params = self.params.encode();
+        let mlen = u16::try_from(self.manifest.len()).ok()?;
+        let len = params.len()
+            + 1
+            + self.circle_id.len()
+            + WORDS_LEN
+            + 32
+            + 1
+            + 2
+            + self.manifest.len()
+            + CAH3_TAIL;
+        if 6 + len > RECORD_MAX {
+            return None;
+        }
+        let mut body = Zeroizing::new(Vec::with_capacity(6 + len));
+        body.extend_from_slice(MAGIC_CAH3);
+        body.extend_from_slice(&(len as u16).to_le_bytes());
+        body.extend_from_slice(&params);
+        body.push(self.seat);
+        body.extend_from_slice(&self.circle_id);
+        for w in self.words {
+            body.extend_from_slice(&w.to_le_bytes());
+        }
+        body.extend_from_slice(&self.seat_key);
+        body.push(self.tier);
+        body.extend_from_slice(&mlen.to_le_bytes());
+        body.extend_from_slice(&self.manifest);
+        let flags = u8::from(self.chip_slot.is_some()) | u8::from(self.root.is_some()) << 1;
+        body.push(flags);
+        body.push(self.chip_slot.unwrap_or(0));
+        body.extend_from_slice(self.root.as_ref().unwrap_or(&[0; 32]));
+        Some(body)
+    }
+
+    /// A whole record, header included, as [`Circle::encode_record`] writes it or as a `CAH2`
+    /// record. `None` for any other magic (`CAH1`, from before the seat key, included: the
+    /// holder runs the ceremony again), a length that does not match, or a field that does
+    /// not parse.
+    pub fn decode_record(bytes: &[u8]) -> Option<Circle> {
+        let len = record_body_len(bytes.get(..6)?)?;
+        let body = bytes.get(6..)?;
+        if body.len() != len {
+            return None;
+        }
+        let cah3 = &bytes[..4] == MAGIC_CAH3;
+        let id_len = core::mem::size_of::<CircleId>();
+        // The params encoding is 8 bytes then the name, its length in byte 7.
+        let params_len = 8 + usize::from(*body.get(7)?);
+        let id_end = params_len + 1 + id_len;
+        let words_end = id_end + WORDS_LEN;
+        let tail = words_end + 32 + 1 + 2;
+        if body.len() < tail {
+            return None;
+        }
+        let params = CircleParams::decode(&body[..params_len]).ok()?;
+        let seat = body[params_len];
+        let circle_id: CircleId = body[params_len + 1..id_end].try_into().ok()?;
+        let mut words = [0u16; 6];
+        for (w, b) in words
+            .iter_mut()
+            .zip(body[id_end..words_end].chunks_exact(2))
+        {
+            *w = u16::from_le_bytes([b[0], b[1]]);
+            if usize::from(*w) >= WORDLIST.len() {
+                return None;
+            }
+        }
+        let mut seat_key = [0u8; 32];
+        seat_key.copy_from_slice(&body[words_end..words_end + 32]);
+        let tier = body[words_end + 32];
+        let mlen = usize::from(u16::from_le_bytes([body[words_end + 33], body[words_end + 34]]));
+        let extra = if cah3 { CAH3_TAIL } else { 0 };
+        if body.len() != tail + mlen + extra {
+            seat_key.zeroize();
+            return None;
+        }
+        let manifest = body[tail..tail + mlen].to_vec();
+        let (mut chip_slot, mut root) = (None, None);
+        if cah3 {
+            let t = &body[tail + mlen..];
+            let (flags, slot, r) = (t[0], t[1], &t[2..34]);
+            // Absent fields are zeros and unknown flags are refused, so one circle has one
+            // record.
+            if flags & !0b11 != 0
+                || (flags & 1 == 0 && slot != 0)
+                || (flags & 2 == 0 && r.iter().any(|&b| b != 0))
+            {
+                seat_key.zeroize();
+                return None;
+            }
+            if flags & 1 != 0 {
+                chip_slot = Some(slot);
+            }
+            if flags & 2 != 0 {
+                root = Some(r.try_into().ok()?);
+            }
+        }
+        Some(Circle {
+            params,
+            seat,
+            circle_id,
+            words,
+            seat_key,
+            chip_slot,
+            root,
+            tier,
+            manifest,
+        })
+    }
+}
+
+/// The record from before the chip: no slot, no root.
+pub const MAGIC_CAH2: &[u8; 4] = b"CAH2";
+/// The record with a chip slot and a root.
+pub const MAGIC_CAH3: &[u8; 4] = b"CAH3";
+/// The largest whole record, header included: a 4 KiB flash sector.
+pub const RECORD_MAX: usize = 4096;
+/// The six check words, as `u16` word indices.
+const WORDS_LEN: usize = 12;
+/// `flags | slot | root` at the end of a `CAH3` record.
+const CAH3_TAIL: usize = 1 + 1 + 32;
+/// The shortest body: an empty name, no manifest.
+const MIN_BODY: usize = 8 + 1 + core::mem::size_of::<CircleId>() + WORDS_LEN + 32 + 1 + 2;
+
+/// From a record's first 6 bytes, the length of the body after them, if the magic is one
+/// [`Circle::decode_record`] reads and the length could be a record. A flash board reads
+/// the header, then that many bytes.
+pub fn record_body_len(head: &[u8]) -> Option<usize> {
+    let head: &[u8; 6] = head.try_into().ok()?;
+    let magic = &head[..4];
+    if magic != MAGIC_CAH2 && magic != MAGIC_CAH3 {
+        return None;
+    }
+    let len = usize::from(u16::from_le_bytes([head[4], head[5]]));
+    if len < MIN_BODY || 6 + len > RECORD_MAX {
+        return None;
+    }
+    Some(len)
 }
 
 /// The indices into `WORDLIST` of six check words, or `None` if one is not in the list.
@@ -132,5 +301,20 @@ pub trait Board {
     /// trace or anywhere else that outlives the screen.
     fn note_screen(&mut self, lines: &[String], secret: bool) {
         let _ = (lines, secret);
+    }
+    /// The board's secure element, if it has one. A board without one keeps the seat key and
+    /// the circle root in software, in the circle record.
+    fn chip(&mut self) -> Option<&mut dyn ChipOps> {
+        None
+    }
+    /// The chip record (see [`crate::chip`]), or `None` if none is stored. A board without a
+    /// chip stores none.
+    fn chip_record_load(&mut self) -> Option<ChipRecord> {
+        None
+    }
+    /// Store the chip record, replacing the last. A board without a chip keeps nothing.
+    fn chip_record_store(&mut self, r: &ChipRecord) -> Result<(), BoardError> {
+        let _ = r;
+        Ok(())
     }
 }

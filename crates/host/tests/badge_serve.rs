@@ -40,6 +40,8 @@ fn keep_a_circle(dir: &Path) -> Circle {
         circle_id: circle_id(&pad),
         words: word_indices(&check_words(&params, &pad)).unwrap(),
         seat_key: [7; 32],
+        chip_slot: None,
+        root: None,
         tier: 0,
         // Serving never reads the manifest; tests/badge.rs checks a kept one.
         manifest: Vec::new(),
@@ -140,4 +142,35 @@ fn a_host_board_in_serve_answers_identify_on_its_down_link() {
         }
         other => panic!("not an identity: {other:?}"),
     }
+}
+
+#[test]
+fn a_host_board_keeps_the_chip_slot_the_root_and_the_chip_record() {
+    use cahoots_badge::chip::{ChipRecord, SlotEntry};
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("card");
+    let mut circle = keep_a_circle(&dir);
+    let mut board = HostBoard::new(&dir, "-", "-", "bench", PAD_LEN, Some(5));
+    assert_eq!(board.load_circle(), Some(circle.clone()));
+    for (slot, root) in [(Some(3), None), (None, Some([9; 32]))] {
+        circle.chip_slot = slot;
+        circle.root = root;
+        board.save_circle(&circle).unwrap();
+        assert_eq!(board.load_circle(), Some(circle.clone()));
+    }
+
+    assert_eq!(board.chip_record_load(), None);
+    let record = ChipRecord {
+        slots: vec![SlotEntry {
+            slot: 3,
+            circle_id: circle.circle_id,
+            has_seat: true,
+            has_root: true,
+            has_epoch: true,
+        }],
+    };
+    board.chip_record_store(&record).unwrap();
+    assert_eq!(board.chip_record_load(), Some(record));
+    std::fs::write(dir.join("chip.cbor"), b"not cbor").unwrap();
+    assert_eq!(board.chip_record_load(), None);
 }

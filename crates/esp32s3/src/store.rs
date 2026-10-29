@@ -14,10 +14,8 @@ use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use cahoots_badge::board::record_body_len;
 use cahoots_badge::Circle;
-use cahoots_core::checkwords::WORDLIST;
-use cahoots_core::circle_id::CircleId;
-use cahoots_core::params::CircleParams;
 use cahoots_hal::ledger::RecordStore;
 use cahoots_hal::{EraseError, PadStore, StoreError};
 use core::cell::RefCell;
@@ -36,7 +34,6 @@ pub const PANIC_BASE: u32 = 0x41_1000;
 pub const TRACE_BASE: u32 = 0x41_2000;
 pub const SECTOR: u32 = 4096;
 const WORD: u32 = 4;
-const CIRCLE_MAGIC: &[u8; 4] = b"CAH2";
 
 pub type SharedFlash = Rc<RefCell<FlashStorage<'static>>>;
 
@@ -208,46 +205,20 @@ impl RecordStore for FlashRecordStore {
     }
 }
 
-/// The six check words, as `u16` word indices, little-endian.
-const WORDS_LEN: usize = 12;
-
-/// `CAH2 | len u16 LE | params | seat | circle id | words | seat key 32 | tier u8 |
-/// manifest len u16 LE | manifest`, rewritten whole in its own sector. `len` counts
-/// everything after itself; `words` is the six `u16` indices into `WORDLIST`, little-endian;
-/// `manifest` is the encoded `SealedManifest`.
+/// The circle record, `Circle::encode_record`'s `CAH3` (or the older `CAH2`, which still
+/// loads), rewritten whole in its own sector. The record must fit the 4 KiB sector, header
+/// included; for n = 8 the manifest is under 2 KiB, so there is room, and `save_circle`
+/// refuses a record over the limit.
 ///
-/// The record must fit the 4 KiB sector, 6 header bytes included. For n = 8 the manifest is
-/// a few hundred bytes of body plus eight attestations of about 110 bytes, under 2 KiB, and
-/// the rest of the record is under 300 bytes, so there is room. `save_circle` refuses a
-/// record over the limit.
-///
-/// The seat key is a secret: it goes to flash here and nowhere else, never into a log line,
-/// the trace or the screen.
+/// The seat key and the root are secrets: they go to flash here and nowhere else, never into
+/// a log line, the trace or the screen.
 pub fn save_circle(flash: &SharedFlash, c: &Circle) -> Result<(), ()> {
-    let params = c.params.encode();
-    let mlen = u16::try_from(c.manifest.len()).map_err(|_| ())?;
-    let len = params.len() + 1 + c.circle_id.len() + WORDS_LEN + 32 + 1 + 2 + c.manifest.len();
-    if 6 + len > SECTOR as usize {
+    let body = c.encode_record().ok_or(())?;
+    if body.len() > SECTOR as usize {
         return Err(());
     }
-    let mut body = Vec::with_capacity(6 + len);
-    body.extend_from_slice(CIRCLE_MAGIC);
-    body.extend_from_slice(&(len as u16).to_le_bytes());
-    body.extend_from_slice(&params);
-    body.push(c.seat);
-    body.extend_from_slice(&c.circle_id);
-    for w in c.words {
-        body.extend_from_slice(&w.to_le_bytes());
-    }
-    body.extend_from_slice(&c.seat_key);
-    body.push(c.tier);
-    body.extend_from_slice(&mlen.to_le_bytes());
-    body.extend_from_slice(&c.manifest);
     let mut f = flash.borrow_mut();
-    let r = erase_sectors(&mut f, CIRCLE_BASE, SECTOR)
-        .and_then(|()| program_any(&mut f, CIRCLE_BASE, &body));
-    body.fill(0);
-    r
+    erase_sectors(&mut f, CIRCLE_BASE, SECTOR).and_then(|()| program_any(&mut f, CIRCLE_BASE, &body))
 }
 
 /// The stored circle, or `None` if there is none or the record does not parse.
@@ -259,59 +230,13 @@ pub fn load_circle(flash: &SharedFlash) -> Option<Circle> {
     let mut head = [0u8; 6];
     let mut f = flash.borrow_mut();
     read_any(&mut f, CIRCLE_BASE, &mut head).ok()?;
-    if &head[..4] != CIRCLE_MAGIC {
-        return None;
-    }
-    let len = u16::from_le_bytes([head[4], head[5]]) as usize;
-    let id_len = core::mem::size_of::<CircleId>();
-    if len < 8 + 1 + id_len + WORDS_LEN + 32 + 1 + 2 || len > SECTOR as usize - 6 {
-        return None;
-    }
-    let mut body = vec![0u8; len];
-    read_any(&mut f, CIRCLE_BASE + 6, &mut body).ok()?;
-    let r = parse_circle(&body, id_len);
-    body.fill(0);
-    r
-}
-
-fn parse_circle(body: &[u8], id_len: usize) -> Option<Circle> {
-    // The params encoding is 8 bytes then the name, its length in byte 7.
-    let params_len = 8 + body[7] as usize;
-    let id_end = params_len + 1 + id_len;
-    let words_end = id_end + WORDS_LEN;
-    let tail = words_end + 32 + 1 + 2;
-    if body.len() < tail {
-        return None;
-    }
-    let params = CircleParams::decode(&body[..params_len]).ok()?;
-    let seat = body[params_len];
-    let circle_id: CircleId = body[params_len + 1..id_end].try_into().ok()?;
-    let mut words = [0u16; 6];
-    for (w, b) in words
-        .iter_mut()
-        .zip(body[id_end..words_end].chunks_exact(2))
-    {
-        *w = u16::from_le_bytes([b[0], b[1]]);
-        if usize::from(*w) >= WORDLIST.len() {
-            return None;
-        }
-    }
-    let mut seat_key = [0u8; 32];
-    seat_key.copy_from_slice(&body[words_end..words_end + 32]);
-    let tier = body[words_end + 32];
-    let mlen = u16::from_le_bytes([body[words_end + 33], body[words_end + 34]]) as usize;
-    if body.len() != tail + mlen {
-        return None;
-    }
-    Some(Circle {
-        params,
-        seat,
-        circle_id,
-        words,
-        seat_key,
-        tier,
-        manifest: body[tail..].to_vec(),
-    })
+    let len = record_body_len(&head)?;
+    let mut record = vec![0u8; 6 + len];
+    record[..6].copy_from_slice(&head);
+    read_any(&mut f, CIRCLE_BASE + 6, &mut record[6..]).ok()?;
+    let c = Circle::decode_record(&record);
+    record.fill(0);
+    c
 }
 
 /// Forget the circle: the record, the ledger, and the pad's sectors.

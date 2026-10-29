@@ -79,7 +79,7 @@ The program may use the first 2 MiB (`memory.x`). Above it, by offset from the s
 |---|---|---|---|
 | pad | 0x200000 | 1 MiB | the pad, programmed once, spent bytes programmed to zero |
 | ledger | 0x300000 | 64 KiB | 16-byte spent-range records, appended |
-| circle | 0x310000 | 4 KiB | `CAH2`: params, seat, circle id, the six check words, the seat key (32 bytes, plaintext like the pad), tier, the sealed manifest |
+| circle | 0x310000 | 4 KiB | `CAH3`: params, seat, circle id, the six check words, the seat key (32 bytes, plaintext like the pad; zeros when the key is in the chip), tier, the sealed manifest, the chip slot and the circle root (when there is no chip). A `CAH2` record, without the last two, still loads |
 | panic | 0x311000 | 4 KiB | the last panic's message, shown at the next boot |
 | trace | 0x312000 | 4 KiB | the last 4 KiB of log lines and screens before a panic, written with the panic record |
 
