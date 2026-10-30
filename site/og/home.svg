@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">Meet in person. Stay in cahoots.</title>
+  <desc id="description">A private network for people who know each other. Three devices connect around a shared circle, in blue and ink on white.</desc>
+  <defs>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#d0d2da"/></pattern>
+  </defs>
+  <rect width="1200" height="630" fill="#fff"/>
+  <g transform="translate(64 52)">
+    <rect width="40" height="40" rx="8" fill="#17181b"/>
+    <g transform="translate(20 20)" fill="none" stroke="#fff" stroke-width="1.9"><circle r="14"/><circle r="8"/></g>
+    <circle cx="20" cy="20" r="2.5" fill="#a5b5ff"/>
+    <text x="52" y="31" fill="#17181b" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="36" letter-spacing="-2">cahoots</text>
+  </g>
+  <g font-family="Georgia, 'Times New Roman', serif" font-size="78" letter-spacing="-3">
+    <text x="64" y="246" fill="#17181b">Meet in person.</text>
+    <text x="64" y="336" fill="#17181b">Stay in <tspan font-style="italic" fill="#304ed1">cahoots.</tspan></text>
+  </g>
+  <g fill="#50525a" font-family="Arial, Helvetica, sans-serif" font-size="26">
+    <text x="66" y="409">A private network for people</text>
+    <text x="66" y="447">who know each other.</text>
+  </g>
+  <g transform="translate(780 128)">
+    <rect width="356" height="352" rx="6" fill="#f7f8fb" stroke="#dce0ed"/>
+    <rect x="14" y="14" width="328" height="324" fill="url(#dots)"/>
+    <circle cx="178" cy="177" r="113" fill="none" stroke="#c8cbd6" stroke-width="1.5" stroke-dasharray="3 7"/>
+    <circle cx="178" cy="177" r="81" fill="#eceef7" stroke="#b6bfdc"/>
+    <g fill="none" stroke="#304ed1" stroke-width="2"><path d="M178 96V72M107 218l-26 16M248 218l26 16"/></g>
+    <circle cx="178" cy="177" r="52" fill="#17181b"/>
+    <g fill="none" stroke="#fff" stroke-width="1.75"><circle cx="178" cy="169" r="14"/><circle cx="178" cy="169" r="6"/></g>
+    <text x="178" y="201" text-anchor="middle" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="10" letter-spacing="1">YOUR CIRCLE</text>
+    <g fill="#fff" stroke="#304ed1" stroke-width="2"><rect x="157" y="25" width="42" height="64" rx="7"/><rect x="48" y="218" width="42" height="64" rx="7"/><rect x="266" y="218" width="42" height="64" rx="7"/></g>
+    <g fill="#e4e8fa"><rect x="163" y="32" width="30" height="39" rx="2"/><rect x="54" y="225" width="30" height="39" rx="2"/><rect x="272" y="225" width="30" height="39" rx="2"/></g>
+    <g fill="#304ed1"><circle cx="178" cy="81" r="2.5"/><circle cx="69" cy="274" r="2.5"/><circle cx="287" cy="274" r="2.5"/></g>
+    <g fill="#304ed1" font-family="monospace" font-size="11" text-anchor="middle"><text x="178" y="56">01</text><text x="69" y="249">02</text><text x="287" y="249">03</text></g>
+  </g>
+  <path d="M64 544h1072" stroke="#e0e1e5"/>
+  <g font-family="Arial, Helvetica, sans-serif" font-size="20" fill="#50525a">
+    <text x="64" y="587">cahoots.network</text>
+    <text x="1136" y="587" text-anchor="end">Made together. Kept between you.</text>
+  </g>
+</svg>

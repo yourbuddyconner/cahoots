@@ -10,9 +10,18 @@
 <meta property="og:title" content="Meet in person. Stay in cahoots.">
 <meta property="og:description" content="A private network that starts with people in the same room.">
 <meta property="og:url" content="https://cahoots.network/">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="https://cahoots.network/assets/og-home.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Meet in person. Stay in cahoots. Three devices connected around a private circle.">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Meet in person. Stay in cahoots.">
 <meta name="twitter:description" content="A private network that starts with people in the same room.">
+<meta name="twitter:image" content="https://cahoots.network/assets/og-home.png">
+<meta name="twitter:image:alt" content="Meet in person. Stay in cahoots. Three devices connected around a private circle.">
+<meta name="theme-color" content="#ffffff">
+<link rel="canonical" href="https://cahoots.network/">
 <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
 <link rel="stylesheet" href="landing.css">
 <link rel="stylesheet" href="brand.css">
@@ -21,8 +30,13 @@
 <a class="skip" href="#main">Skip to content</a>
 <header class="top wrap">
   <a class="brand" href="./" aria-label="Cahoots home"><img src="assets/mark.svg" alt="" width="30" height="30"> cahoots</a>
-  <nav aria-label="Primary"><a href="#how">How it works</a><a href="docs/">Docs</a><a href="blog/">Journal</a><a class="nav-cta" href="app/">Open the app <span aria-hidden="true">↗</span></a></nav>
+  <button class="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="primary-nav" hidden>
+    <span class="nav-toggle-label">Menu</span>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path class="menu-open-icon" d="M4 6h16M4 12h16M4 18h16"/><path class="menu-close-icon" d="m6 6 12 12M6 18 18 6"/></svg>
+  </button>
+  <nav class="primary-nav" id="primary-nav" aria-label="Primary"><a href="#how">How it works</a><a href="docs/">Docs</a><a href="blog/">Journal</a><a class="nav-cta" href="app/">Open the app <span aria-hidden="true">↗</span></a></nav>
 </header>
+<script src="navigation.js" defer></script>
 <main id="main">
 <section class="hero wrap" aria-labelledby="hero-title">
   <div class="hero-copy">
