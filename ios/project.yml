@@ -1,0 +1,87 @@
+# The Cahoots iOS app. Generate the Xcode project with `xcodegen generate` in this directory,
+# or run scripts/ios-build.sh, which builds the Rust library first.
+#
+# ../target/ios holds CahootsCore.xcframework and the generated CahootsCore.swift, made by
+# scripts/ios-framework.sh (scripts/ios-build.sh links it here when CARGO_TARGET_DIR is elsewhere).
+# Signing.xcconfig is git-ignored and holds DEVELOPMENT_TEAM. Copy Signing.xcconfig.example.
+name: Cahoots
+options:
+  bundleIdPrefix: network.cahoots
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  xcodeVersion: "15.4"
+  projectFormat: xcode15_3
+  generateEmptyDirectories: true
+configFiles:
+  Debug: Signing.xcconfig
+  Release: Signing.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Cahoots:
+    type: application
+    platform: iOS
+    sources:
+      - path: Cahoots
+      - path: ../target/ios/CahootsCore.swift
+        group: Core
+    dependencies:
+      - framework: ../target/ios/CahootsCore.xcframework
+        embed: false
+      - sdk: SystemConfiguration.framework
+      - sdk: Security.framework
+    info:
+      path: Cahoots/Info.plist
+      properties:
+        CFBundleDisplayName: Cahoots
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSCameraUsageDescription: The camera only reads codes. Nothing is recorded.
+        NSFaceIDUsageDescription: Face ID confirms it is you before your seat key signs.
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [network.cahoots.refresh]
+        ITSAppUsesNonExemptEncryption: false
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: network.cahoots.app
+        PRODUCT_NAME: Cahoots
+        TARGETED_DEVICE_FAMILY: "1"
+        ENABLE_PREVIEWS: YES
+  CahootsTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [CahootsTests]
+    dependencies:
+      - target: Cahoots
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: network.cahoots.app.tests
+        GENERATE_INFOPLIST_FILE: YES
+  CahootsUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [CahootsUITests]
+    dependencies:
+      - target: Cahoots
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: network.cahoots.app.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Cahoots
+schemes:
+  Cahoots:
+    build:
+      targets:
+        Cahoots: all
+    test:
+      config: Debug
+      targets: [CahootsTests, CahootsUITests]

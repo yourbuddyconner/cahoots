@@ -185,6 +185,19 @@ pub struct HelloWords {
     pub number: u32,
 }
 
+/// One seat of a circle, from its manifest.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Member {
+    /// The seat, from 0.
+    pub seat: u8,
+    /// The device tier the seat declared at the ceremony: 0 software, 1 open
+    /// microcontroller, 2 sealed microcontroller, 3 hardware key store, 4 inspected hardware.
+    /// A claim the ceremony binds, not a proof.
+    pub tier: u8,
+    /// This phone's seat.
+    pub mine: bool,
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct PhoneInfo {
     pub key_store: String,
@@ -770,6 +783,26 @@ impl Phone {
         }
         st.circles.remove(&circle);
         std::fs::remove_dir_all(self.circle_dir(&circle)).map_err(store::io)
+    }
+
+    /// Every seat of a circle with the tier it declared, in seat order.
+    pub fn circle_members(&self, circle: String) -> Result<Vec<Member>, PhoneError> {
+        self.with_circle(&circle, |c, _| {
+            let unreadable = || PhoneError::Storage {
+                message: "This circle's member list does not read.".into(),
+            };
+            let sealed = cahoots_core::manifest::SealedManifest::decode(&c.record.manifest)
+                .map_err(|_| unreadable())?;
+            let m = cahoots_core::manifest::Manifest::decode(&sealed.body).map_err(|_| unreadable())?;
+            Ok(m.seats
+                .iter()
+                .map(|s| Member {
+                    seat: s.seat,
+                    tier: s.tier,
+                    mine: s.seat == c.record.seat,
+                })
+                .collect())
+        })
     }
 
     /// The `Signer` label of a circle's seat key.

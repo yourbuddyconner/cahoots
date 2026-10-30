@@ -938,3 +938,21 @@ fn a_joiner_checks_the_host_against_the_offer() {
     assert_eq!(sb.phase, CeremonyPhase::Complete);
     assert_eq!(sa.words, sb.words);
 }
+
+#[test]
+fn the_roster_lists_every_seat_with_its_tier() {
+    let r = relay();
+    let (a, b) = (device(&r), device(&r));
+    let (id, _, _) = finish(&a, &b);
+    let seen: Vec<(u8, u8, bool)> = a
+        .phone
+        .circle_members(id.clone())
+        .unwrap()
+        .iter()
+        .map(|m| (m.seat, m.tier, m.mine))
+        .collect();
+    assert_eq!(seen, [(0, 0, true), (1, 0, false)]);
+    let theirs = b.phone.circle_members(id).unwrap();
+    assert!(!theirs[0].mine && theirs[1].mine);
+    assert!(matches!(a.phone.circle_members("gone".into()), Err(PhoneError::NotFound { .. })));
+}
