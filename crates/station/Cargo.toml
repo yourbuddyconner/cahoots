@@ -26,13 +26,14 @@ http = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 cahoots-objects = { workspace = true, features = ["std"], optional = true }
 cahoots-channel = { workspace = true, features = ["std"], optional = true }
+minicbor = { version = "2.3", default-features = false, features = ["alloc"], optional = true }
 
 [features]
 default = ["feed-page"]
 # The live feed page at `/`.
 feed-page = []
 # Manifests, channel objects, policies, grants, revocations, deposits, join requests.
-objects = ["dep:cahoots-objects", "dep:cahoots-channel"]
+objects = ["dep:cahoots-objects", "dep:cahoots-channel", "dep:minicbor"]
 # Version 3 messages chained per channel.
 channels = ["objects"]
 # Read and post checks on channels.

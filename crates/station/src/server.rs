@@ -24,7 +24,7 @@ const PAGE_LIMIT: usize = 500;
 
 #[derive(Clone)]
 pub struct State {
-    log: Arc<Mutex<Log>>,
+    pub(crate) log: Arc<Mutex<Log>>,
     notify: Arc<Notify>,
     limiter: Limiter,
     /// Refuse posts once the database is this large. `None` for no cap.
@@ -52,6 +52,19 @@ impl State {
     pub fn limits(&self) -> Limits {
         self.limiter.limits()
     }
+
+    /// `507 {"error":"full"}` once the database has reached its size cap.
+    pub(crate) fn full(&self, log: &Log) -> Option<Response> {
+        self.max_log_bytes
+            .is_some_and(|cap| log.bytes() >= cap)
+            .then(|| {
+                err(
+                    StatusCode::INSUFFICIENT_STORAGE,
+                    "full",
+                    "this relay's log has reached its size cap; the operator must grow it",
+                )
+            })
+    }
 }
 
 pub fn app(state: State) -> Router {
@@ -59,6 +72,8 @@ pub fn app(state: State) -> Router {
     let router = Router::new();
     #[cfg(feature = "feed-page")]
     let router = router.route("/", get(index));
+    #[cfg(feature = "objects")]
+    let router = crate::objects::routes(router);
     router
         .route("/healthz", get(|| async { "ok" }))
         .route("/v1/info", get(info))
@@ -77,7 +92,13 @@ pub fn app(state: State) -> Router {
         .layer(
             tower_http::cors::CorsLayer::new()
                 .allow_origin(tower_http::cors::Any)
-                .allow_methods([http::Method::GET, http::Method::POST, http::Method::OPTIONS])
+                .allow_methods([
+                    http::Method::GET,
+                    http::Method::POST,
+                    http::Method::PUT,
+                    http::Method::DELETE,
+                    http::Method::OPTIONS,
+                ])
                 .allow_headers([http::header::CONTENT_TYPE]),
         )
 }
@@ -89,7 +110,7 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn err(status: StatusCode, code: &str, detail: impl ToString) -> Response {
+pub(crate) fn err(status: StatusCode, code: &str, detail: impl ToString) -> Response {
     (
         status,
         Json(json!({ "error": code, "detail": detail.to_string() })),
@@ -97,7 +118,7 @@ fn err(status: StatusCode, code: &str, detail: impl ToString) -> Response {
         .into_response()
 }
 
-fn parse_circle(hex_id: &str) -> Result<CircleId, Box<Response>> {
+pub(crate) fn parse_circle(hex_id: &str) -> Result<CircleId, Box<Response>> {
     hex::decode(hex_id)
         .ok()
         .and_then(|v| v.try_into().ok())
@@ -132,12 +153,8 @@ async fn post_message(
     };
     let result = {
         let mut log = st.log.lock().unwrap();
-        if st.max_log_bytes.is_some_and(|cap| log.bytes() >= cap) {
-            return err(
-                StatusCode::INSUFFICIENT_STORAGE,
-                "full",
-                "this relay's log has reached its size cap; the operator must grow it",
-            );
+        if let Some(full) = st.full(&log) {
+            return full;
         }
         log.append(sub, now_ms())
     };

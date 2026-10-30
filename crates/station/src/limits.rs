@@ -17,7 +17,7 @@ use std::time::Instant;
 /// Rate limits for one station. `None` for a kind means that kind is not limited.
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
-    /// Accepted posts per client per minute.
+    /// Accepted writes (every POST, PUT and DELETE under `/v1`) per client per minute.
     pub posts_per_minute: Option<u32>,
     /// Accepted reads (every GET under `/v1`) per client per minute.
     pub reads_per_minute: Option<u32>,
@@ -119,7 +119,7 @@ pub async fn limit(AxState(limiter): AxState<Limiter>, req: Request, next: Next)
     let ip = limiter.client_ip(req.headers(), peer);
     let under_v1 = req.uri().path().starts_with("/v1/");
     let allowed = match (req.method(), under_v1) {
-        (&Method::POST, true) => limiter
+        (&Method::POST | &Method::PUT | &Method::DELETE, true) => limiter
             .limits
             .posts_per_minute
             .is_none_or(|n| Limiter::take(&limiter.posts, ip, n)),

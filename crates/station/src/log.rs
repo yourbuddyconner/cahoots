@@ -138,6 +138,8 @@ impl Log {
         // FULL: a commit is on disk before `append` returns, so a 201 means the entry is durable.
         conn.pragma_update(None, "synchronous", "FULL")?;
         conn.execute_batch(SCHEMA)?;
+        #[cfg(feature = "objects")]
+        crate::objects::store::schema(&conn)?;
         let mut log = Log {
             conn,
             path: path.to_path_buf(),
