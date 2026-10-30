@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480" role="img" aria-labelledby="title desc">
+  <title id="title">A circle the group can carry between tools</title>
+  <desc id="desc">People meet in person and establish their circle together. The circle supplies a common foundation for chat, files, and private connections. Each use gets separate keys.</desc>
+  <rect width="640" height="480" rx="4" fill="#f6f6f7"/>
+  <g font-family="Arial, Helvetica, sans-serif" text-anchor="middle">
+    <text x="320" y="38" fill="#50525a" font-size="22">Meet in person</text>
+    <g fill="none" stroke="#304ed1" stroke-width="2.5" stroke-linecap="round">
+      <circle cx="200" cy="76" r="12"/>
+      <path d="M180 108v-5a20 20 0 0 1 40 0v5"/>
+      <circle cx="320" cy="76" r="12"/>
+      <path d="M300 108v-5a20 20 0 0 1 40 0v5"/>
+      <circle cx="440" cy="76" r="12"/>
+      <path d="M420 108v-5a20 20 0 0 1 40 0v5"/>
+    </g>
+    <g fill="none" stroke="#babdc6" stroke-width="2" stroke-dasharray="4 5">
+      <path d="M200 119l54 38"/>
+      <path d="M320 119v38"/>
+      <path d="M440 119l-54 38"/>
+    </g>
+    <rect x="150" y="158" width="340" height="106" rx="53" fill="#fff" stroke="#304ed1" stroke-width="2"/>
+    <text x="320" y="203" fill="#17181b" font-size="30" font-family="Georgia, 'Times New Roman', serif">Our circle</text>
+    <text x="320" y="235" fill="#50525a" font-size="21">Members + shared secrets</text>
+    <g fill="none" stroke="#304ed1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M320 265v84"/>
+      <path d="M116 349v-43h408v43"/>
+    </g>
+    <text x="320" y="293" fill="#50525a" font-size="18" paint-order="stroke" stroke="#f6f6f7" stroke-width="9">Separate keys for each use</text>
+    <g fill="#fff" stroke="#e0e1e5" stroke-width="1.5">
+      <rect x="24" y="350" width="184" height="78" rx="4"/>
+      <rect x="228" y="350" width="184" height="78" rx="4"/>
+      <rect x="432" y="350" width="184" height="78" rx="4"/>
+    </g>
+    <g fill="#17181b" font-size="24">
+      <text x="116" y="398">Chat</text>
+      <text x="320" y="398">Files</text>
+      <text x="524" y="398">Connections</text>
+    </g>
+    <text x="320" y="463" fill="#50525a" font-size="21">The tools can change. The circle stays ours.</text>
+  </g>
+</svg>
