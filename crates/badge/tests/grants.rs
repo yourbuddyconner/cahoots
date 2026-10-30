@@ -5,7 +5,7 @@
 mod common;
 
 use cahoots_badge::chip::{ChipRecord, SlotEntry};
-use cahoots_badge::grants::{GrantRecord, GrantsRecord};
+use cahoots_badge::grants::{GrantRecord, GrantsRecord, ISSUE_SLOT};
 use cahoots_badge::{Badge, Press};
 use cahoots_chip::{ChipOps, Curve, KeyId, KeyKind, SoftChip};
 use cahoots_core::frame::{self, Frame};
@@ -328,7 +328,8 @@ fn remaining_of(r: &Response) -> u32 {
     }
 }
 
-fn counter(badge: &mut Badge<FakeBoard>, slot: u8) -> Option<u64> {
+/// The chip counter of `slot` as it reads, its base included.
+fn raw_counter(badge: &mut Badge<FakeBoard>, slot: u8) -> Option<u64> {
     badge
         .board()
         .chip
@@ -336,6 +337,17 @@ fn counter(badge: &mut Badge<FakeBoard>, slot: u8) -> Option<u64> {
         .unwrap()
         .counter_get(KeyId::new(KeyKind::Grant, slot))
         .ok()
+}
+
+/// The uses the chip counted in `slot`: its counter less the base of the grant the record
+/// holds there (or the raw value when the record holds none).
+fn counter(badge: &mut Badge<FakeBoard>, slot: u8) -> Option<u64> {
+    let base = record(badge)
+        .grants
+        .iter()
+        .find(|g| g.slot == slot)
+        .map_or(0, |g| g.base);
+    raw_counter(badge, slot).map(|n| n - base)
 }
 
 fn record(badge: &mut Badge<FakeBoard>) -> GrantsRecord {
@@ -388,8 +400,14 @@ fn a_grant_is_issued_after_both_and_the_counter_starts_at_zero() {
     assert_eq!(g.budget, 50);
     assert_eq!(g.exp, Some(EXP));
     assert_eq!(g.grantee, agent_key().public());
-    assert_eq!(counter(&mut badge, 0), Some(0));
     let r = record(&mut badge);
+    let base = r.grants[0].base;
+    assert_ne!(base, 0);
+    assert_eq!(raw_counter(&mut badge, 0), Some(base));
+    assert!(
+        raw_counter(&mut badge, ISSUE_SLOT).is_some(),
+        "the issue counter exists"
+    );
     assert_eq!(r.grants.len(), 1);
     assert_eq!(r.grants[0].cti, g.cti);
     assert_eq!(r.grants[0].key_id, key_id(&agent_key().public()));
@@ -715,9 +733,29 @@ fn a_restored_record_does_not_refund_the_chip_counter() {
     // Spent: the counter and the record are gone. A record restored again has no counter,
     // and a grant without its counter is refused.
     assert_eq!(counter(&mut badge, 0), None);
+    badge.board().grants = image.clone();
+    let r = use_grant(&mut badge, &mut laptop, id, &grant, NOW);
+    assert_eq!(r, denied());
+
+    // A later grant in the same slot: an image holding the earlier grant's record, presented
+    // with the earlier grant and its key, neither spends nor resets the later one's counter.
+    badge.board().grants = None;
+    let (_, slot) = issue(
+        &mut badge,
+        &mut laptop,
+        id,
+        grant_request(2, Some(EXP), false, NOW),
+    );
+    assert_eq!(slot, 0);
+    let later = raw_counter(&mut badge, 0).unwrap();
+    let later_record = badge.board().grants.clone();
     badge.board().grants = image;
     let r = use_grant(&mut badge, &mut laptop, id, &grant, NOW);
     assert_eq!(r, denied());
+    assert_eq!(raw_counter(&mut badge, 0), Some(later));
+    // The later grant still has its whole budget.
+    badge.board().grants = later_record;
+    assert_eq!(counter(&mut badge, 0), Some(0));
 }
 
 #[test]
@@ -754,6 +792,7 @@ fn grant_record(slot: u8, id: CircleId) -> GrantRecord {
         exp: Some(EXP),
         revoked: false,
         used_soft: 0,
+        base: 0,
     }
 }
 
@@ -764,6 +803,8 @@ fn sweep_deletes_orphans() {
     // Slot 5: a counter with no record. Slot 6: a record with no counter. Slot 1: both,
     // which stays. Slot 2: both, expired by the stored time.
     chip.put_counter(KeyId::new(KeyKind::Grant, 5), 0).unwrap();
+    chip.put_counter(KeyId::new(KeyKind::Grant, ISSUE_SLOT), 7)
+        .unwrap();
     chip.put_counter(KeyId::new(KeyKind::Grant, 1), 3).unwrap();
     chip.put_counter(KeyId::new(KeyKind::Grant, 2), 0).unwrap();
     let mut expired = grant_record(2, id);
@@ -778,6 +819,8 @@ fn sweep_deletes_orphans() {
     assert_eq!(counter(&mut badge, 5), None);
     assert_eq!(counter(&mut badge, 2), None);
     assert_eq!(counter(&mut badge, 1), Some(3));
+    // The issue counter is not a grant's, and stays.
+    assert_eq!(raw_counter(&mut badge, ISSUE_SLOT), Some(7));
     let left = record(&mut badge);
     assert_eq!(left.grants, vec![grant_record(1, id)]);
     let log = badge.board().log.join("\n");

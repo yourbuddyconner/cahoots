@@ -9,7 +9,11 @@
 //! spent, expired or half there.
 //!
 //! On a badge with a chip the count is the chip's counter for the grant's slot and nothing
-//! else: a flash image restored over the record cannot refund a use. A badge without a chip
+//! else: a flash image restored over the record cannot refund a use. Each grant's counter
+//! starts at its `base`, the chip-wide issue counter ([`ISSUE_SLOT`]) at issue shifted up 32
+//! bits, so a grant's uses are its counter less its base. A later grant in the same slot has a
+//! base at least 2^32 higher: an older record restored over the flash reads its slot's counter
+//! as far past any budget and is refused, and never spends the later grant's count. A badge without a chip
 //! counts in the record (`used_soft`).
 //!
 //! The badge has a timer, not a clock: [`Clock`] keeps the latest time a laptop told it, plus
@@ -51,6 +55,11 @@ pub const AGENT_MAX: usize = 64;
 pub const AUTHOR_MAX: usize = 128;
 /// The longest location, in bytes.
 pub const LOCATION_MAX: usize = 128;
+/// The chip slot of the issue counter: one chip-wide counter, moved by one at every issue,
+/// which gives each grant's counter a base no earlier grant in the same slot had. Never a
+/// grant's slot.
+pub const ISSUE_SLOT: u8 = 255;
+const _: () = assert!(GRANTS_MAX <= ISSUE_SLOT as usize);
 
 /// One grant the badge issued.
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -86,6 +95,10 @@ pub struct GrantRecord {
     /// Uses so far, on a badge without a chip. A badge with one counts in the chip.
     #[n(12)]
     pub used_soft: u64,
+    /// What the grant's chip counter was set to at issue: the issue number shifted up 32 bits.
+    /// Uses are the counter less this. 0 without a chip.
+    #[n(13)]
+    pub base: u64,
 }
 
 /// Every grant the badge holds, and the latest time it was told.
@@ -235,6 +248,23 @@ pub fn short(cti: &[u8; 16]) -> String {
 
 fn counter_id(slot: u8) -> KeyId {
     KeyId::new(KeyKind::Grant, slot)
+}
+
+/// Move the issue counter on by one, making it at 0 first if the chip has none, and return
+/// its new value: this issue's number, never given before on this chip.
+fn next_issue(chip: &mut dyn ChipOps) -> Result<u64, ErrorCode> {
+    let id = counter_id(ISSUE_SLOT);
+    if !chip.exists(id).map_err(|_| ErrorCode::ChipError)? {
+        chip.put_counter(id, 0).map_err(|_| ErrorCode::ChipError)?;
+    }
+    chip.counter_next(id).map_err(|_| ErrorCode::ChipError)
+}
+
+/// The uses a chip counter reading `raw` stands for under a grant with `base` and `budget`,
+/// or `None` when the counter cannot be this grant's: below its base, or past its budget
+/// (a later grant in the same slot, whose base is at least 2^32 higher).
+fn uses(raw: u64, base: u64, budget: u32) -> Option<u64> {
+    raw.checked_sub(base).filter(|&n| n <= u64::from(budget))
 }
 
 /// The stored record, empty if there is none. An unreadable one is `Storage`, logged.
@@ -410,10 +440,12 @@ pub fn issue<G: GrantBoard + ?Sized>(
         return Err(ErrorCode::Denied);
     }
     let signed = sign_grant(board, c, &grant)?;
+    let mut base = 0;
     if let Some(chip) = board.chip() {
+        base = next_issue(chip)? << 32;
         // Anything left in a free slot is stale: the record does not know it.
         let _ = chip.delete(counter_id(slot));
-        chip.put_counter(counter_id(slot), 0)
+        chip.put_counter(counter_id(slot), base)
             .map_err(|_| ErrorCode::ChipError)?;
     }
     record.grants.push(GrantRecord {
@@ -430,6 +462,7 @@ pub fn issue<G: GrantBoard + ?Sized>(
         exp: grant.exp,
         revoked: false,
         used_soft: 0,
+        base,
     });
     if let Err(e) = store(board, clock, &mut record) {
         delete_counter(board, slot);
@@ -511,7 +544,20 @@ pub fn evaluate_request<G: GrantBoard + ?Sized>(
     };
     let used = match board.chip() {
         Some(chip) => match chip.counter_get(counter_id(rec.slot)) {
-            Ok(n) => n,
+            Ok(raw) => match uses(raw, rec.base, rec.budget) {
+                Some(n) => n,
+                None => {
+                    // The slot's counter is another grant's: this record is older than it
+                    // (a restored image). The record goes; the counter stays its grant's.
+                    record.grants.remove(index);
+                    let _ = store(board, clock, record);
+                    return say(
+                        board,
+                        "grant spent, its slot's counter is a later grant's",
+                        Refuse(ErrorCode::Denied),
+                    );
+                }
+            },
             Err(_) => {
                 return say(board, "no counter in the chip", Refuse(ErrorCode::Denied));
             }
@@ -599,13 +645,18 @@ pub fn sign_under_grant<G: GrantBoard + ?Sized>(
         Fallback::Prompt(_) => ErrorCode::Denied,
         Fallback::Refuse(code) => code,
     })?;
-    let (slot, budget) = (record.grants[a.index].slot, record.grants[a.index].budget);
+    let g = &record.grants[a.index];
+    let (slot, budget, base) = (g.slot, g.budget, g.base);
     // Without a chip the count is in the record, which must be written before the signature.
     let mut counted_here = false;
     let used = match board.chip() {
-        Some(chip) => chip
-            .counter_next(counter_id(slot))
-            .map_err(|_| ErrorCode::ChipError)?,
+        Some(chip) => {
+            let raw = chip
+                .counter_next(counter_id(slot))
+                .map_err(|_| ErrorCode::ChipError)?;
+            // Past the budget reads as more than it, and is refused below.
+            raw.checked_sub(base).unwrap_or(u64::MAX)
+        }
         None => {
             let g = &mut record.grants[a.index];
             g.used_soft += 1;
@@ -665,7 +716,7 @@ pub fn sweep<G: GrantBoard + ?Sized>(board: &mut G) -> Vec<String> {
             Ok(ids) => Some(
                 ids.iter()
                     .filter_map(|id| match KeyId::parse(id.0) {
-                        Some((KeyKind::Grant, slot)) => Some(slot),
+                        Some((KeyKind::Grant, slot)) if slot != ISSUE_SLOT => Some(slot),
                         _ => None,
                     })
                     .collect(),
@@ -680,7 +731,10 @@ pub fn sweep<G: GrantBoard + ?Sized>(board: &mut G) -> Vec<String> {
     for g in core::mem::take(&mut record.grants) {
         let used = match (&counters, board.chip()) {
             (Some(slots), Some(chip)) if slots.contains(&g.slot) => {
-                chip.counter_get(counter_id(g.slot)).ok()
+                // A counter that cannot be this grant's reads as spent.
+                chip.counter_get(counter_id(g.slot))
+                    .ok()
+                    .map(|raw| uses(raw, g.base, g.budget).unwrap_or(u64::MAX))
             }
             (Some(_), _) => None,
             (None, _) => Some(g.used_soft),
