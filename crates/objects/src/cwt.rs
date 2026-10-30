@@ -430,7 +430,9 @@ impl Claims {
     /// The circle and what the grant allows, checked: what [`crate::Grant::from_v2`] reads for
     /// a pad grant. A pad grant has a log claim, the [`PAD_TYPE`] detail last, no `aud`, no
     /// `exp` and no base; a sign grant has one [`SIGN_TYPE`] detail, an `aud` naming the
-    /// issuing circle, a base, no log claim and depth 0. Anything else is `Malformed`.
+    /// issuing circle, a base, no log claim and depth 0; a channel grant has one
+    /// [`CHANNEL_TYPE`] detail, a log claim, and no `aud`, `exp` or base. Anything else is
+    /// `Malformed`.
     pub fn kind(&self) -> Result<(CircleId, Kind), ObjectError> {
         let m = ObjectError::Malformed;
         let circle_id = circle_of(&self.iss).ok_or(m)?;
@@ -538,7 +540,7 @@ impl Claims {
         let [d] = self.authorization_details.as_slice() else {
             return Err(m);
         };
-        if d.r#type != SIGN_TYPE {
+        if d.r#type != SIGN_TYPE || d.channel.is_some() {
             return Err(m);
         }
         let actions = d.actions.clone().ok_or(m)?;

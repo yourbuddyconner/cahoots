@@ -179,3 +179,10 @@ fn the_base_is_the_last_claim_and_reads_back() {
     assert!(bytes.ends_with(&[0x3a, 0, 1, 0, 5, 0x1b, 0, 0, 0, 1, 0, 0, 0, 0]));
     assert_eq!(Claims::decode(&bytes).unwrap().base, Some(1 << 32));
 }
+
+#[test]
+fn a_sign_detail_with_a_channel_field_is_refused() {
+    let mut c = sign_claims();
+    c.authorization_details[0].channel = Some("00112233445566778899aabbccddeeff".into());
+    malformed(&c);
+}
