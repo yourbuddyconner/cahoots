@@ -8,7 +8,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use cahoots_chat::{self as chat, ChatError, ChatSession, EpochId};
 use cahoots_core::ceremony::{Ceremony, CeremonyError, Phase};
-use cahoots_core::channel::{join_code, Channel, ChannelError, Gate, Mailbox, Round};
+use cahoots_core::channel::{commitment_hash, join_code, Channel, ChannelError, Gate, Mailbox, Round};
 use cahoots_core::ledger::{MemLedger, SpentLedger};
 use cahoots_core::manifest::{Manifest, SealedManifest};
 use cahoots_core::message::{MessageError, MessageType};
@@ -150,8 +150,11 @@ pub struct WasmCeremony {
     /// Signatures read from the relay before every reveal was in, checked once the manifest
     /// exists. A few per seat, so a bogus one cannot keep the real one out.
     early: Vec<(u8, Vec<u8>)>,
-    /// The host's scans of each joiner's code. `Some` on the host of a relay ceremony.
+    /// The host's scans of each joiner's code, or a joiner's check of seat 0 against the
+    /// offer. `Some` in a relay ceremony.
     gate: Option<Gate>,
+    /// The host's offer, made once: it binds the host's commitment, which never changes.
+    offer: Option<String>,
     /// The host tapped Continue after everyone was scanned: its reveal may go.
     proceeded: bool,
 }
@@ -171,7 +174,7 @@ fn offer_err(e: ChannelError) -> String {
 #[wasm_bindgen]
 pub fn offer_params(text: &str) -> Result<Vec<u8>, String> {
     Channel::from_offer(text)
-        .map(|(_, p, _)| p.encode())
+        .map(|o| o.params.encode())
         .map_err(offer_err)
 }
 
@@ -247,6 +250,7 @@ impl WasmCeremony {
             relay: None,
             early: Vec::new(),
             gate: None,
+            offer: None,
             proceeded: false,
         })
     }
@@ -263,17 +267,19 @@ impl WasmCeremony {
         seat_seed: &[u8],
         tier: u8,
     ) -> Result<WasmCeremony, String> {
-        let (channel, params, relay) = Channel::from_offer(offer).map_err(offer_err)?;
+        let o = Channel::from_offer(offer).map_err(offer_err)?;
         if index == 0 {
             return Err("host-seat".into());
         }
-        let inner = build(params, index, contribution, extra, kem_seed, seat_seed, tier)?;
+        let gate = Gate::for_joiner(&o);
+        let inner = build(o.params, index, contribution, extra, kem_seed, seat_seed, tier)?;
         Ok(WasmCeremony {
             inner,
-            mailbox: Some(Mailbox::new(channel, index)),
-            relay: Some(relay),
+            mailbox: Some(Mailbox::new(o.channel, index)),
+            relay: Some(o.relay),
             early: Vec::new(),
-            gate: None,
+            gate: Some(gate),
+            offer: Some(offer.trim().to_string()),
             proceeded: false,
         })
     }
@@ -282,17 +288,30 @@ impl WasmCeremony {
     /// on `relay`, the host's relay address: from then on the ceremony is held through the
     /// relay, and everyone joining uses that relay. Later calls show the same code.
     pub fn offer(&mut self, relay: &str) -> Result<String, String> {
-        let index = self.inner.index();
-        let relay = self.relay.get_or_insert_with(|| relay.to_string()).clone();
-        if self.mailbox.is_none() {
-            self.gate = Some(Gate::new());
+        if let Some(o) = &self.offer {
+            return Ok(o.clone());
         }
-        let mb = self
-            .mailbox
-            .get_or_insert_with(|| Mailbox::new(Channel::new(&mut OsRng), index));
-        mb.channel()
-            .offer(self.inner.params(), &relay)
-            .map_err(|_| "relay-too-long".to_string())
+        if self.inner.index() != 0 {
+            return Err("host-seat".into());
+        }
+        // The host's commitment is fixed when the ceremony is built; the offer binds it.
+        let host = commitment_hash(&self.commitment());
+        let channel = Channel::new(&mut OsRng);
+        let text = channel
+            .offer(self.inner.params(), relay, &host)
+            .map_err(|_| "relay-too-long".to_string())?;
+        self.mailbox = Some(Mailbox::for_host(channel));
+        self.gate = Some(Gate::new());
+        self.relay = Some(relay.to_string());
+        self.offer = Some(text.clone());
+        Ok(text)
+    }
+
+    /// A joiner: a seat-0 commitment appeared on the relay that is not the host whose code
+    /// was scanned. It is held and never used. Say: "Seat 1 on the relay is not the host
+    /// whose code you scanned."
+    pub fn host_mismatch(&self) -> bool {
+        self.inner.index() != 0 && self.gate.as_ref().is_some_and(|g| g.stray(0))
     }
 
     /// A joiner's code to show the host: `cahoots:joined:v1:...`, binding this seat's
@@ -300,7 +319,7 @@ impl WasmCeremony {
     /// took it. `None` on the host, for codes only, and once the seat is lost.
     pub fn join_code(&self) -> Option<String> {
         let mb = self.mailbox.as_ref()?;
-        if self.gate.is_some() || mb.lost_seat() {
+        if self.inner.index() == 0 || mb.lost_seat() {
             return None;
         }
         let waiting = match self.inner.phase() {
@@ -317,6 +336,9 @@ impl WasmCeremony {
         let (Some(gate), Some(mb)) = (self.gate.as_mut(), self.mailbox.as_ref()) else {
             return Err("not-host".into());
         };
+        if self.inner.index() != 0 {
+            return Err("not-host".into());
+        }
         let seat = gate.scan(mb.channel(), text).map_err(|e| match e {
             ChannelError::OtherChannel => "other-ceremony".to_string(),
             _ => "not-a-join-code".to_string(),
@@ -327,17 +349,21 @@ impl WasmCeremony {
 
     /// Seats the host scanned whose commitment it took.
     pub fn scanned(&self) -> Vec<u8> {
-        self.gate.as_ref().map(Gate::scanned).unwrap_or_default()
+        self.host_gate().map(Gate::scanned).unwrap_or_default()
+    }
+
+    fn host_gate(&self) -> Option<&Gate> {
+        self.gate.as_ref().filter(|_| self.inner.index() == 0)
     }
 
     /// Seats with a commitment on the relay that the host has not scanned.
     pub fn unscanned(&self) -> Vec<u8> {
-        self.gate.as_ref().map(Gate::unscanned).unwrap_or_default()
+        self.host_gate().map(Gate::unscanned).unwrap_or_default()
     }
 
     /// The host holds every scanned commitment and waits for Continue (`proceed`).
     pub fn needs_continue(&self) -> bool {
-        self.gate.is_some()
+        self.host_gate().is_some()
             && !self.proceeded
             && matches!(self.inner.phase(), Phase::Reveal | Phase::Attest)
     }
@@ -380,7 +406,7 @@ impl WasmCeremony {
         }
         let commitment = self.commitment();
         let phase = self.inner.phase();
-        let hold_back = self.gate.is_some() && !self.proceeded;
+        let hold_back = self.host_gate().is_some() && !self.proceeded;
         let reveal = if !hold_back && matches!(phase, Phase::Reveal | Phase::Attest | Phase::Complete) {
             let mut fill = |buf: &mut [u8]| OsRng.fill_bytes(buf);
             self.inner.my_reveal(&mut fill).map(<[u8]>::to_vec)
@@ -423,7 +449,7 @@ impl WasmCeremony {
         if let Some(gate) = self.gate.as_mut() {
             // The host takes a seat's commitment only once its scan matches, and that seat's
             // later messages wait for it.
-            if !gate.is_fed(seat) {
+            if gate.gates(seat) {
                 match round {
                     Round::Commit => gate.commitment(seat, payload),
                     _ => gate.defer(seat, round, payload),

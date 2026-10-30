@@ -8,10 +8,11 @@
 //! from the same place. The round logic is [`crate::ceremony::Ceremony`], the same as with
 //! animated codes, so both ways make the same circle.
 //!
-//! The offer is `"cahoots:ceremony:v1:" || base64url(id || key || relay_len || relay || params)`:
-//! the relay address the host uses, at most 255 bytes of UTF-8 after its one-byte length, and
-//! the parameters in their canonical encoding ([`CircleParams::encode`]). Everyone joining uses
-//! the host's relay.
+//! The offer is `"cahoots:ceremony:v1:" || base64url(id || key || host || relay_len || relay ||
+//! params)`: `host` is SHA-256 of the host's commitment payload, so joiners take seat 0's
+//! commitment only if it is the host's; the relay address the host uses, at most 255 bytes of
+//! UTF-8 after its one-byte length; and the parameters in their canonical encoding
+//! ([`CircleParams::encode`]). Everyone joining uses the host's relay.
 //!
 //! A message on the wire is what the station stores:
 //!
@@ -94,6 +95,23 @@ pub enum ChannelError {
     Open,
 }
 
+/// SHA-256 of a commitment payload, as an offer and a join code carry it.
+pub fn commitment_hash(commitment: &[u8]) -> [u8; 32] {
+    use sha2::Digest;
+    Sha256::digest(commitment).into()
+}
+
+/// A host's offer, read.
+#[derive(Clone, Debug)]
+pub struct Offer {
+    pub channel: Channel,
+    pub params: CircleParams,
+    /// The host's relay address.
+    pub relay: String,
+    /// SHA-256 of the host's commitment payload.
+    pub host: [u8; 32],
+}
+
 /// One ceremony's channel: the id the relay files messages under, and the key that seals them.
 #[derive(Clone)]
 pub struct Channel {
@@ -126,16 +144,23 @@ impl Channel {
         }
     }
 
-    /// The code text to show: `"cahoots:ceremony:v1:" || base64url(id || key || relay_len ||
-    /// relay || params)`. `relay` is the host's relay address, at most 255 bytes; a longer one
-    /// is refused with `Malformed`.
-    pub fn offer(&self, params: &CircleParams, relay: &str) -> Result<String, ChannelError> {
+    /// The code text to show: `"cahoots:ceremony:v1:" || base64url(id || key || host ||
+    /// relay_len || relay || params)`. `host` is [`commitment_hash`] of the host's commitment
+    /// payload. `relay` is the host's relay address, at most 255 bytes; a longer one is
+    /// refused with `Malformed`.
+    pub fn offer(
+        &self,
+        params: &CircleParams,
+        relay: &str,
+        host: &[u8; 32],
+    ) -> Result<String, ChannelError> {
         let relay_len = u8::try_from(relay.len()).map_err(|_| ChannelError::Malformed)?;
         let mut raw = Zeroizing::new(Vec::with_capacity(
-            ID_LEN + KEY_LEN + 1 + relay.len() + 8 + params.name.len(),
+            ID_LEN + KEY_LEN + 32 + 1 + relay.len() + 8 + params.name.len(),
         ));
         raw.extend_from_slice(&self.id);
         raw.extend_from_slice(self.key.as_ref());
+        raw.extend_from_slice(host);
         raw.push(relay_len);
         raw.extend_from_slice(relay.as_bytes());
         raw.extend_from_slice(&params.encode());
@@ -144,8 +169,9 @@ impl Channel {
         Ok(out)
     }
 
-    /// The channel, the circle's parameters and the host's relay address in an offer.
-    pub fn from_offer(text: &str) -> Result<(Channel, CircleParams, String), ChannelError> {
+    /// What an offer holds: the channel, the circle's parameters, the host's relay address and
+    /// the hash of the host's commitment.
+    pub fn from_offer(text: &str) -> Result<Offer, ChannelError> {
         let body = text
             .trim()
             .strip_prefix(OFFER_PREFIX)
@@ -155,11 +181,14 @@ impl Channel {
                 .decode(body)
                 .map_err(|_| ChannelError::Malformed)?,
         );
-        if raw.len() < ID_LEN + KEY_LEN + 1 {
+        let host_at = ID_LEN + KEY_LEN;
+        if raw.len() < host_at + 32 + 1 {
             return Err(ChannelError::Malformed);
         }
-        let relay_at = ID_LEN + KEY_LEN + 1;
-        let relay_end = relay_at + usize::from(raw[ID_LEN + KEY_LEN]);
+        let mut host = [0u8; 32];
+        host.copy_from_slice(&raw[host_at..host_at + 32]);
+        let relay_at = host_at + 32 + 1;
+        let relay_end = relay_at + usize::from(raw[host_at + 32]);
         let relay = raw
             .get(relay_at..relay_end)
             .and_then(|r| core::str::from_utf8(r).ok())
@@ -171,7 +200,12 @@ impl Channel {
         id.copy_from_slice(&raw[..ID_LEN]);
         let mut key = Zeroizing::new([0u8; KEY_LEN]);
         key.copy_from_slice(&raw[ID_LEN..ID_LEN + KEY_LEN]);
-        Ok((Channel { id, key }, params, relay))
+        Ok(Offer {
+            channel: Channel { id, key },
+            params,
+            relay,
+            host,
+        })
     }
 
     fn cipher(&self) -> ChaCha20Poly1305 {
@@ -315,6 +349,14 @@ impl Mailbox {
         }
     }
 
+    /// The host's mailbox. The offer binds seat 0 to the host's commitment, so the host never
+    /// loses its seat to an earlier commitment on the relay.
+    pub fn for_host(channel: Channel) -> Mailbox {
+        let mut m = Mailbox::new(channel, 0);
+        m.seat_won = Some(true);
+        m
+    }
+
     /// Another device's commitment for our seat came first on the relay. This device must
     /// post nothing more: `queue` does nothing and `unposted` is empty from then on.
     pub fn lost_seat(&self) -> bool {
@@ -446,11 +488,10 @@ const DEFERRED_PER_SLOT: usize = 4;
 /// `"cahoots:joined:v1:" || base64url(channel id || seat || SHA-256(commitment))`. The
 /// commitment is the commitment payload as posted.
 pub fn join_code(channel_id: &[u8; 16], seat: u8, commitment: &[u8]) -> String {
-    use sha2::Digest;
     let mut raw = Vec::with_capacity(ID_LEN + 1 + 32);
     raw.extend_from_slice(channel_id);
     raw.push(seat);
-    raw.extend_from_slice(&Sha256::digest(commitment));
+    raw.extend_from_slice(&commitment_hash(commitment));
     let mut out = String::from(JOINED_PREFIX);
     out.push_str(&URL_SAFE_NO_PAD.encode(&raw));
     out
@@ -481,22 +522,48 @@ pub fn parse_join_code(text: &str) -> Result<([u8; 16], u8, [u8; 32]), ChannelEr
 /// its later messages wait too. An intruder who photographed the offer can post a commitment,
 /// but the host never takes it, so the host's manifest differs from the one the joiners build
 /// with the intruder in it, and nobody completes.
+///
+/// A joiner gates seat 0 the same way, against the hash in the offer: a seat-0 commitment that
+/// is not the host's whose code the joiner scanned is held and never fed.
 #[derive(Default)]
 pub struct Gate {
+    /// `Some(seat)`: only that seat is gated (a joiner, seat 0). `None`: every seat (the host).
+    only: Option<u8>,
     candidates: BTreeMap<u8, Vec<Vec<u8>>>,
     scanned: BTreeMap<u8, [u8; 32]>,
     fed: BTreeSet<u8>,
     deferred: Vec<(u8, Round, Vec<u8>)>,
+    /// Seats for which a commitment that matched no scan was seen, before or after the match.
+    strays: BTreeSet<u8>,
 }
 
 impl Gate {
+    /// The host's gate: every joiner's seat waits for its scan.
     pub fn new() -> Gate {
         Gate::default()
+    }
+
+    /// A joiner's gate: seat 0 must be the host the offer names.
+    pub fn for_joiner(offer: &Offer) -> Gate {
+        let mut g = Gate {
+            only: Some(0),
+            ..Gate::default()
+        };
+        g.scanned.insert(0, offer.host);
+        g
+    }
+
+    /// Whether `seat`'s messages go through this gate until its commitment is taken.
+    pub fn gates(&self, seat: u8) -> bool {
+        self.only.is_none_or(|s| s == seat) && !self.fed.contains(&seat)
     }
 
     /// A commitment read from the relay for `seat`. Held until a scan matches it.
     pub fn commitment(&mut self, seat: u8, payload: Vec<u8>) {
         if self.fed.contains(&seat) {
+            if self.scanned.get(&seat) != Some(&commitment_hash(&payload)) {
+                self.strays.insert(seat);
+            }
             return;
         }
         let c = self.candidates.entry(seat).or_default();
@@ -539,14 +606,13 @@ impl Gate {
     /// The commitments whose hash matches a scan and are not yet taken: give each to the
     /// ceremony, then call `fed` for the ones it accepted.
     pub fn ready(&self) -> Vec<(u8, Vec<u8>)> {
-        use sha2::Digest;
         self.scanned
             .iter()
             .filter(|(seat, _)| !self.fed.contains(seat))
             .filter_map(|(seat, hash)| {
                 let c = self.candidates.get(seat)?;
                 c.iter()
-                    .find(|p| Sha256::digest(p).as_slice() == hash)
+                    .find(|p| commitment_hash(p) == *hash)
                     .map(|p| (*seat, p.clone()))
             })
             .collect()
@@ -555,7 +621,18 @@ impl Gate {
     /// The ceremony took `seat`'s commitment. Its waiting messages can go in now.
     pub fn fed(&mut self, seat: u8) {
         self.fed.insert(seat);
-        self.candidates.remove(&seat);
+        if let Some(c) = self.candidates.remove(&seat) {
+            let hash = self.scanned.get(&seat).copied();
+            if c.iter().any(|p| Some(commitment_hash(p)) != hash) {
+                self.strays.insert(seat);
+            }
+        }
+    }
+
+    /// Whether a commitment for `seat` appeared on the relay that matches no scan: an
+    /// intruder's, or a second device on the seat.
+    pub fn stray(&self, seat: u8) -> bool {
+        self.strays.contains(&seat) || self.unscanned().contains(&seat)
     }
 
     /// The waiting messages of seats whose commitment is taken, in the order they arrived.

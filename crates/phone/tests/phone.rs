@@ -676,7 +676,7 @@ fn two_phones_hold_a_ceremony_through_the_relay() {
     let offer = a.phone.offer_code(ida.clone()).unwrap();
     assert!(offer.starts_with("cahoots:ceremony:v1:"), "{offer}");
     // The offer fits one small code.
-    assert!(a.phone.qr_matrix(offer.clone()).unwrap().size <= 41);
+    assert!(a.phone.qr_matrix(offer.clone()).unwrap().size <= 49, "{} characters", offer.len());
     // Scanned before joining: the circle and its size, to pick a seat.
     let seen = b.phone.join_scan(offer.clone()).unwrap().unwrap();
     assert!(seen.through_relay);
@@ -783,7 +783,7 @@ fn a_relay_ceremony_survives_a_failed_post() {
     );
     // Nothing was posted twice: two commitments, two reveals, two signatures.
     let id = a.phone.offer_code(ida).unwrap();
-    let (channel, _, _) = cahoots_core::channel::Channel::from_offer(&id).unwrap();
+    let channel = cahoots_core::channel::Channel::from_offer(&id).unwrap().channel;
     assert_eq!(r.lock().unwrap().poll(&channel.id, None, 0).unwrap().len(), 6);
     // A codes-only ceremony has no offer.
     let idc = a.phone.start_ceremony("codes".into(), 2, PAD, false).unwrap();
@@ -798,7 +798,7 @@ fn the_device_that_lost_a_seat_posts_nothing_more() {
     a.phone.set_default_relay(RELAY.into()).unwrap();
     let ida = a.phone.start_ceremony("park".into(), 3, PAD, true).unwrap();
     let offer = a.phone.offer_code(ida.clone()).unwrap();
-    let (channel, _, _) = cahoots_core::channel::Channel::from_offer(&offer).unwrap();
+    let channel = cahoots_core::channel::Channel::from_offer(&offer).unwrap().channel;
     // B and C both pick seat 2. B's setup reaches the relay first.
     let idb = b.phone.join_offer(offer.clone(), 1).unwrap();
     let idc = c.phone.join_offer(offer, 1).unwrap();
@@ -902,4 +902,39 @@ fn two_phones_finish_only_after_the_host_scans() {
     assert_eq!(sb.phase, CeremonyPhase::Complete);
     assert_eq!(sa.words, sb.words);
     assert!(sb.my_join_code.is_none());
+}
+
+#[test]
+fn a_joiner_checks_the_host_against_the_offer() {
+    use cahoots_core::channel::{Channel, Mailbox, Round};
+    let r = relay();
+    let (a, b) = (device(&r), device(&r));
+    a.phone.set_default_relay(RELAY.into()).unwrap();
+    let ida = a.phone.start_ceremony("park".into(), 2, PAD, true).unwrap();
+    // The offer is ready before the host has ticked, and it binds the host's commitment.
+    let offer = a.phone.offer_code(ida.clone()).unwrap();
+    let parsed = Channel::from_offer(&offer).unwrap();
+    // An intruder with the offer posts its own seat-0 commitment before the host's lands.
+    let fake = cahoots_wasm::WasmCeremony::new(2, PAD, "park", false, 0, &vec![7u8; PAD as usize], None, &[0x49; 32], &[0x69; 32], 0).unwrap();
+    let mut box0 = Mailbox::new(parsed.channel.clone(), 0);
+    box0.queue(Round::Commit, &fake.commitment(), &mut rand_core::OsRng);
+    r.lock().unwrap().post(&parsed.channel.id, &box0.unposted()[0]).unwrap();
+    let idb = b.phone.join_offer(offer, 1).unwrap();
+    let sb = tick(&b, &idb);
+    assert!(sb.host_mismatch);
+    assert_eq!(sb.phase, CeremonyPhase::Commit);
+    // The host keeps its seat, and the joiner takes the host's real commitment.
+    for _ in 0..6 {
+        tick(&a, &ida);
+        tick(&b, &idb);
+        host_scans(&a, &ida, &[(&b, &idb)]);
+    }
+    let (sa, sb) = (
+        a.phone.ceremony_state(ida).unwrap(),
+        b.phone.ceremony_state(idb).unwrap(),
+    );
+    assert!(!sa.seat_lost);
+    assert_eq!(sa.phase, CeremonyPhase::Complete);
+    assert_eq!(sb.phase, CeremonyPhase::Complete);
+    assert_eq!(sa.words, sb.words);
 }

@@ -17,7 +17,9 @@ use crate::{Http, PhoneError};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use cahoots_core::ceremony::{Ceremony, CeremonyError, CeremonyResult, Phase};
-use cahoots_core::channel::{join_code, Channel, ChannelError, Gate, Mailbox, Round, JOINED_PREFIX};
+use cahoots_core::channel::{
+    commitment_hash, join_code, Channel, ChannelError, Gate, Mailbox, Offer, Round, JOINED_PREFIX,
+};
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::PUBLIC_KEY_LEN;
 use cahoots_core::seat::SeatPublic;
@@ -401,6 +403,8 @@ pub struct Pending {
     cursor: Option<u64>,
     /// The host's scans of each joiner's code. `Some` on the host of a relay ceremony.
     gate: Option<Gate>,
+    /// The offer: made at the start on the host, binding its commitment; scanned on a joiner.
+    offer: Option<String>,
     /// The host tapped Continue after everyone was scanned: its reveal may go.
     proceeded: bool,
 }
@@ -441,7 +445,7 @@ impl Pending {
         )
         .map_err(ceremony_err)?;
         let receiver = Receiver::new(max_transfer(&params));
-        Ok(Pending {
+        let mut p = Pending {
             params,
             seat,
             seat_label,
@@ -453,11 +457,47 @@ impl Pending {
             early_attestations: Vec::new(),
             receiver,
             gate: (seat == 0 && channel.is_some()).then(Gate::new),
-            mailbox: channel.map(|c| Mailbox::new(c, seat)),
+            offer: None,
+            mailbox: channel.map(|c| {
+                if seat == 0 {
+                    Mailbox::for_host(c)
+                } else {
+                    Mailbox::new(c, seat)
+                }
+            }),
             relay,
             cursor: None,
             proceeded: false,
-        })
+        };
+        // The host's commitment is fixed now, so the offer that binds it is made now, before
+        // anything is posted, and never changes.
+        if seat == 0 {
+            if let Some(mb) = &p.mailbox {
+                let host = commitment_hash(&p.my_commitment().expect("not finished"));
+                let text = mb
+                    .channel()
+                    .offer(&p.params, &p.relay, &host)
+                    .map_err(|_| plain("The relay address is too long to fit in the code."))?;
+                p.offer = Some(text);
+            }
+        }
+        Ok(p)
+    }
+
+    /// A joiner checks seat 0 against the host's commitment in the offer it scanned.
+    pub fn joined(&mut self, text: &str, offer: &Offer) {
+        self.gate = Some(Gate::for_joiner(offer));
+        self.offer = Some(text.trim().to_string());
+    }
+
+    fn is_host(&self) -> bool {
+        self.seat == 0 && self.gate.is_some()
+    }
+
+    /// A joiner: a seat-0 commitment appeared on the relay that is not the host whose code
+    /// was scanned. It is held and never used.
+    pub fn host_mismatch(&self) -> bool {
+        self.seat != 0 && self.gate.as_ref().is_some_and(|g| g.stray(0))
     }
 
     pub fn through_relay(&self) -> bool {
@@ -466,17 +506,17 @@ impl Pending {
 
     /// The host holds back its reveal until Continue.
     fn held_back(&self) -> bool {
-        self.gate.is_some() && !self.proceeded
+        self.is_host() && !self.proceeded
     }
 
     /// Seats the host scanned whose commitment it took.
     pub fn scanned(&self) -> Vec<u8> {
-        self.gate.as_ref().map(Gate::scanned).unwrap_or_default()
+        self.gate.as_ref().filter(|_| self.seat == 0).map(Gate::scanned).unwrap_or_default()
     }
 
     /// Seats with a commitment on the relay that the host has not scanned.
     pub fn unscanned(&self) -> Vec<u8> {
-        self.gate.as_ref().map(Gate::unscanned).unwrap_or_default()
+        self.gate.as_ref().filter(|_| self.seat == 0).map(Gate::unscanned).unwrap_or_default()
     }
 
     /// Everyone is scanned, and the host's reveal waits for Continue.
@@ -496,7 +536,7 @@ impl Pending {
     /// A joiner's code for the host to scan, from the start until the host's reveal arrives.
     pub fn my_join_code(&self) -> Option<String> {
         let mb = self.mailbox.as_ref()?;
-        if self.gate.is_some() || mb.lost_seat() {
+        if self.seat == 0 || mb.lost_seat() {
             return None;
         }
         let c = self.ceremony.as_ref()?;
@@ -525,12 +565,9 @@ impl Pending {
 
     /// The code everyone joining scans, for a ceremony held through the relay.
     pub fn offer(&self) -> Result<String, PhoneError> {
-        let mb = self.mailbox.as_ref().ok_or_else(|| {
+        self.offer.clone().ok_or_else(|| {
             plain("This ceremony is held with codes only. It has no code to join through the relay.")
-        })?;
-        mb.channel()
-            .offer(&self.params, &self.relay)
-            .map_err(|_| plain("The relay address is too long to fit in the code."))
+        })
     }
 
     pub fn phase(&self) -> Phase {
@@ -896,7 +933,7 @@ impl Pending {
                 if let Some(gate) = self.gate.as_mut() {
                     // The host takes a seat's commitment only once its scan matches, and that
                     // seat's later messages wait for it.
-                    if !gate.is_fed(seat) {
+                    if gate.gates(seat) {
                         match round {
                             Round::Commit => gate.commitment(seat, bytes),
                             _ => gate.defer(seat, round, bytes),
@@ -969,6 +1006,9 @@ impl Pending {
 
     /// The host scans a joiner's code.
     fn scan_join(&mut self, text: &str) -> Result<(), PhoneError> {
+        if self.seat != 0 {
+            return Err(bad("That is a joiner's code. Only the host scans it."));
+        }
         let (Some(gate), Some(mb)) = (self.gate.as_mut(), self.mailbox.as_ref()) else {
             return Err(bad("That is a joiner's code. Only the host scans it."));
         };

@@ -35,6 +35,7 @@ fn rng(seed: u64) -> TestRng {
 }
 
 const RELAY: &str = "https://relay.cahoots.network";
+const HOST: [u8; 32] = [0x42; 32];
 
 fn params() -> CircleParams {
     CircleParams::new(3, 65536, "park", false).unwrap()
@@ -43,12 +44,14 @@ fn params() -> CircleParams {
 #[test]
 fn offer_round_trips() {
     let ch = Channel::new(&mut rng(1));
-    let text = ch.offer(&params(), RELAY).unwrap();
+    let text = ch.offer(&params(), RELAY, &HOST).unwrap();
     assert!(text.starts_with(OFFER_PREFIX), "{text}");
     // One small static code: well under what a version 10 QR code holds at low correction.
-    assert!(text.len() < 150, "{} characters", text.len());
-    let (back, p, relay) = Channel::from_offer(&text).unwrap();
-    assert_eq!(relay, RELAY);
+    assert!(text.len() < 200, "{} characters", text.len());
+    let o = Channel::from_offer(&text).unwrap();
+    let (back, p) = (o.channel, o.params);
+    assert_eq!(o.relay, RELAY);
+    assert_eq!(o.host, HOST);
     assert_eq!(back.id, ch.id);
     assert_eq!(p, params());
     // The same key: a message sealed by one opens with the other.
@@ -65,7 +68,7 @@ fn offer_round_trips() {
     );
     // Parameters that do not read are refused.
     // A relay address longer than its one-byte length is refused.
-    assert_eq!(ch.offer(&params(), &"x".repeat(256)).unwrap_err(), ChannelError::Malformed);
+    assert_eq!(ch.offer(&params(), &"x".repeat(256), &HOST).unwrap_err(), ChannelError::Malformed);
     let mut bad = text.clone();
     bad.truncate(text.len() - 2);
     assert!(Channel::from_offer(&bad).is_err());
@@ -233,8 +236,11 @@ fn reproduces_the_channel_vector() {
     let params = CircleParams::decode(&h(&v["params"])).unwrap();
     let ch = Channel::from_key(id, key);
     let relay = v["relay"].as_str().unwrap();
-    assert_eq!(ch.offer(&params, relay).unwrap(), v["offer"].as_str().unwrap());
-    assert_eq!(Channel::from_offer(v["offer"].as_str().unwrap()).unwrap().2, relay);
+    let host: [u8; 32] = h(&v["host_commitment_hash"]).try_into().unwrap();
+    assert_eq!(host, cahoots_core::channel::commitment_hash(&h(&v["host_commitment"])));
+    assert_eq!(ch.offer(&params, relay, &host).unwrap(), v["offer"].as_str().unwrap());
+    let o = Channel::from_offer(v["offer"].as_str().unwrap()).unwrap();
+    assert_eq!((o.relay.as_str(), o.host), (relay, host));
     let j = &v["join"];
     assert_eq!(
         join_code(&id, j["seat"].as_u64().unwrap() as u8, &h(&j["commitment"])),

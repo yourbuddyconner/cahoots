@@ -781,7 +781,10 @@ function screenRelay(params) {
     h('h2', {}, 'Scan a joiner\'s code'),
     camera((text) => { if (text.startsWith(JOINED_PREFIX)) { stopScanner(); takeJoin(text); close(); } }, 'Fill the frame with their code'),
     btn('Paste a join code', () => { close(); pasteSheet('cahoots:joined:v1:…', takeJoin); })));
+  // A joiner: a seat-1 setup on the relay that is not the host it scanned. It is never used.
+  const warn = h('p', { class: 'status', role: 'alert' });
   const refresh = () => {
+    warn.textContent = !host && c.host_mismatch() ? 'Seat 1 on the relay is not the host whose code you scanned. Someone outside the room may have the code.' : '';
     const phase = c.phase();
     const missing = new Set(phase === 'commit' ? c.missing_commitments() : phase === 'reveal' ? c.missing_reveals() : phase === 'attest' ? c.missing_attestations() : []);
     const joined = phase === 'commit' ? params.n - c.missing_commitments().length : params.n;
@@ -798,7 +801,7 @@ function screenRelay(params) {
         ? (host ? 'Show this code to everyone joining. Then scan the code on each of their screens.' : (c.join_code() ? 'Show this to the host.' : 'Wait here while everyone joins.'))
         : phase === 'reveal' ? (c.join_code() ? 'Show this to the host.' : 'Exchanging secrets through the relay.') : 'Confirming who is in the circle.';
   };
-  const body = [h('div', { class: 'ceremony-members' }, chips, received), step];
+  const body = [h('div', { class: 'ceremony-members' }, chips, received), step, warn];
   const join = c.join_code();
   if (host && c.phase() === 'commit') body.push(h('div', { class: 'pair' }, h('div', { class: 'half' }, panelQr(cer.offer, params.name, 'join'))), scanned);
   if (join) body.push(h('div', { class: 'pair' }, h('div', { class: 'half' }, panelQr(join, `seat ${me + 1}`, 'for the host'))));

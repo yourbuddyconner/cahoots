@@ -136,6 +136,10 @@ pub struct CeremonyState {
     /// On a joiner: the code to show the host ("Show this to the host"), drawn with
     /// `qr_matrix`. `None` once the host has taken it.
     pub my_join_code: Option<String>,
+    /// On a joiner: a seat-1 setup appeared on the relay that is not the host whose code was
+    /// scanned. It is never used. Say "Seat 1 on the relay is not the host whose code you
+    /// scanned."
+    pub host_mismatch: bool,
 }
 
 /// A circle to join, read from a host's code.
@@ -322,6 +326,7 @@ impl Phone {
             unscanned: p.unscanned(),
             needs_continue: p.needs_continue(),
             my_join_code: p.my_join_code(),
+            host_mismatch: p.host_mismatch(),
         }
     }
 }
@@ -430,15 +435,16 @@ impl Phone {
     /// phone's default is. Of two devices on one seat, the one whose setup reached the relay
     /// second is told (`seat_lost`) and posts nothing more.
     pub fn join_offer(&self, text: String, seat: u8) -> Result<String, PhoneError> {
-        let (channel, params, relay) =
-            Channel::from_offer(&text).map_err(|_| PhoneError::BadCode {
-                message: "That is not a host's code to join through the relay.".into(),
-            })?;
-        let relay = chat::check_relay(&relay).map_err(|_| PhoneError::BadCode {
+        let offer = Channel::from_offer(&text).map_err(|_| PhoneError::BadCode {
+            message: "That is not a host's code to join through the relay.".into(),
+        })?;
+        let relay = chat::check_relay(&offer.relay).map_err(|_| PhoneError::BadCode {
             message: "The host's code names a relay address that does not read.".into(),
         })?;
-        check_seat(&params, seat)?;
-        let (id, p) = self.begin(params, seat, Some(channel), Some(relay))?;
+        check_seat(&offer.params, seat)?;
+        let (id, mut p) =
+            self.begin(offer.params.clone(), seat, Some(offer.channel.clone()), Some(relay))?;
+        p.joined(&text, &offer);
         self.lock().ceremonies.insert(id.clone(), p);
         Ok(id)
     }
@@ -484,7 +490,7 @@ impl Phone {
     /// `Some` once a whole code is in; hand its `params_code` to `join_ceremony`.
     pub fn join_scan(&self, text: String) -> Result<Option<JoinOffer>, PhoneError> {
         if text.trim_start().starts_with(OFFER_PREFIX) {
-            let (_, params, _) = Channel::from_offer(&text).map_err(|_| PhoneError::BadCode {
+            let params = Channel::from_offer(&text).map(|o| o.params).map_err(|_| PhoneError::BadCode {
                 message: "That host's code does not read.".into(),
             })?;
             return Ok(Some(JoinOffer {
@@ -531,8 +537,8 @@ impl Phone {
 
     /// The number of seats in the circle a join code is for, to offer a seat picker.
     pub fn ceremony_members(&self, params_code: String) -> Result<u8, PhoneError> {
-        if let Ok((_, params, _)) = Channel::from_offer(&params_code) {
-            return Ok(params.n);
+        if let Ok(o) = Channel::from_offer(&params_code) {
+            return Ok(o.params.n);
         }
         Ok(ceremony::read_join(&params_code)?.0.n)
     }

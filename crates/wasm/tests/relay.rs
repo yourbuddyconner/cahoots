@@ -211,3 +211,52 @@ fn an_unscanned_commitment_does_not_reach_the_host() {
         assert_ne!(c.phase(), "complete");
     }
 }
+
+#[test]
+fn a_seat_0_commitment_not_in_the_offer_is_not_fed() {
+    use cahoots_core::channel::{Channel, Mailbox, Round};
+    let mut host = member(0, None);
+    let offer = host.offer(RELAY).unwrap();
+    let id: [u8; 16] = hex::decode(host.channel_hex().unwrap()).unwrap().try_into().unwrap();
+    // An intruder photographed the offer and posts a seat-0 commitment of its own before the
+    // host's lands. It cannot use from_offer for seat 0, so it seals straight into the channel.
+    let fake = WasmCeremony::new(3, L as u32, "trio", false, 0, &contribution(9), None, &[0x49; 32], &[0x69; 32], 0).unwrap();
+    let ch = Channel::from_offer(&offer).unwrap().channel;
+    let mut box0 = Mailbox::new(ch, 0);
+    box0.queue(Round::Commit, &fake.commitment(), &mut rand_core::OsRng);
+    let mut relay = MemRelay::default();
+    relay.post(&id, &box0.unposted()[0]).unwrap();
+
+    let mut ms = [host, member(1, Some(&offer)), member(2, Some(&offer))];
+    let mut cursors = [None; 3];
+    // The joiners read the intruder's first and hold it back. They say so.
+    for i in 1..3 {
+        tick(&mut ms[i], &mut relay, &id, &mut cursors[i]);
+        assert!(ms[i].host_mismatch());
+        assert!(ms[i].missing_commitments().contains(&0));
+    }
+    // The host keeps its seat. Its real commitment lands, the joiners take it, and the
+    // ceremony completes with the real host.
+    for _ in 0..3 {
+        for (i, c) in ms.iter_mut().enumerate() {
+            tick(c, &mut relay, &id, &mut cursors[i]);
+        }
+    }
+    assert!(!ms[0].lost_seat());
+    let codes: Vec<String> = ms[1..].iter().map(|c| c.join_code().unwrap()).collect();
+    for code in &codes {
+        ms[0].scan_join(code).unwrap();
+    }
+    ms[0].proceed();
+    for _ in 0..4 {
+        for (i, c) in ms.iter_mut().enumerate() {
+            tick(c, &mut relay, &id, &mut cursors[i]);
+        }
+    }
+    let words: Vec<String> = ms.into_iter().map(|c| {
+        assert_eq!(c.phase(), "complete");
+        c.finish("CSPRNG").unwrap().words()
+    }).collect();
+    assert_eq!(words[0], words[1]);
+    assert_eq!(words[0], words[2]);
+}
