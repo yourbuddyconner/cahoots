@@ -11,7 +11,8 @@ pub enum KeyKind {
     Root = 2,
     /// A circle's chat epoch counter.
     Epoch = 3,
-    /// A circle's grant counter: how many grants the badge has handed out.
+    /// A grant counter: the uses of one sign grant, in slots below 8, or the badge's issue
+    /// counter, which gives each grant its base, in slot 255.
     Grant = 4,
 }
 

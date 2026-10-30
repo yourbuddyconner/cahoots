@@ -114,7 +114,9 @@ pub enum ChipRequest {
         #[n(0)]
         label: String,
     },
-    /// A fresh 16-byte nonce from the badge, for a grant request to be answered against.
+    /// The 16-byte nonce an agent's proof under `SshSignUnderGrant` must be made over. The
+    /// badge keeps one nonce until it accepts a proof under it, then draws another, so two
+    /// calls with no use between them get the same bytes.
     #[n(6)]
     Nonce,
     /// Ask the badge to sign a grant for an agent. The holder is asked first.
@@ -133,7 +135,8 @@ pub enum ChipRequest {
         budget: u32,
         #[n(5)]
         exp: Option<u64>,
-        /// True for a grant that stays valid after the session that asked for it.
+        /// True for a grant with no expiry, valid until it is revoked or spent. A request
+        /// sets exactly one of `exp` and `standing`.
         #[n(6)]
         standing: bool,
         /// The agent's public key (33 bytes, compressed P-256).

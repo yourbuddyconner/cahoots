@@ -241,7 +241,8 @@ pub trait ChipApps {
     fn card_sign(&mut self, circle: &CircleId, card: &[u8]) -> Result<Vec<u8>, ErrorCode>;
     fn grant_sign(&mut self, circle: &CircleId, grant: &[u8]) -> Result<Vec<u8>, ErrorCode>;
     fn seal_key(&mut self, circle: &CircleId, label: &str) -> Result<[u8; 32], ErrorCode>;
-    /// A fresh nonce for the next grant request.
+    /// The nonce the next proof under a grant must be made over: the same until a proof
+    /// under it is accepted.
     fn nonce(&mut self, circle: &CircleId) -> Result<[u8; 16], ErrorCode>;
     /// Signs a grant for an agent and returns it with the counter slot it was given.
     fn grant_request(

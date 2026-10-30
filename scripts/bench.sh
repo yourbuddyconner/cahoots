@@ -145,7 +145,6 @@ if CAHOOTS_HOME="$GRANT_HOME" CAHOOTS_BENCH=serve "$HOST" grant request --serial
     ( cd "$REPO" && echo "change $n" >> hello.txt && git add hello.txt && git commit -q -m "Commit $n under a grant" ) >>"$LOG" 2>&1 || ok=0
     ( cd "$REPO" && git log --show-signature -1 2>&1 | grep -q 'Good "git" signature' ) || ok=0
   done
-  left=$(( 2 - $(grep -c "signed under a grant" "$LOG") ))
   if [ $ok = 1 ] && grep -q "signed under a grant, 1 left" "$LOG" && grep -q "signed under a grant, 0 left" "$LOG"; then
     say "two commits signed under the grant with no press, 1 left then 0 left; both verify"
   else
