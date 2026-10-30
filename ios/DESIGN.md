@@ -1,0 +1,95 @@
+# The look of the iOS app
+
+The app should feel native, quiet and cared for, like the site: paper, ink, one blue, hairlines,
+and serif titles. The quality comes from type, spacing and a few custom controls, not from
+decoration. The faces are avatars. They sit where an avatar naturally goes and nowhere else.
+
+## Tokens
+
+Colours live in `Assets.xcassets`, each with a light and a dark value, and in `Theme.swift`.
+
+| Token | Light | Dark | Use |
+|---|---|---|---|
+| Paper | #FFFFFF | #17181B | every screen's ground |
+| Ink | #17181B | #F4F4F6 | text, outlines of controls |
+| Blue | #304ED1 | #7B8FFF | the one accent: primary buttons, my bubbles, unread counts, links |
+| Line | #E1E3EA | #2E3036 | hairlines between rows, borders of fields and cards |
+| Muted | #50545E | #A2A6B3 | secondary text |
+| Cream | #F0DCBD | #F0DCBD | only behind a face, as on the badge's e-paper screen |
+
+No other colours. No gradients, no shadows, no card inside a card. Problems read in ink beside a
+small mark, not in red. The system's destructive role stays red in confirmation dialogs, where iOS
+draws it.
+
+Spacing is the 4 pt grid: 8 inside a group, 16 for margins, 24 between groups, 32 to 48 around a
+screen's title. Corners are 12 pt on fields, buttons and the code. Faces have square corners.
+
+## Type
+
+| Role | Style |
+|---|---|
+| Screen title | `.largeTitle`, system serif (New York), regular weight |
+| Headline in a screen | `.title2`, serif |
+| Circle name in a row, the six words, hello words | `.title3` to `.title`, serif |
+| Body | `.body`, SF |
+| Meta | `.subheadline`, Muted |
+| Section label | `.footnote` semibold, Muted |
+| Codes, fingerprints | `.footnote`, SF Mono |
+
+Every size is a text style, so Dynamic Type scales all of it. Rows stack vertically at
+accessibility sizes.
+
+## Components
+
+- Filled button: Blue with paper text, full width, 52 pt tall. One per screen.
+- Outlined button: ink text in a hairline outline, for the second action.
+- Text button: blue text, for a quiet third action.
+- Option row: a title, one line under it, a blue check when chosen. Replaces segmented pickers
+  where the choice needs words.
+- Section: a small muted label above rows split by hairlines. No grey grouped background.
+- Step bar: four short segments under the ceremony's title, blue up to the current step.
+- Face: the 24 x 24 cahoot drawn with `Canvas`, ink on cream, square corners, a one-pixel cream
+  margin. 20 pt in a circle row, 24 pt in chat, 44 pt in the roster, 96 pt in Settings. Labelled
+  "Seat N's face" for VoiceOver until traits give it words.
+- Liquid Glass, on iOS 26 and later only: the chat composer and the bottom action bars float on
+  glass. On iOS 17 to 18 the same bars sit on Paper with a hairline above. The design does not
+  depend on glass.
+
+## Screens
+
+- Circles: serif title "Cahoots", then each circle as a row: its name in serif, one sentence of
+  meta ("Three people. You are seat 2."), the members' faces small beside it, and the unread count
+  in a blue capsule. With no circles, an empty state in words: the line "Meet in person. Stay in
+  cahoots." and three numbered steps, like the site. Create (filled) and Join (outlined) sit in
+  the bottom bar.
+- Create a circle: a name field, a people stepper with large targets, the two ways to hold the
+  ceremony as option rows, the secret size as option rows. "Start the ceremony" in the bottom bar.
+- Join: the camera in a framed square, the paste field under it. Then "Which seat are you?" with
+  the free seats as option rows and "Make my contribution".
+- Ceremony: the circle's name inline, then the step bar, the step's sentence as a serif headline,
+  and the code on a paper card with a hairline. The host sees every seat as a row with its state
+  in words: waiting, here but not scanned, scanned. "Everyone is scanned" then Continue.
+- Words: the six words large in serif, two columns of three, numbered in blue. "They match"
+  filled, "They differ" as a text button.
+- Chat: the circle's name and the members' small faces in the header. My messages on the right in
+  Blue; theirs on the left on Paper with a hairline, the sender's face beside the first of a run
+  and their name above it. A thin divider marks new keys. The composer is one rounded field with a
+  blue send arrow.
+- People: each seat as a row with its 44 pt face, its name, and its declared tier in words. A row
+  opens hello words.
+- Hello words: the same serif word treatment as the six words.
+- Settings: the phone's own face on cream at the top, the key-store sentence and fingerprint under
+  it, then quiet sections: relay for new circles, checking for messages, circles.
+
+## Copy
+
+Plain words, sentence case, active verbs. Every button says what it does. No middle dots, no em
+dashes, no semicolons, no all caps. Meta is written as sentences.
+
+## Cut
+
+- The coloured dot ring that stood in for a circle's picture.
+- Segmented pickers where the choice needed a sentence.
+- Middle-dot meta strings, the epoch on every message, "you · 1" seat chips.
+- Grey grouped backgrounds and the default `Form` look.
+- Red status text.
