@@ -1,6 +1,6 @@
 //! The custodian trait and the types it speaks, plus the impl for a core `Pad`.
 
-use crate::wire::{ErrorCode, SshHost};
+use crate::wire::{ErrorCode, GrantRequestFields, SshHost, UnderGrantFields};
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
@@ -241,6 +241,20 @@ pub trait ChipApps {
     fn card_sign(&mut self, circle: &CircleId, card: &[u8]) -> Result<Vec<u8>, ErrorCode>;
     fn grant_sign(&mut self, circle: &CircleId, grant: &[u8]) -> Result<Vec<u8>, ErrorCode>;
     fn seal_key(&mut self, circle: &CircleId, label: &str) -> Result<[u8; 32], ErrorCode>;
+    /// A fresh nonce for the next grant request.
+    fn nonce(&mut self, circle: &CircleId) -> Result<[u8; 16], ErrorCode>;
+    /// Signs a grant for an agent and returns it with the counter slot it was given.
+    fn grant_request(
+        &mut self,
+        circle: &CircleId,
+        req: &GrantRequestFields,
+    ) -> Result<(Vec<u8>, u8), ErrorCode>;
+    /// Signs for ssh under a grant and returns the signature with the uses left.
+    fn ssh_sign_under_grant(
+        &mut self,
+        circle: &CircleId,
+        req: &UnderGrantFields,
+    ) -> Result<(Vec<u8>, u32), ErrorCode>;
     /// Whether the device has a chip: `Identify` says so. A device without one keeps this.
     fn has_chip(&self) -> bool {
         false
@@ -271,6 +285,23 @@ impl<S: PadStorage, L: SpentLedger> ChipApps for Pad<S, L> {
         Err(ErrorCode::NoChip)
     }
     fn seal_key(&mut self, _: &CircleId, _: &str) -> Result<[u8; 32], ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+    fn nonce(&mut self, _: &CircleId) -> Result<[u8; 16], ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+    fn grant_request(
+        &mut self,
+        _: &CircleId,
+        _: &GrantRequestFields,
+    ) -> Result<(Vec<u8>, u8), ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+    fn ssh_sign_under_grant(
+        &mut self,
+        _: &CircleId,
+        _: &UnderGrantFields,
+    ) -> Result<(Vec<u8>, u32), ErrorCode> {
         Err(ErrorCode::NoChip)
     }
 }

@@ -3,8 +3,9 @@
 //! It decodes a request, asks a [`Consent`] for permission if the request spends pad,
 //! applies it to a [`Custodian`], and encodes the response. `Identify` and `Remaining`
 //! never ask. The four spending requests always do, and a refusal spends nothing. Of the
-//! `Chip` family, `Describe` and `Attest` never ask (public material only); the signing and
-//! key-releasing operations always do.
+//! `Chip` family, `Describe`, `Attest`, `Nonce` and `SshSignUnderGrant` never ask (public
+//! material, or the badge decides for itself); the other signing and key-releasing
+//! operations always do.
 //!
 //! `Identify` answers with the custodian's circles, the first circle's tier (0 when there
 //! are none), an empty name and whether it has a chip. A device that has a name wraps the
@@ -13,7 +14,9 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::wire::{ChipRequest, ChipResponse, ErrorCode, Request, Response};
+use crate::wire::{
+    ChipRequest, ChipResponse, ErrorCode, GrantRequestFields, Request, Response, UnderGrantFields,
+};
 use crate::{ChipApps, Custodian};
 
 /// Permission to spend. The device decides how to ask: a button, a prompt, or nothing.
@@ -121,6 +124,56 @@ pub fn serve<C: Custodian + ChipApps, K: Consent>(
                 ChipRequest::SealKey { label } => c
                     .seal_key(&circle, &label)
                     .map(|key| ChipResponse::Key { key }),
+                ChipRequest::Nonce => c.nonce(&circle).map(|nonce| ChipResponse::Nonce { nonce }),
+                ChipRequest::GrantRequest {
+                    action,
+                    author,
+                    location,
+                    agent,
+                    budget,
+                    exp,
+                    standing,
+                    cnf,
+                    time,
+                } => c
+                    .grant_request(
+                        &circle,
+                        &GrantRequestFields {
+                            action,
+                            author,
+                            location,
+                            agent,
+                            budget,
+                            exp,
+                            standing,
+                            cnf,
+                            time,
+                        },
+                    )
+                    .map(|(grant, slot)| ChipResponse::Grant { grant, slot }),
+                ChipRequest::SshSignUnderGrant {
+                    data,
+                    content,
+                    grant,
+                    proof,
+                    location,
+                    time,
+                } => c
+                    .ssh_sign_under_grant(
+                        &circle,
+                        &UnderGrantFields {
+                            data,
+                            content,
+                            grant,
+                            proof,
+                            location,
+                            time,
+                        },
+                    )
+                    .map(|(signature, remaining)| ChipResponse::GrantSignature {
+                        signature,
+                        remaining,
+                    }),
             };
             match result {
                 Ok(result) => Response::Chip { result },

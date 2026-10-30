@@ -31,7 +31,7 @@ use cahoots_core::cose;
 use cahoots_core::seat::{SeatKey, SeatPublic, SeatSigner};
 use cahoots_objects::card::{self, Card};
 use cahoots_objects::grant::{self, key_id, Grant, Grantor};
-use cahoots_custodian::wire::{ChipRequest, ErrorCode, SshHost};
+use cahoots_custodian::wire::{ChipRequest, ErrorCode, GrantRequestFields, SshHost, UnderGrantFields};
 use cahoots_custodian::{ChipApps, ChipInfo, CircleId, CircleInfo, Custodian, PadError, PskHandle};
 use zeroize::Zeroizing;
 
@@ -166,6 +166,10 @@ impl<'a> BadgeApps<'a> {
         let c = self.held(circle)?;
         match op {
             ChipRequest::Describe | ChipRequest::Attest { .. } => Ok(None),
+            // A later task gives the grant requests their screens; until then the badge
+            // answers the two that never ask, and refuses the one that would.
+            ChipRequest::Nonce | ChipRequest::SshSignUnderGrant { .. } => Ok(None),
+            ChipRequest::GrantRequest { .. } => Err(ErrorCode::NoChip),
             ChipRequest::SshSign {
                 data,
                 host,
@@ -446,6 +450,27 @@ impl ChipApps for BadgeApps<'_> {
         }
     }
 
+    // A later task fills in the grant methods; until then the badge has none.
+    fn nonce(&mut self, _: &CircleId) -> Result<[u8; 16], ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+
+    fn grant_request(
+        &mut self,
+        _: &CircleId,
+        _: &GrantRequestFields,
+    ) -> Result<(Vec<u8>, u8), ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+
+    fn ssh_sign_under_grant(
+        &mut self,
+        _: &CircleId,
+        _: &UnderGrantFields,
+    ) -> Result<(Vec<u8>, u32), ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+
     fn has_chip(&self) -> bool {
         self.chip.is_some()
     }
@@ -532,6 +557,26 @@ impl<C> ChipApps for Served<'_, C> {
 
     fn seal_key(&mut self, circle: &CircleId, label: &str) -> Result<[u8; 32], ErrorCode> {
         self.apps.seal_key(circle, label)
+    }
+
+    fn nonce(&mut self, circle: &CircleId) -> Result<[u8; 16], ErrorCode> {
+        self.apps.nonce(circle)
+    }
+
+    fn grant_request(
+        &mut self,
+        circle: &CircleId,
+        req: &GrantRequestFields,
+    ) -> Result<(Vec<u8>, u8), ErrorCode> {
+        self.apps.grant_request(circle, req)
+    }
+
+    fn ssh_sign_under_grant(
+        &mut self,
+        circle: &CircleId,
+        req: &UnderGrantFields,
+    ) -> Result<(Vec<u8>, u32), ErrorCode> {
+        self.apps.ssh_sign_under_grant(circle, req)
     }
 
     fn has_chip(&self) -> bool {

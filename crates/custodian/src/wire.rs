@@ -114,17 +114,89 @@ pub enum ChipRequest {
         #[n(0)]
         label: String,
     },
+    /// A fresh 16-byte nonce from the badge, for a grant request to be answered against.
+    #[n(6)]
+    Nonce,
+    /// Ask the badge to sign a grant for an agent. The holder is asked first.
+    #[n(7)]
+    GrantRequest {
+        #[n(0)]
+        action: String,
+        #[n(1)]
+        author: String,
+        #[n(2)]
+        location: Option<String>,
+        #[n(3)]
+        agent: String,
+        /// How many signatures the grant allows.
+        #[n(4)]
+        budget: u32,
+        #[n(5)]
+        exp: Option<u64>,
+        /// True for a grant that stays valid after the session that asked for it.
+        #[n(6)]
+        standing: bool,
+        /// The agent's public key (33 bytes, compressed P-256).
+        #[cbor(n(7), with = "minicbor::bytes")]
+        cnf: [u8; 33],
+        /// The laptop's clock, in seconds.
+        #[n(8)]
+        time: u64,
+    },
+    /// Sign for ssh under a grant the badge issued earlier. The badge decides whether the
+    /// grant covers this; it does not ask first unless it falls back to a prompt.
+    #[n(8)]
+    SshSignUnderGrant {
+        #[cbor(n(0), with = "minicbor::bytes")]
+        data: Vec<u8>,
+        #[cbor(n(1), with = "minicbor::bytes")]
+        content: Vec<u8>,
+        #[cbor(n(2), with = "minicbor::bytes")]
+        grant: Vec<u8>,
+        #[cbor(n(3), with = "minicbor::bytes")]
+        proof: Vec<u8>,
+        #[n(4)]
+        location: Option<String>,
+        /// The laptop's clock, in seconds.
+        #[n(5)]
+        time: u64,
+    },
+}
+
+/// The fields of a `GrantRequest`, as `ChipApps::grant_request` takes them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GrantRequestFields {
+    pub action: String,
+    pub author: String,
+    pub location: Option<String>,
+    pub agent: String,
+    pub budget: u32,
+    pub exp: Option<u64>,
+    pub standing: bool,
+    pub cnf: [u8; 33],
+    pub time: u64,
+}
+
+/// The fields of an `SshSignUnderGrant`, as `ChipApps::ssh_sign_under_grant` takes them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnderGrantFields {
+    pub data: Vec<u8>,
+    pub content: Vec<u8>,
+    pub grant: Vec<u8>,
+    pub proof: Vec<u8>,
+    pub location: Option<String>,
+    pub time: u64,
 }
 
 impl Request {
     /// Whether this request, `encoded_len` bytes long on the wire, is within the length its
-    /// kind allows: [`MAX_REQUEST_LEN`] for an `SshSign`, [`MAX_SMALL_REQUEST_LEN`] for
+    /// kind allows: [`MAX_REQUEST_LEN`] for an `SshSign` or `SshSignUnderGrant`, [`MAX_SMALL_REQUEST_LEN`] for
     /// anything else. A badge checks this before it asks its holder anything.
     pub fn length_ok(&self, encoded_len: usize) -> bool {
         let long_ok = matches!(
             self,
             Request::Chip {
-                op: ChipRequest::SshSign { .. },
+                op: ChipRequest::SshSign { .. } | ChipRequest::SshSignUnderGrant { .. },
                 ..
             }
         );
@@ -140,7 +212,13 @@ impl Request {
 impl ChipRequest {
     /// True when the badge asks its holder before answering.
     pub fn needs_consent(&self) -> bool {
-        !matches!(self, ChipRequest::Describe | ChipRequest::Attest { .. })
+        !matches!(
+            self,
+            ChipRequest::Describe
+                | ChipRequest::Attest { .. }
+                | ChipRequest::Nonce
+                | ChipRequest::SshSignUnderGrant { .. }
+        )
     }
 }
 
@@ -192,6 +270,27 @@ pub enum ChipResponse {
     Key {
         #[cbor(n(0), with = "minicbor::bytes")]
         key: [u8; 32],
+    },
+    #[n(4)]
+    Nonce {
+        #[cbor(n(0), with = "minicbor::bytes")]
+        nonce: [u8; 16],
+    },
+    /// A signed grant, and the counter slot the badge gave it.
+    #[n(5)]
+    Grant {
+        #[cbor(n(0), with = "minicbor::bytes")]
+        grant: Vec<u8>,
+        #[n(1)]
+        slot: u8,
+    },
+    /// An ssh signature made under a grant, and how many uses the grant has left.
+    #[n(6)]
+    GrantSignature {
+        #[cbor(n(0), with = "minicbor::bytes")]
+        signature: Vec<u8>,
+        #[n(1)]
+        remaining: u32,
     },
 }
 

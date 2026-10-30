@@ -1,7 +1,7 @@
 use cahoots_chip::Attested;
 use cahoots_custodian::wire::{
     ChipRequest, ChipResponse, ErrorCode, Request, Response, SshHost, KIND_REQUEST, KIND_RESPONSE,
-    MAX_REQUEST_LEN,
+    MAX_REQUEST_LEN, MAX_SMALL_REQUEST_LEN,
 };
 use cahoots_custodian::{CircleInfo, PskHandle};
 
@@ -207,7 +207,102 @@ fn chip_requests() -> Vec<ChipRequest> {
         ChipRequest::SealKey {
             label: "card".into(),
         },
+        ChipRequest::Nonce,
+        ChipRequest::GrantRequest {
+            action: "ssh-sign".into(),
+            author: "ana".into(),
+            location: Some("github.com".into()),
+            agent: "claude".into(),
+            budget: 5,
+            exp: Some(1_700_000_000),
+            standing: true,
+            cnf: [3; 33],
+            time: 1_699_999_000,
+        },
+        ChipRequest::GrantRequest {
+            action: "ssh-sign".into(),
+            author: "ana".into(),
+            location: None,
+            agent: "claude".into(),
+            budget: 0,
+            exp: None,
+            standing: false,
+            cnf: [0; 33],
+            time: 0,
+        },
+        ChipRequest::SshSignUnderGrant {
+            data: vec![9, 9],
+            content: vec![5],
+            grant: vec![6, 6],
+            proof: vec![7],
+            location: Some("github.com".into()),
+            time: 42,
+        },
+        ChipRequest::SshSignUnderGrant {
+            data: vec![],
+            content: vec![],
+            grant: vec![],
+            proof: vec![],
+            location: None,
+            time: 0,
+        },
     ]
+}
+
+#[test]
+fn grant_requests_decode_strictly() {
+    let r = Request::Chip {
+        circle: [4; 16],
+        op: ChipRequest::Nonce,
+    };
+    let mut bytes = r.encode();
+    bytes.push(0);
+    assert_eq!(Request::decode(&bytes), Err(ErrorCode::Malformed));
+    // A key of the wrong length is not a request.
+    let short = Request::Chip {
+        circle: [4; 16],
+        op: ChipRequest::GrantRequest {
+            action: "a".into(),
+            author: "b".into(),
+            location: None,
+            agent: "c".into(),
+            budget: 1,
+            exp: None,
+            standing: false,
+            cnf: [1; 33],
+            time: 1,
+        },
+    }
+    .encode();
+    let at = short.windows(2).position(|w| w == [0x58, 33]).unwrap();
+    let mut bad = short.clone();
+    bad[at + 1] = 32;
+    bad.remove(at + 2);
+    assert_eq!(Request::decode(&bad), Err(ErrorCode::Malformed));
+}
+
+#[test]
+fn grant_ops_consent_and_length() {
+    let nonce = ChipRequest::Nonce;
+    assert!(!nonce.needs_consent());
+    let ask = chip_requests()
+        .into_iter()
+        .find(|o| matches!(o, ChipRequest::GrantRequest { .. }))
+        .unwrap();
+    assert!(ask.needs_consent());
+    let under = chip_requests()
+        .into_iter()
+        .find(|o| matches!(o, ChipRequest::SshSignUnderGrant { .. }))
+        .unwrap();
+    assert!(!under.needs_consent());
+    let long = |op| Request::Chip {
+        circle: [0; 16],
+        op,
+    };
+    let under = long(under);
+    assert!(under.length_ok(MAX_REQUEST_LEN));
+    assert!(!under.length_ok(MAX_REQUEST_LEN + 1));
+    assert!(!long(ChipRequest::Nonce).length_ok(MAX_SMALL_REQUEST_LEN + 1));
 }
 
 #[test]
@@ -244,6 +339,15 @@ fn chip_responses_round_trip() {
             signature: vec![8; 3],
         },
         ChipResponse::Key { key: [6; 32] },
+        ChipResponse::Nonce { nonce: [9; 16] },
+        ChipResponse::Grant {
+            grant: vec![1, 2, 3],
+            slot: 4,
+        },
+        ChipResponse::GrantSignature {
+            signature: vec![8; 5],
+            remaining: 3,
+        },
     ] {
         let r = Response::Chip { result };
         assert_eq!(Response::decode(&r.encode()), Ok(r));

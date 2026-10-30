@@ -3,7 +3,8 @@ use cahoots_core::ledger::MemLedger;
 use cahoots_core::pad::{MemPadStorage, Pad};
 use cahoots_core::params::CircleParams;
 use cahoots_custodian::wire::{
-    ChipRequest, ChipResponse, ErrorCode, Request, Response, SshHost, MAX_SMALL_REQUEST_LEN,
+    ChipRequest, ChipResponse, ErrorCode, GrantRequestFields, Request, Response, SshHost,
+    UnderGrantFields, MAX_SMALL_REQUEST_LEN,
 };
 use cahoots_custodian::{serve, AlwaysAllow, ChipApps, ChipInfo, CircleId, Consent, Custodian};
 
@@ -107,6 +108,23 @@ impl ChipApps for Fake {
     }
     fn seal_key(&mut self, _: &CircleId, _: &str) -> Result<[u8; 32], ErrorCode> {
         Ok([0xDD; 32])
+    }
+    fn nonce(&mut self, _: &CircleId) -> Result<[u8; 16], ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+    fn grant_request(
+        &mut self,
+        _: &CircleId,
+        _: &GrantRequestFields,
+    ) -> Result<(Vec<u8>, u8), ErrorCode> {
+        Err(ErrorCode::NoChip)
+    }
+    fn ssh_sign_under_grant(
+        &mut self,
+        _: &CircleId,
+        _: &UnderGrantFields,
+    ) -> Result<(Vec<u8>, u32), ErrorCode> {
+        Err(ErrorCode::NoChip)
     }
 }
 
@@ -297,4 +315,43 @@ fn only_ssh_sign_may_be_long() {
             code: ErrorCode::Malformed
         }
     );
+}
+
+#[test]
+fn a_pad_without_a_chip_says_no_chip_to_grant_requests() {
+    let mut p = pad();
+    for op in [
+        ChipRequest::Nonce,
+        ChipRequest::GrantRequest {
+            action: "ssh-sign".into(),
+            author: "ana".into(),
+            location: None,
+            agent: "claude".into(),
+            budget: 1,
+            exp: None,
+            standing: false,
+            cnf: [2; 33],
+            time: 1,
+        },
+        ChipRequest::SshSignUnderGrant {
+            data: vec![1],
+            content: vec![],
+            grant: vec![],
+            proof: vec![],
+            location: None,
+            time: 1,
+        },
+    ] {
+        let req = Request::Chip {
+            circle: [1; 16],
+            op,
+        };
+        let r = Response::decode(&serve(&mut p, &mut AlwaysAllow, &req.encode())).unwrap();
+        assert_eq!(
+            r,
+            Response::Error {
+                code: ErrorCode::NoChip
+            }
+        );
+    }
 }
