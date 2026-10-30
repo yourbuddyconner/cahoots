@@ -36,7 +36,7 @@ curl https://relay.cahoots.network/v1/head
 
 The first answers `ok`; the second answers `{"seq":null,"hash":"…"}` on an empty log.
 
-Updates: the same `fly deploy` line from a checkout of `main`. Deployed for the first time on 2026-10-29 (app `cahoots-relay`, region sjc, one shared-cpu-1x machine, a 1 GB volume). The log on the volume is replayed and chain-verified on every start; a broken file refuses to start, which is the point.
+Updates: the same `fly deploy` line from a checkout of `main`. Redeploy whenever the station's message rules change (a new message version, a new size cap), or clients on the new rules get `unknown message version` from the live relay. Redeployed 2026-10-30 for the ceremony channel (message version 3). Deployed for the first time on 2026-10-29 (app `cahoots-relay`, region sjc, one shared-cpu-1x machine, a 1 GB volume). The log on the volume is replayed and chain-verified on every start; a broken file refuses to start, which is the point.
 
 ## Any other host
 
