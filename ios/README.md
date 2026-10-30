@@ -58,7 +58,7 @@ who cannot use the camera.
 
 ### Once
 
-1. In Xcode, sign into the developer account (Settings, Accounts). Team id `9Z585PW7QR`.
+1. Install Xcode 26 or later with the iOS platform. App Store Connect refuses builds made with an older SDK. Sign into the developer account in Xcode (Settings, Accounts). Team id `9Z585PW7QR`.
 2. `cp ios/Signing.xcconfig.example ios/Signing.xcconfig` and set `DEVELOPMENT_TEAM` to the team
    id. The file is git-ignored.
 3. In App Store Connect, create the app record: My Apps, New App, platform iOS, name Cahoots,
@@ -89,7 +89,8 @@ Tried on 2026-10-30: `scripts/ios-archive.sh --no-upload` archived build 2026103
 exported the `.ipa`. Xcode made an Apple Development certificate on this Mac, and the export is
 signed "Apple Distribution: Conner Swann (9Z585PW7QR)" with the profile "iOS Team Store
 Provisioning Profile: network.cahoots.app". The upload was not tried: it needs the app record
-and the API key above.
+and the API key above. Later that day, with Xcode 27.2 and the iOS 27.2 SDK, the script uploaded
+build 202610302326 to App Store Connect (delivery 462fbaa7).
 
 ### What to try first on a device
 
