@@ -11,11 +11,16 @@ enum BackgroundRefresh {
     static func register(_ model: AppModel) {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil) { task in
             schedule()
+            let done = Once()
             let work = Task { @MainActor in
                 let ok = await model.pollAll()
-                task.setTaskCompleted(success: ok)
+                if done.claim() { task.setTaskCompleted(success: ok) }
             }
-            task.expirationHandler = { work.cancel() }
+            // Out of time: stop between circles, and tell iOS now rather than when a request ends.
+            task.expirationHandler = {
+                work.cancel()
+                if done.claim() { task.setTaskCompleted(success: false) }
+            }
         }
     }
 

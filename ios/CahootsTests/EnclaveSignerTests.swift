@@ -1,4 +1,5 @@
 import CryptoKit
+import LocalAuthentication
 import XCTest
 @testable import Cahoots
 
@@ -53,5 +54,36 @@ final class EnclaveSignerTests: XCTestCase {
         let first = try signer.makeKey(label: l)
         signer.deleteKey(label: l)
         XCTAssertNotEqual(try signer.makeKey(label: l), first)
+    }
+
+    func testOnlyARefusedPromptIsLocked() {
+        let la = { (c: LAError.Code) in NSError(domain: LAErrorDomain, code: c.rawValue) }
+        XCTAssertTrue(EnclaveSigner.isRefusal(la(.userCancel)))
+        XCTAssertTrue(EnclaveSigner.isRefusal(la(.authenticationFailed)))
+        XCTAssertTrue(EnclaveSigner.isRefusal(NSError(domain: NSOSStatusErrorDomain, code: Int(errSecInteractionNotAllowed))))
+        let wrapped = NSError(domain: "CryptoKit.CryptoKitError", code: 1,
+                              userInfo: [NSUnderlyingErrorKey: la(.userCancel)])
+        XCTAssertTrue(EnclaveSigner.isRefusal(wrapped))
+        XCTAssertFalse(EnclaveSigner.isRefusal(la(.passcodeNotSet)))
+        XCTAssertFalse(EnclaveSigner.isRefusal(la(.biometryNotAvailable)))
+        XCTAssertFalse(EnclaveSigner.isRefusal(NSError(domain: "CryptoKit.CryptoKitError", code: 3)))
+    }
+
+    func testABrokenKeyIsReplaced() throws {
+        let l = label()
+        // A key item that does not load as a key.
+        let add: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: EnclaveSigner.service,
+            kSecAttrAccount as String: l,
+            kSecValueData as String: Data([1, 2, 3]),
+        ]
+        XCTAssertEqual(SecItemAdd(add as CFDictionary, nil), errSecSuccess)
+        XCTAssertThrowsError(try signer.sign(label: l, message: Data([1]))) { error in
+            guard case PhoneError.Signer = error else { return XCTFail("expected Signer, got \(error)") }
+        }
+        let publicKey = try signer.makeKey(label: l)
+        XCTAssertEqual(publicKey.count, 33)
+        XCTAssertEqual(try signer.sign(label: l, message: Data([1])).count, 64)
     }
 }

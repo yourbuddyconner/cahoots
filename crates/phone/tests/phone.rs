@@ -956,3 +956,44 @@ fn the_roster_lists_every_seat_with_its_tier() {
     assert!(!theirs[0].mine && theirs[1].mine);
     assert!(matches!(a.phone.circle_members("gone".into()), Err(PhoneError::NotFound { .. })));
 }
+
+#[test]
+fn a_relay_address_is_a_plain_http_url() {
+    let r = relay();
+    let a = device(&r);
+    for good in [
+        "https://relay.cahoots.network",
+        "https://relay.cahoots.network/",
+        "http://127.0.0.1:8787",
+        "http://localhost:8080/",
+    ] {
+        a.phone.set_default_relay(good.into()).unwrap_or_else(|e| panic!("{good}: {e}"));
+    }
+    assert_eq!(a.phone.default_relay(), "http://localhost:8080");
+    for bad in [
+        "http://127.0.0.1:8787network",
+        "ftp://relay.cahoots.network",
+        "https://",
+        "https://relay.cahoots.network/v1",
+        "https://relay.cahoots.network/?a=1",
+        "https://relay.cahoots.network/#x",
+        "relay.cahoots.network",
+        "https://user@relay.cahoots.network",
+    ] {
+        assert!(
+            matches!(a.phone.set_default_relay(bad.into()), Err(PhoneError::Network { .. })),
+            "{bad} was taken"
+        );
+    }
+    assert_eq!(a.phone.default_relay(), "http://localhost:8080");
+}
+
+#[test]
+fn the_key_store_sentence_says_where_the_key_is() {
+    let r = relay();
+    let a = device(&r);
+    assert!(a.phone.describe().key_store.contains("Secure Enclave"));
+    a.phone.set_enclave(false);
+    let s = a.phone.describe().key_store;
+    assert!(!s.contains("Secure Enclave") && s.contains("keychain"), "{s}");
+}

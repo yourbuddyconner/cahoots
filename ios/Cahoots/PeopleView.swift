@@ -53,7 +53,7 @@ struct PeopleView: View {
     private func row(_ m: Member) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(m.mine ? "Seat \(m.seat + 1) · you" : "Seat \(m.seat + 1)").font(.headline)
-            Text(m.mine ? "\(Self.tier(m.tier)) · this phone, seat key in the Secure Enclave" : Self.tier(m.tier))
+            Text(m.mine ? "\(Self.tier(m.tier)) · this phone, \(core.signer.usesEnclave ? "seat key in the Secure Enclave" : "seat key in the keychain of this simulator")" : Self.tier(m.tier))
                 .font(.footnote).foregroundStyle(.secondary)
         }
     }

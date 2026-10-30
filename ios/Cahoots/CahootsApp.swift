@@ -49,6 +49,12 @@ struct RootView: View {
             }
         }
         .task { await model.open() }
+        .alert("Ceremony lost", isPresented: Binding(get: { model.lostCeremony != nil },
+                                                     set: { if !$0 { model.lostCeremony = nil } })) {
+            Button("OK") { model.lostCeremony = nil }
+        } message: {
+            Text(model.lostCeremony ?? "")
+        }
         // While the app is open, read every circle's relay now and then.
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }

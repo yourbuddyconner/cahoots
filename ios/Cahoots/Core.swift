@@ -6,7 +6,7 @@ import Foundation
 /// Face ID prompt, so no call may run on the main thread. Views ask through `run`, which hops to
 /// the queue and back.
 final class Core: @unchecked Sendable {
-    let phone: Phone
+    private let phone: Phone
     let signer: EnclaveSigner
     let store: PhoneStore
     private let queue: DispatchQueue
@@ -25,6 +25,7 @@ final class Core: @unchecked Sendable {
             queue.async {
                 c.resume(with: Result {
                     let phone = try Phone.open(dir: store.directory.path, signer: signer, http: UrlSessionHttp())
+                    phone.setEnclave(enclave: signer.usesEnclave)
                     store.relax()
                     return Core(phone: phone, signer: signer, store: store, queue: queue)
                 })
@@ -41,6 +42,21 @@ final class Core: @unchecked Sendable {
         }
     }
 
+    /// Run `f` on the phone's queue, but stop waiting after `seconds`: `nil` then, or on an
+    /// error. A call already running on the queue cannot be stopped and finishes on its own.
+    func run<T>(within seconds: Double, _ f: @escaping (Phone) throws -> T) async -> T? {
+        let once = Once()
+        return await withCheckedContinuation { c in
+            queue.async {
+                let r = try? f(self.phone)
+                if once.claim() { c.resume(returning: r) }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) {
+                if once.claim() { c.resume(returning: nil) }
+            }
+        }
+    }
+
     /// Decode a camera frame. `decode_frame` reads no state and takes no lock, so the camera's
     /// own queue calls it directly rather than waiting behind a relay request.
     func decodeFrame(width: Int, height: Int, gray: Data) -> String? {
@@ -50,7 +66,21 @@ final class Core: @unchecked Sendable {
 
     /// The seat key a ceremony made, under `cahoots:seat:<ceremony id>`, for when it is thrown away.
     func forgetCeremonyKey(_ ceremony: String) {
-        signer.deleteKey(label: "cahoots:seat:\(ceremony)")
+        signer.deleteKey(label: OpenCeremonies.keyLabel(ceremony))
+    }
+}
+
+/// True for the first caller only, on any thread.
+final class Once: @unchecked Sendable {
+    private let lock = NSLock()
+    private var taken = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if taken { return false }
+        taken = true
+        return true
     }
 }
 

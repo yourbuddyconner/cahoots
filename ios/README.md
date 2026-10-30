@@ -32,11 +32,24 @@ to `$CARGO_TARGET_DIR/ios` when the target directory is elsewhere.
 - `PhoneStore.swift`: Application Support/cahoots, left out of backups. `circles/` has complete
   protection. `phone.cbor` and each circle's `cursor.cbor` and `settings.cbor` hold nothing secret
   and get protection until first unlock, set again after every poll.
-- `BackgroundRefresh.swift`: `network.cahoots.refresh` polls every circle and sets the icon's
-  count. iOS decides when it runs. The circle records are unreadable while the phone is locked,
-  so a refresh only gets through after the phone has been unlocked since the app last ran it.
+- `BackgroundRefresh.swift`: `network.cahoots.refresh` polls every circle, each for at most 20
+  seconds, and sets the icon's count. iOS decides when it runs. Polls while the phone is locked
+  fail: the circle records have complete protection and cannot be read then. So the badge
+  updates only when a refresh runs while the phone is unlocked, and a failed or partial pass
+  leaves the list and the badge as they were rather than showing zero.
+- `OpenCeremonies.swift`: a ceremony lives only in the phone crate's memory. Its id is kept in
+  UserDefaults while it is open, so a ceremony lost when the app closed is reported once at the
+  next launch ("This ceremony was lost when the app closed. Everyone starts over with a new
+  code.") and the seat key made for it is deleted.
 - The screens: `CirclesView`, `NewCircleView`, `JoinView`, `CeremonyView` (with `CeremonyModel`),
   `ChatView`, `PeopleView` and `HelloView`, `SettingsView`.
+
+`Info.plist` is written by hand and preprocessed. Debug builds allow plain HTTP to a local relay
+(`NSAllowsLocalNetworking`) so a `cahoots-station` on the Mac works; Release builds do not. The
+export compliance question (`ITSAppUsesNonExemptEncryption`) is left to be answered at upload,
+since the app encrypts messages itself. `PrivacyInfo.xcprivacy` declares no data collected and
+the two required-reason APIs the Rust standard library uses: file timestamps (C617.1) and disk
+space (E174.1).
 
 Every scan screen has a field to paste a code under the camera, for the simulator and for anyone
 who cannot use the camera.

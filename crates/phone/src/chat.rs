@@ -272,11 +272,19 @@ impl Circle {
 
 /// A relay address as set: trimmed, without a trailing slash, starting with https:// or http://.
 pub(crate) fn check_relay(url: &str) -> Result<String, PhoneError> {
-    let url = url.trim().trim_end_matches('/');
-    if !(url.starts_with("https://") || url.starts_with("http://")) || url.contains(' ') {
-        return Err(network("A relay address starts with https://."));
+    let bad = || network("A relay address is https:// and a host name, with nothing after it.");
+    let parsed = url::Url::parse(url.trim()).map_err(|_| bad())?;
+    let plain = matches!(parsed.scheme(), "http" | "https")
+        && parsed.host_str().is_some_and(|h| !h.is_empty())
+        && parsed.username().is_empty()
+        && parsed.password().is_none()
+        && parsed.path() == "/"
+        && parsed.query().is_none()
+        && parsed.fragment().is_none();
+    if !plain {
+        return Err(bad());
     }
-    Ok(url.into())
+    Ok(parsed.as_str().trim_end_matches('/').to_string())
 }
 
 fn to_message(m: &MessageRecord, pending: bool) -> ChatMessage {

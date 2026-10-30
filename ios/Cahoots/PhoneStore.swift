@@ -44,6 +44,12 @@ struct PhoneStore {
         return "cahoots"
     }
 
+    /// How many circle folders there are, readable or not.
+    var circleCount: Int {
+        let ids = (try? FileManager.default.contentsOfDirectory(atPath: circles.path)) ?? []
+        return ids.filter { !$0.hasPrefix(".") }.count
+    }
+
     /// Give the files that hold nothing secret protection until first unlock. The phone crate
     /// rewrites them on every poll, and a rewritten file takes the folder's complete protection,
     /// so call this after each poll.

@@ -34,6 +34,8 @@ pub use crate::signer::Signer;
 
 /// What the phone says about where its keys are.
 pub const KEY_STORE: &str = "seat key in the Secure Enclave, secret protected by iOS";
+/// What the phone says when Swift reports no Secure Enclave (the simulator).
+pub const KEY_STORE_NO_ENCLAVE: &str = "seat key in the keychain of this simulator, secret protected by iOS";
 /// The longest circle name, in bytes, so the name fits in the step-one code.
 pub const MAX_NAME: usize = 200;
 /// The `Signer` label of this phone's own key.
@@ -226,6 +228,8 @@ pub struct Phone {
     http: Box<dyn Http>,
     me: PhoneRecord,
     state: Mutex<State>,
+    /// Whether the `Signer` keeps keys in the Secure Enclave. Swift says when it does not.
+    enclave: std::sync::atomic::AtomicBool,
 }
 
 fn not_found(what: &str) -> PhoneError {
@@ -378,6 +382,7 @@ impl Phone {
             signer,
             http,
             me,
+            enclave: std::sync::atomic::AtomicBool::new(true),
             state: Mutex::new(State {
                 ceremonies: HashMap::new(),
                 join_receiver: Receiver::new(ceremony::JOIN_MAX_LEN),
@@ -810,9 +815,16 @@ impl Phone {
         self.with_circle(&circle, |c, _| Ok(c.record.seat_label.clone()))
     }
 
+    /// Swift says whether its `Signer` keeps keys in the Secure Enclave (not on the simulator),
+    /// so `describe` says where the keys really are.
+    pub fn set_enclave(&self, enclave: bool) {
+        self.enclave.store(enclave, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub fn describe(&self) -> PhoneInfo {
+        let enclave = self.enclave.load(std::sync::atomic::Ordering::Relaxed);
         PhoneInfo {
-            key_store: KEY_STORE.into(),
+            key_store: if enclave { KEY_STORE } else { KEY_STORE_NO_ENCLAVE }.into(),
             app_version: env!("CARGO_PKG_VERSION").into(),
             fingerprint: self.me.fingerprint.clone(),
         }

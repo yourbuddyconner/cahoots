@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UserNotifications
 
 enum Route: Hashable {
@@ -18,6 +19,9 @@ final class AppModel: ObservableObject {
     @Published var openError: String?
     @Published var circles: [CircleSummary] = []
     @Published var path: [Route] = []
+    /// Shown once at launch when a ceremony was open when the app closed.
+    @Published var lostCeremony: String?
+    let ceremonies = OpenCeremonies()
 
     private var opening: Task<Core?, Never>?
 
@@ -32,6 +36,9 @@ final class AppModel: ObservableObject {
                 let core = try await Core.open(store: store)
                 self.core = core
                 self.openError = nil
+                let lost = self.ceremonies.takeLost()
+                for label in lost { core.signer.deleteKey(label: label) }
+                if !lost.isEmpty { self.lostCeremony = OpenCeremonies.lostMessage }
                 return core
             } catch {
                 self.openError = plain(error)
@@ -45,33 +52,41 @@ final class AppModel: ObservableObject {
         return c
     }
 
-    func refresh() async {
-        guard let core else { return }
-        if let list = try? await core.run({ $0.circles() }) {
-            circles = list
-        }
+    /// Read the list of circles. While the phone is locked the circles cannot be read, and the
+    /// list (and the badge) stay as they were rather than look empty. False when not read.
+    @discardableResult
+    func refresh() async -> Bool {
+        guard let core, UIApplication.shared.isProtectedDataAvailable else { return false }
+        guard let list = try? await core.run({ $0.circles() }) else { return false }
+        circles = list
+        return true
     }
 
     func circle(_ id: String) -> CircleSummary? {
         circles.first { $0.id == id }
     }
 
-    /// Read every circle's relay, then show the unread count on the icon.
+    /// Read every circle's relay, then show the unread count on the icon. Each circle gets at
+    /// most 20 seconds, and a cancelled task stops between circles. The badge changes only after
+    /// a pass in which every circle was read and polled.
     func pollAll() async -> Bool {
         guard let core = await open() else { return false }
-        var ok = true
-        let ids = (try? await core.run { $0.circles().map(\.id) }) ?? []
+        guard UIApplication.shared.isProtectedDataAvailable else { return false }
+        let onDisk = core.store.circleCount
+        guard let ids = await core.run(within: 20, { $0.circles().map(\.id) }) else { return false }
+        var ok = ids.count == onDisk
         for id in ids {
-            do {
-                _ = try await core.run { try $0.poll(circle: id) }
-            } catch {
+            if Task.isCancelled { return false }
+            guard await core.run(within: 20, { try $0.poll(circle: id) }) != nil else {
                 ok = false
+                continue
             }
         }
         core.store.relax()
-        await refresh()
+        if Task.isCancelled { return false }
+        guard await refresh(), ok else { return false }
         await updateBadge()
-        return ok
+        return true
     }
 
     func updateBadge() async {
@@ -89,10 +104,12 @@ final class AppModel: ObservableObject {
         let id = try await core.run {
             try $0.startCeremony(name: name, members: members, padLen: padLen, throughRelay: throughRelay)
         }
+        ceremonies.record(id)
         path = [.ceremony(id)]
     }
 
     func joined(_ ceremony: String) {
+        ceremonies.record(ceremony)
         path = [.ceremony(ceremony)]
     }
 

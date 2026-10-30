@@ -22,6 +22,8 @@ settings:
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
+    # The Rust library has an arm64 simulator slice only (aarch64-apple-ios-sim).
+    "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
 targets:
   Cahoots:
     type: application
@@ -35,27 +37,19 @@ targets:
         embed: false
       - sdk: SystemConfiguration.framework
       - sdk: Security.framework
-    info:
-      path: Cahoots/Info.plist
-      properties:
-        CFBundleDisplayName: Cahoots
-        CFBundleShortVersionString: $(MARKETING_VERSION)
-        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        UILaunchScreen: {}
-        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
-        NSCameraUsageDescription: The camera only reads codes. Nothing is recorded.
-        NSFaceIDUsageDescription: Face ID confirms it is you before your seat key signs.
-        UIBackgroundModes: [fetch]
-        BGTaskSchedulerPermittedIdentifiers: [network.cahoots.refresh]
-        ITSAppUsesNonExemptEncryption: false
-        NSAppTransportSecurity:
-          NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: network.cahoots.app
         PRODUCT_NAME: Cahoots
         TARGETED_DEVICE_FAMILY: "1"
         ENABLE_PREVIEWS: YES
+        # Info.plist is written by hand and run through the C preprocessor, so plain HTTP to a
+        # local relay (a cahoots-station on this Mac) is allowed in Debug builds only.
+        INFOPLIST_FILE: Cahoots/Info.plist
+        INFOPLIST_PREPROCESS: YES
+      configs:
+        Debug:
+          INFOPLIST_PREPROCESSOR_DEFINITIONS: CAHOOTS_LOCAL_RELAY=1
   CahootsTests:
     type: bundle.unit-test
     platform: iOS

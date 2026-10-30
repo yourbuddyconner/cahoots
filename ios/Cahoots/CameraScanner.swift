@@ -56,6 +56,9 @@ struct CameraScanner: UIViewRepresentable {
         private let session = AVCaptureSession()
         private let frames = DispatchQueue(label: "network.cahoots.camera")
         private var last = Date.distantPast
+        /// Set on the frames queue when the view goes away, so a start that was waiting for camera
+        /// permission does not run the camera after it.
+        private var stopped = false
         private var lastText: String?
 
         init(core: Core) { self.core = core }
@@ -84,6 +87,7 @@ struct CameraScanner: UIViewRepresentable {
 
         private func start() {
             frames.async { [self] in
+                guard !stopped, !session.isRunning else { return }
                 guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
                         ?? AVCaptureDevice.default(for: .video),
                       let input = try? AVCaptureDeviceInput(device: device) else { return }
@@ -102,7 +106,10 @@ struct CameraScanner: UIViewRepresentable {
         }
 
         func stop() {
-            frames.async { [session] in session.stopRunning() }
+            frames.async { [self] in
+                stopped = true
+                session.stopRunning()
+            }
         }
 
         func captureOutput(_ output: AVCaptureOutput, didOutput sample: CMSampleBuffer,

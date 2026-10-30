@@ -24,13 +24,13 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
+#if CAHOOTS_LOCAL_RELAY
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+#endif
 	<key>NSCameraUsageDescription</key>
 	<string>The camera only reads codes. Nothing is recorded.</string>
 	<key>NSFaceIDUsageDescription</key>

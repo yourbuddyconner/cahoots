@@ -186,7 +186,9 @@ final class CeremonyModel: ObservableObject {
     /// The words match: write the circle. Returns its id.
     func keep() async -> String? {
         do {
-            return try await core.run { [id] in try $0.ceremonyKeep(id: id) }
+            let circle = try await core.run { [id] in try $0.ceremonyKeep(id: id) }
+            OpenCeremonies().clear(id)
+            return circle
         } catch {
             status = plain(error)
             return nil
@@ -197,5 +199,6 @@ final class CeremonyModel: ObservableObject {
     func discard() async {
         _ = try? await core.run { [id] in $0.ceremonyDiscard(id: id) }
         core.forgetCeremonyKey(id)
+        OpenCeremonies().clear(id)
     }
 }

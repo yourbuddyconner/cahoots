@@ -35,7 +35,13 @@ final class EnclaveSigner: Signer {
 
     func makeKey(label: String) throws -> Data {
         if let stored = try load(label) {
-            return try publicKey(of: stored)
+            do {
+                return try publicKey(of: stored)
+            } catch PhoneError.Signer {
+                // A handle the enclave no longer accepts (the phone was reset, or the item is
+                // damaged) can never sign. Replace it with a new key under the same name.
+                deleteKey(label: label)
+            }
         }
         let data: Data
         do {
@@ -143,16 +149,29 @@ final class EnclaveSigner: Signer {
         }
     }
 
-    /// Face ID refused or cancelled, or the phone locked, becomes `Locked`, which the phone crate
-    /// treats as "nothing changed, try again".
+    /// Face ID refused, cancelled or failed, or the phone locked, becomes `Locked`, which the
+    /// phone crate treats as "nothing changed, try again". Anything else (a key that does not
+    /// load, no passcode set, another CryptoKit error) is a `Signer` error with its cause.
     private func mapped(_ error: Error) -> PhoneError {
         if let e = error as? PhoneError { return e }
-        if error is LAError { return .Locked }
-        let ns = error as NSError
-        if ns.domain == LAErrorDomain { return .Locked }
-        if ns.domain == NSOSStatusErrorDomain, ns.code == Int(errSecInteractionNotAllowed) { return .Locked }
-        // The enclave reports a refused or cancelled Face ID prompt as a CryptoKit error.
-        if usesEnclave, error is CryptoKitError { return .Locked }
-        return .Signer(message: "The key could not be used: \(error.localizedDescription)")
+        return Self.isRefusal(error as NSError)
+            ? .Locked
+            : .Signer(message: "The key could not be used: \(error.localizedDescription)")
     }
-}
+
+    private static let refusals: Set<Int> = [
+        LAError.userCancel.rawValue, LAError.authenticationFailed.rawValue,
+        LAError.systemCancel.rawValue, LAError.appCancel.rawValue,
+        LAError.userFallback.rawValue, LAError.notInteractive.rawValue,
+    ]
+
+    /// The enclave reports a refused prompt as an `LAError`, or wraps one as the underlying
+    /// error of what it throws.
+    static func isRefusal(_ e: NSError) -> Bool {
+        if e.domain == LAErrorDomain { return refusals.contains(e.code) }
+        if e.domain == NSOSStatusErrorDomain {
+            return e.code == Int(errSecInteractionNotAllowed) || e.code == Int(errSecUserCanceled)
+                || e.code == Int(errSecAuthFailed)
+        }
+        return e.underlyingErrors.contains { isRefusal($0 as NSError) }
+    }}
