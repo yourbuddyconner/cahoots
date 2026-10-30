@@ -23,6 +23,7 @@ extern crate alloc;
 pub mod approval;
 pub mod assurance;
 pub mod attestation;
+pub mod authz;
 pub mod card;
 pub mod cwt;
 pub mod fact;
