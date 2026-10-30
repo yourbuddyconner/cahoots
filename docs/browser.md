@@ -4,6 +4,15 @@ The [Cahoots app](https://cahoots.network/app/) runs on phones and laptops. It s
 
 First, [create a circle](ceremony-guide.md) with someone in person.
 
+## Create a circle
+
+Select **Create a circle**, give it a name, and count the people in the room. Then pick how to hold the ceremony.
+
+- **Through the relay** is the default. Your screen shows one code. Each person joining selects **Join a circle**, scans it, and picks a seat. Their screen then shows a code of their own, and you scan each one with **Scan a joiner's code**. When everyone is scanned, select **Continue**. The rest of the ceremony goes through the relay, sealed with a key that never leaves your first code, so the relay cannot read it.
+- **Codes only** works with no network. Everyone shows and scans animated codes for each step until every device has every code.
+
+Either way, everyone reads the six words aloud at the end. If every word matches on every screen, select **They match**. If one differs, everyone starts again.
+
 ## Find your way around
 
 The home screen lists the circles saved in this browser. Open one to enter its conversation directly.
@@ -14,7 +23,7 @@ The **Network** page describes the WireGuard desktop integration and its setup. 
 
 ## Put names to seats
 
-Open **People** in a circle and select **Name this person**. Save a name you recognize; it will also appear in chat and hello words on this device.
+Open **People** in a circle and select **Name this person**. Save a name you recognize. It will also appear in chat and hello words on this device.
 
 Names are local labels. They are not shared with other members and do not verify anyone’s identity. You can change one with **Edit name**, or clear it to return to the seat number. Changing the circle’s relay keeps these names.
 
@@ -37,7 +46,7 @@ Chat is a separate mode. It uses conventional encryption with keys seeded from t
 2. Type a message. It travels through the default relay, `relay.cahoots.network`.
 3. To use a relay a member [runs](relay.md), set **Relay address** from the menu, and have every member of the circle set the same one.
 
-If the status line says the relay cannot be reached, creating the circle still succeeded; delivery is the missing step. Check the address in the menu or try again later.
+If the status line says the relay cannot be reached, creating the circle still succeeded. Delivery is the missing step. Check the address in the menu or try again later.
 
 The relay receives encrypted messages. It does not receive the secret. It can still observe traffic and stop delivering messages.
 

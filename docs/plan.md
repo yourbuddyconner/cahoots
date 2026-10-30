@@ -99,11 +99,11 @@ N1 and N2 shipped first, because they needed no hardware. A Tailscale-like mesh 
 
 ## Chat
 
-Goal: a group chat where the keys come from the pad and the messages travel over a public feed. The design is in [Chat](chat.md).
+Goal: a group chat where the keys come from the circle root and the messages travel over a public feed. Chat is as secret as the root. The design is in [Chat](chat.md).
 
 | Milestone | What it delivers | Done when | Status |
 |---|---|---|---|
-| C1 Chat crate | The chat encryption: keys derived from the pad, forward secrecy per sender, standard authenticated encryption | Three sessions exchange messages with key rotation, out-of-order delivery, and rejection of tampered or replayed messages | **done** |
+| C1 Chat crate | The chat encryption: keys derived from the circle root in numbered epochs, a chain per sender that deletes each step once used, standard authenticated encryption. Chat is as secret as the root, with no forward secrecy against a device that holds it | Three sessions exchange messages with key rotation, out-of-order delivery, and rejection of tampered or replayed messages | **done** |
 | C2 The feed | The public relay (the Numbers Station): an append-only log where each entry is chained to the last, and which refuses any pure-pad message that reuses pad bytes | Posting and reading work over HTTP. A tampered log refuses to start | **done** |
 | C3 CLI demo | A terminal chat client for trying the protocol without hardware | Three terminals chat through one relay, rotate keys, and reject a tampered entry | **done** |
 | C4 Chat in the app | A chat screen in the browser app, with a relay address setting | Two browser tabs chat through the relay | **done** |

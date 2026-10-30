@@ -45,7 +45,7 @@ to `$CARGO_TARGET_DIR/ios` when the target directory is elsewhere.
   `ChatView`, `PeopleView` and `HelloView`, `SettingsView`.
 
 `Info.plist` is written by hand and preprocessed. Debug builds allow plain HTTP to a local relay
-(`NSAllowsLocalNetworking`) so a `cahoots-station` on the Mac works; Release builds do not. The
+(`NSAllowsLocalNetworking`) so a `cahoots-station` on the Mac works. Release builds do not. The
 export compliance question (`ITSAppUsesNonExemptEncryption`) is left to be answered at upload,
 since the app encrypts messages itself. `PrivacyInfo.xcprivacy` declares no data collected and
 the two required-reason APIs the Rust standard library uses: file timestamps (C617.1) and disk

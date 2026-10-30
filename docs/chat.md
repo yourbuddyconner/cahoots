@@ -24,7 +24,7 @@ There is no separate rotation message. Every chat message carries its `epoch_id`
 
 There is no bound on how far ahead `n` may be. Each attempt costs one HMAC, and a message whose tag fails installs nothing. A member who missed many epochs reads the latest one directly.
 
-A member SHOULD start a new epoch after `ROTATE_AFTER = 1000` of its own messages in the current epoch, or after 24 hours, whichever comes first. The time rule is not implemented. `cahoots-chat` rotates on count only. Members SHOULD switch to the newest epoch they have seen. Two epochs MAY be live at once while members switch. A member who was offline reads the epochs it missed in order. A receiver keeps at most `MAX_EPOCHS = 4` epoch states and drops the lowest. It does not derive a dropped epoch again, because fresh chains would accept the old messages a second time.
+A member SHOULD start a new epoch after `ROTATE_AFTER = 1000` of its own messages in the current epoch, or after 24 hours, whichever comes first. The time rule is not implemented. `cahoots-chat` rotates on count only. Members SHOULD switch to the newest epoch they have seen. Two epochs MAY be live at once while members switch. Messages from older epochs still open if their epoch is at or above the floor, that is, above every epoch whose state this member has dropped. A receiver keeps at most `MAX_EPOCHS = 4` epoch states and drops the lowest. It does not derive a dropped epoch again, because fresh chains would accept the old messages a second time.
 
 ## 2. Sender chains
 
@@ -67,7 +67,7 @@ Every key depends only on the root, the epoch, the sender and the counter. A dev
 - **No forward secrecy and no post-compromise security.** Chain steps bound what one message key reveals and nothing more. A new epoch does not help against an attacker who has the root. A new ceremony makes a new root.
 - **Not provided**: sender authenticity among members, and protection against a member who leaks the root or an epoch key.
 
-**Designed, not built.** A ratcheted root would restore forward secrecy for software members: `root_{n+1} = HMAC(root_n, "cahoots/chat/next")`, with old roots deleted after every member has caught up. This is the planned fix.
+**Considered and set aside.** A ratcheted root would restore forward secrecy for software members: `root_{n+1} = HMAC(root_n, "cahoots/chat/next")`, with old roots deleted after every member has caught up. It was set aside because a card's chip cannot follow it: the chip cannot chain HMACs inside itself, so a paired phone would have to hold the ratchet state, could then derive every later epoch, and unpairing would no longer revoke future taps. It stays recorded here in case the badge can keep the chip's root advanced cheaply.
 
 ## 6. Cost
 

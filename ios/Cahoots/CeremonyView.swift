@@ -297,7 +297,7 @@ struct CodesCeremonyView: View {
         switch state.phase {
         case .commit: return "Scan the setup codes from \(who). They also need to scan yours. You can take turns in any order."
         case .reveal: return "Ask \(who) to show their step-2 codes. Scan each animation until the progress bar fills."
-        default: return "Scan signatures from \(who) to confirm the group's members. They also need to scan yours."
+        default: return "Scan signatures from \(who) to confirm the circle's members. They also need to scan yours."
         }
     }
 }
