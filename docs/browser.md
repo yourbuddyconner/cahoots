@@ -4,10 +4,24 @@ The [Cahoots app](https://cahoots.network/app/) runs on phones and laptops. It s
 
 First, [create a circle](ceremony-guide.md) with someone in person.
 
+## Find your way around
+
+The home screen lists the circles saved in this browser. Open one to enter its conversation directly.
+
+On a desktop, the circle switcher and tool navigation stay on the left, with people beside the conversation. On a phone, use the **Conversation**, **People**, and **Network** navigation row. **Circle tools** opens short messages, history, and hello words without a separate app directory.
+
+The **Network** page describes the WireGuard desktop integration and its setup. The browser does not yet load machine lists or manage tunnels.
+
+## Put names to seats
+
+Open **People** in a circle and select **Name this person**. Save a name you recognize; it will also appear in chat and hello words on this device.
+
+Names are local labels. They are not shared with other members and do not verify anyone’s identity. You can change one with **Edit name**, or clear it to return to the seat number. Changing the circle’s relay keeps these names.
+
 ## Send a short message
 
 1. Open a saved circle.
-2. Select **Send a message** and enter your text.
+2. Select **Send a message** from the sidebar, or from **Circle tools** on a phone, and enter your text.
 3. Pass the encrypted QR code or copyable text to another member.
 4. The recipient opens the same circle, selects **Read a message**, and scans or pastes it.
 
@@ -19,7 +33,7 @@ A message can be read once by each receiving device. Reading it again is refused
 
 Chat is a separate mode. It uses conventional encryption with keys seeded from the circle’s secret, so it can carry many messages without consuming one secret byte per text byte.
 
-1. Open **Chat** in the saved circle.
+1. Open a saved circle. Its **Conversation** view is the group chat.
 2. Type a message. It travels through the default relay, `relay.cahoots.network`.
 3. To use a relay a member [runs](relay.md), set **Relay address** from the menu, and have every member of the circle set the same one.
 

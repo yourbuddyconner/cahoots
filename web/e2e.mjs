@@ -78,8 +78,10 @@ const J = await person("joiner", { width: 1280, height: 900 });
 people.push(L, J);
 
 // Leader: set up and commit.
+await L.page.waitForSelector('.entry-screen', { timeout: 3000 });
+if (await L.page.getByRole('link', { name: 'Explore', exact: true }).count()) throw new Error('Entry should not split the app into Circles and Explore');
 await L.snap("home");
-await L.page.click("text=Start a ceremony");
+await L.page.click("text=Create a circle");
 await L.snap("new");
 await L.page.fill("input[type=text]", "e2e-test");
 await L.page.click("text=Continue");
@@ -92,7 +94,7 @@ if (!commitL?.startsWith("cahoots-commit:0:")) throw new Error(`leader commit te
 
 // Joiner: join from the leader's commitment, commit.
 await J.snap("home");
-await J.page.click("text=Join one");
+await J.page.click("text=Join a circle");
 await J.snap("join");
 await J.page.click("text=No camera? Paste a code");
 await J.paste(commitL);
@@ -154,7 +156,36 @@ const wL = await wordsOf(L.page), wJ = await wordsOf(J.page);
 if (wL !== wJ) throw new Error(`check words differ: ${wL} / ${wJ}`);
 console.log("check words:", wL);
 await L.page.click("text=They match"); await J.page.click("text=They match");
-await L.page.waitForSelector(".budget"); await J.page.waitForSelector(".budget");
+await L.page.waitForSelector('.circle-dashboard .composer', { timeout: 3000 });
+await J.page.waitForSelector('.circle-dashboard .composer', { timeout: 3000 });
+await J.page.waitForSelector('.dashboard-rail');
+await J.page.waitForSelector('.dashboard-aside');
+await L.page.getByRole('link', { name: 'People', exact: true }).click();
+await L.page.getByRole('heading', { name: 'The people in this circle.', exact: true }).waitFor();
+await L.page.getByRole('button', { name: 'Name this person', exact: true }).click();
+await L.page.getByLabel('Name on this device', { exact: true }).fill('Jordan');
+await L.page.getByRole('button', { name: 'Save name', exact: true }).click();
+await L.page.getByRole('heading', { name: 'Jordan', exact: true }).waitFor();
+await L.snap('people');
+await L.page.reload();
+await L.page.getByRole('heading', { name: 'Jordan', exact: true }).waitFor();
+await L.page.getByRole('button', { name: 'Back', exact: true }).click();
+await L.page.waitForSelector('.circle-dashboard .composer');
+await L.page.getByLabel('Message', { exact: true }).fill('Keep this draft while I check the network');
+for (const p of [L, J]) {
+  await p.page.getByRole('link', { name: 'Network', exact: true }).click();
+  await p.page.getByRole('heading', { name: 'Network', exact: true }).waitFor();
+  await p.page.getByRole('heading', { name: 'No peer data in this browser', exact: true }).waitFor();
+  await p.snap('network');
+  await p.page.getByRole('link', { name: 'Conversation', exact: true }).click();
+  await p.page.waitForSelector('.composer');
+}
+if (await L.page.getByLabel('Message', { exact: true }).inputValue() !== 'Keep this draft while I check the network') throw new Error('Switching circle tools discarded the unsent draft');
+await L.page.setViewportSize({ width: 1280, height: 900 });
+await L.page.waitForSelector('.dashboard-aside');
+if (await L.page.getByLabel('Message', { exact: true }).inputValue() !== 'Keep this draft while I check the network') throw new Error('Resizing discarded the draft');
+await L.page.setViewportSize({ width: 390, height: 844 });
+await L.page.getByLabel('Message', { exact: true }).fill('');
 await L.snap("hub"); await J.snap("hub");
 
 // The saved circle is state version 4 and carries the seat key and the signed manifest.
@@ -166,7 +197,9 @@ const saved = (p) => p.evaluate(() => new Promise((res, rej) => {
 for (const p of [L, J]) { const v = await saved(p.page); if (v.length !== 1 || v[0] !== 4) throw new Error(`${p.name} saved state versions: ${v}`); }
 
 // Hello words: what the leader says is what the joiner expects, both move together, and the number survives a reload.
-await L.page.click("text=Hello words"); await L.page.waitForSelector(".hello");
+await L.page.getByRole('button', { name: 'Circle tools', exact: true }).click();
+await L.page.getByRole('link', { name: 'Hello words', exact: true }).click();
+await L.page.waitForSelector('.hello');
 await J.page.click("text=Hello words"); await J.page.waitForSelector(".hello");
 await L.snap("hello");
 const hello = (p) => p.$$eval(".hello .pair", (els) => els.map((e) => e.textContent.trim()));
@@ -185,45 +218,62 @@ await L.snap("hello-next");
 await J.page.reload(); await J.page.waitForSelector(".hello");
 const [jMine3] = await hello(J.page);
 if (jMine3 !== jMine2) throw new Error("hello number did not survive a reload");
-await L.page.click('button[aria-label="Back"]'); await L.page.waitForSelector(".budget");
-await J.page.click('button[aria-label="Back"]'); await J.page.waitForSelector(".budget");
+await L.page.click('button[aria-label="Back"]'); await L.page.waitForSelector(".circle-dashboard");
+await J.page.click('button[aria-label="Back"]'); await J.page.waitForSelector(".circle-dashboard");
 
 
 // Chat: the app opens on its default relay; each member points it at the one started here, then they talk.
 const setRelay = async (p) => {
-  await p.page.click("text=Chat"); await p.page.waitForSelector(".chatlist");
+  await p.page.waitForSelector(".circle-dashboard .chatlist");
   await p.menu(); await p.page.click('button:text-is("Relay address")');
   await p.page.fill('input[type="url"]', stationUrl);
   await p.page.click('button:text-is("Save and connect")');
-  await p.page.waitForSelector('.status:has-text("connected")');
+  await p.page.waitForSelector('.status:has-text("Connected")');
 };
 await setRelay(L); await setRelay(J);
+// Relay configuration must not discard the people names saved in the same settings row.
+await L.page.getByRole('link', { name: 'People', exact: true }).click();
+await L.page.getByRole('heading', { name: 'Jordan', exact: true }).waitFor({ timeout: 3000 });
+await L.page.getByRole('button', { name: 'Back', exact: true }).click();
+await L.page.waitForSelector('.status:has-text("Connected")');
 await L.snap("chat-empty");
+let releasePost;
+let signalPost;
+const postStarted = new Promise(resolve => { signalPost = resolve; });
+const postRelease = new Promise(resolve => { releasePost = resolve; });
+await L.page.route(`${stationUrl}/v1/circles/**/messages`, async route => {
+  if (route.request().method() === 'POST') { signalPost(); await postRelease; }
+  await route.continue();
+});
 await L.page.fill('input[placeholder="Message"]', "hello from the ring");
 await L.page.click('button:text-is("Send")');
+await postStarted;
+await L.page.getByRole('link', { name: 'People', exact: true }).click();
+await L.page.getByRole('link', { name: 'Conversation', exact: true }).click();
+if (!(await L.page.getByRole('button', { name: /^Send(?:ing…)?$/ }).isDisabled())) throw new Error('Returning to a pending send enabled duplicate submission');
+releasePost();
 await L.page.waitForSelector('.bubble.out:has-text("hello from the ring")');
 await J.page.waitForSelector('.bubble.in:has-text("hello from the ring")', { timeout: 15000 });
 await J.page.fill('input[placeholder="Message"]', "reading you");
 await J.page.keyboard.press("Enter");
 await L.page.waitForSelector('.bubble.in:has-text("reading you")', { timeout: 15000 });
+await L.page.waitForSelector('.bubble.in .meta:has-text("Jordan")');
 const rejected = await L.page.$$(".bubble.rejected");
 if (rejected.length) throw new Error(`${rejected.length} rejected chat messages`);
 console.log("chat exchanged; capturing chat screens");
 await L.snap("chat"); await J.snap("chat");
 const headRes = await (await fetch(`${stationUrl}/v1/head`)).json();
 if (headRes.seq !== 1) throw new Error(`relay head seq ${headRes.seq}, expected 1 (two messages)`);
-await L.page.click('button[aria-label="Back"]'); await L.page.waitForSelector(".budget");
-await J.page.click('button[aria-label="Back"]'); await J.page.waitForSelector(".budget");
-
 // Leader sends a one-time-pad message as text; joiner reads it.
-await L.page.click("text=Send a message");
+await L.page.getByRole('button', { name: 'Circle tools', exact: true }).click();
+await L.page.getByRole('link', { name: 'Send a message', exact: true }).click();
 await L.snap("send");
 await L.page.fill("textarea.input", "meet at the trailhead at 9");
 await L.page.click('button:text-is("Encrypt")');
 await L.page.waitForSelector('.bar .title:has-text("Encrypted")');
 await L.snap("encrypted");
 await L.page.click('button:text-is("Copy as text")'); const wire = await L.clip();
-await J.page.click("text=Read a message");
+await J.page.getByRole('link', { name: 'Read a message', exact: true }).click();
 await J.page.click("text=No camera? Paste the text");
 await J.paste(wire);
 await J.page.waitForSelector('.bar .title:has-text("Decrypted")');
@@ -242,6 +292,14 @@ await J.snap("replay-refused");
 await L.page.goto(base);
 await L.page.waitForSelector(".row-item");
 await L.snap("home-with-circle");
+await L.page.locator('.entry-list .row-item').first().click();
+await L.page.getByRole('button', { name: 'Circle tools', exact: true }).click();
+await L.page.getByRole('button', { name: 'Storage & security', exact: true }).click();
+L.page.once('dialog', dialog => dialog.accept());
+await L.page.getByRole('button', { name: 'Remove circle from this browser', exact: true }).click();
+await L.page.waitForSelector('.entry-screen');
+await L.page.waitForTimeout(250);
+if (await L.page.locator('.sheet-bg.on').count()) throw new Error('Removing a circle left a modal over the entry screen');
 
 }
 
@@ -254,7 +312,7 @@ for (let i = 0; i < 3; i++) {
 }
 const copyStage = async p => { await p.menu(); await p.page.getByRole('button', { name: 'Copy as text', exact: true }).click(); const text = await p.clip(); await p.closeSheet(); return text; };
 const receive = async (p, text) => { await p.menu(); await p.page.getByRole('button', { name: 'Paste a code', exact: true }).click(); await p.paste(text); await p.closeSheet(); };
-await group[0].page.getByRole('button', { name: 'Start a ceremony', exact: true }).click();
+await group[0].page.getByRole('button', { name: 'Create a circle', exact: true }).click();
 await group[0].page.fill('input[type=text]', 'three members');
 await group[0].page.getByRole('button', { name: 'More', exact: true }).click();
 await group[0].page.locator('.seg button').filter({ hasText: 'Small' }).click();
@@ -264,7 +322,7 @@ await group[0].page.waitForSelector('text=Step 1 of 4');
 const commits = [await copyStage(group[0])];
 for (let i = 1; i < 3; i++) {
   const p = group[i];
-  await p.page.getByRole('button', { name: 'Join one', exact: true }).click();
+  await p.page.getByRole('button', { name: 'Join a circle', exact: true }).click();
   await p.page.getByRole('button', { name: 'No camera? Paste a code', exact: true }).click();
   await p.paste(commits[0]);
   await p.page.waitForSelector('text=Which seat are you?');

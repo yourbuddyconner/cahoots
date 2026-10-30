@@ -13,7 +13,7 @@ The QR codes carry encrypted contributions, not the shared secret in plaintext. 
 
 ## 1. Set up the group
 
-One person selects **Start a ceremony** and chooses:
+One person selects **Create a circle** and chooses:
 
 - **Name:** something everyone will recognize.
 - **People in the room:** the number of participating devices, including the host.
@@ -23,7 +23,7 @@ Leave the hosted software member option under **Advanced** off for a circle made
 
 The host continues, keeps seat 1, and selects **Make my contribution**.
 
-Everyone else selects **Join one**, scans the host’s code, and chooses a different seat number. Say your number aloud to avoid duplicates. Then select **Make my contribution**.
+Everyone else selects **Join a circle**, scans the host’s code, and chooses a different seat number. Say your number aloud to avoid duplicates. Then select **Make my contribution**.
 
 Hardware randomness is optional. If you have a suitable file, add it on your own device through **Add hardware randomness**. It is not needed for a first test.
 

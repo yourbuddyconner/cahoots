@@ -17,7 +17,7 @@ Start with [Apps for your circle](apps.md): what is available now, which tools n
 You need two phones or laptops. No badge is required.
 
 1. Open the [browser app](https://cahoots.network/app/) on both devices.
-2. One person selects **Start a ceremony**. The other selects **Join one**.
+2. One person selects **Create a circle**. The other selects **Join a circle**.
 3. Follow [Create a circle](ceremony-guide.md) to exchange codes and check the words.
 4. Open **Chat** and talk. Messages travel through the default relay, which only ever sees encrypted bytes. To send something without any server, use **Send a message** by QR code or paste.
 

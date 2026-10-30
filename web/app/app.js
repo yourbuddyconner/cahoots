@@ -111,6 +111,7 @@ async function openCircle(id) {
 
 // ---------------------------------------------------------------- tiny DOM helpers
 const app = document.getElementById('app');
+let routeGeneration = 0;
 const h = (tag, attrs = {}, ...kids) => {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -143,12 +144,12 @@ function toast(text, kind = '') {
 /** The screen skeleton: bar (back, title, menu), body with a stage, pinned actions. */
 function screen({ title, sub, back, menu, body, actions = [] }) {
   stopScanner();
-  const bar = h('div', { class: 'bar' },
+  const bar = h('header', { class: 'bar' },
     back ? h('button', { 'aria-label': 'Back', onclick: () => (typeof back === 'function' ? back() : go(back)) }, '‹') : h('span'),
     h('div', { class: 'title' }, title, sub ? h('small', {}, sub) : null),
     menu ? h('button', { 'aria-label': 'More options', onclick: menu }, '⋯') : h('span'));
   const stage = h('div', { class: 'stage' }, ...body);
-  const el = h('div', { class: 'screen' }, bar, h('div', { class: 'body' }, stage), actions.length ? h('div', { class: 'actions' }, ...actions) : null);
+  const el = h('div', { class: 'screen' }, bar, h('main', { class: 'body' }, stage), actions.length ? h('div', { class: 'actions' }, ...actions) : null);
   app.replaceChildren(el);
   window.scrollTo(0, 0);
   return el;
@@ -164,7 +165,16 @@ function seg(options, value, onChange) {
   for (const [v, label, disabled] of options) el.append(h('button', { 'data-v': v, type: 'button', class: String(v) === String(value) ? 'on' : '', disabled: !!disabled, onclick: () => set(v) }, label));
   return el;
 }
-function field(label, input, hint) { return h('div', { class: 'field' }, h('label', {}, label), input, hint ? h('span', { class: 'hint' }, hint) : null); }
+let fieldNumber = 0;
+function field(label, control, hint) {
+  const id = control.id || `field-${++fieldNumber}`;
+  control.id = id;
+  const labelId = `${id}-label`;
+  const isInput = control.matches('input, textarea, select');
+  if (!isInput) control.setAttribute('aria-labelledby', labelId);
+  if (hint) control.setAttribute('aria-describedby', `${id}-hint`);
+  return h('div', { class: 'field' }, h(isInput ? 'label' : 'span', { id: labelId, for: isInput ? id : null, class: isInput ? null : 'field-label' }, label), control, hint ? h('span', { class: 'hint', id: `${id}-hint` }, hint) : null);
+}
 const input = (attrs) => h('input', { class: 'input', ...attrs });
 function stepper(min, max, value, onChange) {
   const out = h('output', {}, String(value));
@@ -174,9 +184,10 @@ function stepper(min, max, value, onChange) {
 /** A bottom sheet for the secondary options a screen needs but shouldn't show by default. */
 function sheet(...kids) {
   const bg = h('div', { class: 'sheet-bg', onclick: (e) => { if (e.target === bg) close(); } });
-  const close = () => { bg.classList.remove('on'); setTimeout(() => bg.remove(), 180); };
+  const close = () => { document.removeEventListener('keydown', onKey); bg.classList.remove('on'); setTimeout(() => bg.remove(), 180); };
   const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
   document.addEventListener('keydown', onKey);
+  bg.addEventListener('click', e => { if (e.target.closest('a[href^="#"]')) close(); });
   bg.append(h('div', { class: 'sheet', role: 'dialog' }, h('div', { class: 'grab' }), ...kids.map((k) => (typeof k === 'function' ? k(close) : k))));
   document.body.append(bg);
   requestAnimationFrame(() => bg.classList.add('on'));
@@ -203,9 +214,9 @@ function fileBtn(label, onText) {
   return h('div', {}, f, btn(label, () => f.click()));
 }
 const aboutSheet = () => sheet(
-  h('h2', {}, 'What this is'),
-  h('p', { class: 'muted' }, 'Cahoots makes a shared secret with the people in the room. Phones show and scan codes; no server is involved. The secret is a one-time pad: short messages encrypted with it cannot be broken by any computer, and it also seeds keys for chat.'),
-  h('p', { class: 'muted' }, 'You need at least two devices in the same place. Everything stays on this device.'),
+  h('h2', {}, 'A home for your circles'),
+  h('p', { class: 'muted' }, 'Meet in person to create a circle, then come back here to chat, check someone on a call, or exchange a private note. No account is needed.'),
+  h('p', { class: 'muted' }, 'Your circles, keys, and message history are saved in this browser. A relay delivers encrypted chat without receiving the keys. Clearing browser data can remove your circles.'),
   h('a', { class: 'btn', href: SITE, target: '_blank', rel: 'noopener' }, 'Read more at cahoots.network'));
 
 // ---------------------------------------------------------------- QR scanning (camera)
@@ -350,24 +361,90 @@ let pendingCommits = [];   // commitments scanned before this device's ceremony 
 let ceremony = null;       // in-memory only: { c, params, label, mode, attests }
 
 // ================================================================ screens
+// Public circle IDs provide a decorative mark, never a personal identity or credential.
+function circleMark(id, name, className = '') {
+  const turn = parseInt(id.slice(0, 2), 16) || 0;
+  return h('span', { class: `circle-mark ${className}`, 'aria-hidden': 'true', style: `--turn:${turn % 90}deg` },
+    h('span', { class: 'mark-ring' }), h('span', { class: 'mark-letter' }, (name || 'C').slice(0, 1).toUpperCase()));
+}
+function walletScreen({ className = '', ...options }) {
+  const el = screen(options);
+  el.classList.add('content-screen');
+  if (className) el.classList.add(className);
+  return el;
+}
+const toolLink = (href, symbol, title, detail) => h('a', { class: 'tool-card', href, 'aria-label': title },
+  h('span', { class: 'tool-symbol', 'aria-hidden': 'true' }, symbol),
+  h('div', {}, h('b', {}, title), h('span', {}, detail)), h('span', { class: 'tool-arrow', 'aria-hidden': 'true' }, '↗'));
+
 async function screenHome() {
-  const rows = (await loadCircles()).sort((a, b) => (b.updated || 0) - (a.updated || 0));
-  const row = (r) => {
-    const left = r.slice_len ? Math.max(0, Math.round((r.remaining / r.slice_len) * 100)) : null;
-    return h('a', { class: 'row-item', href: `#/c/${r.id}` },
-      h('div', {}, h('b', {}, r.name), h('span', {}, `${r.members ? `${r.members} people · ` : ''}${left == null ? '' : `${left}% of your share left · `}`), h('span', { class: `pill ${r.label.toLowerCase()}` }, r.label)),
-      h('span', { class: 'arrow' }, '›'));
-  };
-  const empty = h('div', { class: 'empty' },
-    h('img', { src: 'icon.svg', alt: '', width: 56, height: 56 }),
-    h('h1', {}, 'Make a secret with the people in the room.'),
-    h('p', { class: 'lead' }, 'One person starts a ceremony. Everyone else joins by scanning their screen. You need at least two devices.'));
-  screen({
-    title: 'Cahoots',
-    menu: aboutSheet,
-    body: [rows.length ? h('div', {}, h('p', { class: 'eyebrow' }, 'Your circles'), h('div', { class: 'rows' }, ...rows.map(row))) : empty],
-    actions: [btn('Start a ceremony', () => go('#/new'), 'primary'), btn('Join one', () => go('#/join')), rows.length ? null : link('What is this?', aboutSheet)],
+  const generation = routeGeneration;
+  const circles = (await loadCircles()).sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  if (generation !== routeGeneration) return;
+  walletScreen({ title: 'Cahoots', className: 'entry-screen', menu: aboutSheet,
+    body: [h('header', { class: 'entry-heading' }, h('img', { src: 'icon.svg', alt: '', width: 38, height: 38 }),
+      h('h1', {}, circles.length ? 'Your circles' : 'Meet in person. Stay in cahoots.'),
+      h('p', { class: 'lead' }, circles.length ? 'Choose a circle to pick up the conversation.' : 'Create a private circle with the people beside you. Then keep talking, wherever you go.')),
+      circles.length ? h('div', { class: 'entry-list' }, ...circles.map(c => h('a', { class: 'row-item', href: `#/c/${c.id}`, 'aria-label': c.name }, circleMark(c.id, c.name), h('div', {}, h('b', {}, c.name), h('span', {}, `${c.members || '—'} people · on this device`)), h('span', { 'aria-hidden': 'true' }, '›')))) : null,
+      h('div', { class: 'entry-actions' }, btn('Create a circle', () => go('#/new'), 'primary'), btn('Join a circle', () => go('#/join'))),
+      h('p', { class: 'device-note' }, 'Circles and history are saved in this browser. No account needed.')],
   });
+}
+
+function circleTools(circle) {
+  const id = circle.circle_id_hex();
+  return [
+    toolLink(`#/c/${id}/hello`, '◌', 'Hello words', 'Check someone on a call.'),
+    toolLink(`#/c/${id}/send`, '↗', 'Send a message', 'Encrypt a short note to share by code or text.'),
+    toolLink(`#/c/${id}/read`, '↙', 'Read a message', 'Open a note from someone in this circle.'),
+    toolLink(`#/c/${id}/history`, '≡', 'History', 'Notes sent and read on this device.'),
+  ];
+}
+
+async function workspaceScreen(circle, settings, { view = 'conversation', title, content, aside = null, menu, isCurrent = () => true }) {
+  const requestedHash = location.hash;
+  const id = circle.circle_id_hex();
+  const circles = await loadCircles();
+  if (requestedHash !== location.hash || !isCurrent()) return null;
+  const select = h('select', { class: 'circle-switcher', 'aria-label': 'Switch circle', onchange: e => go(`#/c/${e.target.value}`) },
+    ...circles.map(c => h('option', { value: c.id, selected: c.id === id }, c.name)));
+  const pages = [ ['conversation', '', 'Conversation'], ['people', '/people', 'People'], ['network', '/network', 'Network'] ];
+  const navigation = className => h('nav', { class: className, 'aria-label': 'Circle sections' }, ...pages.map(([key, path, name]) => h('a', { href: `#/c/${id}${path}`, 'aria-current': key === view ? 'page' : null }, name)));
+  const details = () => sheet(close => h('div', { class: 'stack' }, h('h2', {}, 'Circle details'), h('p', { class: 'muted' }, `${circle.name()} · ${circle.members()} people · your seat: ${circle.my_slice() + 1}`), budget(circle), h('p', { class: 'muted' }, 'This browser holds your circle’s secret. Chat history stays here. Browser erasure is best effort.'), copyBtn(id, 'Copy circle ID'), btn('Remove circle from this browser', async () => {
+    if (!confirm('Remove this circle from this browser? Other members keep theirs.')) return;
+    live.delete(id); chatDrafts.delete(id); await deleteCircle(id); close(); go('#/');
+  }, 'danger')));
+  const tools = () => sheet(close => h('div', { class: 'stack' }, h('h2', {}, 'Circle tools'), ...circleTools(circle), btn('Storage & security', () => { close(); details(); }), h('a', { class: 'link', href: `${SITE}/docs/#/apps`, target: '_blank', rel: 'noopener' }, 'More about circle tools ↗')));
+  const rail = h('aside', { class: 'dashboard-rail' },
+    h('a', { class: 'rail-brand', href: '#/', 'aria-label': 'All circles' }, h('img', { src: 'icon.svg', alt: '', width: 25, height: 25 }), 'cahoots'),
+    h('label', { class: 'rail-label' }, 'YOUR CIRCLE', select), navigation('dashboard-navigation'),
+    h('p', { class: 'rail-label' }, 'CIRCLE TOOLS'), h('div', { class: 'rail-tools' }, ...circleTools(circle)),
+    h('div', { class: 'rail-footer' }, btn('Storage & security', details), h('a', { href: '#/' }, 'All circles')));
+  const el = screen({ title: circle.name(), sub: `${circle.members()} people · on this device`, back: view === 'conversation' ? '#/' : `#/c/${id}`, menu: menu || details,
+    body: [navigation('dashboard-mobile-tabs'), h('div', { class: `dashboard-grid${aside ? ' has-aside' : ''}` }, rail,
+      h('section', { class: `workspace-pane ${view === 'conversation' ? 'conversation-pane' : ''}`, 'aria-label': title || 'Conversation' }, ...content), aside)],
+  });
+  el.classList.add('circle-dashboard');
+  el.dataset.view = view;
+  return { el, tools };
+}
+
+async function screenNetwork(id) {
+  const generation = routeGeneration;
+  const circle = await openCircle(id);
+  if (!circle) return go('#/');
+  const settings = await loadSettings(id);
+  await workspaceScreen(circle, settings, { view: 'network', title: 'Network', isCurrent: () => generation === routeGeneration, content: [
+    h('header', { class: 'workspace-heading' }, h('div', {}, h('h1', {}, 'Network'), h('p', {}, 'Private connections between machines in this circle.')),
+      h('a', { class: 'btn primary compact-button', href: `${SITE}/docs/#/adapters`, target: '_blank', rel: 'noopener' }, 'Set up WireGuard ↗')),
+    h('div', { class: 'network-notice' }, h('strong', {}, 'Desktop integration'), h('span', {}, 'The WireGuard CLI is available. This browser does not yet load its peer list or control tunnels.')),
+    h('div', { class: 'network-table-wrap' }, h('table', { class: 'network-table' }, h('thead', {}, h('tr', {}, ...['Machine', 'Address', 'Connection', 'Managed by'].map(name => h('th', { scope: 'col' }, name)))),
+      h('tbody', {}, h('tr', {}, h('td', { colspan: 4 }, h('div', { class: 'network-empty' }, h('span', { 'aria-hidden': 'true' }, '⌁'), h('h2', {}, 'No peer data in this browser'), h('p', {}, 'Use the desktop tool to announce machines and exchange tunnel keys. No machines or connection states are inferred from circle membership.'))))))),
+    h('section', { class: 'network-setup' }, h('h2', {}, 'Start with the desktop tool'), h('ol', {},
+      h('li', {}, h('b', {}, 'Set up the circle provider.'), h('p', {}, 'The CLI needs its own provider configuration. A saved browser circle is not automatically connected to it.')),
+      h('li', {}, h('b', {}, 'Announce machines and exchange keys.'), h('p', {}, 'Use cahoots-wg on each machine. The integration guide covers the available commands.')),
+      h('li', {}, h('b', {}, 'Manage tunnels on those machines.'), h('p', {}, 'Browser-based device enrollment and live tunnel controls are still to be built.')))),
+  ] });
 }
 
 function screenNew() {
@@ -376,11 +453,11 @@ function screenNew() {
   const sizeHint = h('span', { class: 'hint' }, SIZES[1][2]);
   const err = status();
   screen({
-    title: 'New ceremony', back: '#/',
+    title: 'Create a circle', back: '#/',
     body: [
       h('div', {},
-        h('h1', {}, 'Set up the circle.'),
-        h('p', { class: 'lead' }, 'Everyone will see these on their own screen.'),
+        h('h1', {}, 'Bring your people together.'),
+        h('p', { class: 'lead' }, 'Give your circle a name, then exchange codes with the people beside you.'),
         field('Name', name),
         field('People in the room', stepper(2, 8, params.n, (v) => { params.n = v; }), 'Count every device that will hold the secret, including yours.'),
         h('div', { class: 'field' }, h('label', {}, 'Secret size'), seg(SIZES.map(([v, l]) => [v, l]), params.pad_len, (v) => { params.pad_len = v; sizeHint.textContent = SIZES.find((s) => s[0] === v)[2]; }), sizeHint),
@@ -675,7 +752,7 @@ function screenWords() {
         h('div', { class: 'words' }, ...words.map((w, i) => h('div', {}, h('small', {}, String(i + 1)), w)))),
     ],
     actions: [
-      btn('They match', async () => { const circle = out.into_circle(); live.set(id, circle); await saveCircle(circle); toast('Saved. You are in cahoots.', 'ok'); go(`#/c/${id}`); }, 'primary'),
+      btn('They match', async () => { const circle = out.into_circle(); live.set(id, circle); await saveCircle(circle); toast('Your circle is ready.', 'ok'); go(`#/c/${id}`); }, 'primary'),
       btn('They differ · start over', () => { if (confirm('Throw this away and start again?')) go('#/'); }, 'danger'),
       link('Someone still needs my signature', showSign),
     ],
@@ -688,33 +765,37 @@ const budget = (circle) => {
   return h('div', { class: 'budget' }, h('div', { class: 'budget-bar' }, h('div', { style: `width:${pct}%` })), h('span', {}, `${kib(circle.remaining())} of your share left · ${pct}%`));
 };
 async function screenCircle(id) {
+  return screenChat(id);
+}
+
+async function screenPeople(id) {
+  const generation = routeGeneration;
   const circle = await openCircle(id);
-  if (!circle) { screen({ title: 'Cahoots', body: [h('div', { class: 'empty' }, h('h1', {}, 'This circle is not on this device.'))], actions: [btn('Home', () => go('#/'), 'primary')] }); return; }
-  const label = circle.label();
-  const low = circle.remaining() < circle.slice_len() / 10;
-  screen({
-    title: circle.name(), sub: `${label} · you are seat ${circle.my_slice() + 1} of ${circle.members()}`, back: '#/',
-    menu: () => sheet(
-      h('h2', {}, circle.name()),
-      h('p', { class: 'muted' }, CLAIM[label]),
-      h('p', { class: 'muted' }, 'Inside the circle, a message proves a member wrote it, not which member.'),
-      h('p', { class: 'muted' }, 'History stays on this device. Secret bytes are erased as they are used, but erasure on phone storage is best effort.'),
-      btn('Delete this circle from this device', async () => { if (confirm('Delete? The secret and the history on this device are removed. Other members keep theirs.')) { live.delete(id); await deleteCircle(id); go('#/'); } }, 'danger')),
-    body: [
-      h('div', {},
-        budget(circle),
-        low ? notice('Less than 10% of your share is left. Plan a new ceremony.') : null,
-        h('div', { class: 'rows' },
-          h('a', { class: 'row-item', href: `#/chat/${id}` }, h('div', {}, h('b', {}, 'Chat'), h('span', {}, 'end-to-end encrypted · the relay only carries ciphertext')), h('span', { class: 'arrow' }, '›')),
-          h('a', { class: 'row-item', href: `#/c/${id}/send` }, h('div', {}, h('b', {}, 'Send a message'), h('span', {}, 'short · unbreakable · shown as a code to scan or paste')), h('span', { class: 'arrow' }, '›')),
-          h('a', { class: 'row-item', href: `#/c/${id}/read` }, h('div', {}, h('b', {}, 'Read a message'), h('span', {}, 'scan a code or paste one')), h('span', { class: 'arrow' }, '›')),
-          h('a', { class: 'row-item', href: `#/c/${id}/hello` }, h('div', {}, h('b', {}, 'Hello words'), h('span', {}, 'on a call, know it is really them · two words each')), h('span', { class: 'arrow' }, '›')),
-          h('a', { class: 'row-item', href: `#/c/${id}/history` }, h('div', {}, h('b', {}, 'History'), h('span', {}, 'messages on this device')), h('span', { class: 'arrow' }, '›')))),
-    ],
+  if (!circle) return go('#/');
+  const settings = await loadSettings(id);
+  const me = circle.my_slice();
+  const rename = seat => sheet(close => {
+    const name = input({ type: 'text', value: settings.names?.[seat] || '', maxlength: '24', autocomplete: 'off', 'aria-label': 'Name on this device', placeholder: `Seat ${seat + 1}` });
+    return h('div', { class: 'stack' }, h('h2', {}, `A name for seat ${seat + 1}`), h('p', { class: 'muted' }, 'This name is just for you. It stays on this device and doesn’t verify anyone’s identity.'), field('Name on this device', name),
+      btn('Save name', async () => {
+        const names = { ...(settings.names || {}) };
+        if (name.value.trim()) names[seat] = name.value.trim(); else delete names[seat];
+        await saveSettings({ ...settings, id, names });
+        close(); if (generation === routeGeneration) await screenPeople(id);
+      }, 'primary'));
+  });
+  await workspaceScreen(circle, settings, { view: 'people', title: 'People', isCurrent: () => generation === routeGeneration,
+    content: [h('header', { class: 'wallet-heading' }, h('p', { class: 'eyebrow' }, circle.name()), h('h1', {}, 'The people in this circle.'), h('p', { class: 'lead' }, 'Put a familiar name to each seat. Names are saved on your device only.')),
+      h('div', { class: 'people-grid' }, ...Array.from({ length: circle.members() }, (_, seat) => h('article', { class: 'person-card' },
+        circleMark(id.slice(seat * 2) || id, settings.names?.[seat] || String(seat + 1)),
+        h('div', {}, h('h2', {}, seat === me ? 'You' : nameOf(settings, seat)), h('p', {}, `Seat ${seat + 1}${seat === me ? ' · this device' : ''}`)),
+        seat === me ? h('span', { class: 'person-local' }, 'Your place in the circle') : h('div', { class: 'person-actions' }, btn(settings.names?.[seat] ? 'Edit name' : 'Name this person', () => rename(seat)), h('a', { href: `#/c/${id}/hello/${seat}` }, 'Compare hello words ↗'))))),
+      h('p', { class: 'device-note' }, 'Seat labels identify devices in the ceremony. A saved name or decorative mark is not proof of identity.')],
   });
 }
 
 async function screenSend(id) {
+  const generation = routeGeneration;
   const circle = await openCircle(id);
   if (!circle) return go('#/');
   let type = 0, padOn = true;
@@ -722,6 +803,7 @@ async function screenSend(id) {
   const count = h('span', { class: 'hint' }, '0 / 255');
   text.oninput = () => { count.textContent = `${utf8.encode(text.value).length} / 255`; };
   const err = status();
+  if (generation !== routeGeneration) return;
   screen({
     title: 'Send a message', sub: `${kib(circle.remaining())} of your share left`, back: `#/c/${id}`,
     menu: () => sheet(
@@ -731,7 +813,7 @@ async function screenSend(id) {
     body: [
       h('div', {},
         h('h1', {}, 'Write it.'),
-        h('p', { class: 'lead' }, 'It is encrypted with secret bytes that are then erased. Nothing can read it except your circle.'),
+        h('p', { class: 'lead' }, 'Encrypt a short note with this circle’s shared secret, then pass it along as a code or text.'),
         field('Message', text, count),
         err),
     ],
@@ -758,6 +840,7 @@ function screenShowWire(id, circle, wire, spent) {
   });
 }
 async function screenRead(id) {
+  const generation = routeGeneration;
   const circle = await openCircle(id);
   if (!circle) return go('#/');
   const st = status();
@@ -771,7 +854,8 @@ async function screenRead(id) {
       const shown = utf8d.decode(un ?? pt);
       await saveMessage({ circle: id, dir: 'in', type: TYPES[r.msg_type()], text: shown, slice: r.slice(), ts: Date.now() });
       buzz();
-      screen({
+      if (generation !== routeGeneration) return;
+  screen({
         title: 'Decrypted', sub: `from seat ${r.slice() + 1}${r.msg_type() ? ` · ${TYPES[r.msg_type()]}` : ''}`, back: `#/c/${id}`,
         body: [h('div', { class: 'panel' }, h('div', { class: 'cap' }, h('span', {}, circle.name()), h('span', {}, 'one-time pad')), h('p', { class: 'plain' }, shown))],
         actions: [btn('Read another', () => screenRead(id), 'primary'), btn('Done', () => go(`#/c/${id}`))],
@@ -786,9 +870,11 @@ async function screenRead(id) {
   });
 }
 async function screenHistory(id) {
+  const generation = routeGeneration;
   const circle = await openCircle(id);
   if (!circle) return go('#/');
   const msgs = (await loadMessages(id)).reverse();
+  if (generation !== routeGeneration) return;
   screen({
     title: 'History', sub: circle.name(), back: `#/c/${id}`,
     body: [msgs.length
@@ -799,10 +885,12 @@ async function screenHistory(id) {
 
 // ---------------------------------------------------------------- hello words: pairwise, spoken, moved on demand
 async function screenHello(id, peerStr) {
+  const generation = routeGeneration;
   const circle = await openCircle(id);
   if (!circle) return go('#/');
   const me = circle.my_slice();
   const settings = await loadSettings(id);
+  if (generation !== routeGeneration) return;
   const others = [...Array(circle.members()).keys()].filter((s) => s !== me);
   const tooOld = () => screen({
     title: 'Hello words', sub: circle.name(), back: `#/c/${id}`,
@@ -868,28 +956,37 @@ async function screenHello(id, peerStr) {
 }
 
 // ---------------------------------------------------------------- chat (pad-seeded, over the Numbers Station)
+const pendingChatSends = new Map(); // One in-flight send per circle, across remounted views.
+const chatDrafts = new Map(); // Unsent text stays in memory, scoped to its circle.
 let chatRun = 0; // bumps on every render; a stale poll loop sees a different value and stops
 window.addEventListener('hashchange', () => { chatRun++; });
 async function screenChat(id) {
+  const generation = routeGeneration;
+  const requestedHash = location.hash;
   const circle = await openCircle(id);
   if (!circle) return go('#/');
   const me = circle.my_slice();
   const settings = await loadSettings(id);
+  if (location.hash !== requestedHash || generation !== routeGeneration) return;
   const run = ++chatRun;
   const relayBase = () => (settings.relay || '').trim().replace(/\/$/, '');
   const st = status();
   const list = h('div', { class: 'chatlist' });
-  const inp = input({ type: 'text', placeholder: 'Message', maxlength: '4000', autocomplete: 'off', enterkeyhint: 'send' });
-  const sendBtn = btn('Send', () => doSend(), 'primary');
+  const inp = input({ type: 'text', placeholder: 'Message', value: chatDrafts.get(id) || '', maxlength: '4000', autocomplete: 'off', enterkeyhint: 'send', oninput: e => { if (e.target.value) chatDrafts.set(id, e.target.value); else chatDrafts.delete(id); } });
+  const pending = pendingChatSends.get(id);
+  const sendBtn = btn(pending ? 'Sending…' : 'Send', () => doSend(), 'primary');
+  inp.disabled = sendBtn.disabled = !!pending;
+  if (pending) pending.refresh = async error => { if (run === chatRun) { await screenChat(id); if (error) toast(error, 'bad'); } };
   const epoch = () => { const e = circle.current_epoch(); return e ? `epoch ${e}` : 'no epoch yet'; };
   const bubble = (m) => m.dir === 'rejected'
     ? h('div', { class: 'bubble rejected' }, `rejected · ${friendly(m.reason)} · seq ${m.seq}`)
     : h('div', { class: `bubble ${m.dir}` }, h('div', { class: 'meta' }, `${m.dir === 'out' ? 'you' : nameOf(settings, m.sender)} · ${new Date(m.ts).toLocaleTimeString()}`), h('div', {}, m.text));
-  const empty = h('p', { class: 'muted center' }, 'No messages yet.');
+  const empty = h('div', { class: 'chat-empty' }, h('p', { class: 'eyebrow' }, 'A little space for your people'), h('h1', {}, 'Keep the conversation going.'), h('p', {}, 'Start with a hello. Messages are encrypted on your device before the relay delivers them.'));
   const append = (m) => { empty.remove(); list.append(bubble(m)); list.scrollTop = list.scrollHeight; };
   const history = await loadChat(id);
+  if (run !== chatRun) return;
   for (const m of history) append(m);
-  const titleSub = h('small', {}, `${CHAT_LABEL} · ${epoch()}`);
+  const titleSub = h('small', {}, `${circle.members()} people · End-to-end encrypted`);
 
   const relaySheet = () => sheet((close) => {
     const relayIn = input({ type: 'url', value: settings.relay, placeholder: 'https://relay.example.com', autocapitalize: 'off', autocomplete: 'off' });
@@ -897,8 +994,8 @@ async function screenChat(id) {
       h('h2', {}, 'Relay'),
       h('p', { class: 'muted' }, `Messages travel through a relay that every member can reach. It only ever sees encrypted messages. The app ships with ${DEFAULT_RELAY.replace('https://', '')}. Every member of this circle must use the same relay, so change it together.`),
       field('Relay address', relayIn),
-      btn('Save and connect', async () => { settings.relay = relayIn.value.trim() || DEFAULT_RELAY; await saveSettings({ id, relay: settings.relay }); close(); chatRun++; screenChat(id); }, 'primary'),
-      settings.relay !== DEFAULT_RELAY ? btn('Use the default relay', async () => { settings.relay = DEFAULT_RELAY; await saveSettings({ id, relay: settings.relay }); close(); chatRun++; screenChat(id); }) : null);
+      btn('Save and connect', async () => { settings.relay = relayIn.value.trim() || DEFAULT_RELAY; await saveSettings({ ...settings, id }); close(); chatRun++; screenChat(id); }, 'primary'),
+      settings.relay !== DEFAULT_RELAY ? btn('Use the default relay', async () => { settings.relay = DEFAULT_RELAY; await saveSettings({ ...settings, id }); close(); chatRun++; screenChat(id); }) : null);
   });
 
   const post = async (bytes) => {
@@ -908,9 +1005,14 @@ async function screenChat(id) {
   };
   const doSend = async () => {
     const text = inp.value;
-    if (!text) return;
+    if (!text || pendingChatSends.has(id)) return;
     if (!relayBase()) { relaySheet(); return; }
+    const sending = { refresh: null };
+    pendingChatSends.set(id, sending);
+    let sendError = null;
     sendBtn.disabled = true;
+    sendBtn.textContent = 'Sending…';
+    inp.disabled = true;
     try {
       const pt = chat_bucket_pad(utf8.encode(text));
       if (!pt) throw 'Message too long.';
@@ -918,11 +1020,16 @@ async function screenChat(id) {
       await saveCircle(circle); // keys and any epoch spend are recorded before the ciphertext leaves
       await post(b64_decode(wire));
       const m = { circle: id, dir: 'out', sender: me, epoch: circle.current_epoch(), text, ts: Date.now() };
-      await saveChat(m); append(m); titleSub.textContent = `${CHAT_LABEL} · ${epoch()}`;
+      await saveChat(m); append(m); titleSub.textContent = `${circle.members()} people · End-to-end encrypted`;
+      if (chatDrafts.get(id) === text) chatDrafts.delete(id);
       inp.value = '';
-    } catch (e) { st.textContent = `Not sent: ${friendly(e)}`; }
+    } catch (e) { sendError = `Not sent: ${friendly(e)}`; st.textContent = sendError; }
+    finally { pendingChatSends.delete(id); }
     sendBtn.disabled = false;
-    inp.focus();
+    sendBtn.textContent = 'Send';
+    inp.disabled = false;
+    if (run === chatRun) inp.focus();
+    else if (sending.refresh) await sending.refresh(sendError);
   };
   inp.onkeydown = (e) => { if (e.key === 'Enter') doSend(); };
 
@@ -935,7 +1042,7 @@ async function screenChat(id) {
         const res = await fetch(url);
         if (!res.ok) throw `${res.status}`;
         data = await res.json();
-        st.textContent = `connected · last seq ${circle.relay_seq() ?? 'none'}`;
+        st.textContent = 'Connected to relay';
       } catch (e) {
         st.textContent = `Cannot reach ${relayBase().replace('https://', '')}. Retrying. If this keeps up, check the address in the menu.`;
         await new Promise((r) => setTimeout(r, 3000));
@@ -959,7 +1066,7 @@ async function screenChat(id) {
         circle.set_relay_seq(BigInt(entry.seq));
         changed = true;
       }
-      if (changed) { await saveCircle(circle); titleSub.textContent = `${CHAT_LABEL} · ${epoch()}`; }
+      if (changed) { await saveCircle(circle); titleSub.textContent = `${circle.members()} people · End-to-end encrypted`; }
     }
   };
 
@@ -967,28 +1074,36 @@ async function screenChat(id) {
     h('h1', {}, 'Chat needs a relay.'),
     h('p', { class: 'lead' }, 'A relay is a small server any member can run. It carries encrypted messages between you and cannot read them. Set its address to start.'),
     btn('Set the relay address', relaySheet, 'primary'));
-  const el = screen({
-    title: circle.name(), back: `#/c/${id}`,
-    menu: () => sheet((close) =>
-      h('div', { class: 'stack' },
-        h('h2', {}, 'Chat'),
-        h('p', { class: 'muted' }, CHAT_CLAIM),
-        h('p', { class: 'muted' }, `Starting a new epoch rotates everyone's keys and costs 32 secret bytes. ${kib(circle.remaining())} of your share left. The seat shown on a message is a chain label, not a proof of who typed.`),
-        btn('Start a new epoch', async () => { try { circle.rotate_epoch(); await saveCircle(circle); titleSub.textContent = `${CHAT_LABEL} · ${epoch()}`; toast('New epoch started', 'ok'); close(); } catch (e) { st.textContent = friendly(e); } }),
-        btn('Relay address', () => { close(); relaySheet(); }))),
-    body: relayBase() ? [history.length ? null : empty, list, st] : [noRelay],
-    actions: relayBase() ? [h('div', { class: 'composer' }, inp, sendBtn)] : [],
+  const conversation = h('div', { class: 'dashboard-conversation' },
+    h('header', { class: 'conversation-heading' }, h('div', {}, h('h1', {}, 'Conversation'), titleSub),
+      btn('Circle tools', () => workspace.tools(), 'dashboard-tools-trigger')),
+    h('div', { class: 'conversation-thread' }, ...(relayBase() ? [history.length ? null : empty, list] : [noRelay])),
+    st,
+    relayBase() ? h('div', { class: 'dashboard-composer composer' }, inp, sendBtn) : null);
+  const aside = h('aside', { class: 'dashboard-aside' }, h('header', {}, h('h2', {}, 'People'), h('span', {}, String(circle.members()))),
+    h('div', { class: 'dashboard-members' }, ...Array.from({ length: circle.members() }, (_, seat) => h('a', { href: `#/c/${id}/people` }, circleMark(id.slice(seat * 2) || id, String(seat + 1)), h('div', {}, h('b', {}, seat === me ? 'You' : nameOf(settings, seat)), h('span', {}, `Seat ${seat + 1}${seat === me ? ' · this device' : ''}`))))),
+    h('a', { class: 'manage-people', href: `#/c/${id}/people` }, 'Manage names ↗'),
+    h('div', { class: 'dashboard-context' }, h('h2', {}, 'About this circle'), h('p', {}, 'Created together in person. Your keys and history are stored in this browser.'), h('a', { href: `${SITE}/docs/#/security`, target: '_blank', rel: 'noopener' }, 'Security & limits ↗')));
+  const workspace = await workspaceScreen(circle, settings, { content: [conversation], aside, isCurrent: () => run === chatRun,
+    menu: () => sheet((close) => h('div', { class: 'stack' }, h('h2', {}, 'Conversation settings'), h('p', { class: 'eyebrow' }, CHAT_LABEL), h('p', { class: 'muted' }, CHAT_CLAIM),
+      h('p', { class: 'wallet-fine' }, `Current keys: ${epoch()}`),
+      h('p', { class: 'muted' }, 'A sender label identifies a message chain, not proof of which member typed it.'),
+      btn('Start a new epoch', async () => { try { circle.rotate_epoch(); await saveCircle(circle); toast('New epoch started', 'ok'); close(); } catch (e) { st.textContent = friendly(e); } }),
+      btn('Relay address', () => { close(); relaySheet(); }))),
   });
-  el.querySelector('.bar .title').append(titleSub);
+  if (!workspace) return;
+  inp.setAttribute('aria-label', 'Message');
   if (relayBase()) poll();
 }
 
 // ---------------------------------------------------------------- router
 async function route() {
+  routeGeneration++;
   const parts = location.hash.replace(/^#\/?/, '').split('/');
   try {
     if (parts[0] === 'new') screenNew();
     else if (parts[0] === 'join') screenJoin();
+    else if (parts[0] === 'explore') go('#/');
     else if (parts[0] === 'ceremony') {
       const params = JSON.parse(utf8d.decode(b64_decode(parts[1])));
       if (parts[2] === 'run') screenRun(params); else screenPick(params);
@@ -996,6 +1111,8 @@ async function route() {
       if (parts[2] === 'send') await screenSend(parts[1]);
       else if (parts[2] === 'read') await screenRead(parts[1]);
       else if (parts[2] === 'history') await screenHistory(parts[1]);
+      else if (parts[2] === 'network') await screenNetwork(parts[1]);
+      else if (parts[2] === 'people') await screenPeople(parts[1]);
       else if (parts[2] === 'hello') await screenHello(parts[1], parts[3]);
       else await screenCircle(parts[1]);
     } else if (parts[0] === 'chat') await screenChat(parts[1]);
