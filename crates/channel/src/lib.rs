@@ -2,6 +2,8 @@
 //! read or post to. `no_std` + `alloc`.
 //!
 //! - [`object::ChannelObject`]: names the channel and its current policy, signed by a seat.
+//! - [`link`]: the invite link and the keys derived from its secret.
+//! - [`keys`]: epoch ids, epoch keys and chain starts.
 //! - [`policy::Policy`]: who may read, post, admit and govern, and what each needs.
 //!
 //! Every object is a canonical CBOR map (definite lengths, shortest integers, integer keys in
@@ -13,6 +15,8 @@
 extern crate alloc;
 
 mod cbor;
+pub mod keys;
+pub mod link;
 pub mod object;
 pub mod policy;
 
