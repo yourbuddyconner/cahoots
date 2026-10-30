@@ -21,8 +21,9 @@
 //!   envelope is a git signature by the grant's author, it asks the badge for a nonce and sends
 //!   `SshSignUnderGrant` with a proof by its own key: the badge signs without asking its holder.
 //!   A grant is retired here when the badge's answers count it down to 0. A refusal under a
-//!   grant (`Denied`) fails the signature and leaves the grant as it is: it cannot be told
-//!   apart from the holder refusing a prompt the badge fell back to.
+//!   grant (`Denied`) fails that signature and retires the grant too (`remaining` 0): the
+//!   badge has revoked, ended or forgotten it, or its holder refused a prompt the badge fell
+//!   back to, and the agent cannot tell which. The next commit asks the ordinary way.
 //! - Anything else: `SSH_AGENT_FAILURE`.
 
 use crate::badge_client::{describe_error, BadgeClient, ASK_TIMEOUT};
@@ -385,11 +386,20 @@ impl Agent {
                     code: ErrorCode::Denied,
                 }) => {
                     // The holder refusing a fallback prompt and a grant the badge no longer
-                    // honours look the same: leave the grant as it is and ask nobody again.
+                    // honours look the same. This commit fails without a second question,
+                    // and the grant is retired, so the next commit asks the ordinary way.
                     eprintln!(
                         "agent: {}: refused on the badge, or the grant is no longer valid: run `cahoots-host grant list`",
                         id.comment
                     );
+                    stored.remaining = Some(0);
+                    match grants::save(&self.home, &stored) {
+                        Ok(_) => eprintln!(
+                            "agent: {}: the grant is no longer used; the next commit asks on the badge",
+                            id.comment
+                        ),
+                        Err(e) => eprintln!("agent: {e}"),
+                    }
                     return UnderGrant::Failed;
                 }
                 Ok(Response::Error {

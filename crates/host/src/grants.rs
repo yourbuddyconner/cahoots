@@ -240,6 +240,22 @@ pub fn find(dir: &Path, circle: &str) -> Option<Stored> {
         .find(|s| s.circle == circle && s.remaining != Some(0))
 }
 
+/// Delete a kept grant: the `.cwt` named by `path` (or the `.json` beside it) and its
+/// `.json`. A file that does not read as a grant is left alone. Returns the token's path.
+pub fn forget(path: &Path) -> Result<PathBuf, String> {
+    let token = path.with_extension("cwt");
+    let bytes = std::fs::read(&token).map_err(|e| format!("{}: {e}", token.display()))?;
+    claims(&bytes).map_err(|e| format!("{}: {e}", token.display()))?;
+    std::fs::remove_file(&token).map_err(|e| format!("{}: {e}", token.display()))?;
+    let meta = token.with_extension("json");
+    match std::fs::remove_file(&meta) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("{}: {e}", meta.display())),
+    }
+    Ok(token)
+}
+
 /// A signed grant's claims as JSON (`iss`, `sub`, `aud`, `exp`, `cti`, the authorization
 /// details and the rest), read without checking the signature.
 pub fn show(bytes: &[u8]) -> Result<Value, String> {

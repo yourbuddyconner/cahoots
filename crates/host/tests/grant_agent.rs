@@ -1,7 +1,7 @@
 //! An agent's grant on the laptop: `cahoots-host grant request` has the badge sign a grant for
 //! the agent's key after its holder allows it; then `cahoots-host-git-sign`, through the
 //! agent, signs commits under the grant with no press while the badge counts down, and once
-//! the grant is spent the badge asks as it always did.
+//! the grant is spent, or the badge refuses it, the badge asks as it always did.
 
 mod common;
 
@@ -157,7 +157,7 @@ fn an_agent_signs_under_a_grant_until_it_is_spent() {
     }
 
     // The badge refuses a use the laptop thought it had left (here, a count out of step with
-    // the badge's): the signature fails once, nobody is asked, and the grant is left alone.
+    // the badge's): the signature fails once, nobody is asked, and the agent retires the grant.
     let meta = Path::new(&grant_file).with_extension("json");
     let spent = std::fs::read_to_string(&meta).unwrap();
     assert!(spent.contains("\"remaining\": 0"), "{spent}");
@@ -172,8 +172,7 @@ fn an_agent_signs_under_a_grant_until_it_is_spent() {
     let screen = std::fs::read_to_string(top.join("screen.txt")).unwrap();
     assert!(!screen.lines().any(|l| l == "sign a git commit"), "{screen}");
     let after = std::fs::read_to_string(&meta).unwrap();
-    assert!(after.contains("\"remaining\": 1"), "the grant is left as it was: {after}");
-    std::fs::write(&meta, spent).unwrap();
+    assert!(after.contains("\"remaining\": 0"), "the grant is retired: {after}");
 
     // Spent: the third commit is asked about as any other.
     let commit = tmp.path().join("three");
@@ -194,4 +193,114 @@ fn an_agent_signs_under_a_grant_until_it_is_spent() {
     assert!(listed.status.success(), "{}", String::from_utf8_lossy(&listed.stderr));
     let text = String::from_utf8_lossy(&listed.stdout);
     assert!(text.contains("claude") && text.contains("0 left of 2"), "{text}");
+}
+
+/// Ask the badge in `top` for a grant of `budget` commits for the agent "claude", allowed with
+/// Both, and return the path of the kept grant.
+fn request_grant(home: &Path, top: &Path, badge_sock: &Path, budget: &str) -> String {
+    let serving = badge_on(top, badge_sock);
+    let child = Command::new(HOST)
+        .args(["grant", "request", "--sim"])
+        .arg(badge_sock)
+        .args([
+            "--circle",
+            "bench",
+            "--agent",
+            "claude",
+            "--author",
+            "Ada Lovelace <ada@example.com>",
+            "--budget",
+            budget,
+            "--until",
+            "2030-01-01",
+        ])
+        .env("CAHOOTS_HOME", home)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    serving.start();
+    wait_line(top, "let an agent sign");
+    press(top, "B");
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    drop(serving);
+    String::from_utf8_lossy(&out.stdout).lines().last().unwrap().trim().to_string()
+}
+
+#[test]
+fn after_a_revoke_on_the_badge_one_commit_fails_and_the_next_asks() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let (_bottom, top) = chip_ceremony(tmp.path());
+    let badge_sock = tmp.path().join("badge.sock");
+    let grant_file = request_grant(&home, &top, &badge_sock, "5");
+    let meta = Path::new(&grant_file).with_extension("json");
+
+    let agent_sock = tmp.path().join("agent.sock");
+    let known_hosts = tmp.path().join("known_hosts");
+    std::fs::write(&known_hosts, "").unwrap();
+    let serving = badge_on(&top, &badge_sock);
+    let _agent = spawn_agent_in(&home, &badge_sock, &agent_sock, &known_hosts);
+    serving.start();
+    let (blob, comment) = identities(&agent_sock).remove(0);
+    let public = ssh_key::PublicKey::from_bytes(&blob).unwrap();
+    let keyfile = tmp.path().join("key.pub");
+    std::fs::write(&keyfile, format!("{} {comment}\n", public.to_openssh().unwrap())).unwrap();
+    wait_line(&top, "1/5");
+
+    // One commit under the grant, with no press.
+    let one = tmp.path().join("one");
+    std::fs::write(&one, COMMIT).unwrap();
+    let out = git_sign(tmp.path(), &agent_sock, &keyfile, &one).wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    wait_line(&top, "4 left of 5");
+
+    // The holder revokes it on the badge: a press takes the use screen away, two more reach
+    // the grants page, Both asks and Both again revokes.
+    press(&top, "R");
+    wait_line(&top, "1/5");
+    press(&top, "R");
+    wait_line(&top, "2/5");
+    press(&top, "R");
+    let page = wait_line(&top, "3/5");
+    assert!(page.lines().any(|l| l.starts_with("1 of 5")), "{page}");
+    press(&top, "B");
+    wait_line(&top, "revoke this grant?");
+    press(&top, "B");
+    wait_line(&top, "no grants");
+
+    // The next commit fails, with nobody asked, and the agent retires the grant.
+    let two = tmp.path().join("two");
+    std::fs::write(&two, COMMIT).unwrap();
+    let out = git_sign(tmp.path(), &agent_sock, &keyfile, &two).wait_with_output().unwrap();
+    assert!(!out.status.success());
+    assert!(!tmp.path().join("two.sig").exists());
+    let screen = std::fs::read_to_string(top.join("screen.txt")).unwrap();
+    assert!(!screen.lines().any(|l| l == "sign a git commit"), "{screen}");
+    let after = std::fs::read_to_string(&meta).unwrap();
+    assert!(after.contains("\"remaining\": 0"), "the grant is retired: {after}");
+
+    // The one after that asks on the badge, as any commit does, and signs after Both.
+    let three = tmp.path().join("three");
+    std::fs::write(&three, COMMIT).unwrap();
+    let run = git_sign(tmp.path(), &agent_sock, &keyfile, &three);
+    let shown = wait_line(&top, "sign a git commit");
+    assert!(shown.lines().any(|l| l == "Ada Lovelace"), "{shown}");
+    press(&top, "B");
+    let out = run.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let armored = std::fs::read_to_string(tmp.path().join("three.sig")).unwrap();
+    let sig = ssh_key::SshSig::from_pem(&armored).unwrap();
+    public
+        .verify("git", COMMIT.as_bytes(), &sig)
+        .expect("the signature verifies");
+
+    // `grant forget` deletes the token and the .json beside it.
+    let forgot = host(&home, &["grant", "forget", &grant_file]);
+    assert!(forgot.status.success(), "{}", String::from_utf8_lossy(&forgot.stderr));
+    assert!(!Path::new(&grant_file).exists());
+    assert!(!meta.exists());
+    let listed = host(&home, &["grant", "list"]);
+    assert!(String::from_utf8_lossy(&listed.stderr).contains("no grants"));
 }

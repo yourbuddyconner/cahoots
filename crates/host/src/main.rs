@@ -20,6 +20,7 @@
 //! cahoots-host grant request (--serial <port> | --sim <socket>) --circle <name> --agent <text> --author <text> [--location <repo>] --budget N (--until YYYY-MM-DD | --standing)
 //! cahoots-host grant list
 //! cahoots-host grant show <file>
+//! cahoots-host grant forget <file>
 //! cahoots-host grant verify <file> --state <dir> --circle <name>
 //! ```
 //!
@@ -37,7 +38,7 @@
 //! `cahoots-host-git-sign`, the one to name in `gpg.ssh.program`). `roster` prints a circle's
 //! seat keys as `authorized_keys` lines. `attest` asks the badge's chip to attest a seat key.
 //! `card` makes, opens and shows contact cards, and `grant` has the badge sign a grant; see
-//! [`cahoots_host::card`]. `grant request`, `list`, `show` and `verify` are grants for an
+//! [`cahoots_host::card`]. `grant request`, `list`, `show`, `verify` and `forget` are grants for an
 //! agent: the badge lets the agent's key sign git commits without a press; see
 //! [`cahoots_host::grants`].
 //! `--sim` is the socket a simulated badge listens on (its `--listen`).
@@ -375,7 +376,7 @@ fn main() {
         }
         "card" => run_card(&args),
         "grant" => match args.0.first().map(String::as_str) {
-            Some("request" | "list" | "show" | "verify") => run_agent_grant(&args),
+            Some("request" | "list" | "show" | "verify" | "forget") => run_agent_grant(&args),
             _ => run_grant(&args),
         },
         _ => Err(format!("unknown command {cmd}")),
@@ -507,11 +508,12 @@ fn run_grant(args: &Args) -> Result<(), String> {
     Ok(())
 }
 
-/// `grant request`, `grant list`, `grant show` and `grant verify`: grants for an agent.
+/// `grant request`, `grant list`, `grant show`, `grant verify` and `grant forget`: grants for
+/// an agent.
 fn run_agent_grant(args: &Args) -> Result<(), String> {
     use cahoots_host::{agentkey, grants};
     let home = agentkey::dir();
-    // The file named last, for `show` and `verify`.
+    // The file named last, for `show`, `verify` and `forget`.
     let file = || -> Result<PathBuf, String> {
         args.0
             .get(1)
@@ -595,7 +597,12 @@ fn run_agent_grant(args: &Args) -> Result<(), String> {
             eprintln!("the grant verifies: signed by seat {seat} of {circle}, under the key in the circle's manifest");
             Ok(())
         }
-        _ => Err("grant request, grant list, grant show or grant verify".into()),
+        Some("forget") => {
+            let gone = grants::forget(&file()?)?;
+            eprintln!("forgot {} and the .json beside it", gone.display());
+            Ok(())
+        }
+        _ => Err("grant request, grant list, grant show, grant verify or grant forget".into()),
     }
 }
 
