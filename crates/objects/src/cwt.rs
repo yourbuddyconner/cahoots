@@ -42,6 +42,8 @@ use crate::{canonical, encode_with, Enc, EncResult, ObjectError};
 
 pub const ISS: i64 = 1;
 pub const SUB: i64 = 2;
+pub const AUD: i64 = 3;
+pub const EXP: i64 = 4;
 pub const CTI: i64 = 7;
 pub const CNF: i64 = 8;
 /// `cahoots-log`: `not_after` as a log position. Private.
@@ -64,16 +66,72 @@ pub const TYPE_PREFIX: &str = "cahoots:";
 /// The detail type that carries the pad budget.
 pub const PAD_TYPE: &str = "cahoots:pad";
 const NUMBERED: &str = "cahoots:purpose-";
+/// The detail type of a sign grant.
+pub const SIGN_TYPE: &str = "cahoots:sign";
+/// An `aud` naming a seat: `"cahoots:seat:<circle id hex>:<seat>"`.
+pub const AUD_PREFIX: &str = "cahoots:seat:";
+
+/// The actions a sign grant can allow.
+const SIGN_ACTIONS: [&str; 3] = ["git-commit", "ssh-login", "file"];
+/// The most signatures a sign grant can allow.
+const MAX_SIGN_BUDGET: u32 = 1000;
+/// The most entries in a detail's `actions` or `locations`.
+const MAX_LIST: u64 = 64;
 
 /// The most details a grant has: one per purpose byte, and the pad.
 const MAX_DETAILS: u64 = 257;
 
 /// One RFC 9396 authorization detail.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Detail {
     pub r#type: String,
-    /// Bytes of pad, on the [`PAD_TYPE`] detail only.
+    /// Bytes of pad on the [`PAD_TYPE`] detail; signatures on the [`SIGN_TYPE`] detail.
     pub budget: Option<u32>,
+    /// The actions a [`SIGN_TYPE`] detail allows.
+    pub actions: Option<Vec<String>>,
+    /// Who commits are signed as, on a [`SIGN_TYPE`] detail.
+    pub author: Option<String>,
+    /// Where a [`SIGN_TYPE`] detail applies; may be empty.
+    pub locations: Option<Vec<String>>,
+    /// Which agent holds the grant, on a [`SIGN_TYPE`] detail; may be empty.
+    pub agent: Option<String>,
+}
+
+impl Detail {
+    /// A detail with a type and nothing else.
+    pub(crate) fn bare(r#type: String) -> Detail {
+        Detail {
+            r#type,
+            ..Detail::default()
+        }
+    }
+
+    fn field_count(&self) -> u64 {
+        1 + u64::from(self.budget.is_some())
+            + u64::from(self.actions.is_some())
+            + u64::from(self.author.is_some())
+            + u64::from(self.locations.is_some())
+            + u64::from(self.agent.is_some())
+    }
+}
+
+/// What a grant allows, checked: see [`Claims::kind`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// Pad bytes for the listed purposes.
+    Pad { purposes: Vec<u8>, budget: u32 },
+    /// Signatures by an agent.
+    Sign(SignDetail),
+}
+
+/// The one detail of a sign grant.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignDetail {
+    pub actions: Vec<String>,
+    pub author: String,
+    pub locations: Vec<String>,
+    pub agent: String,
+    pub budget: u32,
 }
 
 /// A grant's CWT claims set.
@@ -81,10 +139,15 @@ pub struct Detail {
 pub struct Claims {
     pub iss: String,
     pub sub: String,
+    /// The seat a sign grant is for ([`audience`]); absent on a pad grant.
+    pub aud: Option<String>,
+    /// When a sign grant ends, in Unix seconds; absent on a pad grant.
+    pub exp: Option<u64>,
     pub cnf: SeatPublic,
     pub cti: [u8; 16],
     pub authorization_details: Vec<Detail>,
-    pub log_not_after: u64,
+    /// The last log position a pad grant holds at; absent on a sign grant.
+    pub log_not_after: Option<u64>,
     pub parent: Option<[u8; 32]>,
     pub depth: u8,
     pub grantor: Grantor,
@@ -119,6 +182,24 @@ pub fn issuer(circle_id: &CircleId) -> String {
 /// The circle an `iss` names, if it is one.
 pub fn circle_of(iss: &str) -> Option<CircleId> {
     unhex(iss.strip_prefix(ISS_PREFIX)?)
+}
+
+/// `aud` for a seat of a circle.
+pub fn audience(circle_id: &CircleId, seat: u8) -> String {
+    format!("{AUD_PREFIX}{}:{seat}", hex(circle_id))
+}
+
+/// The circle and seat an `aud` names, if it names one.
+pub fn seat_of(aud: &str) -> Option<(CircleId, u8)> {
+    let (circle, seat) = aud.strip_prefix(AUD_PREFIX)?.split_once(':')?;
+    // Only the shortest decimal spelling.
+    if seat.is_empty()
+        || (seat.len() > 1 && seat.starts_with('0'))
+        || !seat.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    Some((unhex(circle)?, seat.parse().ok()?))
 }
 
 /// `sub` for a grantee key: its key id.
@@ -184,9 +265,20 @@ impl Claims {
     }
 
     fn write(&self, e: &mut Enc) -> EncResult {
-        e.map(8 + u64::from(self.parent.is_some()))?;
+        e.map(
+            7 + u64::from(self.aud.is_some())
+                + u64::from(self.exp.is_some())
+                + u64::from(self.log_not_after.is_some())
+                + u64::from(self.parent.is_some()),
+        )?;
         e.i64(ISS)?.str(&self.iss)?;
         e.i64(SUB)?.str(&self.sub)?;
+        if let Some(a) = &self.aud {
+            e.i64(AUD)?.str(a)?;
+        }
+        if let Some(t) = self.exp {
+            e.i64(EXP)?.u64(t)?;
+        }
         e.i64(CTI)?.bytes(&self.cti)?;
         let (x, y) = coordinates(&self.cnf);
         e.i64(CNF)?.map(1)?.u8(CNF_COSE_KEY)?.map(4)?;
@@ -194,17 +286,38 @@ impl Claims {
         e.i8(-1)?.u8(1)?; // crv: P-256
         e.i8(-2)?.bytes(&x)?;
         e.i8(-3)?.bytes(&y)?;
-        e.i64(LOG_NOT_AFTER)?.u64(self.log_not_after)?;
+        if let Some(l) = self.log_not_after {
+            e.i64(LOG_NOT_AFTER)?.u64(l)?;
+        }
         if let Some(p) = &self.parent {
             e.i64(PARENT)?.bytes(p)?;
         }
         e.i64(AUTHORIZATION_DETAILS)?
             .array(self.authorization_details.len() as u64)?;
         for d in &self.authorization_details {
-            e.map(1 + u64::from(d.budget.is_some()))?;
+            // Text keys in canonical order: shorter first, then bytewise.
+            e.map(d.field_count())?;
             e.str("type")?.str(&d.r#type)?;
+            if let Some(a) = &d.agent {
+                e.str("agent")?.str(a)?;
+            }
+            if let Some(a) = &d.author {
+                e.str("author")?.str(a)?;
+            }
             if let Some(b) = d.budget {
                 e.str("budget")?.u32(b)?;
+            }
+            if let Some(list) = &d.actions {
+                e.str("actions")?.array(list.len() as u64)?;
+                for a in list {
+                    e.str(a)?;
+                }
+            }
+            if let Some(list) = &d.locations {
+                e.str("locations")?.array(list.len() as u64)?;
+                for l in list {
+                    e.str(l)?;
+                }
             }
         }
         e.i64(DEPTH)?.u8(self.depth)?;
@@ -221,11 +334,13 @@ impl Claims {
         let m = ObjectError::Malformed;
         let mut d = Decoder::new(bytes);
         let n = definite_map(&mut d)?;
-        if n > 16 {
+        if n > 18 {
             return Err(m);
         }
         let mut iss = None;
         let mut sub = None;
+        let mut aud = None;
+        let mut exp = None;
         let mut cti = None;
         let mut cnf = None;
         let mut log = None;
@@ -238,6 +353,8 @@ impl Claims {
             match key {
                 ISS => once(&mut iss, String::from(d.str().map_err(|_| m)?))?,
                 SUB => once(&mut sub, String::from(d.str().map_err(|_| m)?))?,
+                AUD => once(&mut aud, String::from(d.str().map_err(|_| m)?))?,
+                EXP => once(&mut exp, d.u64().map_err(|_| m)?)?,
                 CTI => once(
                     &mut cti,
                     d.bytes().map_err(|_| m)?.try_into().map_err(|_| m)?,
@@ -263,36 +380,59 @@ impl Claims {
         let claims = Claims {
             iss: iss.ok_or(m)?,
             sub: sub.ok_or(m)?,
+            aud,
+            exp,
             cnf: cnf.ok_or(m)?,
             cti: cti.ok_or(m)?,
             authorization_details: details.ok_or(m)?,
-            log_not_after: log.ok_or(m)?,
+            log_not_after: log,
             parent,
             depth: depth.ok_or(m)?,
             grantor: grantor.ok_or(m)?,
         };
-        // The meaning must be a grant's: this checks the issuer, the details and that `sub`
+        // The kind must be a grant's: this checks the issuer, the details and that `sub`
         // is the key id of `cnf`.
-        claims.meaning()?;
+        claims.kind()?;
         let encoded = claims.encode();
         canonical(claims, encoded, bytes)
     }
 
-    /// The circle, the purposes and the budget, checked: what [`crate::Grant::from_v2`] reads.
-    pub(crate) fn meaning(&self) -> Result<(CircleId, Vec<u8>, u32), ObjectError> {
+    /// The circle and what the grant allows, checked: what [`crate::Grant::from_v2`] reads for
+    /// a pad grant. A pad grant has a log claim, the [`PAD_TYPE`] detail last, no `aud` and no
+    /// `exp`; a sign grant has one [`SIGN_TYPE`] detail, an `aud` naming the issuing circle,
+    /// no log claim and depth 0. Anything else is `Malformed`.
+    pub fn kind(&self) -> Result<(CircleId, Kind), ObjectError> {
         let m = ObjectError::Malformed;
         let circle_id = circle_of(&self.iss).ok_or(m)?;
         if self.sub != subject(&self.cnf) {
             return Err(m);
         }
+        let kind = if self.log_not_after.is_some() {
+            self.pad_kind()?
+        } else {
+            self.sign_kind(&circle_id)?
+        };
+        Ok((circle_id, kind))
+    }
+
+    fn pad_kind(&self) -> Result<Kind, ObjectError> {
+        let m = ObjectError::Malformed;
+        if self.aud.is_some() || self.exp.is_some() {
+            return Err(m);
+        }
         let (pad, purposes) = self.authorization_details.split_last().ok_or(m)?;
-        if pad.r#type != PAD_TYPE {
+        if pad.r#type != PAD_TYPE
+            || pad.actions.is_some()
+            || pad.author.is_some()
+            || pad.locations.is_some()
+            || pad.agent.is_some()
+        {
             return Err(m);
         }
         let budget = pad.budget.ok_or(m)?;
         let mut list = Vec::new();
         for d in purposes {
-            if d.budget.is_some() {
+            if *d != Detail::bare(d.r#type.clone()) {
                 return Err(m);
             }
             let p = type_purpose(&d.r#type).ok_or(m)?;
@@ -305,7 +445,41 @@ impl Claims {
         if !list.windows(2).all(|w| w[0] < w[1]) {
             return Err(m);
         }
-        Ok((circle_id, list, budget))
+        Ok(Kind::Pad {
+            purposes: list,
+            budget,
+        })
+    }
+
+    fn sign_kind(&self, circle_id: &CircleId) -> Result<Kind, ObjectError> {
+        let m = ObjectError::Malformed;
+        let aud = self.aud.as_deref().ok_or(m)?;
+        if seat_of(aud).ok_or(m)?.0 != *circle_id || self.depth != 0 || self.parent.is_some() {
+            return Err(m);
+        }
+        let [d] = self.authorization_details.as_slice() else {
+            return Err(m);
+        };
+        if d.r#type != SIGN_TYPE {
+            return Err(m);
+        }
+        let actions = d.actions.clone().ok_or(m)?;
+        let author = d.author.clone().ok_or(m)?;
+        let budget = d.budget.ok_or(m)?;
+        if actions.is_empty()
+            || author.is_empty()
+            || !(1..=MAX_SIGN_BUDGET).contains(&budget)
+            || !actions.iter().all(|a| SIGN_ACTIONS.contains(&a.as_str()))
+        {
+            return Err(m);
+        }
+        Ok(Kind::Sign(SignDetail {
+            actions,
+            author,
+            locations: d.locations.clone().unwrap_or_default(),
+            agent: d.agent.clone().unwrap_or_default(),
+            budget,
+        }))
     }
 }
 
@@ -370,11 +544,15 @@ fn read_details(d: &mut Decoder<'_>) -> Result<Vec<Detail>, ObjectError> {
     let mut out = Vec::new();
     for _ in 0..n {
         let fields = definite_map(d)?;
-        if !(1..=2).contains(&fields) {
+        if !(1..=6).contains(&fields) {
             return Err(m);
         }
         let mut r#type = None;
         let mut budget = None;
+        let mut actions = None;
+        let mut author = None;
+        let mut locations = None;
+        let mut agent = None;
         for _ in 0..fields {
             match d.str().map_err(|_| m)? {
                 "type" => once(&mut r#type, String::from(d.str().map_err(|_| m)?))?,
@@ -382,15 +560,34 @@ fn read_details(d: &mut Decoder<'_>) -> Result<Vec<Detail>, ObjectError> {
                     &mut budget,
                     d.u64().map_err(|_| m)?.try_into().map_err(|_| m)?,
                 )?,
+                "actions" => once(&mut actions, read_strings(d)?)?,
+                "author" => once(&mut author, String::from(d.str().map_err(|_| m)?))?,
+                "locations" => once(&mut locations, read_strings(d)?)?,
+                "agent" => once(&mut agent, String::from(d.str().map_err(|_| m)?))?,
                 _ => return Err(m),
             }
         }
         out.push(Detail {
             r#type: r#type.ok_or(m)?,
             budget,
+            actions,
+            author,
+            locations,
+            agent,
         });
     }
     Ok(out)
+}
+
+fn read_strings(d: &mut Decoder<'_>) -> Result<Vec<String>, ObjectError> {
+    let m = ObjectError::Malformed;
+    let n = definite_array(d)?;
+    if n > MAX_LIST {
+        return Err(m);
+    }
+    (0..n)
+        .map(|_| d.str().map(String::from).map_err(|_| m))
+        .collect()
 }
 
 fn read_grantor(d: &mut Decoder<'_>) -> Result<Grantor, ObjectError> {

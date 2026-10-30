@@ -30,7 +30,7 @@ use cahoots_core::CircleId;
 use minicbor::data::Type;
 use sha2::{Digest, Sha256};
 
-use crate::cwt::{self, Claims, Detail};
+use crate::cwt::{self, Claims, Detail, Kind};
 use crate::{canonical, encode_with, Enc, EncResult, ObjectError, Reader, VERSION};
 
 /// External AAD of a grant's COSE_Sign1.
@@ -181,22 +181,21 @@ impl Grant {
         let mut details: Vec<Detail> = self
             .purposes
             .iter()
-            .map(|p| Detail {
-                r#type: cwt::purpose_type(*p),
-                budget: None,
-            })
+            .map(|p| Detail::bare(cwt::purpose_type(*p)))
             .collect();
         details.push(Detail {
-            r#type: String::from(cwt::PAD_TYPE),
             budget: Some(self.budget),
+            ..Detail::bare(String::from(cwt::PAD_TYPE))
         });
         Claims {
             iss: cwt::issuer(&self.circle_id),
             sub: cwt::subject(&self.grantee),
+            aud: None,
+            exp: None,
             cnf: self.grantee,
             cti: self.nonce,
             authorization_details: details,
-            log_not_after: self.not_after,
+            log_not_after: Some(self.not_after),
             parent: self.parent,
             depth: self.depth,
             grantor: self.grantor,
@@ -206,14 +205,17 @@ impl Grant {
     /// The grant version 2 claims hold. `Malformed` if they are not a grant: see
     /// [`Claims::decode`].
     pub fn from_v2(claims: &Claims) -> Result<Grant, ObjectError> {
-        let (circle_id, purposes, budget) = claims.meaning()?;
+        let (circle_id, Kind::Pad { purposes, budget }) = claims.kind()? else {
+            return Err(ObjectError::Malformed);
+        };
+        let not_after = claims.log_not_after.ok_or(ObjectError::Malformed)?;
         Ok(Grant {
             circle_id,
             grantor: claims.grantor,
             grantee: claims.cnf,
             purposes,
             budget,
-            not_after: claims.log_not_after,
+            not_after,
             depth: claims.depth,
             parent: claims.parent,
             nonce: claims.cti,

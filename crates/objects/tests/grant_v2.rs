@@ -67,25 +67,29 @@ fn grant_v2_round_trip_equals_v1_meaning() {
     );
     assert_eq!(claims.cnf, other_key(0).public());
     assert_eq!(claims.cti, [0x11; 16]);
-    assert_eq!(claims.log_not_after, 1000);
+    assert_eq!(claims.log_not_after, Some(1000));
     assert_eq!(
         claims.authorization_details,
         vec![
             Detail {
                 r#type: "cahoots:wireguard".into(),
-                budget: None
+                budget: None,
+                ..Default::default()
             },
             Detail {
                 r#type: "cahoots:mls".into(),
-                budget: None
+                budget: None,
+                ..Default::default()
             },
             Detail {
                 r#type: "cahoots:other".into(),
-                budget: None
+                budget: None,
+                ..Default::default()
             },
             Detail {
                 r#type: "cahoots:pad".into(),
-                budget: Some(4096)
+                budget: Some(4096),
+                ..Default::default()
             },
         ]
     );

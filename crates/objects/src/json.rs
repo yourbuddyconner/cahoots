@@ -86,12 +86,24 @@ impl Claims {
         let details: Vec<Value> = self
             .authorization_details
             .iter()
-            .map(|d| match d.budget {
-                Some(b) => json!({ "type": d.r#type, "budget": b }),
-                None => json!({ "type": d.r#type }),
+            .map(|d| {
+                let mut v = json!({ "type": d.r#type });
+                let fields = [
+                    ("budget", d.budget.map(Value::from)),
+                    ("actions", d.actions.as_ref().map(|a| json!(a))),
+                    ("author", d.author.as_ref().map(|a| json!(a))),
+                    ("locations", d.locations.as_ref().map(|a| json!(a))),
+                    ("agent", d.agent.as_ref().map(|a| json!(a))),
+                ];
+                for (k, f) in fields {
+                    if let Some(f) = f {
+                        v[k] = f;
+                    }
+                }
+                v
             })
             .collect();
-        json!({
+        let mut claims = json!({
             "iss": self.iss,
             "sub": self.sub,
             "cti": hex(&self.cti),
@@ -104,7 +116,14 @@ impl Claims {
                 Grantor::Seat(s) => json!(s),
                 Grantor::Key(k) => json!(hex(&k.0)),
             },
-        })
+        });
+        if let Some(a) = &self.aud {
+            claims["aud"] = json!(a);
+        }
+        if let Some(t) = self.exp {
+            claims["exp"] = json!(t);
+        }
+        claims
     }
 }
 
