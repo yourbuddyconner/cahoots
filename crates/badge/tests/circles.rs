@@ -95,8 +95,8 @@ fn two_circles(chip: bool) -> (Badge<FakeBoard>, Badge<FakeBoard>, Badge<FakeBoa
 
     // The menu of the first circle; the Circles page; the list; "new circle".
     b.idle_step();
-    assert!(b.board().shows("1/4"));
-    for _ in 0..2 {
+    assert!(b.board().shows("1/5"));
+    for _ in 0..3 {
         press(&mut b, Press::Right);
     }
     assert!(b.board().shows("circles"));
@@ -150,7 +150,7 @@ fn serve(b: &mut Badge<FakeBoard>) -> FakeLink {
     b.board().links = Some((down, FakeLink::open()));
     // Back to the list and into the first circle's menu, which takes the links.
     let mut n = 0;
-    while !b.board().shows("3/4") {
+    while !b.board().shows("4/5") {
         press(b, Press::Right);
         n += 1;
         assert!(n < 20, "{:?}", b.board().last());
@@ -325,8 +325,9 @@ fn two_stored() -> FakeBoard {
     board
 }
 
-/// From the menu's words page to the list of circles: Right twice to the Circles page, Both.
+/// From the menu's words page to the list of circles: Right three times to the Circles page, Both.
 fn to_the_list(b: &mut Badge<FakeBoard>) {
+    press(b, Press::Right);
     press(b, Press::Right);
     press(b, Press::Right);
     assert!(b.board().shows("circles"), "{:?}", b.board().last());
@@ -358,7 +359,7 @@ fn chooser_navigation() {
     // Both opens that circle's menu, on its words page.
     press(&mut b, Press::Both);
     assert!(b.board().shows("other  tier 1"));
-    assert!(b.board().shows("1/4"));
+    assert!(b.board().shows("1/5"));
     assert_eq!(b.circle().unwrap().params.name, "other");
     // Its Circles page goes back to the list, with it marked.
     press(&mut b, Press::Left);
@@ -377,7 +378,7 @@ fn one_circle_opens_its_menu_without_the_list() {
     let mut b = Badge::new(board);
     b.boot();
     b.idle_step();
-    assert!(b.board().shows("1/4"));
+    assert!(b.board().shows("1/5"));
     assert!(!b.board().screens.iter().any(|l| l.iter().any(|x| x == "circles")));
 }
 
@@ -430,7 +431,7 @@ fn forget_one_keeps_the_other() {
     assert!(b.board().shows("first"));
     assert!(b.board().shows("back  A+B  forget  back"));
     press(&mut b, Press::Right);
-    assert!(b.board().shows("4/4"));
+    assert!(b.board().shows("5/5"));
     assert_eq!(b.circles().len(), 2);
     press(&mut b, Press::Both);
     press(&mut b, Press::Both);
@@ -555,7 +556,7 @@ fn unknown_circle_chip_request() {
     // A spend for a circle the badge does not hold is refused without asking.
     let r = ask(&mut b, &mut laptop, 6, &Request::Psk { circle: stranger, context: b"wg".to_vec() });
     assert_eq!(r, Response::Error { code: ErrorCode::UnknownCircle });
-    assert!(b.board().shows("1/4"));
+    assert!(b.board().shows("1/5"));
 }
 
 /// A board with one record: only `load_circle`, `save_circle` and `forget`, through the
@@ -633,7 +634,7 @@ fn a_board_with_one_record_holds_one_circle() {
     assert_eq!(b.board().max_circles(), 1);
     b.idle_step();
     // Circles page: the list has the one circle and no "new circle".
-    for _ in 0..2 {
+    for _ in 0..3 {
         b.board().0.presses.push_back(Press::Right);
         b.idle_step();
     }

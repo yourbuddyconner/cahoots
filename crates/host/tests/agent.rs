@@ -100,7 +100,7 @@ fn agent_lists_seat_key_and_signs() {
     check_signature(&answer, key, &data);
 
     // Refused: a failure, and no signature.
-    wait_line(&top, "1/4");
+    wait_line(&top, "1/5");
     let pending = sign_later(s, key.clone(), data.clone());
     wait_line(&top, "ssh login");
     press(&top, "L");
@@ -108,7 +108,7 @@ fn agent_lists_seat_key_and_signs() {
     assert_eq!(answer, vec![5]);
 
     // A key the agent does not hold: refused without asking.
-    wait_line(&top, "1/4");
+    wait_line(&top, "1/5");
     let other = PrivateKey::random(&mut OsRng, Algorithm::Ed25519).unwrap();
     let other = other.public_key().to_bytes().unwrap();
     assert_eq!(agent_call(&mut s, &sign_request(&other, &data)), vec![5]);

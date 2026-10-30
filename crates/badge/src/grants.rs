@@ -376,6 +376,76 @@ pub fn check_request<G: GrantBoard + ?Sized>(
     Ok(grant)
 }
 
+/// One live grant as the menu's grants page lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PageEntry {
+    pub cti: [u8; 16],
+    pub agent: String,
+    /// `"37 of 50 \u{b7} until 29 Nov 2026"`, or `"\u{2026} \u{b7} until revoked"`.
+    pub line: String,
+}
+
+/// The live grants of `circle`, oldest first: not revoked, not expired by the badge's known
+/// time. Uses come from the chip counter less the grant's base, or from the record without a
+/// chip; a counter that cannot be the grant's reads as spent. An unreadable record lists none.
+pub fn page_entries<G: GrantBoard + ?Sized>(
+    board: &mut G,
+    clock: &Clock,
+    circle: &CircleId,
+) -> Vec<PageEntry> {
+    let Ok(Some(record)) = board.grants_load() else {
+        return Vec::new();
+    };
+    let now = clock.known_time(board.uptime_secs()).max(record.known_time);
+    let mut out = Vec::new();
+    for g in record
+        .grants
+        .iter()
+        .filter(|g| g.circle_id == *circle && !g.revoked && g.exp.is_none_or(|e| now < e))
+    {
+        let used = match board.chip() {
+            Some(chip) => chip
+                .counter_get(counter_id(g.slot))
+                .ok()
+                .and_then(|raw| uses(raw, g.base, g.budget)),
+            None => Some(g.used_soft),
+        };
+        let used = used.map_or_else(|| format!("{}", g.budget), |n| format!("{n}"));
+        let until = match g.exp {
+            Some(t) => {
+                let d = date(t);
+                format!("until {}", d.rsplit_once(' ').map_or(d.as_str(), |(day, _)| day))
+            }
+            None => String::from("until revoked"),
+        };
+        out.push(PageEntry {
+            cti: g.cti,
+            agent: g.agent.clone(),
+            line: format!("{used} of {} \u{b7} {until}", g.budget),
+        });
+    }
+    out
+}
+
+/// Revoke the grant `cti`: delete its chip counter, mark the record revoked and store it,
+/// and log it. The record stays so the grant stays refused.
+pub fn revoke<G: GrantBoard + ?Sized>(
+    board: &mut G,
+    clock: &mut Clock,
+    cti: &[u8; 16],
+) -> Result<(), ErrorCode> {
+    let mut record = load(board)?;
+    let Some(g) = record.grants.iter_mut().find(|g| g.cti == *cti) else {
+        return Err(ErrorCode::Denied);
+    };
+    g.revoked = true;
+    let slot = g.slot;
+    delete_counter(board, slot);
+    store(board, clock, &mut record)?;
+    board.log(&format!("grant {}: revoked", short(cti)));
+    Ok(())
+}
+
 /// The expiry as the consent screen words it: `"until 29 Nov 2026 (laptop)"`, or
 /// `"until revoked"` for a standing grant.
 pub fn until_text(exp: Option<u64>) -> String {

@@ -107,7 +107,7 @@ fn gitsign_writes_sshsig() {
     }
 
     // Refused on the badge: git-sign fails and writes no signature.
-    wait_line(&top, "1/4");
+    wait_line(&top, "1/5");
     let again = tmp.path().join("again");
     std::fs::write(&again, COMMIT).unwrap();
     let run = Command::new(GIT_SIGN)

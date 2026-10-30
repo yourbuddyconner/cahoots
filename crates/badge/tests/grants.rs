@@ -1012,3 +1012,50 @@ fn a_proof_is_not_accepted_twice_even_when_signing_fails() {
         Ok(base + 1)
     );
 }
+
+// ---- the grants page ----
+
+#[test]
+fn revoking_from_the_page_ends_the_grant() {
+    let (mut badge, mut laptop, id, public) = serving(true);
+    let (grant, slot) = issue(
+        &mut badge,
+        &mut laptop,
+        id,
+        grant_request(50, Some(EXP), false, NOW),
+    );
+    press(&mut badge, Press::Right);
+    press(&mut badge, Press::Right);
+    assert!(badge.board().shows("3/5"), "{:?}", badge.board().last());
+    assert!(badge.board().shows("grants"));
+    assert!(badge.board().shows("> claude on conner..."), "{:?}", badge.board().last());
+    assert!(badge.board().shows("0 of 50 \u{b7} until 29 Nov"));
+    assert!(badge.board().shows("prev  A+B  revoke  next"));
+    // Left on the prompt goes back and revokes nothing.
+    press(&mut badge, Press::Both);
+    assert!(badge.board().shows("revoke this grant?"));
+    assert!(badge.board().shows("it stops at once"));
+    assert!(badge.board().shows("back  A+B  revoke  back"));
+    press(&mut badge, Press::Left);
+    assert!(badge.board().shows("3/5"));
+    assert!(!record(&mut badge).grants[0].revoked);
+    assert_eq!(counter(&mut badge, slot), Some(0));
+    // Both twice revokes.
+    press(&mut badge, Press::Both);
+    press(&mut badge, Press::Both);
+    let cti = SignGrant::verify(&grant, &public, &id, 1).unwrap().cti;
+    let short: String = cti[..4].iter().map(|b| format!("{b:02x}")).collect();
+    let line = format!("grant {short}: revoked");
+    assert!(badge.board().log.contains(&line), "{:?}", badge.board().log);
+    assert_eq!(raw_counter(&mut badge, slot), None);
+    assert!(record(&mut badge).grants[0].revoked);
+    assert!(
+        badge.board().shows("no grants"),
+        "{:?}",
+        badge.board().last()
+    );
+    assert_eq!(
+        use_grant(&mut badge, &mut laptop, id, &grant, NOW + 60),
+        denied()
+    );
+}

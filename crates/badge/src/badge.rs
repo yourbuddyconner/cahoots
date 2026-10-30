@@ -163,6 +163,8 @@ const POLL_MS: u32 = 10;
 enum Page {
     Words,
     Key,
+    /// Lists the live grants of this circle; Both on one asks, then revokes it.
+    Grants,
     /// Both shows the list of circles, where another circle opens or a new one starts.
     Circles,
     /// Both asks, then forgets this circle and nothing else.
@@ -170,15 +172,22 @@ enum Page {
 }
 
 impl Page {
-    const ALL: [Page; 4] = [Page::Words, Page::Key, Page::Circles, Page::Forget];
+    const ALL: [Page; 5] = [
+        Page::Words,
+        Page::Key,
+        Page::Grants,
+        Page::Circles,
+        Page::Forget,
+    ];
 
     /// The page's place in the ring, from 0.
     fn index(self) -> usize {
         match self {
             Page::Words => 0,
             Page::Key => 1,
-            Page::Circles => 2,
-            Page::Forget => 3,
+            Page::Grants => 2,
+            Page::Circles => 3,
+            Page::Forget => 4,
         }
     }
 
@@ -194,6 +203,7 @@ impl Page {
         match self {
             Page::Words => "words",
             Page::Key => "key as code",
+            Page::Grants => "grants",
             Page::Circles => "circles",
             Page::Forget => "forget this circle",
         }
@@ -230,6 +240,12 @@ struct Menu<B: Board> {
     /// Both on the Forget page asked "forget this circle?": Both forgets, Left or Right goes
     /// back.
     confirm_forget: bool,
+    /// The live grants of this circle, read when the Grants page is entered and after a
+    /// revoke, and the one marked.
+    grant_entries: Vec<grants::PageEntry>,
+    grant_index: usize,
+    /// Both on a grant asked "revoke this grant?": Both revokes, Left or Right goes back.
+    confirm_revoke: bool,
     /// The nonce a proof under a grant must be made over: drawn when the menu opens, and
     /// drawn again after every signature under a grant.
     /// `None` while the random source fails: no nonce is given and no use accepted until a
@@ -1115,6 +1131,9 @@ impl<B: Board> Badge<B> {
             peer_seen: false,
             covered: false,
             confirm_forget: false,
+            grant_entries: Vec::new(),
+            grant_index: 0,
+            confirm_revoke: false,
             nonce,
         };
         let c = &self.circles[self.current];
@@ -1246,14 +1265,63 @@ impl<B: Board> Badge<B> {
             return MenuAction::Stay;
         }
 
+        if m.confirm_revoke {
+            match gesture {
+                Press::None => {}
+                Press::Both => {
+                    if let Some(e) = m.grant_entries.get(m.grant_index) {
+                        if grants::revoke(board, clock, &e.cti).is_err() {
+                            show_status(board, "could not revoke");
+                            m.covered = true;
+                        }
+                    }
+                    m.confirm_revoke = false;
+                    Self::read_grants(board, clock, c, m);
+                    m.grant_index = m.grant_index.min(m.grant_entries.len().saturating_sub(1));
+                    if !m.covered {
+                        show_page(board, c, m);
+                    }
+                }
+                Press::Left | Press::Right => {
+                    m.confirm_revoke = false;
+                    show_page(board, c, m);
+                }
+            }
+            return MenuAction::Stay;
+        }
+
         match gesture {
             Press::None => {}
             Press::Left | Press::Right => {
-                m.page = if gesture == Press::Left {
+                let left = gesture == Press::Left;
+                // On the grants page the caret moves first; the ring turns from the first
+                // or last entry, or when there are none.
+                if m.page == Page::Grants {
+                    let last = m.grant_entries.len().saturating_sub(1);
+                    if left && m.grant_index > 0 {
+                        m.grant_index -= 1;
+                        show_page(board, c, m);
+                        return MenuAction::Stay;
+                    }
+                    if !left && m.grant_index < last {
+                        m.grant_index += 1;
+                        show_page(board, c, m);
+                        return MenuAction::Stay;
+                    }
+                }
+                m.page = if left {
                     m.page.previous()
                 } else {
                     m.page.next()
                 };
+                if m.page == Page::Grants {
+                    Self::read_grants(board, clock, c, m);
+                    m.grant_index = if left {
+                        m.grant_entries.len().saturating_sub(1)
+                    } else {
+                        0
+                    };
+                }
                 show_page(board, c, m);
             }
             Press::Both => match m.page {
@@ -1265,6 +1333,13 @@ impl<B: Board> Badge<B> {
                     }
                     m.covered = true;
                 }
+                Page::Grants => match m.grant_entries.get(m.grant_index) {
+                    Some(e) => {
+                        m.confirm_revoke = true;
+                        show(board, screens::revoke_prompt(&e.agent));
+                    }
+                    None => show_page(board, c, m),
+                },
                 Page::Circles => return MenuAction::Choose,
                 Page::Forget => {
                     m.confirm_forget = true;
@@ -1273,6 +1348,11 @@ impl<B: Board> Badge<B> {
             },
         }
         MenuAction::Stay
+    }
+
+    /// Read the live grants of the current circle into the menu.
+    fn read_grants(board: &mut B, clock: &Clock, c: &Circle, m: &mut Menu<B>) {
+        m.grant_entries = grants::page_entries(board, clock, &c.circle_id);
     }
 
     /// Answer or queue every whole request frame in `rx`. Bytes that are not a frame, or a
@@ -1483,6 +1563,23 @@ fn show_page<B: Board>(board: &mut B, c: &Circle, m: &Menu<B>) {
                 &words,
                 true,
                 true,
+            );
+            show(board, page);
+            return;
+        }
+        Page::Grants => {
+            let entries: Vec<(String, String)> = m
+                .grant_entries
+                .iter()
+                .map(|e| (e.agent.clone(), e.line.clone()))
+                .collect();
+            let page = screens::grants_page(
+                &c.params.name,
+                &tier,
+                m.page.index() + 1,
+                Page::ALL.len(),
+                &entries,
+                m.grant_index,
             );
             show(board, page);
             return;

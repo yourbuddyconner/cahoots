@@ -34,7 +34,7 @@ fn press(badge: &mut Badge<FakeBoard>, gesture: Press) {
 /// The words page has no title: its six words are the page.
 fn on_page(badge: &mut Badge<FakeBoard>, page: usize, title: &str) -> bool {
     let b = badge.board();
-    b.shows(&format!("{page}/4")) && (title.is_empty() || b.shows(title))
+    b.shows(&format!("{page}/5")) && (title.is_empty() || b.shows(title))
 }
 
 /// In the menu with the laptop allowed: its first request (Identify) draws the question
@@ -120,15 +120,19 @@ fn left_and_right_walk_the_page_ring() {
     assert!(on_page(&mut badge, 2, "key as code"));
     assert!(badge.board().shows("Both to spend 32 bytes"));
     press(&mut badge, Press::Right);
-    assert!(on_page(&mut badge, 3, "circles"));
+    assert!(on_page(&mut badge, 3, "grants"));
     press(&mut badge, Press::Right);
-    assert!(on_page(&mut badge, 4, "forget this circle"));
+    assert!(on_page(&mut badge, 4, "circles"));
+    press(&mut badge, Press::Right);
+    assert!(on_page(&mut badge, 5, "forget this circle"));
     press(&mut badge, Press::Right);
     assert!(on_page(&mut badge, 1, ""));
     press(&mut badge, Press::Left);
-    assert!(on_page(&mut badge, 4, "forget this circle"));
+    assert!(on_page(&mut badge, 5, "forget this circle"));
     press(&mut badge, Press::Left);
-    assert!(on_page(&mut badge, 3, "circles"));
+    assert!(on_page(&mut badge, 4, "circles"));
+    press(&mut badge, Press::Left);
+    assert!(on_page(&mut badge, 3, "grants"));
     press(&mut badge, Press::Left);
     assert!(on_page(&mut badge, 2, "key as code"));
     press(&mut badge, Press::Left);

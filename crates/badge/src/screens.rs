@@ -233,6 +233,80 @@ pub fn chooser(names: &[String], chosen: usize) -> Screen {
     s.done()
 }
 
+/// The menu's grants page: one line per live grant, the chosen one marked with `>` and
+/// drawn bold. Each entry is the agent and, under it, how much is used and until when.
+pub fn grants_page(
+    circle: &str,
+    tier: &str,
+    page: usize,
+    pages: usize,
+    entries: &[(String, String)],
+    chosen: usize,
+) -> Screen {
+    let mut s = Draw::new();
+    s.header(circle, tier);
+    s.centered(&FONT_8X13, 34, &format!("{page}/{pages}"));
+    s.centered(&FONT_9X18_BOLD, 56, "grants");
+    let w = cols(&FONT_8X13) - 3;
+    let w2 = cols(&FONT_6X13) - 7;
+    if entries.is_empty() {
+        s.centered(&FONT_8X13, 96, "no grants");
+        s.lines.push(String::from("no grants"));
+    }
+    // Two rows an entry, so three entries show at a time, around the chosen one.
+    let first = chosen
+        .saturating_sub(1)
+        .min(entries.len().saturating_sub(3));
+    for (row, (i, (agent, line))) in entries.iter().enumerate().skip(first).take(3).enumerate() {
+        let y = 80 + 32 * row as i32;
+        let (mark, font) = if i == chosen {
+            ("> ", &FONT_7X13_BOLD)
+        } else {
+            ("  ", &FONT_8X13)
+        };
+        let top = fit(mark, agent, "", w);
+        let under = fit("", line, "", w2);
+        s.text(
+            font,
+            Point::new(14, y),
+            Alignment::Left,
+            BinaryColor::On,
+            &top,
+        );
+        s.text(
+            &FONT_8X13,
+            Point::new(14, y + 14),
+            Alignment::Left,
+            BinaryColor::On,
+            &under,
+        );
+        s.lines.push(top);
+        s.lines.push(under);
+    }
+    s.arrow(2, "<");
+    s.arrow(190, ">");
+    if entries.is_empty() {
+        s.footer(Some("page"), Some("A+B  choose"), Some("page"));
+    } else {
+        s.footer(Some("prev"), Some("A+B  revoke"), Some("next"));
+    }
+    s.done()
+}
+
+/// The question before a grant is revoked: whose it is, and that it ends now.
+pub fn revoke_prompt(agent: &str) -> Screen {
+    let mut s = Draw::new();
+    s.title("revoke this grant?");
+    s.two_rows(
+        &FONT_9X18_BOLD,
+        46,
+        &fit("", agent, "", 2 * cols(&FONT_9X18_BOLD)),
+    );
+    s.centered(&FONT_8X13, 110, "it stops at once");
+    s.footer(Some("back"), Some("A+B  revoke"), Some("back"));
+    s.done()
+}
+
 /// The question before a circle is forgotten: its name, what goes, and keep or forget.
 pub fn forget_prompt(circle: &str) -> Screen {
     let mut s = Draw::new();
