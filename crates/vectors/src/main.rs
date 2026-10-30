@@ -913,6 +913,350 @@ Names longer than 64 bytes were cut.\n";
     })
 }
 
+/// The objects vectors' three-seat circle: its seat seeds, keys and manifest.
+fn objects_circle() -> (Vec<[u8; 32]>, Vec<SeatKey>, Manifest) {
+    let params = CircleParams::new(3, 192, "objects", false).unwrap();
+    let seeds: Vec<[u8; 32]> = (0..3)
+        .map(|i| fill(500 + i, 32).try_into().unwrap())
+        .collect();
+    let keys: Vec<SeatKey> = seeds
+        .iter()
+        .map(|s| SeatKey::from_seed(s).unwrap())
+        .collect();
+    let manifest = Manifest {
+        circle_id: fill(510, 16).try_into().unwrap(),
+        seats: keys
+            .iter()
+            .enumerate()
+            .map(|(i, k)| Seat {
+                seat: i as u8,
+                key: k.public(),
+                tier: TIERS[i],
+                evidence: Vec::new(),
+            })
+            .collect(),
+        floor: Manifest::default_floor(&params),
+        params,
+        genesis: 0,
+    };
+    (seeds, keys, manifest)
+}
+
+fn channel_vectors() -> Value {
+    use cahoots_channel::control::Control as ChanControl;
+    use cahoots_channel::deposit::{self, Deposit};
+    use cahoots_channel::grant as cgrant;
+    use cahoots_channel::keys::{chain_init, epoch_key, kid_of, EpochId};
+    use cahoots_channel::link::{Link, LinkSecret};
+    use cahoots_channel::message::{self as cmsg, MessageType as ChanType};
+    use cahoots_channel::object::{channel_id_for, ChannelObject};
+    use cahoots_channel::policy::{self, Policy, Preset};
+    use cahoots_channel::quorum::{approval_for, check_quorum, PROFILE_POST};
+    use cahoots_channel::session::ChannelSession;
+    use cahoots_channel::Action;
+    use rand::SeedableRng;
+
+    let (seat_seeds, seat_keys, manifest) = objects_circle();
+    let circle = manifest.circle_id;
+    let seat = 1u8;
+    let seat_key = &seat_keys[usize::from(seat)];
+    fn h(bytes: impl AsRef<[u8]>) -> String {
+        hex::encode(bytes)
+    }
+
+    let channel_nonce: [u8; 16] = fill(540, 16).try_into().unwrap();
+    let channel_id = channel_id_for(&circle, &channel_nonce);
+    let secret = LinkSecret(fill(541, 32).try_into().unwrap());
+
+    // Policies: one payload per preset, then one signed.
+    let preset_cases: Vec<(&str, Preset)> = vec![
+        ("announcements", Preset::Announcements),
+        ("announcements_quorum_2", Preset::AnnouncementsQuorum(2)),
+        ("group_chat", Preset::GroupChat),
+        ("members_post", Preset::MembersPost),
+        ("closed", Preset::Closed),
+    ];
+    let policy_nonce: [u8; 16] = fill(543, 16).try_into().unwrap();
+    let make_policy =
+        |preset| Policy::preset(preset, circle, channel_id, secret.id(), 3, 5, policy_nonce);
+    let presets: Vec<Value> = preset_cases
+        .iter()
+        .map(|(name, p)| json!({"preset": name, "payload": h(make_policy(*p).encode())}))
+        .collect();
+    let policy = make_policy(Preset::AnnouncementsQuorum(2));
+    let policy_signed = policy.sign(seat_key, seat);
+    let policy_id = policy::id(&policy_signed);
+
+    let object = ChannelObject {
+        circle_id: circle,
+        channel_id,
+        name: "announcements".to_string(),
+        created_log: 5,
+        policy_id,
+        nonce: channel_nonce,
+    };
+    let object_signed = object.sign(seat_key, seat);
+
+    let link = Link {
+        relay: "relay.cahoots.network".to_string(),
+        channel_id,
+        secret: Some(LinkSecret(secret.0)),
+    };
+
+    // Epochs and chains.
+    let root: [u8; 32] = fill(542, 32).try_into().unwrap();
+    let epoch_id = EpochId {
+        channel_id,
+        epoch: 1,
+    };
+    let ekey = epoch_key(&epoch_id, &root);
+    let member_seed: [u8; 32] = fill(600, 32).try_into().unwrap();
+    let owner_seed: [u8; 32] = fill(601, 32).try_into().unwrap();
+    let member = SeatKey::from_seed(&member_seed).unwrap();
+    let owner = SeatKey::from_seed(&owner_seed).unwrap();
+    let chains: Vec<Value> = [&member, &owner]
+        .iter()
+        .map(|k| {
+            let kid = kid_of(&k.public());
+            json!({"kid": h(kid), "chain": h(&chain_init(&ekey, &kid)[..])})
+        })
+        .collect();
+
+    // Deposits.
+    let dep_link = deposit::seal_for_link(&ekey, &secret, &epoch_id);
+    let mut rng = rand::rngs::StdRng::from_seed(fill(610, 32).try_into().unwrap());
+    let (xsk, xpk) = cahoots_hpke::gen_keypair(cahoots_hpke::Suite::XWing, &mut rng);
+    let member_kid = kid_of(&member.public());
+    let dep_key = deposit::seal_for_key(&ekey, &epoch_id, member_kid, &xpk, &mut rng).unwrap();
+    let dep_json = |d: &Deposit| {
+        json!({
+            "deposit": h(d.encode()),
+            "channel_id": h(d.channel_id),
+            "epoch_id": h(d.epoch_id.encode()),
+            "to": h(d.to),
+            "kind": d.kind,
+            "sealed": h(&d.sealed),
+            "id": h(d.id()),
+        })
+    };
+
+    // Grants.
+    let delegate_seed: [u8; 32] = fill(522, 32).try_into().unwrap();
+    let delegate = SeatKey::from_seed(&delegate_seed).unwrap();
+    let leaf_seed: [u8; 32] = fill(523, 32).try_into().unwrap();
+    let leaf = SeatKey::from_seed(&leaf_seed).unwrap();
+    let root_claims = cgrant::issue_root(
+        &circle,
+        &channel_id,
+        seat,
+        &delegate.public(),
+        &[Action::Read, Action::Post, Action::Admit],
+        0,
+        1000,
+        1,
+        fill(550, 16).try_into().unwrap(),
+    );
+    let root_signed = cgrant::sign_root(&root_claims, seat_key, seat);
+    let root_grant = cgrant::from_claims(&root_claims).unwrap();
+    let delegated_claims = cgrant::issue_delegated(
+        &root_signed,
+        &root_grant,
+        &leaf.public(),
+        &[Action::Read, Action::Post],
+        10,
+        500,
+        fill(551, 16).try_into().unwrap(),
+    );
+    let delegated_signed = cgrant::sign_delegated(&delegated_claims, &delegate);
+    let leaf_grant =
+        cgrant::verify_chain(&[&root_signed, &delegated_signed], &manifest, &channel_id).unwrap();
+
+    // Messages. The owner's member session sends three in a row, so its counters run 0, 1, 2.
+    let mut member_session = ChannelSession::new(channel_id, member);
+    member_session
+        .install_epoch(epoch_id, epoch_key(&epoch_id, &root))
+        .unwrap();
+    let mut owner_session = ChannelSession::new(channel_id, owner);
+    owner_session
+        .install_epoch(epoch_id, epoch_key(&epoch_id, &root))
+        .unwrap();
+    let msg_json = |seed: &[u8; 32], what: &str, kind: ChanType, plain: &[u8], wire: &[u8]| {
+        let signer = SeatKey::from_seed(seed).unwrap().public();
+        let (header, _, approvals) = cmsg::verify_signature(wire, &signer).unwrap();
+        json!({
+            "case": what,
+            "member_seed": h(seed),
+            "member_public": h(signer.0),
+            "kid": h(header.kid),
+            "epoch_id": h(epoch_id.encode()),
+            "epoch_key": h(&ekey[..]),
+            "msg_type": kind as u8,
+            "counter": header.counter,
+            "plaintext": h(plain),
+            "approvals": approvals.iter().map(h).collect::<Vec<_>>(),
+            "wire": h(wire),
+        })
+    };
+    let text = b"hello, channel";
+    let text_wire = member_session.send(ChanType::Text, text, &[]).unwrap();
+    let text_case = msg_json(&member_seed, "text", ChanType::Text, text, &text_wire);
+
+    let rotation = ChanControl::Rotation {
+        epoch_id: EpochId {
+            channel_id,
+            epoch: 2,
+        },
+        deposits: vec![dep_link.id(), dep_key.id()],
+    }
+    .encode();
+    let rotation_wire = owner_session
+        .send(ChanType::Control, &rotation, &[])
+        .unwrap();
+    let rotation_case = msg_json(
+        &owner_seed,
+        "control_rotation",
+        ChanType::Control,
+        &rotation,
+        &rotation_wire,
+    );
+
+    // The approvals sign the digest of the body, which the signature does not change, so a
+    // dry run on a copy of the session gives the body.
+    let announcement = "Dues are due Friday.\nBring the signed form.";
+    let mut dry = ChannelSession::import_state(&owner_session.export_state()).unwrap();
+    let dry_wire = dry
+        .send(ChanType::Announcement, announcement.as_bytes(), &[])
+        .unwrap();
+    let (body, _, _) = cmsg::split(&dry_wire).unwrap();
+    let digest = cmsg::body_digest(body);
+    let approvals: Vec<Vec<u8>> = [0usize, 1]
+        .iter()
+        .map(|&s| {
+            approval_for(
+                &seat_keys[s],
+                s as u8,
+                &circle,
+                PROFILE_POST,
+                vec![
+                    ("channel".to_string(), "announcements".to_string()),
+                    (
+                        "text".to_string(),
+                        announcement.lines().next().unwrap().to_string(),
+                    ),
+                ],
+                digest,
+                &policy_id,
+                7,
+                2,
+                fill(560 + s as u64, 16).try_into().unwrap(),
+            )
+        })
+        .collect();
+    let announcement_wire = owner_session
+        .send(ChanType::Announcement, announcement.as_bytes(), &approvals)
+        .unwrap();
+    assert_eq!(
+        check_quorum(&approvals, &manifest, &digest, PROFILE_POST, 2, 2).unwrap(),
+        2
+    );
+    let mut announcement_case = msg_json(
+        &owner_seed,
+        "announcement",
+        ChanType::Announcement,
+        announcement.as_bytes(),
+        &announcement_wire,
+    );
+    announcement_case["body_digest"] = json!(h(digest));
+    announcement_case["quorum"] = json!(2);
+    announcement_case["quorum_count"] = json!(2);
+    announcement_case["profile"] = json!(PROFILE_POST);
+    announcement_case["policy_id"] = json!(h(policy_id));
+    announcement_case["log"] = json!(7);
+    announcement_case["assurance"] = json!(2);
+
+    let revocation = ChanControl::Revocation {
+        grant_id: leaf_grant.id,
+        reason: "left".to_string(),
+    };
+    let revocation_wire = owner_session
+        .send(ChanType::Control, &revocation.encode(), &[])
+        .unwrap();
+    let mut revocation_case = msg_json(
+        &owner_seed,
+        "revocation",
+        ChanType::Control,
+        &revocation.encode(),
+        &revocation_wire,
+    );
+    revocation_case["grant_id"] = json!(h(leaf_grant.id));
+    revocation_case["reason"] = json!("left");
+
+    json!({
+        "description": "Channels (crates/channel). Every object is built over the objects vectors' three-seat circle: seat_seeds are the seat seeds, seat 1 signs every object and root grant, and circle_id is the circle. All signed hex reproduces exactly: ECDSA P-256 is RFC 6979 deterministic. channel_object, policy_signed and grant_chain are COSE_Sign1 with the payload embedded. policy_presets lists the payload of Policy::preset for each preset with 3 seats and log 5. link is the invite link and the keys derived from its secret. epoch gives the epoch key from the root and the first chain key of two senders. deposit_link is deterministic. deposit_key is sealed to a fixed X-Wing key with a seeded random generator, so its sealed bytes are recorded, but X-Wing encapsulation is randomized and a client checks it by opening it with recipient_secret_key. Each message case is sent by a member key from member_seed after installing epoch_key as epoch epoch_id. The owner's three messages (control_rotation, announcement, revocation) share one sender chain and must be opened in that order. The announcement carries two seat approvals (seats 0 and 1) over body_digest, the SHA-256 of the header and ciphertext.",
+        "seat_seeds": seat_seeds.iter().map(h).collect::<Vec<_>>(),
+        "circle_id": h(circle),
+        "seat": seat,
+        "channel_object": {
+            "channel_nonce": h(channel_nonce),
+            "channel_id": h(channel_id),
+            "name": object.name,
+            "created_log": object.created_log,
+            "policy_id": h(policy_id),
+            "payload": h(object.encode()),
+            "signed": h(&object_signed),
+        },
+        "policy_presets": {
+            "link_id": h(secret.id()),
+            "seats": 3,
+            "log": 5,
+            "nonce": h(policy_nonce),
+            "presets": presets,
+        },
+        "policy_signed": {
+            "preset": "announcements_quorum_2",
+            "payload": h(policy.encode()),
+            "signed": h(&policy_signed),
+            "id": h(policy_id),
+        },
+        "link": {
+            "secret": h(secret.0),
+            "relay": link.relay,
+            "channel_id": h(channel_id),
+            "id": h(secret.id()),
+            "seal_key": h(&secret.seal_key(&channel_id)[..]),
+            "gate_token": h(secret.gate_token(&channel_id)),
+            "url": link.to_url(),
+        },
+        "epoch": {
+            "root": h(root),
+            "epoch_id": h(epoch_id.encode()),
+            "epoch_key": h(&ekey[..]),
+            "chains": chains,
+        },
+        "deposit_link": dep_json(&dep_link),
+        "deposit_key": {
+            "recipient_secret_key": h(&xsk[..]),
+            "recipient_public_key": h(&xpk),
+            "member_seed": h(member_seed),
+            "epoch_key": h(&ekey[..]),
+            "rng_seed": h(fill(610, 32)),
+            "deposit": dep_json(&dep_key),
+        },
+        "grant_chain": {
+            "delegate_seed": h(delegate_seed),
+            "leaf_seed": h(leaf_seed),
+            "root": h(&root_signed),
+            "delegated": h(&delegated_signed),
+            "root_id": h(root_grant.id),
+            "delegated_id": h(leaf_grant.id),
+        },
+        "message_text": text_case,
+        "message_control_rotation": rotation_case,
+        "message_announcement": announcement_case,
+        "revocation": revocation_case,
+    })
+}
+
 fn main() {
     let check = std::env::args().any(|a| a == "--check");
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -927,6 +1271,7 @@ fn main() {
         ("spend.json", spend_vectors()),
         ("frames.json", frame_vectors()),
         ("objects.json", object_vectors()),
+        ("channel.json", channel_vectors()),
     ];
     let mut stale = Vec::new();
     for (name, value) in files {

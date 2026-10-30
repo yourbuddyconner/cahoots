@@ -28,5 +28,7 @@ zeroize = { version = "1.8", default-features = false, features = ["alloc"] }
 [dev-dependencies]
 cahoots-hpke = { path = "../hpke" }
 minicbor = { version = "2.3", default-features = false, features = ["alloc"] }
+hex = { workspace = true, features = ["std"] }
 rand = "0.10"
+serde_json = { workspace = true }
 sha2 = { workspace = true, features = ["std"] }

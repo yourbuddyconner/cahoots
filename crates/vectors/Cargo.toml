@@ -11,6 +11,9 @@ publish = false
 cahoots-core = { workspace = true, features = ["std"] }
 cahoots-objects = { workspace = true, features = ["std"] }
 cahoots-badge = { workspace = true }
+cahoots-channel = { workspace = true, features = ["std"] }
+cahoots-hpke = { path = "../hpke" }
+rand = "0.10"
 cahoots-custodian = { workspace = true }
 serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true }
