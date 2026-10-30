@@ -12,6 +12,7 @@ learn:
 - What a circle should let you do after meeting in person
 - How agents can act for a circle under explicit, limited grants
 - Why the badge matters, and what it cannot promise
+- Why verification has to reach through the software stack and hardware supply chain
 description: The people you trust should be able to make a private circle, set the terms for agents acting on their behalf, and carry that authority on hardware they own. That's why I'm building Cahoots.
 ---
 
@@ -83,7 +84,9 @@ My frustration is that putting these protections together still asks a lot of th
 
 Cahoots is an attempt to make the group a useful starting point across those boundaries. A shared circle can supply a pre-shared key for a WireGuard tunnel, key material for chat, or a key for encrypting a file. Members also have individual signing keys for actions that need to be attributable to one person.
 
-There will still be infrastructure. Messages need delivery. Software needs updates. Devices break. We run a hosted relay because people should be able to start a conversation without first becoming server administrators. The relay can fail, observe traffic patterns, or refuse to deliver a message. It doesn't need the circle's keys to do its job.
+There will still be infrastructure. Messages need delivery. Software needs updates. Devices break. We run a hosted relay because people should be able to start a conversation without first becoming server administrators. It doesn't need the circle's keys to do its job. A relay operator can still observe traffic patterns or refuse to deliver messages. We promise we won't use ours to surveil your circle or selectively block its conversations. But you shouldn't have to take our word for it. You can run the relay yourself and keep that decision in your own hands.
+
+I want the convenience of hosting to come with verifiable limits on the host's power. (Secure enclaves, through infrastructure such as [Turnkey Verifiable Cloud](https://docs.turnkey.com/features/verifiable-cloud/overview), offer a way to verify which code is running and isolate its work from the operator.) That's the world we're trying to help bring about: you can let someone else run the service and check the rules it runs under, without having to trust their promise to follow them. That still rests on the hardware and its verification, but it gives us something stronger than a privacy policy.
 
 I want to be able to draw that line clearly: here's what the service does, here's what it can learn, and here's what remains with us.
 
@@ -103,6 +106,16 @@ Hardware wallets and login keys have done important work here. I want to bring t
 
 There should be more people trying this. More boards. More approaches. More things you can own, fix, and understand well enough to decide whether you trust them.
 
+## Verification all the way down
+
+An open app on an opaque foundation only takes us so far. Who built the binary? What dependencies went into it? Which firmware is the badge running? Did the factory deliver the chip its label claims? The hardware supply chain belongs in the same conversation as the software supply chain. Otherwise we keep moving the demand for trust down a layer and calling the problem solved.
+
+That's why [Baochip-1x, the chip on the Dabao board](https://www.crowdsupply.com/baochip/dabao), matters to me. Its boot software is open and reproducible, much of its logic design is published, and the chip is packaged for infrared inspection of the silicon itself. You can gather evidence about the thing in your hand instead of stopping at the manufacturer's word. That's the direction I want privacy hardware to go.
+
+The same ambition has to run through the entire software stack: the app, its dependencies, the tools that build it, the relay, the badge firmware, and the boot code. Published source gives us something to inspect. Reproducible builds let us compare what we built with what we were given. Attestation can provide evidence of which code a remote service is running. Each layer should give the next one something checkable.
+
+This is the point of tiered security. A circle should be able to choose how much evidence it needs, from using familiar devices to checking the software and inspecting the hardware beneath it. At the highest tier, I want users to have a path to verify the system for themselves, through to the silicon, with every remaining assumption exposed. That's the utopian end of this for me: keep replacing demands for trust with things people can actually check.
+
 ## The limits matter
 
 Part of what got me here was a pessimistic question: what do we keep if the cryptography we rely on stops holding up?
@@ -118,6 +131,10 @@ I still think there's something worth building here. We can give a group more co
 ## Privacy as a core competency
 
 I don't want to become a part-time administrator just to have a private life. I don't think anyone else should have to, either. The tools need to do more of the work.
+
+Being secure isn't enough. It has to be usable by normal people, on an ordinary day, when they're tired and have something else to do. A confusing ceremony, a warning nobody understands, or a stream of approval prompts can wear the whole thing down. Fatigue kills it. People click through, take shortcuts, or leave, and a beautiful security model becomes irrelevant.
+
+Verification needs that same care. People should be able to run checks, understand the results, and choose whose independent work they rely on without learning chip design or auditing every dependency themselves. The deeper inspection should remain available to anyone who wants it. Everyday use should make the safe path easy and save people's attention for decisions that deserve it.
 
 But I do want to be able to answer three questions: Who else can read this? What would they have to do to read it? What happens if they're compromised?
 
