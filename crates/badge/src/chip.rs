@@ -230,9 +230,11 @@ pub fn delete_slot(chip: &mut dyn ChipOps, slot: u8) -> Result<(), ChipError> {
     Ok(())
 }
 
-/// Delete every object in the Cahoots range: the wipe at boot.
+/// Delete every object in the Cahoots range but the grant issue counter: the wipe at boot.
+/// The issue counter stays so a grant base is never given twice on one chip.
 pub fn delete_all(chip: &mut dyn ChipOps) -> Result<(), ChipError> {
-    for id in chip.ids()? {
+    let issue = KeyId::new(KeyKind::Grant, crate::grants::ISSUE_SLOT);
+    for id in chip.ids()?.into_iter().filter(|&id| id != issue) {
         match chip.delete(id) {
             Ok(()) | Err(ChipError::NoSuchKey) => {}
             Err(e) => return Err(e),

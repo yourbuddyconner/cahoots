@@ -81,7 +81,8 @@ impl Grant {
 impl Claims {
     /// The claims by name: `iss`, `sub`, `cti` (hex), `cnf` as `{"jwk": ...}`,
     /// `authorization_details`, and the Cahoots claims `cahoots-log`, `cahoots-parent` (hex or
-    /// null), `cahoots-depth` and `cahoots-grantor` (a seat number, or the key in hex).
+    /// null), `cahoots-depth`, `cahoots-grantor` (a seat number, or the key in hex) and, on a
+    /// sign grant, `cahoots-base`.
     pub fn to_json(&self) -> Value {
         let details: Vec<Value> = self
             .authorization_details
@@ -122,6 +123,9 @@ impl Claims {
         }
         if let Some(t) = self.exp {
             claims["exp"] = json!(t);
+        }
+        if let Some(b) = self.base {
+            claims["cahoots-base"] = json!(b);
         }
         claims
     }

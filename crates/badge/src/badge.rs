@@ -240,8 +240,8 @@ struct Menu<B: Board> {
     /// Both on the Forget page asked "forget this circle?": Both forgets, Left or Right goes
     /// back.
     confirm_forget: bool,
-    /// The live grants of this circle, read when the Grants page is entered and after a
-    /// revoke, and the one marked.
+    /// The live grants of this circle, read when the Grants page is entered, after a revoke
+    /// and when a cover over the page goes, and the one marked.
     grant_entries: Vec<grants::PageEntry>,
     grant_index: usize,
     /// Both on a grant asked "revoke this grant?": Both revokes, Left or Right goes back.
@@ -379,7 +379,8 @@ impl<B: Board> Badge<B> {
             self.board.log(l);
         }
         self.reconcile_chip(circles.iter().filter_map(|c| c.chip_slot).collect());
-        for l in grants::sweep(&mut self.board) {
+        let held: Vec<cahoots_core::circle_id::CircleId> = circles.iter().map(|c| c.circle_id).collect();
+        for l in grants::sweep(&mut self.board, &held) {
             self.board.log(&l);
         }
         self.clock = grants::boot_clock(&mut self.board);
@@ -1254,6 +1255,12 @@ impl<B: Board> Badge<B> {
         if m.covered {
             if gesture != Press::None {
                 m.covered = false;
+                // A use under a grant may have been drawn over the page: its counts are read
+                // again, not shown from before.
+                if m.page == Page::Grants {
+                    Self::read_grants(board, clock, c, m);
+                    m.grant_index = m.grant_index.min(m.grant_entries.len().saturating_sub(1));
+                }
                 show_page(board, c, m);
             }
             return MenuAction::Stay;
@@ -1492,9 +1499,13 @@ impl<B: Board> Badge<B> {
                     }
                     // Signed under a grant: the badge shows what it signed until the next
                     // gesture or screen, without waiting.
+                    // It replaces the revoke or forget question, as a prompt does: once it is
+                    // dismissed the page is back, and a Both then is the page's, not an answer.
                     if let Some(u) = used {
                         board.note_grant_use(&u.cti, &u.agent, &u.subject, u.remaining, u.budget);
                         m.covered = true;
+                        m.confirm_revoke = false;
+                        m.confirm_forget = false;
                     }
                 }
                 // Refused before anyone is asked: a circle the badge does not hold, a request

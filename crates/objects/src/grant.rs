@@ -199,6 +199,7 @@ impl Grant {
             parent: self.parent,
             depth: self.depth,
             grantor: self.grantor,
+            base: None,
         }
     }
 

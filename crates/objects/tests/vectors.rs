@@ -319,6 +319,7 @@ fn the_sign_grant_and_its_proof_are_reproduced() {
         agent: i["agent"].as_str().unwrap().into(),
         budget: uint(&i["budget"]) as u32,
         exp: Some(uint(&i["exp"])),
+        base: uint(&i["base"]),
     };
     assert_eq!(want.grantee, agent.public());
     assert_eq!(want.exp, Some(1_764_374_400));

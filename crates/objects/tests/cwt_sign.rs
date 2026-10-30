@@ -31,6 +31,7 @@ fn sign_claims() -> Claims {
         parent: None,
         depth: 0,
         grantor: cahoots_objects::grant::Grantor::Seat(1),
+        base: Some(1 << 32),
     }
 }
 
@@ -150,4 +151,30 @@ fn an_aud_that_is_not_a_seat_is_malformed() {
     let mut c = sign_claims();
     c.aud = Some(audience(&[9; 16], 2));
     malformed(&c);
+}
+
+#[test]
+fn a_sign_grant_without_a_base_is_malformed() {
+    let mut c = sign_claims();
+    c.base = None;
+    malformed(&c);
+}
+
+#[test]
+fn a_pad_grant_with_a_base_is_malformed() {
+    let v: serde_json::Value =
+        serde_json::from_str(include_str!("../../vectors/objects.json")).unwrap();
+    let bytes = hex::decode(v["grant_v2_root"]["payload"].as_str().unwrap()).unwrap();
+    let mut c = Claims::decode(&bytes).unwrap();
+    c.base = Some(1 << 32);
+    malformed(&c);
+}
+
+#[test]
+fn the_base_is_the_last_claim_and_reads_back() {
+    let c = sign_claims();
+    let bytes = c.encode();
+    // -65542 then 1 << 32: 3a 00010005 1b 0000000100000000.
+    assert!(bytes.ends_with(&[0x3a, 0, 1, 0, 5, 0x1b, 0, 0, 0, 1, 0, 0, 0, 0]));
+    assert_eq!(Claims::decode(&bytes).unwrap().base, Some(1 << 32));
 }

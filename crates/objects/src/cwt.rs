@@ -13,6 +13,7 @@
 //! | -65539 | `authorization_details` (RFC 9396) | array of detail maps |
 //! | -65540 | `cahoots-depth` | uint, delegations still allowed below this grant |
 //! | -65541 | `cahoots-grantor` | uint seat for a root grant, or bstr 33 key for a delegated one |
+//! | -65542 | `cahoots-base` | uint, where a sign grant's use counter starts on the issuing badge, absent on a pad grant |
 //!
 //! `authorization_details` has no key in IANA's CWT Claims registry (RFC 9396 registers it for
 //! JWT only; checked 2026-10-28), so it takes a private key, `-65539`, beside the Cahoots
@@ -56,6 +57,10 @@ pub const AUTHORIZATION_DETAILS: i64 = -65539;
 pub const DEPTH: i64 = -65540;
 /// `cahoots-grantor`: who signed, as in version 1. Private.
 pub const GRANTOR: i64 = -65541;
+/// `cahoots-base`: the value a sign grant's use counter starts at, on the badge that issued
+/// it. Signed into the grant so the count is read against it and never against a stored copy.
+/// Private.
+pub const BASE: i64 = -65542;
 
 /// The `cnf` map's key for a COSE_Key (RFC 8747 §3.1).
 const CNF_COSE_KEY: u8 = 1;
@@ -151,6 +156,8 @@ pub struct Claims {
     pub parent: Option<[u8; 32]>,
     pub depth: u8,
     pub grantor: Grantor,
+    /// Where a sign grant's use counter starts on the issuing badge. Absent on a pad grant.
+    pub base: Option<u64>,
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -269,7 +276,8 @@ impl Claims {
             7 + u64::from(self.aud.is_some())
                 + u64::from(self.exp.is_some())
                 + u64::from(self.log_not_after.is_some())
-                + u64::from(self.parent.is_some()),
+                + u64::from(self.parent.is_some())
+                + u64::from(self.base.is_some()),
         )?;
         e.i64(ISS)?.str(&self.iss)?;
         e.i64(SUB)?.str(&self.sub)?;
@@ -326,6 +334,9 @@ impl Claims {
             Grantor::Seat(s) => e.u8(*s)?,
             Grantor::Key(k) => e.bytes(&k.0)?,
         };
+        if let Some(b) = self.base {
+            e.i64(BASE)?.u64(b)?;
+        }
         Ok(())
     }
 
@@ -348,6 +359,7 @@ impl Claims {
         let mut details = None;
         let mut depth = None;
         let mut grantor = None;
+        let mut base = None;
         for _ in 0..n {
             let key = i64::try_from(d.int().map_err(|_| m)?).map_err(|_| m)?;
             match key {
@@ -371,6 +383,7 @@ impl Claims {
                     d.u64().map_err(|_| m)?.try_into().map_err(|_| m)?,
                 )?,
                 GRANTOR => once(&mut grantor, read_grantor(&mut d)?)?,
+                BASE => once(&mut base, d.u64().map_err(|_| m)?)?,
                 _ => return Err(m),
             }
         }
@@ -389,6 +402,7 @@ impl Claims {
             parent,
             depth: depth.ok_or(m)?,
             grantor: grantor.ok_or(m)?,
+            base,
         };
         // The kind must be a grant's: this checks the issuer, the details and that `sub`
         // is the key id of `cnf`.
@@ -398,9 +412,9 @@ impl Claims {
     }
 
     /// The circle and what the grant allows, checked: what [`crate::Grant::from_v2`] reads for
-    /// a pad grant. A pad grant has a log claim, the [`PAD_TYPE`] detail last, no `aud` and no
-    /// `exp`; a sign grant has one [`SIGN_TYPE`] detail, an `aud` naming the issuing circle,
-    /// no log claim and depth 0. Anything else is `Malformed`.
+    /// a pad grant. A pad grant has a log claim, the [`PAD_TYPE`] detail last, no `aud`, no
+    /// `exp` and no base; a sign grant has one [`SIGN_TYPE`] detail, an `aud` naming the
+    /// issuing circle, a base, no log claim and depth 0. Anything else is `Malformed`.
     pub fn kind(&self) -> Result<(CircleId, Kind), ObjectError> {
         let m = ObjectError::Malformed;
         let circle_id = circle_of(&self.iss).ok_or(m)?;
@@ -417,7 +431,7 @@ impl Claims {
 
     fn pad_kind(&self) -> Result<Kind, ObjectError> {
         let m = ObjectError::Malformed;
-        if self.aud.is_some() || self.exp.is_some() {
+        if self.aud.is_some() || self.exp.is_some() || self.base.is_some() {
             return Err(m);
         }
         let (pad, purposes) = self.authorization_details.split_last().ok_or(m)?;
@@ -454,7 +468,11 @@ impl Claims {
     fn sign_kind(&self, circle_id: &CircleId) -> Result<Kind, ObjectError> {
         let m = ObjectError::Malformed;
         let aud = self.aud.as_deref().ok_or(m)?;
-        if seat_of(aud).ok_or(m)?.0 != *circle_id || self.depth != 0 || self.parent.is_some() {
+        if seat_of(aud).ok_or(m)?.0 != *circle_id
+            || self.depth != 0
+            || self.parent.is_some()
+            || self.base.is_none()
+        {
             return Err(m);
         }
         let [d] = self.authorization_details.as_slice() else {

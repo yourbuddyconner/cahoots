@@ -328,6 +328,7 @@ mod tests {
             agent: "claude".into(),
             budget: 3,
             exp: None,
+            base: 1 << 32,
         };
         let stored = |cti: u8, remaining| Stored {
             circle: "my-circle".into(),

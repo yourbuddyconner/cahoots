@@ -25,6 +25,7 @@ fn grant() -> SignGrant {
         agent: "claude on connerswann-mbp".into(),
         budget: 2,
         exp: Some(1000),
+        base: 1 << 32,
     }
 }
 

@@ -21,7 +21,7 @@ Per-member fields are arrays with one entry per member, in seat order: `seat_see
 
 ## `objects.json` fields
 
-`manifest` is the canonical body of a three-seat circle whose keys come from `seat_seeds`. Every object is signed by `seat` (1) under kid `[1]`, except the delegated grant, signed by `delegate_seed` under kid SHA-256 of its public key. Each object has `inputs` (every field), `payload` (canonical CBOR), `signed` (the COSE_Sign1 with the payload embedded) and `json` (the informative projection). The test in `crates/objects/tests/vectors.rs` rebuilds all of them from the inputs. `sign_grant` is a sign grant (protocol section 8.3) signed by `seat` for the key of `agent_seed`, with its claims as `payload`, and `sign_grant.proof` is that key's proof over a fixed hash and nonce.
+`manifest` is the canonical body of a three-seat circle whose keys come from `seat_seeds`. Every object is signed by `seat` (1) under kid `[1]`, except the delegated grant, signed by `delegate_seed` under kid SHA-256 of its public key. Each object has `inputs` (every field), `payload` (canonical CBOR), `signed` (the COSE_Sign1 with the payload embedded) and `json` (the informative projection). The test in `crates/objects/tests/vectors.rs` rebuilds all of them from the inputs. `sign_grant` is a sign grant (protocol section 8.3) signed by `seat` for the key of `agent_seed`, with its claims as `payload` and the base its counter starts at as `inputs.base`, and `sign_grant.proof` is that key's proof over a fixed hash and nonce.
 
 ## `root.json` fields
 

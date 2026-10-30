@@ -67,6 +67,9 @@ pub struct SignGrant {
     pub budget: u32,
     /// Unix time at which the grant ends, if it does.
     pub exp: Option<u64>,
+    /// Where the grant's use counter starts on the badge that issued it: uses are the counter
+    /// less this. 0 on a badge that counts without a chip.
+    pub base: u64,
 }
 
 impl SignGrant {
@@ -96,6 +99,7 @@ impl SignGrant {
             parent: None,
             depth: 0,
             grantor: Grantor::Seat(self.seat),
+            base: Some(self.base),
         }
     }
 
@@ -126,6 +130,7 @@ impl SignGrant {
             agent: d.agent,
             budget: d.budget,
             exp: c.exp,
+            base: c.base.ok_or(m)?,
         })
     }
 

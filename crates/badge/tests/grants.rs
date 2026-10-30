@@ -1095,3 +1095,160 @@ fn a_request_over_the_revoke_question_cancels_it() {
     assert!(!record(&mut badge).grants[0].revoked);
     assert_eq!(counter(&mut badge, slot), Some(0));
 }
+
+// ---- the base is signed into the grant ----
+
+#[test]
+fn the_grant_carries_its_base_and_the_record_copies_it() {
+    let (mut badge, mut laptop, id, public) = serving(true);
+    let (a, a_slot) = issue(&mut badge, &mut laptop, id, grant_request(2, Some(EXP), false, NOW));
+    let (b, b_slot) = issue(&mut badge, &mut laptop, id, grant_request(2, Some(EXP), false, NOW));
+    let a = SignGrant::verify(&a, &public, &id, 1).unwrap();
+    let b = SignGrant::verify(&b, &public, &id, 1).unwrap();
+    // Issue 1 and issue 2, shifted up 32 bits.
+    assert_eq!((a.base, b.base), (BASE, 2 * BASE));
+    let r = record(&mut badge);
+    assert_eq!((r.grants[0].base, r.grants[1].base), (a.base, b.base));
+    assert_eq!(raw_counter(&mut badge, a_slot), Some(a.base));
+    assert_eq!(raw_counter(&mut badge, b_slot), Some(b.base));
+}
+
+#[test]
+fn a_record_pointing_an_old_grant_at_a_live_grants_slot_and_base_is_refused() {
+    let (mut badge, mut laptop, id, public) = serving(true);
+    let (a, _) = issue(&mut badge, &mut laptop, id, grant_request(1, Some(EXP), false, NOW));
+    let a_cti = SignGrant::verify(&a, &public, &id, 1).unwrap().cti;
+    assert_eq!(remaining_of(&use_grant(&mut badge, &mut laptop, id, &a, NOW)), 0);
+    assert_eq!(use_grant(&mut badge, &mut laptop, id, &a, NOW), denied());
+    assert!(record(&mut badge).grants.is_empty());
+    let (b, slot) = issue(&mut badge, &mut laptop, id, grant_request(2, Some(EXP), false, NOW));
+    let live = record(&mut badge);
+    let b_raw = raw_counter(&mut badge, slot).unwrap();
+    // The spent grant A, named in a record with B's slot and B's base: A's signed base is not
+    // B's, so the record is not A's and A is unknown.
+    let mut crafted = live.clone();
+    crafted.grants[0].cti = a_cti;
+    badge.board().grants = Some(crafted.encode());
+    assert_eq!(use_grant(&mut badge, &mut laptop, id, &a, NOW), denied());
+    assert_eq!(raw_counter(&mut badge, slot), Some(b_raw));
+    assert!(badge
+        .board()
+        .log
+        .iter()
+        .any(|l| l.contains("grant unknown, the record's base is not the grant's")));
+    // The same record with A's own base: B's counter is far past A's budget above it.
+    crafted.grants[0].base = BASE;
+    badge.board().grants = Some(crafted.encode());
+    assert_eq!(use_grant(&mut badge, &mut laptop, id, &a, NOW), denied());
+    assert_eq!(raw_counter(&mut badge, slot), Some(b_raw));
+    // B is untouched: its whole budget is left.
+    badge.board().grants = Some(live.encode());
+    assert_eq!(remaining_of(&use_grant(&mut badge, &mut laptop, id, &b, NOW)), 1);
+}
+
+#[test]
+fn a_wipe_keeps_the_issue_counter() {
+    let (mut board, _, _) = board(true);
+    let chip = board.chip.as_mut().unwrap();
+    chip.put_counter(KeyId::new(KeyKind::Grant, ISSUE_SLOT), 5).unwrap();
+    chip.put_counter(KeyId::new(KeyKind::Grant, 0), 5 * BASE).unwrap();
+    board.a_down = true;
+    board.release_at_ms = board.elapsed_ms + 3000;
+    let mut badge = Badge::new(board);
+    badge.boot();
+    assert!(badge.circle().is_none());
+    // The grant's counter and the seat key go. The issue counter stays, so no base repeats.
+    assert_eq!(raw_counter(&mut badge, 0), None);
+    assert_eq!(raw_counter(&mut badge, ISSUE_SLOT), Some(5));
+    let ids = badge.board().chip.as_mut().unwrap().ids().unwrap();
+    assert_eq!(ids, vec![KeyId::new(KeyKind::Grant, ISSUE_SLOT)]);
+}
+
+// ---- a use drawn over a question ----
+
+#[test]
+fn a_grant_use_over_the_revoke_question_takes_it_away() {
+    let (mut badge, mut laptop, id, _) = serving(true);
+    let (grant, slot) = issue(&mut badge, &mut laptop, id, grant_request(50, Some(EXP), false, NOW));
+    press(&mut badge, Press::Right);
+    press(&mut badge, Press::Right);
+    press(&mut badge, Press::Both);
+    assert!(badge.board().shows("revoke this grant?"));
+    // The agent commits while the question is on the screen.
+    assert_eq!(remaining_of(&use_grant(&mut badge, &mut laptop, id, &grant, NOW)), 49);
+    assert!(badge.board().shows("49 left of 50"), "{:?}", badge.board().last());
+    // Any press takes the use screen away and shows the page, with the count read again.
+    press(&mut badge, Press::Left);
+    assert!(badge.board().shows("3/5"), "{:?}", badge.board().last());
+    assert!(badge.board().shows("1 of 50 \u{b7} until 29 Nov"), "{:?}", badge.board().last());
+    // Both now is the page's: it asks again and revokes nothing.
+    press(&mut badge, Press::Both);
+    assert!(badge.board().shows("revoke this grant?"));
+    assert!(!record(&mut badge).grants[0].revoked);
+    assert_eq!(counter(&mut badge, slot), Some(1));
+}
+
+#[test]
+fn a_grant_use_over_the_forget_question_takes_it_away() {
+    let (mut badge, mut laptop, id, _) = serving(true);
+    let (grant, _) = issue(&mut badge, &mut laptop, id, grant_request(50, Some(EXP), false, NOW));
+    // Words, key, grants, circles, forget: four to the left of words is forget.
+    press(&mut badge, Press::Left);
+    assert!(badge.board().shows("forget this circle"), "{:?}", badge.board().last());
+    press(&mut badge, Press::Both);
+    assert!(badge.board().shows("forget this circle?"), "{:?}", badge.board().last());
+    assert_eq!(remaining_of(&use_grant(&mut badge, &mut laptop, id, &grant, NOW)), 49);
+    assert!(badge.board().shows("49 left of 50"), "{:?}", badge.board().last());
+    press(&mut badge, Press::Left);
+    assert!(badge.board().shows("5/5"), "{:?}", badge.board().last());
+    // Both now asks again and forgets nothing.
+    press(&mut badge, Press::Both);
+    assert!(badge.board().shows("forget this circle?"), "{:?}", badge.board().last());
+    assert!(badge.circle().is_some());
+    assert!(badge.board().circle.is_some());
+}
+
+// ---- the sweep drops what no use would honour ----
+
+#[test]
+fn the_sweep_drops_a_spent_grant() {
+    let (mut badge, mut laptop, id, _) = serving(true);
+    let (grant, slot) = issue(&mut badge, &mut laptop, id, grant_request(2, Some(EXP), false, NOW));
+    assert_eq!(remaining_of(&use_grant(&mut badge, &mut laptop, id, &grant, NOW)), 1);
+    assert_eq!(remaining_of(&use_grant(&mut badge, &mut laptop, id, &grant, NOW)), 0);
+    // The agent retires the grant at 0 and never sends it again: the record stays until boot.
+    assert_eq!(record(&mut badge).grants.len(), 1);
+    badge.boot();
+    assert!(record(&mut badge).grants.is_empty());
+    assert_eq!(raw_counter(&mut badge, slot), None);
+    let log = badge.board().log.join("\n");
+    assert!(log.contains(&format!("in slot {slot}: spent, removed")), "{log}");
+}
+
+#[test]
+fn the_sweep_drops_the_grants_of_a_circle_the_badge_no_longer_holds() {
+    let (mut board, id, _) = board(true);
+    let gone = [0x77; 16];
+    let chip = board.chip.as_mut().unwrap();
+    chip.put_counter(KeyId::new(KeyKind::Grant, 1), BASE).unwrap();
+    chip.put_counter(KeyId::new(KeyKind::Grant, 2), BASE).unwrap();
+    let mut revoked = grant_record(3, gone);
+    revoked.revoked = true;
+    board.grants = Some(
+        GrantsRecord {
+            known_time: NOW,
+            grants: vec![grant_record(1, id), grant_record(2, gone), revoked],
+        }
+        .encode(),
+    );
+    let mut badge = Badge::new(board);
+    badge.boot();
+    // The held circle's grant stays. The other circle's grants go, live or revoked, and so
+    // does the live one's counter.
+    assert_eq!(record(&mut badge).grants, vec![grant_record(1, id)]);
+    assert_eq!(raw_counter(&mut badge, 1), Some(BASE));
+    assert_eq!(raw_counter(&mut badge, 2), None);
+    let log = badge.board().log.join("\n");
+    assert!(log.contains("in slot 2: its circle is gone, removed"), "{log}");
+    assert!(log.contains("in slot 3: its circle is gone, removed"), "{log}");
+}

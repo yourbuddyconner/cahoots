@@ -11,10 +11,13 @@
 //! On a badge with a chip the count is the chip's counter for the grant's slot and nothing
 //! else: a flash image restored over the record cannot refund a use. Each grant's counter
 //! starts at its `base`, the chip-wide issue counter ([`ISSUE_SLOT`]) at issue shifted up 32
-//! bits, so a grant's uses are its counter less its base. A later grant in the same slot has a
-//! base at least 2^32 higher: an older record restored over the flash reads its slot's counter
-//! as far past any budget and is refused, and never spends the later grant's count. A badge without a chip
-//! counts in the record (`used_soft`).
+//! bits, so a grant's uses are its counter less its base. The base is signed into the grant
+//! (the `cahoots-base` claim) and read from the verified grant, never from flash: a record
+//! whose base is not the grant's is refused as unknown. A later grant in the same slot has a
+//! base at least 2^32 higher, so an older grant reads its slot's counter as far past any
+//! budget and is refused, and never spends the later grant's count. The issue counter is kept
+//! through a wipe, so no base is given twice on one chip. A badge without a chip counts in the
+//! record (`used_soft`), and its grants have base 0.
 //!
 //! The badge has a timer, not a clock: [`Clock`] keeps the latest time a laptop told it, plus
 //! the uptime since, and never goes back. A laptop can make a grant end early, never late.
@@ -96,7 +99,8 @@ pub struct GrantRecord {
     #[n(12)]
     pub used_soft: u64,
     /// What the grant's chip counter was set to at issue: the issue number shifted up 32 bits.
-    /// Uses are the counter less this. 0 without a chip.
+    /// 0 without a chip. A copy of the grant's signed base: a record that differs from the
+    /// grant is refused, and the count is read against the grant's.
     #[n(13)]
     pub base: u64,
 }
@@ -260,9 +264,6 @@ fn next_issue(chip: &mut dyn ChipOps) -> Result<u64, ErrorCode> {
     chip.counter_next(id).map_err(|_| ErrorCode::ChipError)
 }
 
-/// The uses a chip counter reading `raw` stands for under a grant with `base` and `budget`,
-/// or `None` when the counter cannot be this grant's: below its base, or past its budget
-/// (a later grant in the same slot, whose base is at least 2^32 higher).
 /// A base the badge gives on a chip: a nonzero issue number shifted up 32 bits. Only one such
 /// base lies within a budget below any counter value, so the chip alone decides the count
 /// whatever the flash says.
@@ -270,6 +271,9 @@ fn base_ok(base: u64) -> bool {
     base != 0 && base & 0xFFFF_FFFF == 0
 }
 
+/// The uses a chip counter reading `raw` stands for under a grant with `base` and `budget`,
+/// or `None` when the counter cannot be this grant's: below its base, or past its budget
+/// (a later grant in the same slot, whose base is at least 2^32 higher).
 fn uses(raw: u64, base: u64, budget: u32) -> Option<u64> {
     raw.checked_sub(base).filter(|&n| n <= u64::from(budget))
 }
@@ -367,6 +371,7 @@ pub fn check_request<G: GrantBoard + ?Sized>(
         agent: req.agent.clone(),
         budget: req.budget,
         exp: req.exp,
+        base: 0,
     };
     // The grant must read back as itself, or nobody could check it.
     let back = Claims::decode(&grant.claims().encode()).and_then(|c| SignGrant::from_claims(&c));
@@ -493,8 +498,9 @@ fn sign_grant<G: GrantBoard + ?Sized>(
 
 /// Make the grant `req` asks for, after the holder allowed it: [`check_request`] again, the
 /// time raised to the laptop's if later, the lowest free slot (the oldest revoked record makes
-/// room when every slot is taken), a fresh `cti`, the grant signed by the seat key, its counter
-/// at 0 in the chip, and its record stored. Returns the signed grant and its slot.
+/// room when every slot is taken), a fresh `cti`, the next issue number as the grant's base
+/// (on a chip), the grant signed by the seat key with that base in it, its counter set to the
+/// base in the chip, and its record stored. Returns the signed grant and its slot.
 pub fn issue<G: GrantBoard + ?Sized>(
     board: &mut G,
     clock: &mut Clock,
@@ -518,18 +524,21 @@ pub fn issue<G: GrantBoard + ?Sized>(
         board.log("grant request refused: the random source failed");
         return Err(ErrorCode::Denied);
     }
-    let signed = sign_grant(board, c, &grant)?;
-    let mut base = 0;
+    // The base comes first: it is signed into the grant.
     if let Some(chip) = board.chip() {
         let issue_no = next_issue(chip)?;
         // An issue number past 32 bits would lose its high bits in the base: refuse.
-        base = match u32::try_from(issue_no) {
+        grant.base = match u32::try_from(issue_no) {
             Ok(n) if n != 0 => u64::from(n) << 32,
             _ => {
                 board.log("grant request refused: the chip's issue counter is used up");
                 return Err(ErrorCode::Denied);
             }
         };
+    }
+    let base = grant.base;
+    let signed = sign_grant(board, c, &grant)?;
+    if let Some(chip) = board.chip() {
         // Anything left in a free slot is stale: the record does not know it.
         let _ = chip.delete(counter_id(slot));
         chip.put_counter(counter_id(slot), base)
@@ -566,11 +575,12 @@ pub fn issue<G: GrantBoard + ?Sized>(
 }
 
 /// Decide a request to sign under a grant, in order: the grant is this seat's (else
-/// `Refuse(Unparseable)`); its record is here (else `Refuse(Denied)`, "grant unknown") and not
-/// revoked (`Refuse(Denied)`); the proof is by the grant's key over this request's hash and
-/// `nonce` (else `Refuse(Unparseable)`); the request is a git commit signature with its text
-/// and an author line (else `Prompt`); then [`authz::evaluate`] with the count from the chip
-/// (or the record) and the badge's time. An expired or spent grant is removed, counter and
+/// `Refuse(Unparseable)`); its record is here with the grant's own base (else
+/// `Refuse(Denied)`, "grant unknown") and not revoked (`Refuse(Denied)`); the proof is by the
+/// grant's key over this request's hash and `nonce` (else `Refuse(Unparseable)`); the request
+/// is a git commit signature with its text and an author line (else `Prompt`); then
+/// [`authz::evaluate`] with the count from the chip (or the record), against the grant's own
+/// base, and the badge's time. An expired or spent grant is removed, counter and
 /// record, and refused; another author, location or action asks; another key or circle is
 /// refused. Every reason is logged.
 pub fn evaluate_request<G: GrantBoard + ?Sized>(
@@ -602,6 +612,15 @@ pub fn evaluate_request<G: GrantBoard + ?Sized>(
         return say(board, "grant unknown", Refuse(ErrorCode::Denied));
     };
     let rec = record.grants[index].clone();
+    // The base is the signed grant's. A record that says otherwise is not this grant's: it
+    // could point the grant at another grant's counter.
+    if rec.base != grant.base || (board.chip().is_some() && !base_ok(grant.base)) {
+        return say(
+            board,
+            "grant unknown, the record's base is not the grant's",
+            Refuse(ErrorCode::Denied),
+        );
+    }
     if rec.revoked {
         return say(board, "grant revoked", Refuse(ErrorCode::Denied));
     }
@@ -631,14 +650,7 @@ pub fn evaluate_request<G: GrantBoard + ?Sized>(
     };
     let used = match board.chip() {
         Some(chip) => match chip.counter_get(counter_id(rec.slot)) {
-            Ok(_) if !base_ok(rec.base) => {
-                return say(
-                    board,
-                    "the record's base is not one the badge gives",
-                    Refuse(ErrorCode::Denied),
-                );
-            }
-            Ok(raw) => match uses(raw, rec.base, grant.budget) {
+            Ok(raw) => match uses(raw, grant.base, grant.budget) {
                 Some(n) => n,
                 None => {
                     // The slot's counter is another grant's: this record is older than it
@@ -744,9 +756,8 @@ pub fn sign_under_grant<G: GrantBoard + ?Sized>(
     })?;
     // The proof is accepted: it is never accepted again, whatever happens below.
     *nonce_spent = true;
-    let g = &record.grants[a.index];
-    // The budget is the signed grant's; the record's copy is for the page.
-    let (slot, budget, base) = (g.slot, a.grant.budget, g.base);
+    // The budget and the base are the signed grant's. The record gives only the slot.
+    let (slot, budget, base) = (record.grants[a.index].slot, a.grant.budget, a.grant.base);
     // Without a chip the count is in the record, which must be written before the signature.
     let mut counted_here = false;
     let used = match board.chip() {
@@ -794,10 +805,15 @@ pub fn sign_under_grant<G: GrantBoard + ?Sized>(
 }
 
 /// At boot: remove what is spent, expired or half there, and return a log line for each.
-/// A record whose grant expired by the stored time, or whose counter is spent or missing (a
-/// revoked one has none, and stays), goes; a counter no live grant names is deleted; a revoked
-/// grant's counter left behind is deleted. An unreadable record changes nothing.
-pub fn sweep<G: GrantBoard + ?Sized>(board: &mut G) -> Vec<String> {
+/// A record of a circle not in `held` goes, revoked or not. So does one whose grant expired by
+/// the stored time, or whose counter is spent or missing (a revoked one has none, and stays).
+/// A counter no live grant names is deleted, and so is a revoked grant's counter left behind.
+/// An unreadable record changes nothing.
+///
+/// The sweep has only the record, not the signed grant, so it reads the count against the
+/// record's base. That can only remove a record or keep one: a use is always checked against
+/// the grant's own base ([`evaluate_request`]).
+pub fn sweep<G: GrantBoard + ?Sized>(board: &mut G, held: &[CircleId]) -> Vec<String> {
     let mut lines = Vec::new();
     let stored = match board.grants_load() {
         Ok(r) => r,
@@ -842,7 +858,9 @@ pub fn sweep<G: GrantBoard + ?Sized>(board: &mut G) -> Vec<String> {
             (Some(_), _) => None,
             (None, _) => Some(g.used_soft),
         };
-        let why = if g.exp.is_some_and(|e| now >= e) {
+        let why = if !held.contains(&g.circle_id) {
+            Some("its circle is gone")
+        } else if g.exp.is_some_and(|e| now >= e) {
             Some("expired")
         } else if g.revoked {
             None
