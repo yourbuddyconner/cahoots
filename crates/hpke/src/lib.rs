@@ -178,3 +178,78 @@ pub fn open_from(
         Suite::XWing => open_with::<XWing>(&*psk, &id, recipient_sk, enc, info, aad, ciphertext),
     }
 }
+
+fn seal_base_with<K: Kem>(
+    pk: &[u8],
+    info: &[u8],
+    aad: &[u8],
+    pt: &[u8],
+    rng: &mut impl CryptoRng,
+) -> Result<(Vec<u8>, Vec<u8>), HpkeError> {
+    let pk = K::PublicKey::from_bytes(pk).map_err(|_| HpkeError::Key)?;
+    let (enc, ct) = hpke::single_shot_seal_with_rng::<ChaCha20Poly1305, HkdfSha256, K>(
+        &OpModeS::Base,
+        &pk,
+        info,
+        pt,
+        aad,
+        rng,
+    )
+    .map_err(|_| HpkeError::Seal)?;
+    Ok((enc.to_bytes().to_vec(), ct))
+}
+
+fn open_base_with<K: Kem>(
+    sk: &[u8],
+    enc: &[u8],
+    info: &[u8],
+    aad: &[u8],
+    ct: &[u8],
+) -> Result<Vec<u8>, HpkeError> {
+    let sk = K::PrivateKey::from_bytes(sk).map_err(|_| HpkeError::Key)?;
+    let enc = K::EncappedKey::from_bytes(enc).map_err(|_| HpkeError::Key)?;
+    hpke::single_shot_open::<ChaCha20Poly1305, HkdfSha256, K>(
+        &OpModeR::Base,
+        &sk,
+        &enc,
+        info,
+        ct,
+        aad,
+    )
+    .map_err(|_| HpkeError::Open)
+}
+
+/// Seal `plaintext` to `recipient_pk` in HPKE base mode: no pad, no PSK. Returns
+/// `(enc, ciphertext)`. For a reader who holds no pad.
+pub fn seal_base(
+    suite: Suite,
+    recipient_pk: &[u8],
+    info: &[u8],
+    aad: &[u8],
+    plaintext: &[u8],
+    rng: &mut impl CryptoRng,
+) -> Result<(Vec<u8>, Vec<u8>), HpkeError> {
+    match suite {
+        Suite::X25519 => {
+            seal_base_with::<X25519HkdfSha256>(recipient_pk, info, aad, plaintext, rng)
+        }
+        Suite::XWing => seal_base_with::<XWing>(recipient_pk, info, aad, plaintext, rng),
+    }
+}
+
+/// Open a message sealed by [`seal_base`].
+pub fn open_base(
+    suite: Suite,
+    recipient_sk: &[u8],
+    enc: &[u8],
+    info: &[u8],
+    aad: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, HpkeError> {
+    match suite {
+        Suite::X25519 => {
+            open_base_with::<X25519HkdfSha256>(recipient_sk, enc, info, aad, ciphertext)
+        }
+        Suite::XWing => open_base_with::<XWing>(recipient_sk, enc, info, aad, ciphertext),
+    }
+}
