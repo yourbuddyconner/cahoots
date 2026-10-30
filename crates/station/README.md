@@ -70,7 +70,7 @@ Clients that keep the last head they saw can detect a rollback: a later head who
 
 - **Pure pad, version byte 1.** Parsed with `cahoots_core::message::parse`. The spent range is `[offset, offset + 32 + len)`.
 - **Chat, version byte 2.** `version | circle_id (16) | epoch_id (5) | sender (1) | counter (u32) | len (u32) | type (1) | ciphertext`, where the ciphertext is exactly `len + 16` bytes. Only the length arithmetic is checked.
-- **Ceremony channel, version byte 3.** `version | channel_id (16) | len (u32) | sealed`, where `sealed` is exactly `len` bytes. Only the length is checked. The channel id is random and comes from the code the host shows. The station stores these like chat messages, under the channel id, and they count against the same rate limit and size cap. See [protocol](../../docs/protocol.md) section 3.7.
+- **Ceremony channel, version byte 3.** `version | channel_id (16) | len (u32) | sealed`, where `sealed` is exactly `len` bytes. Only the length is checked. The channel id is random and comes from the code the host shows. The station stores these like chat messages, under the channel id, and they count against the same rate limit and size cap. They are left out of `/v1/circles` and `/v1/feed`, so only someone who holds the channel id reads them. See [protocol](../../docs/protocol.md) section 3.7.
 
 ## Deploying as the default relay
 

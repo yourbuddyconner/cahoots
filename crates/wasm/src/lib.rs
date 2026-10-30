@@ -145,9 +145,15 @@ pub struct WasmCeremony {
     inner: Ceremony,
     /// The relay channel, for a ceremony held through the relay. `None` for codes only.
     mailbox: Option<Mailbox>,
-    /// Signatures read from the relay before every reveal was in.
+    /// The relay the channel is on: the host's, from the offer.
+    relay: Option<String>,
+    /// Signatures read from the relay before every reveal was in, checked once the manifest
+    /// exists. A few per seat, so a bogus one cannot keep the real one out.
     early: Vec<(u8, Vec<u8>)>,
 }
+
+/// Signatures kept per seat before the manifest exists.
+const EARLY_PER_SEAT: usize = 4;
 
 fn offer_err(e: ChannelError) -> String {
     match e {
@@ -161,7 +167,7 @@ fn offer_err(e: ChannelError) -> String {
 #[wasm_bindgen]
 pub fn offer_params(text: &str) -> Result<Vec<u8>, String> {
     Channel::from_offer(text)
-        .map(|(_, p)| p.encode())
+        .map(|(_, p, _)| p.encode())
         .map_err(offer_err)
 }
 
@@ -234,6 +240,7 @@ impl WasmCeremony {
         Ok(WasmCeremony {
             inner,
             mailbox: None,
+            relay: None,
             early: Vec::new(),
         })
     }
@@ -250,7 +257,7 @@ impl WasmCeremony {
         seat_seed: &[u8],
         tier: u8,
     ) -> Result<WasmCeremony, String> {
-        let (channel, params) = Channel::from_offer(offer).map_err(offer_err)?;
+        let (channel, params, relay) = Channel::from_offer(offer).map_err(offer_err)?;
         if index == 0 {
             return Err("host-seat".into());
         }
@@ -258,18 +265,34 @@ impl WasmCeremony {
         Ok(WasmCeremony {
             inner,
             mailbox: Some(Mailbox::new(channel, index)),
+            relay: Some(relay),
             early: Vec::new(),
         })
     }
 
-    /// The code to show everyone joining through the relay. The first call opens the channel:
-    /// from then on the ceremony is held through the relay.
-    pub fn offer(&mut self) -> String {
+    /// The code to show everyone joining through the relay. The first call opens the channel
+    /// on `relay`, the host's relay address: from then on the ceremony is held through the
+    /// relay, and everyone joining uses that relay. Later calls show the same code.
+    pub fn offer(&mut self, relay: &str) -> Result<String, String> {
         let index = self.inner.index();
+        let relay = self.relay.get_or_insert_with(|| relay.to_string()).clone();
         let mb = self
             .mailbox
             .get_or_insert_with(|| Mailbox::new(Channel::new(&mut OsRng), index));
-        mb.channel().offer(self.inner.params())
+        mb.channel()
+            .offer(self.inner.params(), &relay)
+            .map_err(|_| "relay-too-long".to_string())
+    }
+
+    /// The relay the ceremony is held on. `None` for codes only.
+    pub fn relay(&self) -> Option<String> {
+        self.relay.clone()
+    }
+
+    /// Another device's commitment for this seat came first on the relay. This device posts
+    /// nothing more: leave, and join again with a free seat.
+    pub fn lost_seat(&self) -> bool {
+        self.mailbox.as_ref().is_some_and(Mailbox::lost_seat)
     }
 
     pub fn through_relay(&self) -> bool {
@@ -317,10 +340,12 @@ impl WasmCeremony {
         }
     }
 
-    /// One message read from the relay under the channel id. `true` when it moved the ceremony.
-    /// A message that does not open (a stranger's), our own, or a second one for a seat and
-    /// round already held is passed over with `false`. Another device on our seat is
-    /// `"same-seat:<index>"`; the core's refusals are as for codes.
+    /// One message read from the relay under the channel id, in the relay's order. `true`
+    /// when it moved the ceremony. A message that does not open (a stranger's), our own,
+    /// another device's for our seat, or a second one for a seat and round already held is
+    /// passed over with `false`. So is one the core refuses, and its seat and round stay open
+    /// for the real one. Only an abort is an error (`"commit-mismatch:<i>"`). Check
+    /// `lost_seat` after reading.
     pub fn inbound(&mut self, wire: &[u8]) -> Result<bool, String> {
         let mb = self
             .mailbox
@@ -329,21 +354,36 @@ impl WasmCeremony {
         let Some((seat, round, payload)) = mb.receive(wire) else {
             return Ok(false);
         };
-        if seat == self.inner.index() {
-            return Err(format!("same-seat:{seat}"));
-        }
-        match (round, self.inner.phase()) {
-            (Round::Commit, Phase::Commit) => self.add_commitment(seat, &payload)?,
+        let applied = match (round, self.inner.phase()) {
+            (Round::Commit, Phase::Commit) => self.add_commitment(seat, &payload),
             // Every commitment is held once the phase has moved on.
             (Round::Commit, _) => return Ok(false),
-            (Round::Reveal, _) => self.add_reveal(seat, &payload)?,
-            (Round::Attest, Phase::Commit | Phase::Reveal) => self.early.push((seat, payload)),
-            (Round::Attest, _) => self.add_attestation(seat, &payload)?,
+            (Round::Reveal, _) => self.add_reveal(seat, &payload),
+            (Round::Attest, Phase::Commit | Phase::Reveal) => {
+                let mine = self.early.iter().filter(|(i, _)| *i == seat).count();
+                if mine < EARLY_PER_SEAT && !self.early.iter().any(|(i, a)| *i == seat && *a == payload) {
+                    self.early.push((seat, payload));
+                }
+                return Ok(false);
+            }
+            (Round::Attest, _) => self.add_attestation(seat, &payload),
+        };
+        if let Err(e) = applied {
+            if self.inner.phase() == Phase::Aborted {
+                return Err(e);
+            }
+            return Ok(false);
         }
+        let mb = self.mailbox.as_mut().expect("checked");
+        mb.hold(seat, round);
         if self.inner.phase() == Phase::Attest {
             for (i, a) in std::mem::take(&mut self.early) {
-                // A bad one is dropped: the relay holds only the first from each seat.
-                let _ = self.inner.add_attestation(i, &a);
+                // A bad one is dropped. The first that verifies is held.
+                if self.inner.add_attestation(i, &a).is_ok()
+                    && !self.inner.missing_attestations().contains(&i)
+                {
+                    mb.hold(i, Round::Attest);
+                }
             }
         }
         Ok(true)

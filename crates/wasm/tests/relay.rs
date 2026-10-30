@@ -5,6 +5,7 @@ use cahoots_relay::{MemRelay, Relay};
 use cahoots_wasm::{b64_decode, offer_params, WasmCeremony};
 
 const L: usize = 2048;
+const RELAY: &str = "https://relay.test";
 
 fn contribution(i: u8) -> Vec<u8> {
     (0..L)
@@ -37,11 +38,12 @@ fn tick(c: &mut WasmCeremony, relay: &mut MemRelay, id: &[u8; 16], cursor: &mut 
 fn three_browsers_hold_a_ceremony_through_a_mem_relay() {
     let mut host = member(0, None);
     assert!(!host.through_relay());
-    let offer = host.offer();
+    let offer = host.offer(RELAY).unwrap();
     assert!(offer.starts_with("cahoots:ceremony:v1:"), "{offer}");
     assert!(host.through_relay());
     // The offer is the same each time it is shown.
-    assert_eq!(host.offer(), offer);
+    assert_eq!(host.offer("https://elsewhere.test").unwrap(), offer);
+    assert_eq!(host.relay().as_deref(), Some(RELAY));
     let params = offer_params(&offer).unwrap();
     assert_eq!(params, host.params_bytes());
     assert_eq!(offer_params("cahoots-params:0:AQ").unwrap_err(), "not-an-offer");
@@ -49,6 +51,8 @@ fn three_browsers_hold_a_ceremony_through_a_mem_relay() {
     let mut ms = vec![host, member(1, Some(&offer)), member(2, Some(&offer))];
     let id: [u8; 16] = hex::decode(ms[0].channel_hex().unwrap()).unwrap().try_into().unwrap();
     assert_eq!(ms[1].channel_hex(), ms[0].channel_hex());
+    // A joiner is on the host's relay.
+    assert_eq!(ms[2].relay().as_deref(), Some(RELAY));
     // A stranger posts into the channel; it does not open and is dropped.
     let mut relay = MemRelay::default();
     let mut junk = vec![3u8];
@@ -80,7 +84,7 @@ fn three_browsers_hold_a_ceremony_through_a_mem_relay() {
 #[test]
 fn a_second_browser_on_a_taken_seat_is_told() {
     let mut host = member(0, None);
-    let offer = host.offer();
+    let offer = host.offer(RELAY).unwrap();
     let mut a = member(1, Some(&offer));
     let mut b = member(1, Some(&offer));
     let id: [u8; 16] = hex::decode(host.channel_hex().unwrap()).unwrap().try_into().unwrap();
@@ -91,10 +95,18 @@ fn a_second_browser_on_a_taken_seat_is_told() {
         }
     }
     let msgs = relay.poll(&id, None, 0).unwrap();
-    // A's own commitment marks itself posted; B's for the same seat is refused aloud.
-    assert!(!a.inbound(&msgs[0].1).unwrap());
+    // A's commitment is first on the relay: A keeps the seat and ignores B's.
+    for (_, m) in &msgs {
+        assert!(!a.inbound(m).unwrap());
+    }
+    assert!(!a.lost_seat());
     assert!(a.outbound().unwrap().is_empty());
-    assert_eq!(a.inbound(&msgs[1].1).unwrap_err(), "same-seat:1");
+    // B reads A's first: B lost the seat and posts nothing more, ever.
+    for (_, m) in &msgs {
+        assert!(!b.inbound(m).unwrap());
+    }
+    assert!(b.lost_seat());
+    assert!(b.outbound().unwrap().is_empty());
     // The host keeps the first commitment for seat 2 and ignores the second.
     assert!(host.inbound(&msgs[0].1).unwrap());
     assert!(!host.inbound(&msgs[1].1).unwrap());

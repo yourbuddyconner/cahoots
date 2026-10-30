@@ -1,5 +1,5 @@
 {
-  "description": "The ceremony channel (crates/core/src/channel.rs, docs/protocol.md section 3.7). offer = \"cahoots:ceremony:v1:\" || base64url without padding (id || key || params). A message is version 3 | id (16) | len (u32 LE, the bytes after it) | seat | round (1 commit, 2 reveal, 3 attest) | nonce (12) | ChaCha20-Poly1305 ciphertext and tag, under HKDF-SHA256(ikm = key, salt = id, info = \"cahoots/ceremony/channel/v1\"), with id || seat || round as associated data.",
+  "description": "The ceremony channel (crates/core/src/channel.rs, docs/protocol.md section 3.7). offer = \"cahoots:ceremony:v1:\" || base64url without padding (id || key || relay length (u8) || relay (UTF-8) || params). A message is version 3 | id (16) | len (u32 LE, the bytes after it) | seat | round (1 commit, 2 reveal, 3 attest) | nonce (12) | ChaCha20-Poly1305 ciphertext and tag, under HKDF-SHA256(ikm = key, salt = id, info = \"cahoots/ceremony/channel/v1\"), with id || seat || round as associated data.",
   "id": "76a0334b2423da91325d3063955080e2",
   "key": "2cc30f8d1a5504b35e9a02a7db91e8bb168847a1e0f8627c84aa3a6d138df85b",
   "message": {
@@ -9,6 +9,7 @@
     "seat": 2,
     "wire": "0376a0334b2423da91325d3063955080e24e000000020259cb1b6cece7f1d4d0394b072e29c6233fe35f7e5f57ae3544d032f9c59b0ca1e01c61fe24a6a011d0d481cf2616bd3bcad9d5cd88aabf3d61875cc6ac3fbff72203ad496fddbde8926a3ba5"
   },
-  "offer": "cahoots:ceremony:v1:dqAzSyQj2pEyXTBjlVCA4izDD40aVQSzXpoCp9uR6LsWiEeh4PhifISqOm0TjfhbAQMAAAEAAARwYXJr",
-  "params": "01030000010000047061726b"
+  "offer": "cahoots:ceremony:v1:dqAzSyQj2pEyXTBjlVCA4izDD40aVQSzXpoCp9uR6LsWiEeh4PhifISqOm0TjfhbHWh0dHBzOi8vcmVsYXkuY2Fob290cy5uZXR3b3JrAQMAAAEAAARwYXJr",
+  "params": "01030000010000047061726b",
+  "relay": "https://relay.cahoots.network"
 }

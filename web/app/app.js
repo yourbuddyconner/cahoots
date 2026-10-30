@@ -48,8 +48,6 @@ const friendly = (e) => {
   if (m2 && m2[1] === 'corrupted') return 'That scan came through garbled. Scan it again.';
   if (m2 && m2[1] === 'bad-key') return `Seat ${Number(m2[2]) + 1}'s code is not valid. Ask them to show it again.`;
   if (m2 && m2[1] === 'bad-attestation') return `Seat ${Number(m2[2]) + 1}'s signature does not check out. Ask them to show it again.`;
-  const m3 = s.match(/^same-seat:(\d+)$/);
-  if (m3) return `Someone else also picked seat ${Number(m3[1]) + 1}. One of you must leave and join again with another seat.`;
   return s;
 };
 const CHAT_LABEL = 'End-to-end encrypted';
@@ -57,7 +55,10 @@ const CHAT_CLAIM = 'The circle root from your ceremony seeds the keys and ChaCha
 // The relay the app ships with. A circle can point at another one from the chat menu.
 const DEFAULT_RELAY = 'https://relay.cahoots.network';
 const POLL_WAIT_MS = 25000;
-const CEREMONY_POLL_MS = 1000; // a ceremony through the relay reads the relay every second
+const CEREMONY_POLL_MS = 2000; // a ceremony through the relay reads the relay every 2 seconds
+const LOST = 'This ceremony was lost when the app closed. Everyone starts over with a new code.';
+/** A ceremony in memory is gone after a reload or a close. Joining it again cannot work. */
+const ceremonyLost = () => screen({ title: 'Ceremony lost', body: [h('div', {}, h('h1', {}, 'This ceremony is gone.'), h('p', { class: 'lead' }, LOST), h('p', { class: 'muted' }, 'Nothing was kept.'))], actions: [btn('Back to start', () => go('#/'), 'primary')] });
 const OFFER_PREFIX = 'cahoots:ceremony:v1:';
 const QR_PACKET = 300;   // payload bytes per animated frame: ~77 modules per side, readable by phone cameras
 const QR_FPS = 10;
@@ -495,7 +496,7 @@ function screenJoin() {
   // The host's code for a ceremony through the relay: pick a seat, and the rest goes through the relay.
   const acceptOffer = (text) => {
     try {
-      const params = { ...paramsFromBytes(offer_params(text.trim())), via: 'relay' };
+      const params = { ...paramsFromBytes(offer_params(text.trim())), via: 'relay', join: true };
       pendingOffer = text.trim(); pendingCommits = [];
       buzz();
       go(`#/ceremony/${paramsHash(params)}/pick`);
@@ -524,6 +525,8 @@ function screenJoin() {
 
 /** Who you are, and where your randomness comes from. */
 function screenPick(params) {
+  // A joiner whose page reloaded has lost the host's code. It must not become a host.
+  if (params.join && !pendingOffer) { ceremonyLost(); return; }
   // Joining through the relay: seat 1 is the host's.
   const joining = params.via === 'relay' && pendingOffer;
   const taken = new Set(joining ? [0] : pendingCommits.map((p) => p.index));
@@ -582,7 +585,7 @@ function screenPick(params) {
         }
         const relay = params.via === 'relay';
         // The host opens the channel; its code is what everyone joining scans.
-        const offer = relay ? c.offer() : null;
+        const offer = relay ? c.offer(DEFAULT_RELAY) : null;
         pendingOffer = null;
         ceremony = { c, params, label: extra ? 'TRNG' : 'CSPRNG', mode: 'show', attests: [], revealShared: false, relay, offer, cursor: null, run: 0 };
         go(`#/ceremony/${paramsHash(params)}/run`);
@@ -608,7 +611,7 @@ const STEPS = { commit: 'Step 1 of 4 · Meet the group', reveal: 'Step 2 of 4 ·
 /** Commit, reveal and sign: one stage with Show and Scan modes, member chips that update in place. */
 function screenRun(params) {
   if (!ceremony) {
-    screen({ title: 'Ceremony lost', body: [h('div', {}, h('h1', {}, 'This page was reloaded.'), h('p', { class: 'lead' }, 'A ceremony in progress lives only in memory, so it is gone. Nothing was kept. Join again from the start.'))], actions: [btn('Back to start', () => go('#/'), 'primary')] });
+    ceremonyLost();
     return;
   }
   if (ceremony.relay) { screenRelay(params); return; }
@@ -753,7 +756,8 @@ function screenRelay(params) {
   const me = c.index();
   const run = ++cer.run;
   const live = () => ceremony === cer && cer.run === run && location.hash.endsWith('/run');
-  const base = () => `${DEFAULT_RELAY}/v1/circles/${c.channel_hex()}/messages`;
+  // The host's relay, from the code: everyone in the ceremony uses it.
+  const base = () => `${c.relay().replace(/\/$/, '')}/v1/circles/${c.channel_hex()}/messages`;
   const st = status();
   const chips = h('div', { class: 'members' });
   const received = h('p', { class: 'ceremony-progress', role: 'status', 'aria-live': 'polite' });
@@ -816,6 +820,12 @@ function screenRelay(params) {
       st.textContent = 'Cannot reach the relay. Trying again.';
     }
     if (!live()) return;
+    // Someone else's setup for this seat reached the relay first. This device posts nothing more.
+    if (c.lost_seat()) {
+      stop(); ceremony = null;
+      screen({ title: 'Seat taken', body: [h('div', {}, h('h1', {}, `Seat ${me + 1} was taken by someone else.`), h('p', { class: 'lead' }, 'Leave and join again with a free seat.'))], actions: [btn('Leave', () => go('#/'), 'primary')] });
+      return;
+    }
     const phase = c.phase();
     if (phase === 'aborted') {
       stop(); ceremony = null;
@@ -861,6 +871,7 @@ function screenWords() {
   // Kept so members still collecting can scan them from here.
   const reveal = revealOf(c);
   const sig = c.attestation();
+  const ceremonyRelay = relay ? c.relay() : null;
   const out = c.finish(label);
   ceremony = null;
   const words = out.words().split(' ');
@@ -876,7 +887,11 @@ function screenWords() {
         h('div', { class: 'words' }, ...words.map((w, i) => h('div', {}, h('small', {}, String(i + 1)), w)))),
     ],
     actions: [
-      btn('They match', async () => { const circle = out.into_circle(); live.set(id, circle); await saveCircle(circle); toast('Your circle is ready.', 'ok'); go(`#/c/${id}`); }, 'primary'),
+      btn('They match', async () => {
+        const circle = out.into_circle(); live.set(id, circle); await saveCircle(circle);
+        // The circle chats through the relay its ceremony used.
+        if (ceremonyRelay && ceremonyRelay !== DEFAULT_RELAY) await saveSettings({ ...(await loadSettings(id)), id, relay: ceremonyRelay });
+        toast('Your circle is ready.', 'ok'); go(`#/c/${id}`); }, 'primary'),
       btn('They differ · start over', () => { if (confirm('Throw this away and start again?')) go('#/'); }, 'danger'),
       relay ? null : link('Someone still needs my signature', showSign),
     ],

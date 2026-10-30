@@ -121,8 +121,11 @@ pub struct CeremonyState {
     pub words: Vec<String>,
     /// Step three waits for this seat's signature: call `ceremony_sign`.
     pub needs_signature: bool,
-    /// Held through the relay: call `ceremony_tick` every second. Otherwise codes only.
+    /// Held through the relay: call `ceremony_tick` every 2 seconds. Otherwise codes only.
     pub through_relay: bool,
+    /// Another device took this seat first on the relay. This phone posts nothing more:
+    /// show that, and offer to leave. Joining again with a free seat works.
+    pub seat_lost: bool,
 }
 
 /// A circle to join, read from a host's code.
@@ -204,6 +207,14 @@ fn not_found(what: &str) -> PhoneError {
     }
 }
 
+/// A ceremony lives in memory only, so one the phone does not hold was lost when the app
+/// closed. Joining it again cannot work: the old setup is already on the relay.
+fn ceremony_lost() -> PhoneError {
+    PhoneError::NotFound {
+        message: "This ceremony was lost when the app closed. Everyone starts over with a new code.".into(),
+    }
+}
+
 fn fingerprint(public: &[u8]) -> String {
     let h = hex::encode(&Sha256::digest(public)[..8]);
     [&h[0..4], &h[4..8], &h[8..12], &h[12..16]].join(" ")
@@ -259,10 +270,7 @@ impl Phone {
         f: impl FnOnce(&mut Pending) -> Result<T, PhoneError>,
     ) -> Result<T, PhoneError> {
         let mut st = self.lock();
-        let p = st
-            .ceremonies
-            .get_mut(id)
-            .ok_or_else(|| not_found("ceremony"))?;
+        let p = st.ceremonies.get_mut(id).ok_or_else(ceremony_lost)?;
         f(p)
     }
 
@@ -274,10 +282,14 @@ impl Phone {
         params: CircleParams,
         seat: u8,
         channel: Option<Channel>,
+        relay: Option<String>,
     ) -> Result<(String, Pending), PhoneError> {
         let id = chat::random_id()?;
         let label = format!("cahoots:seat:{id}");
-        let relay = self.lock().relay.clone();
+        let relay = match relay {
+            Some(r) => r,
+            None => self.lock().relay.clone(),
+        };
         let p = Pending::new(params, seat, self.signer.as_ref(), label, channel, relay)?;
         Ok((id, p))
     }
@@ -295,6 +307,7 @@ impl Phone {
             words: p.words(),
             needs_signature: p.needs_signature(),
             through_relay: p.through_relay(),
+            seat_lost: p.seat_lost(),
         }
     }
 }
@@ -385,7 +398,7 @@ impl Phone {
         }
         let params = CircleParams::new(members, pad_len, name, false).map_err(params_err)?;
         let channel = through_relay.then(|| Channel::new(&mut rand_core::OsRng));
-        let (id, p) = self.begin(params, 0, channel)?;
+        let (id, p) = self.begin(params, 0, channel, None)?;
         self.lock().ceremonies.insert(id.clone(), p);
         Ok(id)
     }
@@ -397,21 +410,28 @@ impl Phone {
     }
 
     /// Join a ceremony held through the relay as `seat` (from 0), from the host's code
-    /// (`cahoots:ceremony:v1:...`). Seat 0 is the host's. Returns the ceremony id. Two phones
-    /// on one seat are told when the second one's code arrives.
+    /// (`cahoots:ceremony:v1:...`). Seat 0 is the host's. Returns the ceremony id. The
+    /// ceremony, and the circle it makes, use the host's relay from the code, whatever this
+    /// phone's default is. Of two devices on one seat, the one whose setup reached the relay
+    /// second is told (`seat_lost`) and posts nothing more.
     pub fn join_offer(&self, text: String, seat: u8) -> Result<String, PhoneError> {
-        let (channel, params) = Channel::from_offer(&text).map_err(|_| PhoneError::BadCode {
-            message: "That is not a host's code to join through the relay.".into(),
+        let (channel, params, relay) =
+            Channel::from_offer(&text).map_err(|_| PhoneError::BadCode {
+                message: "That is not a host's code to join through the relay.".into(),
+            })?;
+        let relay = chat::check_relay(&relay).map_err(|_| PhoneError::BadCode {
+            message: "The host's code names a relay address that does not read.".into(),
         })?;
         check_seat(&params, seat)?;
-        let (id, p) = self.begin(params, seat, Some(channel))?;
+        let (id, p) = self.begin(params, seat, Some(channel), Some(relay))?;
         self.lock().ceremonies.insert(id.clone(), p);
         Ok(id)
     }
 
     /// One step of a ceremony held through the relay: post this seat's messages for the
     /// rounds it has reached, once each, then read and apply everyone else's. Call it every
-    /// second. When `needs_signature` says so, call `ceremony_sign`, then tick again.
+    /// 2 seconds. When `needs_signature` says so, call `ceremony_sign`, then tick again. A
+    /// phone that lost its seat gets the same error from every tick and posts nothing.
     pub fn ceremony_tick(&self, id: String) -> Result<CeremonyState, PhoneError> {
         self.with_ceremony(&id, |p| {
             p.tick(self.http.as_ref())?;
@@ -441,7 +461,7 @@ impl Phone {
     /// `Some` once a whole code is in; hand its `params_code` to `join_ceremony`.
     pub fn join_scan(&self, text: String) -> Result<Option<JoinOffer>, PhoneError> {
         if text.trim_start().starts_with(OFFER_PREFIX) {
-            let (_, params) = Channel::from_offer(&text).map_err(|_| PhoneError::BadCode {
+            let (_, params, _) = Channel::from_offer(&text).map_err(|_| PhoneError::BadCode {
                 message: "That host's code does not read.".into(),
             })?;
             return Ok(Some(JoinOffer {
@@ -488,7 +508,7 @@ impl Phone {
 
     /// The number of seats in the circle a join code is for, to offer a seat picker.
     pub fn ceremony_members(&self, params_code: String) -> Result<u8, PhoneError> {
-        if let Ok((_, params)) = Channel::from_offer(&params_code) {
+        if let Ok((_, params, _)) = Channel::from_offer(&params_code) {
             return Ok(params.n);
         }
         Ok(ceremony::read_join(&params_code)?.0.n)
@@ -511,7 +531,7 @@ impl Phone {
                 ));
             }
         }
-        let (id, mut p) = self.begin(params, seat, None)?;
+        let (id, mut p) = self.begin(params, seat, None, None)?;
         if let Some(code) = kept {
             p.apply_kept(code)?;
         }
@@ -551,10 +571,7 @@ impl Phone {
     /// Write the circle, after the words were read aloud and match. Returns the circle id.
     pub fn ceremony_keep(&self, id: String) -> Result<String, PhoneError> {
         let mut st = self.lock();
-        let p = st
-            .ceremonies
-            .get(&id)
-            .ok_or_else(|| not_found("ceremony"))?;
+        let p = st.ceremonies.get(&id).ok_or_else(ceremony_lost)?;
         let r = p.result.as_ref().ok_or_else(|| PhoneError::Ceremony {
             message: "The ceremony is not finished. Every signature is needed first.".into(),
         })?;

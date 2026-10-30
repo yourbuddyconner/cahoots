@@ -84,10 +84,10 @@ For ongoing chat, follow [Run a relay](relay.md). Saving a circle does not autom
 
 | Problem | What to do |
 |---|---|
-| Two people chose the same seat | One leaves the ceremony and rejoins with an unused number. |
+| Two people chose the same seat | With **Codes only**, one leaves the ceremony and rejoins with an unused number. Through the relay, the device that picked second is told "Seat N was taken by someone else". That person leaves and joins again with a free seat. |
 | Scanning is slow | Increase brightness, reduce glare, and hold both devices still. Wait for the progress bar to finish. |
 | A device has no camera | Use the copy and paste options in the menu to exchange the same data. |
-| A device reloads or closes | Restart the ceremony on every device. Unsaved progress cannot be recovered. |
+| A device reloads or closes | The ceremony is lost. Everyone starts over with a new code. Unsaved progress cannot be recovered. |
 | A signature is rejected | Check whose code you are scanning and try again. |
 | A reveal fails its commitment check | Restart. The device refuses to save the circle. |
 | The six words differ | Discard the ceremony on every device and start again. |

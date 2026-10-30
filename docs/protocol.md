@@ -157,7 +157,7 @@ Implementation: `crates/core`.
 
 A ceremony can run through a relay instead of animated codes. The rounds and the checks are the ones above. Only the way the bytes travel changes. The animated codes remain the way that needs no network.
 
-1. The host draws a channel: a random 16-byte id and a random 32-byte key. It shows one static QR code. The code's text is `cahoots:ceremony:v1:` followed by `id || key || params` in base64url without padding. The parameters are in their encoding from section 2.1.
+1. The host draws a channel: a random 16-byte id and a random 32-byte key. It shows one static QR code. The code's text is `cahoots:ceremony:v1:` followed by `id || key || relay_len || relay || params` in base64url without padding. `relay` is the host's relay address in UTF-8, at most 255 bytes, after its one-byte length. The parameters are in their encoding from section 2.1. Everyone joining uses the host's relay, and so does the circle the ceremony makes.
 2. Each person joining scans that code from the host's screen and picks a seat. The code is shown in the room. There are no remote ceremonies.
 3. Each member posts its commitment, then its sealed reveal, then its attestation to the relay under the channel id. It reads everyone else's from the same place.
 
@@ -169,9 +169,13 @@ message = 3 | id (16) | len (u32 LE) | seat | round | nonce (12) | ciphertext | 
 
 The plaintext is one part of a round's payload: `part (u16 LE) | parts (u16 LE) | bytes`. A payload is split into parts of at most 65,481 bytes, so each message fits in 64 KiB. Only a reveal for a large pad needs more than one part. The commitment payload is `C_i || pk_i || seat_pk_i || tier_i`, as in section 3. The reveal payload is the sealed reveal of section 3.2. The attestation payload is the signature of section 3.4.
 
-A reader opens each message and drops one that does not open. A stranger can post under the id, but cannot seal. The reader keeps the first complete payload for each seat and round and ignores later ones. A message from another device for the reader's own seat means two people picked one seat, and the reader says so.
+A reader reads the channel in the relay's order. It opens each message and drops one that does not open. A stranger can post under the id, but cannot seal. The reader gives each complete payload to the ceremony. It holds a seat and round once the ceremony accepts its payload, and ignores later ones. A payload the ceremony refuses is dropped, and the seat and round stay open for the real one. Only an abort stops the ceremony.
 
-The relay sees the channel id, the seats, the rounds, the sizes and the timing. It cannot read the payloads. The key is only in the code on the host's screen. Members still read the six words aloud at the end.
+The first commitment on the relay for a seat takes the seat. When two people pick one seat, the device whose commitment is second reads the other one first. That device has lost the seat. It posts nothing more and says so: "Seat N was taken by someone else. Leave and join again with a free seat." The others ignore its commitment, so nobody sees a reveal that does not match.
+
+A ceremony lives in memory only. A device that closes cannot rejoin, because its old commitment is already on the relay. Everyone starts over with a new code.
+
+The relay operator sees the channel id, the seats, the rounds, the sizes and the timing. The station leaves channel ids out of its public listings (`/v1/circles` and `/v1/feed`), so only someone who holds the id can read a channel. Nobody can read the payloads without the key. The key is only in the code on the host's screen. Members still read the six words aloud at the end.
 
 Implementation: `crates/core/src/channel.rs`. Vectors: `crates/vectors/channel.json`.
 

@@ -657,9 +657,8 @@ fn two_phones_hold_a_ceremony_through_the_relay() {
     let r = relay();
     let (a, b) = (device(&r), device(&r));
     assert_eq!(a.phone.default_relay(), "https://relay.cahoots.network");
-    for d in [&a, &b] {
-        d.phone.set_default_relay(RELAY.into()).unwrap();
-    }
+    // Only the host sets the relay. The joiner takes it from the host's code.
+    a.phone.set_default_relay(RELAY.into()).unwrap();
     assert!(a.phone.set_default_relay("relay.test".into()).is_err());
     let ida = a.phone.start_ceremony("park".into(), 2, PAD, true).unwrap();
     let offer = a.phone.offer_code(ida.clone()).unwrap();
@@ -697,6 +696,7 @@ fn two_phones_hold_a_ceremony_through_the_relay() {
     assert_eq!(ca, cb);
     // The circle chats through the relay the ceremony used, with no address entered.
     assert_eq!(a.phone.circles()[0].relay, RELAY);
+    assert_eq!(b.phone.circles()[0].relay, RELAY);
     a.phone.send_chat(ca.clone(), "made through the relay".into()).unwrap();
     assert_eq!(texts(&b.phone.poll(cb).unwrap()), ["made through the relay"]);
 }
@@ -705,14 +705,14 @@ fn two_phones_hold_a_ceremony_through_the_relay() {
 fn a_phone_joins_a_browser_offer() {
     use cahoots_wasm::{b64_decode, WasmCeremony};
     let r = relay();
+    // The phone's own default is not the browser's relay: it uses the one in the code.
     let p = device(&r);
-    p.phone.set_default_relay(RELAY.into()).unwrap();
     let contribution: Vec<u8> = (0..PAD).map(|i| (i * 31) as u8).collect();
     let mut browser = WasmCeremony::new(
         2, PAD, "mixed", false, 0, &contribution, None, &[0x41; 32], &[0x61; 32], 0,
     )
     .unwrap();
-    let offer = browser.offer();
+    let offer = browser.offer(RELAY).unwrap();
     let id: [u8; 16] = hex::decode(browser.channel_hex().unwrap())
         .unwrap()
         .try_into()
@@ -762,10 +762,70 @@ fn a_relay_ceremony_survives_a_failed_post() {
     );
     // Nothing was posted twice: two commitments, two reveals, two signatures.
     let id = a.phone.offer_code(ida).unwrap();
-    let (channel, _) = cahoots_core::channel::Channel::from_offer(&id).unwrap();
+    let (channel, _, _) = cahoots_core::channel::Channel::from_offer(&id).unwrap();
     assert_eq!(r.lock().unwrap().poll(&channel.id, None, 0).unwrap().len(), 6);
     // A codes-only ceremony has no offer.
     let idc = a.phone.start_ceremony("codes".into(), 2, PAD, false).unwrap();
     assert!(a.phone.offer_code(idc.clone()).is_err());
     assert!(a.phone.ceremony_tick(idc).is_err());
+}
+
+#[test]
+fn the_device_that_lost_a_seat_posts_nothing_more() {
+    let r = relay();
+    let (a, b, c) = (device(&r), device(&r), device(&r));
+    a.phone.set_default_relay(RELAY.into()).unwrap();
+    let ida = a.phone.start_ceremony("park".into(), 3, PAD, true).unwrap();
+    let offer = a.phone.offer_code(ida.clone()).unwrap();
+    let (channel, _, _) = cahoots_core::channel::Channel::from_offer(&offer).unwrap();
+    // B and C both pick seat 2. B's setup reaches the relay first.
+    let idb = b.phone.join_offer(offer.clone(), 1).unwrap();
+    let idc = c.phone.join_offer(offer, 1).unwrap();
+    tick(&b, &idb);
+    match c.phone.ceremony_tick(idc.clone()) {
+        Err(PhoneError::Ceremony { message }) => {
+            assert_eq!(message, "Seat 2 was taken by someone else. Leave and join again with a free seat.")
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(c.phone.ceremony_state(idc.clone()).unwrap().seat_lost);
+    // B keeps the seat, and nobody else sees an error.
+    let sb = tick(&b, &idb);
+    assert!(!sb.seat_lost);
+    let sa = tick(&a, &ida);
+    assert_eq!(sa.missing, vec![2]);
+    // A third person takes seat 3, and the ceremony finishes without C.
+    let d = device(&r);
+    let idd = d.phone.join_offer(a.phone.offer_code(ida.clone()).unwrap(), 2).unwrap();
+    for _ in 0..5 {
+        tick(&a, &ida);
+        tick(&b, &idb);
+        tick(&d, &idd);
+        assert!(c.phone.ceremony_tick(idc.clone()).is_err());
+    }
+    let words: Vec<_> = [(&a, &ida), (&b, &idb), (&d, &idd)]
+        .iter()
+        .map(|(x, id)| x.phone.ceremony_state((*id).clone()).unwrap())
+        .map(|s| {
+            assert_eq!(s.phase, CeremonyPhase::Complete);
+            s.words
+        })
+        .collect();
+    assert_eq!(words[0], words[1]);
+    assert_eq!(words[0], words[2]);
+    // C posted its setup and nothing else: three setups, three reveals, three signatures, and C's one.
+    assert_eq!(r.lock().unwrap().poll(&channel.id, None, 0).unwrap().len(), 10);
+}
+
+#[test]
+fn a_lost_ceremony_says_to_start_over() {
+    let r = relay();
+    let a = device(&r);
+    match a.phone.ceremony_tick("gone".into()) {
+        Err(PhoneError::NotFound { message }) => assert_eq!(
+            message,
+            "This ceremony was lost when the app closed. Everyone starts over with a new code."
+        ),
+        other => panic!("{other:?}"),
+    }
 }

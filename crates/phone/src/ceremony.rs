@@ -33,6 +33,8 @@ const OTI_LEN: usize = 12;
 const SEAT_PUBLIC_LEN: usize = 33;
 /// Commitment hash, KEM public key, seat public key, tier.
 const COMMITMENT_LEN: usize = 32 + PUBLIC_KEY_LEN + SEAT_PUBLIC_LEN + 1;
+/// Signatures kept per seat before the manifest exists.
+const EARLY_PER_SEAT: usize = 4;
 /// A phone declares tier 0: its pad and root are in ordinary storage.
 pub const PHONE_TIER: u8 = 0;
 const PACK_COMMIT: u8 = 1;
@@ -456,12 +458,26 @@ impl Pending {
         self.mailbox.is_some()
     }
 
+    /// Another device's commitment for this seat came first on the relay.
+    pub fn seat_lost(&self) -> bool {
+        self.mailbox.as_ref().is_some_and(Mailbox::lost_seat)
+    }
+
+    fn seat_lost_err(&self) -> PhoneError {
+        plain(format!(
+            "Seat {} was taken by someone else. Leave and join again with a free seat.",
+            self.seat + 1
+        ))
+    }
+
     /// The code everyone joining scans, for a ceremony held through the relay.
     pub fn offer(&self) -> Result<String, PhoneError> {
         let mb = self.mailbox.as_ref().ok_or_else(|| {
             plain("This ceremony is held with codes only. It has no code to join through the relay.")
         })?;
-        Ok(mb.channel().offer(&self.params))
+        mb.channel()
+            .offer(&self.params, &self.relay)
+            .map_err(|_| plain("The relay address is too long to fit in the code."))
     }
 
     pub fn phase(&self) -> Phase {
@@ -672,8 +688,13 @@ impl Pending {
             Code::Reveal { seat, bytes } => c.add_reveal(seat, &bytes).map_err(ceremony_err)?,
             Code::Attest { seat, bytes } => {
                 if matches!(c.phase(), Phase::Commit | Phase::Reveal) {
-                    self.early_attestations.retain(|(i, _)| *i != seat);
-                    self.early_attestations.push((seat, bytes));
+                    // A few per seat, so a bogus one cannot keep the real one out.
+                    let held = self.early_attestations.iter().filter(|(i, _)| *i == seat).count();
+                    if held < EARLY_PER_SEAT
+                        && !self.early_attestations.iter().any(|(i, a)| *i == seat && *a == bytes)
+                    {
+                        self.early_attestations.push((seat, bytes));
+                    }
                 } else {
                     c.add_attestation(seat, &bytes).map_err(ceremony_err)?;
                 }
@@ -729,6 +750,9 @@ impl Pending {
         let Some(mb) = &self.mailbox else {
             return Ok(());
         };
+        if mb.lost_seat() {
+            return Ok(());
+        }
         let (commit, reveal, attest) = (
             mb.queued(Round::Commit),
             mb.queued(Round::Reveal),
@@ -784,9 +808,11 @@ impl Pending {
         let url = self.channel_url().ok_or_else(|| {
             plain("This ceremony is held with codes only. Show and scan the codes instead.")
         })?;
+        if self.seat_lost() {
+            return Err(self.seat_lost_err());
+        }
         self.queue()?;
         self.post(http)?;
-        let mut refused = None;
         loop {
             let mut get = format!("{url}?wait=0");
             if let Some(a) = self.cursor {
@@ -808,9 +834,10 @@ impl Pending {
                 let Some((seat, round, bytes)) = mb.receive(&wire) else {
                     continue;
                 };
+                let phase = self.phase();
                 let code = match round {
                     // Every commitment is held once the phase has moved on.
-                    Round::Commit if seat != self.seat && self.phase() != Phase::Commit => continue,
+                    Round::Commit if phase != Phase::Commit => continue,
                     Round::Commit => Code::Commit {
                         seat,
                         bytes,
@@ -819,14 +846,42 @@ impl Pending {
                     Round::Reveal => Code::Reveal { seat, bytes },
                     Round::Attest => Code::Attest { seat, bytes },
                 };
-                if let Err(e) = self.apply(code) {
-                    refused.get_or_insert(e);
+                // A signature before the manifest is only kept for later, not accepted.
+                let early = round == Round::Attest && matches!(phase, Phase::Commit | Phase::Reveal);
+                match self.apply(code) {
+                    Ok(()) if !early => {
+                        self.mailbox.as_mut().expect("has a url").hold(seat, round);
+                    }
+                    Ok(()) => {}
+                    // A refused message is dropped, and its seat and round stay open for the
+                    // real one. Only an abort stops the ceremony.
+                    Err(e) if self.phase() == Phase::Aborted => return Err(e),
+                    Err(_) => {}
                 }
+                self.hold_attestations();
+            }
+            if self.seat_lost() {
+                return Err(self.seat_lost_err());
             }
         }
         self.queue()?;
-        self.post(http)?;
-        refused.map_or(Ok(()), Err)
+        self.post(http)
+    }
+
+    /// Hold every seat whose signature the ceremony has accepted, kept early ones included.
+    fn hold_attestations(&mut self) {
+        let (Some(c), Some(mb)) = (self.ceremony.as_ref(), self.mailbox.as_mut()) else {
+            return;
+        };
+        if c.phase() != Phase::Attest {
+            return;
+        }
+        let missing = c.missing_attestations();
+        for i in 0..self.params.n {
+            if !missing.contains(&i) {
+                mb.hold(i, Round::Attest);
+            }
+        }
     }
 }
 

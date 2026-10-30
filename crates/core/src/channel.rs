@@ -8,8 +8,10 @@
 //! from the same place. The round logic is [`crate::ceremony::Ceremony`], the same as with
 //! animated codes, so both ways make the same circle.
 //!
-//! The offer is `"cahoots:ceremony:v1:" || base64url(id || key || params)`, with the
-//! parameters in their canonical encoding ([`CircleParams::encode`]).
+//! The offer is `"cahoots:ceremony:v1:" || base64url(id || key || relay_len || relay || params)`:
+//! the relay address the host uses, at most 255 bytes of UTF-8 after its one-byte length, and
+//! the parameters in their canonical encoding ([`CircleParams::encode`]). Everyone joining uses
+//! the host's relay.
 //!
 //! A message on the wire is what the station stores:
 //!
@@ -23,8 +25,10 @@
 //! stranger who posts under the id makes a message that does not open and is dropped.
 //!
 //! A payload larger than one station message travels in parts. [`Mailbox`] seals each round's
-//! payload once, in parts, and puts them back together on the other side, keeping the first
-//! message for each seat and round.
+//! payload once, in parts, and puts them back together on the other side. The caller marks a
+//! seat and round held once the ceremony accepts its payload, and later messages for it are
+//! ignored. The first commitment on the relay for a seat takes it: a device whose own
+//! commitment comes second has lost its seat and must post nothing more.
 
 use crate::params::CircleParams;
 use alloc::collections::{BTreeMap, BTreeSet};
@@ -122,18 +126,26 @@ impl Channel {
         }
     }
 
-    /// The code text to show: `"cahoots:ceremony:v1:" || base64url(id || key || params)`.
-    pub fn offer(&self, params: &CircleParams) -> String {
-        let mut raw = Zeroizing::new(Vec::with_capacity(ID_LEN + KEY_LEN + 8 + params.name.len()));
+    /// The code text to show: `"cahoots:ceremony:v1:" || base64url(id || key || relay_len ||
+    /// relay || params)`. `relay` is the host's relay address, at most 255 bytes; a longer one
+    /// is refused with `Malformed`.
+    pub fn offer(&self, params: &CircleParams, relay: &str) -> Result<String, ChannelError> {
+        let relay_len = u8::try_from(relay.len()).map_err(|_| ChannelError::Malformed)?;
+        let mut raw = Zeroizing::new(Vec::with_capacity(
+            ID_LEN + KEY_LEN + 1 + relay.len() + 8 + params.name.len(),
+        ));
         raw.extend_from_slice(&self.id);
         raw.extend_from_slice(self.key.as_ref());
+        raw.push(relay_len);
+        raw.extend_from_slice(relay.as_bytes());
         raw.extend_from_slice(&params.encode());
         let mut out = String::from(OFFER_PREFIX);
         out.push_str(&URL_SAFE_NO_PAD.encode(&raw[..]));
-        out
+        Ok(out)
     }
 
-    pub fn from_offer(text: &str) -> Result<(Channel, CircleParams), ChannelError> {
+    /// The channel, the circle's parameters and the host's relay address in an offer.
+    pub fn from_offer(text: &str) -> Result<(Channel, CircleParams, String), ChannelError> {
         let body = text
             .trim()
             .strip_prefix(OFFER_PREFIX)
@@ -143,16 +155,23 @@ impl Channel {
                 .decode(body)
                 .map_err(|_| ChannelError::Malformed)?,
         );
-        if raw.len() < ID_LEN + KEY_LEN {
+        if raw.len() < ID_LEN + KEY_LEN + 1 {
             return Err(ChannelError::Malformed);
         }
+        let relay_at = ID_LEN + KEY_LEN + 1;
+        let relay_end = relay_at + usize::from(raw[ID_LEN + KEY_LEN]);
+        let relay = raw
+            .get(relay_at..relay_end)
+            .and_then(|r| core::str::from_utf8(r).ok())
+            .ok_or(ChannelError::Malformed)?;
+        let relay = String::from(relay);
         let params =
-            CircleParams::decode(&raw[ID_LEN + KEY_LEN..]).map_err(|_| ChannelError::Malformed)?;
+            CircleParams::decode(&raw[relay_end..]).map_err(|_| ChannelError::Malformed)?;
         let mut id = [0u8; ID_LEN];
         id.copy_from_slice(&raw[..ID_LEN]);
         let mut key = Zeroizing::new([0u8; KEY_LEN]);
         key.copy_from_slice(&raw[ID_LEN..ID_LEN + KEY_LEN]);
-        Ok((Channel { id, key }, params))
+        Ok((Channel { id, key }, params, relay))
     }
 
     fn cipher(&self) -> ChaCha20Poly1305 {
@@ -277,8 +296,11 @@ pub struct Mailbox {
     seat: u8,
     outgoing: BTreeMap<Round, Outgoing>,
     partial: BTreeMap<(u8, Round), Partial>,
-    /// Seats and rounds whose payload was handed up. Later messages for them are ignored.
+    /// Seats and rounds whose payload the ceremony accepted. Later messages for them are ignored.
     held: BTreeSet<(u8, Round)>,
+    /// Whether our seat is ours: `Some(true)` once our commitment is the first for it on the
+    /// relay, `Some(false)` once another device's came first.
+    seat_won: Option<bool>,
 }
 
 impl Mailbox {
@@ -289,7 +311,24 @@ impl Mailbox {
             outgoing: BTreeMap::new(),
             partial: BTreeMap::new(),
             held: BTreeSet::new(),
+            seat_won: None,
         }
+    }
+
+    /// Another device's commitment for our seat came first on the relay. This device must
+    /// post nothing more: `queue` does nothing and `unposted` is empty from then on.
+    pub fn lost_seat(&self) -> bool {
+        self.seat_won == Some(false)
+    }
+
+    /// The ceremony accepted the payload from `seat` for `round`. Later messages for it are
+    /// ignored. A payload the ceremony refused is not held, so the slot stays open.
+    pub fn hold(&mut self, seat: u8, round: Round) {
+        self.held.insert((seat, round));
+    }
+
+    pub fn held(&self, seat: u8, round: Round) -> bool {
+        self.held.contains(&(seat, round))
     }
 
     pub fn channel(&self) -> &Channel {
@@ -307,7 +346,7 @@ impl Mailbox {
 
     /// Seal this seat's payload for `round`, once. A second call for the round does nothing.
     pub fn queue(&mut self, round: Round, payload: &[u8], rng: &mut impl CryptoRngCore) {
-        if self.queued(round) {
+        if self.queued(round) || self.lost_seat() {
             return;
         }
         let wires: Vec<Vec<u8>> = parts(payload)
@@ -320,6 +359,9 @@ impl Mailbox {
 
     /// The messages to post: everything queued that the relay has not taken yet, in round order.
     pub fn unposted(&self) -> Vec<Vec<u8>> {
+        if self.lost_seat() {
+            return Vec::new();
+        }
         self.outgoing
             .values()
             .flat_map(|o| {
@@ -332,26 +374,38 @@ impl Mailbox {
             .collect()
     }
 
-    /// The relay took `wire`.
-    pub fn posted(&mut self, wire: &[u8]) -> bool {
-        for o in self.outgoing.values_mut() {
+    /// The relay took `wire`. The round it belongs to, if it is ours.
+    pub fn posted(&mut self, wire: &[u8]) -> Option<Round> {
+        for (round, o) in self.outgoing.iter_mut() {
             if let Some(i) = o.wires.iter().position(|w| w[..] == *wire) {
                 o.posted[i] = true;
-                return true;
+                return Some(*round);
             }
         }
-        false
+        None
     }
 
-    /// Read one message from the relay. `Some` when it completes a payload from a seat and
-    /// round not yet held. Our own messages mark themselves posted. Another device's message
-    /// for our seat is handed up too, so the caller can say two people picked one seat. A
-    /// message that does not open, or a part that does not fit what came first, is dropped.
+    /// Read one message from the relay, in the relay's order. `Some` when it completes a
+    /// payload from another seat for a round not yet held: apply it, then `hold` it if the
+    /// ceremony accepted it. Our own messages mark themselves posted, and our commitment read
+    /// back before any other for our seat wins the seat. Another device's commitment for our
+    /// seat read first loses it (`lost_seat`). Messages for our seat from other devices are
+    /// never handed up. A message that does not open, or a part that does not fit what came
+    /// first, is dropped.
     pub fn receive(&mut self, wire: &[u8]) -> Option<(u8, Round, Vec<u8>)> {
-        if self.posted(wire) {
+        if let Some(round) = self.posted(wire) {
+            if round == Round::Commit && self.seat_won.is_none() {
+                self.seat_won = Some(true);
+            }
             return None;
         }
         let (seat, round, part) = self.channel.open(wire).ok()?;
+        if seat == self.seat {
+            if round == Round::Commit && self.seat_won.is_none() {
+                self.seat_won = Some(false);
+            }
+            return None;
+        }
         if self.held.contains(&(seat, round)) || part.len() < PART_HEADER {
             return None;
         }
@@ -375,7 +429,6 @@ impl Mailbox {
             return None;
         }
         let p = self.partial.remove(&(seat, round)).expect("present");
-        self.held.insert((seat, round));
         let payload = p.parts.into_iter().flatten().flatten().collect();
         Some((seat, round, payload))
     }

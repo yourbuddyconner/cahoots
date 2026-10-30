@@ -33,6 +33,8 @@ fn rng(seed: u64) -> TestRng {
     TestRng(0x9E37_79B9_7F4A_7C15 ^ seed)
 }
 
+const RELAY: &str = "https://relay.cahoots.network";
+
 fn params() -> CircleParams {
     CircleParams::new(3, 65536, "park", false).unwrap()
 }
@@ -40,11 +42,12 @@ fn params() -> CircleParams {
 #[test]
 fn offer_round_trips() {
     let ch = Channel::new(&mut rng(1));
-    let text = ch.offer(&params());
+    let text = ch.offer(&params(), RELAY).unwrap();
     assert!(text.starts_with(OFFER_PREFIX), "{text}");
     // One small static code: well under what a version 10 QR code holds at low correction.
     assert!(text.len() < 150, "{} characters", text.len());
-    let (back, p) = Channel::from_offer(&text).unwrap();
+    let (back, p, relay) = Channel::from_offer(&text).unwrap();
+    assert_eq!(relay, RELAY);
     assert_eq!(back.id, ch.id);
     assert_eq!(p, params());
     // The same key: a message sealed by one opens with the other.
@@ -60,6 +63,8 @@ fn offer_round_trips() {
         ChannelError::Malformed
     );
     // Parameters that do not read are refused.
+    // A relay address longer than its one-byte length is refused.
+    assert_eq!(ch.offer(&params(), &"x".repeat(256)).unwrap_err(), ChannelError::Malformed);
     let mut bad = text.clone();
     bad.truncate(text.len() - 2);
     assert!(Channel::from_offer(&bad).is_err());
@@ -138,7 +143,10 @@ fn a_large_payload_travels_in_parts_under_the_station_cap() {
     // Out of order, with a repeat: the payload comes out once, whole.
     let mut got = Vec::new();
     for w in wires.iter().rev().chain(wires.iter()) {
-        got.extend(guest.receive(w));
+        if let Some(x) = guest.receive(w) {
+            guest.hold(x.0, x.1);
+            got.push(x);
+        }
     }
     assert_eq!(got, vec![(0, Round::Reveal, big)]);
 }
@@ -160,13 +168,23 @@ fn a_mailbox_keeps_the_first_message_per_seat_and_round() {
     let second = d.unposted().remove(0);
 
     assert_eq!(a.receive(&first), Some((1, Round::Commit, b"first".to_vec())));
+    a.hold(1, Round::Commit);
     assert_eq!(a.receive(&second), None);
     assert_eq!(a.receive(&first), None);
-    // Our own message seen on the relay counts as posted.
+    // Our own message seen on the relay counts as posted, and being first it wins the seat.
     assert_eq!(b.receive(&first), None);
     assert!(b.unposted().is_empty());
-    // Another device's message for our seat is handed up, so the caller can say so.
-    assert_eq!(b.receive(&second), Some((1, Round::Commit, b"other".to_vec())));
+    assert!(!b.lost_seat());
+    // The other device's message for our seat is never handed up.
+    assert_eq!(b.receive(&second), None);
+    assert!(!b.lost_seat());
+    // The other device reads ours first: it lost the seat, and posts nothing more.
+    assert_eq!(d.receive(&first), None);
+    assert_eq!(d.receive(&second), None);
+    assert!(d.lost_seat());
+    d.queue(Round::Reveal, b"a reveal", &mut rng(21));
+    assert!(d.unposted().is_empty());
+    assert!(!d.queued(Round::Reveal));
     // A message that does not open is dropped.
     let stranger = Channel::new(&mut rng(18));
     let mut s = stranger.seal(1, Round::Commit, b"x", &mut rng(19));
@@ -182,6 +200,25 @@ fn a_mailbox_keeps_the_first_message_per_seat_and_round() {
 }
 
 #[test]
+fn a_refused_message_does_not_hold_the_slot() {
+    let ch = Channel::new(&mut rng(22));
+    let mut a = Mailbox::new(ch.clone(), 0);
+    let mut early = Mailbox::new(ch.clone(), 1);
+    early.queue(Round::Reveal, b"too early, refused", &mut rng(23));
+    let bogus = early.unposted().remove(0);
+    let mut real = Mailbox::new(ch.clone(), 1);
+    real.queue(Round::Reveal, b"the real reveal", &mut rng(24));
+    let good = real.unposted().remove(0);
+    // The ceremony refused the first one, so it is not held, and the real one still gets in.
+    assert_eq!(a.receive(&bogus), Some((1, Round::Reveal, b"too early, refused".to_vec())));
+    assert!(!a.held(1, Round::Reveal));
+    assert_eq!(a.receive(&good), Some((1, Round::Reveal, b"the real reveal".to_vec())));
+    a.hold(1, Round::Reveal);
+    // Once accepted, later ones are ignored.
+    assert_eq!(a.receive(&bogus), None);
+}
+
+#[test]
 fn reproduces_the_channel_vector() {
     let text = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -194,7 +231,9 @@ fn reproduces_the_channel_vector() {
     let key: [u8; 32] = h(&v["key"]).try_into().unwrap();
     let params = CircleParams::decode(&h(&v["params"])).unwrap();
     let ch = Channel::from_key(id, key);
-    assert_eq!(ch.offer(&params), v["offer"].as_str().unwrap());
+    let relay = v["relay"].as_str().unwrap();
+    assert_eq!(ch.offer(&params, relay).unwrap(), v["offer"].as_str().unwrap());
+    assert_eq!(Channel::from_offer(v["offer"].as_str().unwrap()).unwrap().2, relay);
     let m = &v["message"];
     let nonce: [u8; 12] = h(&m["nonce"]).try_into().unwrap();
     let round = Round::from_u8(m["round"].as_u64().unwrap() as u8).unwrap();

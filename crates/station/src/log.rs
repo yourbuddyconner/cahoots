@@ -35,6 +35,14 @@ pub struct Entry {
     pub hash: Hash,
 }
 
+impl Entry {
+    /// Whether the public listings show it. A ceremony channel's messages (version 3) are
+    /// served only to whoever asks for the channel id, which comes from the host's code.
+    pub fn listed(&self) -> bool {
+        self.message.first() != Some(&crate::rules::CEREMONY_VERSION)
+    }
+}
+
 /// On-disk and on-the-wire form. Bytes are base64url, hashes are hex.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EntryRecord {
@@ -260,9 +268,15 @@ impl Log {
             .collect()
     }
 
+    /// Entries for the public feed: every circle's, but no ceremony channel's.
     pub fn all_after(&self, after: Option<u64>, limit: usize) -> Vec<&Entry> {
         let from = after.map(|a| a as usize + 1).unwrap_or(0);
-        self.entries.iter().skip(from).take(limit).collect()
+        self.entries
+            .iter()
+            .skip(from)
+            .filter(|e| e.listed())
+            .take(limit)
+            .collect()
     }
 
     pub fn len(&self) -> usize {
@@ -274,7 +288,7 @@ impl Log {
 
     pub fn circles(&self) -> Vec<CircleSummary> {
         let mut map: HashMap<CircleId, CircleSummary> = HashMap::new();
-        for e in &self.entries {
+        for e in self.entries.iter().filter(|e| e.listed()) {
             let s = map.entry(e.circle_id).or_insert(CircleSummary {
                 circle_id: e.circle_id,
                 count: 0,

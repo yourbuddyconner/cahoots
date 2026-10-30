@@ -329,3 +329,37 @@ async fn an_oversized_ceremony_message_is_refused() {
     let r = client.post(&url).body(over).send().await.unwrap();
     assert_eq!(r.status(), 413);
 }
+
+#[tokio::test]
+async fn ceremony_channels_are_not_listed_publicly() {
+    let (base, _dir) = start().await;
+    let client = reqwest::Client::new();
+    let id = [0x5F; 16];
+    let cid = [0x60; 16];
+    let post = |path: [u8; 16], body: Vec<u8>| {
+        client
+            .post(format!("{base}/v1/circles/{}/messages", hex::encode(path)))
+            .body(body)
+            .send()
+    };
+    assert_eq!(post(id, ceremony_message(id, b"a commitment")).await.unwrap().status(), 201);
+    assert_eq!(post(cid, chat(cid, 0)).await.unwrap().status(), 201);
+    assert_eq!(post(id, ceremony_message(id, b"a reveal")).await.unwrap().status(), 201);
+    // The listing and the feed show the circle, not the channel.
+    let v: Value = client.get(format!("{base}/v1/circles")).send().await.unwrap().json().await.unwrap();
+    let listed: Vec<&str> = v["circles"].as_array().unwrap().iter().map(|c| c["circle_id"].as_str().unwrap()).collect();
+    assert_eq!(listed, [hex::encode(cid)]);
+    let v: Value = client.get(format!("{base}/v1/feed")).send().await.unwrap().json().await.unwrap();
+    let fed: Vec<u64> = v["entries"].as_array().unwrap().iter().map(|e| e["seq"].as_u64().unwrap()).collect();
+    assert_eq!(fed, [1]);
+    // Whoever holds the channel id still reads it.
+    let v: Value = client
+        .get(format!("{base}/v1/circles/{}/messages", hex::encode(id)))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(v["entries"].as_array().unwrap().len(), 2);
+}
