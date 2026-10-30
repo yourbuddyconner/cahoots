@@ -9,6 +9,7 @@ pub mod apps;
 pub mod badge;
 pub mod board;
 pub mod chip;
+pub mod grants;
 pub mod screens;
 pub mod ssh;
 

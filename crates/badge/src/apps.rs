@@ -19,9 +19,15 @@
 //! - A seal key is `HMAC-SHA256(root, label || circle_id)`, computed in the chip when the root
 //!   is there and from the record otherwise. The badge must name the label on the screen, so a
 //!   label that is not 1 to 32 printable ASCII characters is `Unparseable`.
+//! - A grant request is checked by [`grants::check_request`] and shown; after Both,
+//!   [`grants::issue`] makes it. A request under a grant is decided by
+//!   [`grants::evaluate_request`] before anything is drawn: answered at once, refused, or
+//!   asked as the ordinary signature it is (the badge then serves it as an `SshSign`). Grants
+//!   need the board ([`BadgeApps::on_board`]); with the chip alone they are `NoChip`.
 
 use crate::board::Circle;
 use crate::chip::ChipSeat;
+use crate::grants::{self, Clock, Fallback, GrantBoard, GrantUse};
 use crate::screens::{self, Screen};
 use crate::ssh::{self, HostCheck, Signed};
 use alloc::string::String;
@@ -47,17 +53,52 @@ pub const MAX_LABEL: usize = 32;
 /// The badge's chip requests for the circles it holds.
 pub struct BadgeApps<'a> {
     circles: &'a [Circle],
-    chip: Option<&'a mut dyn ChipOps>,
+    hw: Hw<'a>,
+    /// The nonce a proof under a grant must be made over: the link's current one.
+    nonce: [u8; 16],
+    has_chip: bool,
+    /// The signature under a grant this request made, for the badge to show; the link's nonce
+    /// is spent.
+    pub grant_use: Option<GrantUse>,
+}
+
+/// What the requests run on: the board's chip alone, or the board itself, which grants need
+/// for their record, the time and the random source.
+enum Hw<'a> {
+    Chip(Option<&'a mut dyn ChipOps>),
+    Board(&'a mut dyn GrantBoard, &'a mut Clock),
 }
 
 /// A seat key, in the chip or in software.
-enum Seat<'a> {
+pub(crate) enum Seat<'a> {
     Chip(ChipSeat<'a>),
     Soft(SeatKey),
 }
 
+/// The circle's seat key: in the chip slot it names, or the software key it keeps.
+pub(crate) fn seat_of<'c>(
+    chip: Option<&'c mut dyn ChipOps>,
+    circle: &Circle,
+) -> Result<Seat<'c>, ErrorCode> {
+    match circle.chip_slot {
+        Some(slot) => {
+            let chip = chip.ok_or(ErrorCode::NoChip)?;
+            Ok(Seat::Chip(ChipSeat::new(
+                chip,
+                KeyId::new(KeyKind::Seat, slot),
+            )))
+        }
+        None => {
+            let seed = Zeroizing::new(circle.seat_key);
+            SeatKey::from_seed(&seed)
+                .map(Seat::Soft)
+                .map_err(|_| ErrorCode::NoChip)
+        }
+    }
+}
+
 impl Seat<'_> {
-    fn public(&mut self) -> Result<SeatPublic, ErrorCode> {
+    pub(crate) fn public(&mut self) -> Result<SeatPublic, ErrorCode> {
         match self {
             Seat::Chip(c) => {
                 let p = c.public();
@@ -67,7 +108,7 @@ impl Seat<'_> {
         }
     }
 
-    fn sign(&mut self, msg: &[u8]) -> Result<[u8; 64], ErrorCode> {
+    pub(crate) fn sign(&mut self, msg: &[u8]) -> Result<[u8; 64], ErrorCode> {
         match self {
             Seat::Chip(c) => {
                 let sig = c.sign(msg);
@@ -97,7 +138,7 @@ impl SeatSigner for Seat<'_> {
 }
 
 impl Seat<'_> {
-    fn failed(&self) -> bool {
+    pub(crate) fn failed(&self) -> bool {
         matches!(self, Seat::Chip(c) if c.error.is_some())
     }
 }
@@ -123,8 +164,54 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 impl<'a> BadgeApps<'a> {
-    pub fn new(circles: &'a [Circle], chip: Option<&'a mut dyn ChipOps>) -> Self {
-        BadgeApps { circles, chip }
+    /// The requests with the board's chip alone: a grant request or a use under a grant is
+    /// `NoChip`, as there is nowhere to keep grants. `nonce` is the link's nonce.
+    pub fn new(circles: &'a [Circle], chip: Option<&'a mut dyn ChipOps>, nonce: [u8; 16]) -> Self {
+        let has_chip = chip.is_some();
+        BadgeApps {
+            circles,
+            hw: Hw::Chip(chip),
+            nonce,
+            has_chip,
+            grant_use: None,
+        }
+    }
+
+    /// The requests on the board, grants included, with the badge's clock and the link's
+    /// nonce.
+    pub fn on_board(
+        circles: &'a [Circle],
+        board: &'a mut dyn GrantBoard,
+        clock: &'a mut Clock,
+        nonce: [u8; 16],
+    ) -> Self {
+        let has_chip = board.chip().is_some();
+        BadgeApps {
+            circles,
+            hw: Hw::Board(board, clock),
+            nonce,
+            has_chip,
+            grant_use: None,
+        }
+    }
+
+    /// The board's chip, if it has one.
+    fn chip(&mut self) -> Option<&mut dyn ChipOps> {
+        match &mut self.hw {
+            Hw::Chip(chip) => match chip {
+                Some(c) => Some(&mut **c),
+                None => None,
+            },
+            Hw::Board(board, _) => board.chip(),
+        }
+    }
+
+    /// The board and the clock, for grants; `NoChip` without them.
+    fn grant_board(&mut self) -> Result<(&mut dyn GrantBoard, &mut Clock), ErrorCode> {
+        match &mut self.hw {
+            Hw::Board(board, clock) => Ok((&mut **board, &mut **clock)),
+            Hw::Chip(_) => Err(ErrorCode::NoChip),
+        }
     }
 
     /// The circle the request names, if the badge holds it.
@@ -138,21 +225,7 @@ impl<'a> BadgeApps<'a> {
 
     /// The circle's seat key: in the chip slot it names, or the software key it keeps.
     fn seat(&mut self, circle: &Circle) -> Result<Seat<'_>, ErrorCode> {
-        match circle.chip_slot {
-            Some(slot) => {
-                let chip = self.chip.as_deref_mut().ok_or(ErrorCode::NoChip)?;
-                Ok(Seat::Chip(ChipSeat::new(
-                    chip,
-                    KeyId::new(KeyKind::Seat, slot),
-                )))
-            }
-            None => {
-                let seed = Zeroizing::new(circle.seat_key);
-                SeatKey::from_seed(&seed)
-                    .map(Seat::Soft)
-                    .map_err(|_| ErrorCode::NoChip)
-            }
-        }
+        seat_of(self.chip(), circle)
     }
 
     /// What to do with a `Chip` request before anyone is asked: `Ok(None)` to answer it now
@@ -165,11 +238,70 @@ impl<'a> BadgeApps<'a> {
     ) -> Result<Option<Screen>, ErrorCode> {
         let c = self.held(circle)?;
         match op {
-            ChipRequest::Describe | ChipRequest::Attest { .. } => Ok(None),
-            // A later task gives the grant requests their screens; until then the badge
-            // answers the two that never ask, and refuses the one that would.
-            ChipRequest::Nonce | ChipRequest::SshSignUnderGrant { .. } => Ok(None),
-            ChipRequest::GrantRequest { .. } => Err(ErrorCode::NoChip),
+            ChipRequest::Describe | ChipRequest::Attest { .. } | ChipRequest::Nonce => Ok(None),
+            ChipRequest::GrantRequest {
+                action,
+                author,
+                location,
+                agent,
+                budget,
+                exp,
+                standing,
+                cnf,
+                time,
+            } => {
+                let req = GrantRequestFields {
+                    action: action.clone(),
+                    author: author.clone(),
+                    location: location.clone(),
+                    agent: agent.clone(),
+                    budget: *budget,
+                    exp: *exp,
+                    standing: *standing,
+                    cnf: *cnf,
+                    time: *time,
+                };
+                let (board, _) = self.grant_board()?;
+                grants::check_request(board, c, &req)?;
+                Ok(Some(screens::grant_request(
+                    agent,
+                    author,
+                    *budget,
+                    &grants::until_text(*exp),
+                    &c.params.name,
+                )))
+            }
+            ChipRequest::SshSignUnderGrant {
+                data,
+                content,
+                grant,
+                proof,
+                location,
+                time,
+            } => {
+                let req = UnderGrantFields {
+                    data: data.clone(),
+                    content: content.clone(),
+                    grant: grant.clone(),
+                    proof: proof.clone(),
+                    location: location.clone(),
+                    time: *time,
+                };
+                let nonce = self.nonce;
+                let (board, clock) = self.grant_board()?;
+                let mut record = match board.grants_load() {
+                    Ok(r) => r.unwrap_or_default(),
+                    Err(_) => return Err(ErrorCode::Storage),
+                };
+                match grants::evaluate_request(board, clock, &mut record, c, &req, &nonce) {
+                    Ok(_) => Ok(None),
+                    // Asked as an ordinary signature: the badge serves it as one.
+                    Err(Fallback::Prompt(_)) => self
+                        .ssh_screen(c, data, None, Some(content))
+                        .map(Some),
+                    Err(Fallback::Refuse(code)) => Err(code),
+                }
+            }
             ChipRequest::SshSign {
                 data,
                 host,
@@ -234,7 +366,7 @@ impl<'a> BadgeApps<'a> {
     fn check_root(&mut self, c: &Circle) -> Result<(), ErrorCode> {
         match c.chip_slot {
             Some(slot) => {
-                let chip = self.chip.as_deref_mut().ok_or(ErrorCode::NoChip)?;
+                let chip = self.chip().ok_or(ErrorCode::NoChip)?;
                 match chip.exists(KeyId::new(KeyKind::Root, slot)) {
                     Ok(true) => Ok(()),
                     _ => Err(ErrorCode::ChipError),
@@ -390,7 +522,7 @@ impl ChipApps for BadgeApps<'_> {
 
     fn attest(&mut self, circle: &CircleId, freshness: &[u8; 16]) -> Result<Attested, ErrorCode> {
         let slot = self.held(circle)?.chip_slot.ok_or(ErrorCode::NoChip)?;
-        let chip = self.chip.as_deref_mut().ok_or(ErrorCode::NoChip)?;
+        let chip = self.chip().ok_or(ErrorCode::NoChip)?;
         chip.attest(KeyId::new(KeyKind::Seat, slot), freshness)
             .map_err(|_| ErrorCode::ChipError)
     }
@@ -434,7 +566,7 @@ impl ChipApps for BadgeApps<'_> {
         }
         match (c.chip_slot, &c.root) {
             (Some(slot), _) => {
-                let chip = self.chip.as_deref_mut().ok_or(ErrorCode::NoChip)?;
+                let chip = self.chip().ok_or(ErrorCode::NoChip)?;
                 let mut data = Vec::with_capacity(label.len() + c.circle_id.len());
                 data.extend_from_slice(label.as_bytes());
                 data.extend_from_slice(&c.circle_id);
@@ -450,29 +582,38 @@ impl ChipApps for BadgeApps<'_> {
         }
     }
 
-    // A later task fills in the grant methods; until then the badge has none.
-    fn nonce(&mut self, _: &CircleId) -> Result<[u8; 16], ErrorCode> {
-        Err(ErrorCode::NoChip)
+    fn nonce(&mut self, circle: &CircleId) -> Result<[u8; 16], ErrorCode> {
+        self.held(circle)?;
+        self.grant_board()?;
+        Ok(self.nonce)
     }
 
     fn grant_request(
         &mut self,
-        _: &CircleId,
-        _: &GrantRequestFields,
+        circle: &CircleId,
+        req: &GrantRequestFields,
     ) -> Result<(Vec<u8>, u8), ErrorCode> {
-        Err(ErrorCode::NoChip)
+        let c = self.held(circle)?;
+        let (board, clock) = self.grant_board()?;
+        grants::issue(board, clock, c, req)
     }
 
     fn ssh_sign_under_grant(
         &mut self,
-        _: &CircleId,
-        _: &UnderGrantFields,
+        circle: &CircleId,
+        req: &UnderGrantFields,
     ) -> Result<(Vec<u8>, u32), ErrorCode> {
-        Err(ErrorCode::NoChip)
+        let c = self.held(circle)?;
+        let nonce = self.nonce;
+        let (board, clock) = self.grant_board()?;
+        let (signature, used) = grants::sign_under_grant(board, clock, c, req, &nonce)?;
+        let remaining = used.remaining;
+        self.grant_use = Some(used);
+        Ok((signature, remaining))
     }
 
     fn has_chip(&self) -> bool {
-        self.chip.is_some()
+        self.has_chip
     }
 }
 

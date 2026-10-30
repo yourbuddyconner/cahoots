@@ -428,6 +428,41 @@ pub fn grant(
     s.done()
 }
 
+/// The question a request for a sign grant asks: which agent (its name is the laptop's), the
+/// author every commit must carry (the badge checks it on each use, so it is not marked), how
+/// many signatures, until when (`until`, as [`crate::grants::until_text`] words it), and the
+/// circle.
+pub fn grant_request(agent: &str, author: &str, budget: u32, until: &str, circle: &str) -> Screen {
+    let mut s = Draw::new();
+    s.title("let an agent sign");
+    let w = cols(&FONT_8X13);
+    s.two_rows(&FONT_8X13, 30, &fit("", agent, LAPTOP, 2 * w));
+    s.centered(&FONT_8X13, 62, "git commits as");
+    s.two_rows(&FONT_8X13, 77, &fit("", author, "", 2 * w));
+    s.centered(&FONT_9X18_BOLD, 108, &format!("{budget} of them"));
+    s.two_rows(&FONT_8X13, 128, until);
+    s.centered(&FONT_8X13, 160, &fit("", circle, "", w));
+    s.footer(Some("refuse"), Some("A+B  allow"), Some("refuse"));
+    s.done()
+}
+
+/// What the badge shows, without asking, after it signs under a grant: for which agent, the
+/// commit's subject, and how many signatures are left. The title is cut to fit the band;
+/// `lines` keeps it whole.
+pub fn grant_signed(agent: &str, subject: &str, remaining: u32, budget: u32) -> Screen {
+    let mut s = Draw::new();
+    let title = format!("signed for {agent}");
+    s.title(&fit("", &title, "", cols(&FONT_9X18_BOLD)));
+    if let Some(t) = s.lines.last_mut() {
+        *t = title;
+    }
+    let w = cols(&FONT_8X13);
+    let subject = if subject.is_empty() { "no subject" } else { subject };
+    s.two_rows(&FONT_8X13, 60, &fit("", subject, "", 2 * w));
+    s.centered(&FONT_9X18_BOLD, 120, &format!("{remaining} left of {budget}"));
+    s.done()
+}
+
 /// What marks a value the laptop sent and the badge could not check.
 const LAPTOP: &str = " (laptop)";
 

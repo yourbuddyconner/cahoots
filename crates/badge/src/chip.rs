@@ -96,7 +96,7 @@ impl SlotEntry {
             KeyKind::Seat => self.has_seat,
             KeyKind::Root => self.has_root,
             KeyKind::Epoch => self.has_epoch,
-            // The record does not track grant counters yet; a later task adds that.
+            // Grant counters are in the grants record, not here.
             KeyKind::Grant => false,
         }
     }
@@ -158,7 +158,7 @@ impl ChipRecord {
 
     /// Delete every Cahoots object in a slot this record does not know, and clear the flag of
     /// any object the record says was made but the chip does not hold. Returns a log line for
-    /// each change.
+    /// each change. Grant counters are left alone: [`crate::grants::sweep`] owns them.
     pub fn reconcile(&mut self, chip: &mut dyn ChipOps) -> Vec<String> {
         self.reconcile_keeping(chip, &[])
     }
@@ -175,6 +175,11 @@ impl ChipRecord {
             }
         };
         for id in &ids {
+            // A grant counter's slot is a grant's, not a circle's: the grants record owns it,
+            // and the grant sweep deletes the ones it does not know.
+            if matches!(KeyId::parse(id.0), Some((KeyKind::Grant, _))) {
+                continue;
+            }
             // Every id in the range ends in its slot, whatever its kind.
             let slot = id.0 as u8;
             if self.entry(slot).is_some() {

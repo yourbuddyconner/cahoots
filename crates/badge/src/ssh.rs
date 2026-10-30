@@ -325,16 +325,26 @@ pub fn encode_signature(sig: &[u8; 64]) -> Vec<u8> {
     out
 }
 
-/// What the badge reads from a commit's text: the author's name and the subject line.
-/// `None` if the text is not a commit (it has no `tree` line first, or no `author` line), or
-/// it has more than one `author` line.
-pub fn describe_commit(content: &[u8]) -> Option<(String, String)> {
+/// What the badge reads from a commit's text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Commit {
+    /// The author's name, as the git screen shows it.
+    pub name: String,
+    /// The author as `Name <email>`, without the time: what a grant's `author` must equal.
+    /// `None` when the author line has no `<email>`.
+    pub author: Option<String>,
+    pub subject: String,
+}
+
+/// Read a commit's text: the author and the subject line. `None` if the text is not a commit
+/// (it has no `tree` line first, or no `author` line), or it has more than one `author` line.
+pub fn read_commit(content: &[u8]) -> Option<Commit> {
     let text = String::from_utf8_lossy(content);
     let mut lines = text.split('\n');
     if !lines.next()?.starts_with("tree ") {
         return None;
     }
-    let mut author = None;
+    let mut author: Option<(String, Option<String>)> = None;
     for line in lines.by_ref() {
         if line.is_empty() {
             break;
@@ -345,11 +355,25 @@ pub fn describe_commit(content: &[u8]) -> Option<(String, String)> {
             if author.is_some() {
                 return None;
             }
-            // "Name <email> time zone": the name is before the address.
+            // "Name <email> time zone": the name is before the address, and the author as a
+            // grant names it runs to the address's closing bracket.
             let name = rest.split(" <").next().unwrap_or(rest).trim();
-            author = Some(String::from(name));
+            let full = rest.rfind('>').map(|end| String::from(rest[..=end].trim()));
+            author = Some((String::from(name), full));
         }
     }
     let subject = lines.next().unwrap_or("").trim_end_matches('\r');
-    Some((author?, String::from(subject)))
+    let (name, author) = author?;
+    Some(Commit {
+        name,
+        author,
+        subject: String::from(subject),
+    })
+}
+
+/// What the badge reads from a commit's text: the author's name and the subject line.
+/// `None` if the text is not a commit (it has no `tree` line first, or no `author` line), or
+/// it has more than one `author` line.
+pub fn describe_commit(content: &[u8]) -> Option<(String, String)> {
+    read_commit(content).map(|c| (c.name, c.subject))
 }

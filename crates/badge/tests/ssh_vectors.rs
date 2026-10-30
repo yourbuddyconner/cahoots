@@ -49,7 +49,7 @@ fn the_ssh_vectors_are_reproduced() {
             host: host.clone(),
             content: content.clone(),
         };
-        let mut apps = BadgeApps::new(&circles, None);
+        let mut apps = BadgeApps::new(&circles, None, [0u8; 16]);
         let screen = apps.prompt(&circle_id, &op).unwrap().unwrap();
         let want: Vec<&str> = c["screen"]
             .as_array()

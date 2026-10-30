@@ -835,7 +835,7 @@ Names longer than 64 bytes were cut.\n";
                 host: host.clone(),
                 content: content.clone(),
             };
-            let mut apps = BadgeApps::new(&circles, None);
+            let mut apps = BadgeApps::new(&circles, None, [0u8; 16]);
             let screen = apps.prompt(&circle_id, &op).unwrap().unwrap();
             let signature = apps
                 .ssh_sign(&circle_id, &data, host.as_ref(), content.as_deref())

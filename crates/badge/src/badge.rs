@@ -3,6 +3,7 @@
 use crate::apps::{BadgeApps, Served};
 use crate::board::{Board, Circle, Press};
 use crate::chip::{self, ChipSeat, SlotEntry};
+use crate::grants::{self, Clock, GrantsRecord};
 use crate::screens::{self, Screen};
 use alloc::boxed::Box;
 use alloc::format;
@@ -16,7 +17,7 @@ use cahoots_core::pad::Pad;
 use cahoots_core::params::CircleParams;
 use cahoots_core::seat::SeatPublic;
 use cahoots_custodian::wire::{
-    ErrorCode, Request, Response, KIND_REQUEST, KIND_RESPONSE, MAX_REQUEST_LEN,
+    ChipRequest, ErrorCode, Request, Response, KIND_REQUEST, KIND_RESPONSE, MAX_REQUEST_LEN,
 };
 use cahoots_custodian::{
     serve, CircleId, CircleInfo, Consent, Custodian, PadError, PskHandle, PSK_LEN,
@@ -229,6 +230,9 @@ struct Menu<B: Board> {
     /// Both on the Forget page asked "forget this circle?": Both forgets, Left or Right goes
     /// back.
     confirm_forget: bool,
+    /// The nonce a proof under a grant must be made over: drawn when the menu opens, and
+    /// drawn again after every signature under a grant.
+    nonce: [u8; 16],
 }
 
 /// What the menu asks of the badge after a step.
@@ -282,6 +286,9 @@ pub struct Badge<B: Board> {
     /// The last contact card the holder signed for each circle, as signed. Kept in memory
     /// only, for a card page to show: a restart forgets it, and the laptop keeps its own copy.
     cards: Vec<(CircleId, Vec<u8>)>,
+    /// The badge's best time, for grants: the stored time from boot, raised by what laptops
+    /// say, counted on with the uptime.
+    clock: Clock,
 }
 
 impl<B: Board> Badge<B> {
@@ -295,6 +302,7 @@ impl<B: Board> Badge<B> {
             idle: Idle::Off,
             chip_slot: None,
             cards: Vec::new(),
+            clock: Clock::default(),
         }
     }
 
@@ -353,6 +361,10 @@ impl<B: Board> Badge<B> {
             self.board.log(l);
         }
         self.reconcile_chip(circles.iter().filter_map(|c| c.chip_slot).collect());
+        for l in grants::sweep(&mut self.board) {
+            self.board.log(&l);
+        }
+        self.clock = grants::boot_clock(&mut self.board);
         // A must already be held at power-on to mean "forget every circle". Sample it before
         // the wait: a Both that ends the wait holds A down too, and must not wipe.
         let held_at_power_on = self.board.a_down();
@@ -412,6 +424,10 @@ impl<B: Board> Badge<B> {
             }
         }
         self.forget_chip();
+        // The grants went with the chip's counters and the circles that issued them.
+        if self.board.grants_store(&GrantsRecord::default()).is_err() {
+            self.board.log("grants record: write failed");
+        }
         if !ok {
             return left;
         }
@@ -930,6 +946,7 @@ impl<B: Board> Badge<B> {
                     self.current,
                     &mut menu,
                     &mut self.cards,
+                    &mut self.clock,
                 ) {
                     MenuAction::Stay => Idle::On(menu),
                     MenuAction::Choose => {
@@ -1084,6 +1101,7 @@ impl<B: Board> Badge<B> {
             }
         }
         let (down, _up) = self.board.links();
+        let nonce = fresh_nonce(&mut self.board);
         let mut menu = Menu {
             pads: Pads { held, tier },
             down,
@@ -1095,6 +1113,7 @@ impl<B: Board> Badge<B> {
             peer_seen: false,
             covered: false,
             confirm_forget: false,
+            nonce,
         };
         let c = &self.circles[self.current];
         show_page(&mut self.board, c, &menu);
@@ -1111,6 +1130,7 @@ impl<B: Board> Badge<B> {
         current: usize,
         m: &mut Menu<B>,
         cards: &mut Vec<(CircleId, Vec<u8>)>,
+        clock: &mut Clock,
     ) -> MenuAction {
         let c = &circles[current];
         let asked = m.pending.is_some() || m.connect.is_some();
@@ -1140,7 +1160,7 @@ impl<B: Board> Badge<B> {
                 break;
             }
             m.rx.extend_from_slice(&buf[..n]);
-            Self::menu_decode(board, circles, m);
+            Self::menu_decode(board, circles, m, clock);
         }
 
         // A gesture made before the prompt was on the screen is not an answer to it: on the
@@ -1160,7 +1180,7 @@ impl<B: Board> Badge<B> {
                     board.log("laptop allowed until unplugged");
                     m.covered = false;
                     show_page(board, c, m);
-                    Self::handle_request(board, circles, m, p.seq, p.request);
+                    Self::handle_request(board, circles, m, clock, p.seq, p.request);
                 }
                 Press::Left | Press::Right => {
                     board.log("laptop refused");
@@ -1182,7 +1202,7 @@ impl<B: Board> Badge<B> {
             };
             let mut served = Served {
                 custody: &mut m.pads,
-                apps: BadgeApps::new(circles, board.chip()),
+                apps: BadgeApps::on_board(circles, board, clock, m.nonce),
                 signed_card: None,
             };
             let resp = serve(&mut served, &mut Answer(yes), &p.request);
@@ -1257,7 +1277,7 @@ impl<B: Board> Badge<B> {
     /// header longer than any request, are dropped one at a time to resync. A partial header
     /// left by garbage can claim a length that is never filled, so while the front is
     /// incomplete, a whole frame further on wins and the bytes before it are dropped.
-    fn menu_decode(board: &mut B, circles: &[Circle], m: &mut Menu<B>) {
+    fn menu_decode(board: &mut B, circles: &[Circle], m: &mut Menu<B>, clock: &mut Clock) {
         loop {
             let (kind, seq, payload, used) = match frame::decode_max(&m.rx, MAX_REQUEST_LEN) {
                 Ok((f, used)) => (f.kind, f.seq, f.payload.to_vec(), used),
@@ -1298,13 +1318,20 @@ impl<B: Board> Badge<B> {
                 });
                 continue;
             }
-            Self::handle_request(board, circles, m, seq, payload);
+            Self::handle_request(board, circles, m, clock, seq, payload);
         }
     }
 
     /// Answer `payload` (a request frame's payload with sequence `seq`) now, or draw its
     /// question and hold it for the holder's answer.
-    fn handle_request(board: &mut B, circles: &[Circle], m: &mut Menu<B>, seq: u32, payload: Vec<u8>) {
+    fn handle_request(
+        board: &mut B,
+        circles: &[Circle],
+        m: &mut Menu<B>,
+        clock: &mut Clock,
+        seq: u32,
+        payload: Vec<u8>,
+    ) {
         {
             let req = Request::decode(&payload).ok();
             // A request longer than its kind allows is refused before the holder is asked:
@@ -1319,7 +1346,7 @@ impl<B: Board> Badge<B> {
             }
             let ask = match &req {
                 Some(Request::Chip { circle, op }) => {
-                    BadgeApps::new(circles, board.chip()).prompt(circle, op)
+                    BadgeApps::on_board(circles, board, clock, m.nonce).prompt(circle, op)
                 }
                 Some(r) => match spends(r) {
                     // A spend for a circle the badge does not hold is refused before asking.
@@ -1335,22 +1362,44 @@ impl<B: Board> Badge<B> {
             match ask {
                 Ok(Some(screen)) => {
                     show(board, screen);
-                    m.pending = Some(Pending {
-                        seq,
-                        request: payload,
-                        chip: matches!(req, Some(Request::Chip { .. })),
-                    });
+                    let chip = matches!(req, Some(Request::Chip { .. }));
+                    // A request under a grant that asks is asked, and answered, as the
+                    // ordinary signature it is: nothing is counted against the grant.
+                    let request = match req {
+                        Some(Request::Chip {
+                            circle,
+                            op: ChipRequest::SshSignUnderGrant { data, content, .. },
+                        }) => Request::Chip {
+                            circle,
+                            op: ChipRequest::SshSign {
+                                data,
+                                host: None,
+                                content: Some(content),
+                            },
+                        }
+                        .encode(),
+                        _ => payload,
+                    };
+                    m.pending = Some(Pending { seq, request, chip });
                 }
                 // Identify, Remaining, Describe, Attest and anything malformed: answered now,
                 // never asked.
                 Ok(None) => {
                     let mut served = Served {
                         custody: &mut m.pads,
-                        apps: BadgeApps::new(circles, board.chip()),
+                        apps: BadgeApps::on_board(circles, board, clock, m.nonce),
                         signed_card: None,
                     };
                     let resp = serve(&mut served, &mut Answer(false), &payload);
+                    let used = served.apps.grant_use.take();
                     respond(&mut m.down, seq, &resp);
+                    // Signed under a grant: the nonce is spent, and the badge shows what it
+                    // signed until the next gesture or screen, without waiting.
+                    if let Some(u) = used {
+                        m.nonce = fresh_nonce(board);
+                        board.note_grant_use(&u.cti, &u.agent, &u.subject, u.remaining, u.budget);
+                        m.covered = true;
+                    }
                 }
                 // Refused before anyone is asked: a circle the badge does not hold, a request
                 // to sign that it cannot describe, one it cannot do yet.
@@ -1374,6 +1423,16 @@ fn spends(req: &Request) -> Option<(CircleId, u32)> {
         Request::Spend { circle, len } => Some((*circle, *len)),
         Request::SpendFor { handle, len } => Some((handle.circle_id, *len)),
     }
+}
+
+/// 16 bytes from the board's random source for a link's nonce. A failed source is logged and
+/// leaves the nonce all zeros until the next draw.
+fn fresh_nonce<B: Board>(board: &mut B) -> [u8; 16] {
+    let mut nonce = [0u8; 16];
+    if board.entropy().fill(&mut nonce).is_err() {
+        board.log("trng: failed, the grant nonce is not fresh");
+    }
+    nonce
 }
 
 /// Send `response` back as a response frame echoing the request's `seq`.

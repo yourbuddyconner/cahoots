@@ -1,6 +1,8 @@
 //! The [`Board`] trait: everything the badge needs from the hardware under it.
 
 use crate::chip::ChipRecord;
+use crate::grants::GrantsRecord;
+use crate::screens;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -415,5 +417,39 @@ pub trait Board {
     fn chip_record_store(&mut self, r: &ChipRecord) -> Result<(), BoardError> {
         let _ = r;
         Ok(())
+    }
+    /// The grants record (see [`crate::grants`]): `Ok(None)` if none is stored, an error if one
+    /// is stored but cannot be read or does not decode. A board that keeps no grants keeps the
+    /// default, and every grant it issues is unknown at its first use.
+    fn grants_load(&mut self) -> Result<Option<GrantsRecord>, BoardError> {
+        Ok(None)
+    }
+    /// Store the grants record, replacing the last.
+    fn grants_store(&mut self, r: &GrantsRecord) -> Result<(), BoardError> {
+        let _ = r;
+        Ok(())
+    }
+    /// Seconds since boot. A board with no timer returns 0.
+    fn uptime_secs(&self) -> u64 {
+        0
+    }
+    /// A signature was just made under a grant: show what was signed until the next screen,
+    /// and log it. `cti` is the grant's id.
+    fn note_grant_use(
+        &mut self,
+        cti: &[u8; 16],
+        agent: &str,
+        subject: &str,
+        remaining: u32,
+        budget: u32,
+    ) {
+        let s = screens::grant_signed(agent, subject, remaining, budget);
+        self.note_screen(&s.lines, s.secret);
+        self.display().draw(&s.frame);
+        self.screen_drawn();
+        let short: String = cti[..4].iter().map(|b| alloc::format!("{b:02x}")).collect();
+        self.log(&alloc::format!(
+            "grant {short}: signed git commit \"{subject}\", {remaining} left"
+        ));
     }
 }

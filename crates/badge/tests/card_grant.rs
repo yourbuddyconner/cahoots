@@ -450,7 +450,7 @@ fn a_circle_without_a_root_has_no_seal_key() {
     let mut circle = badge.circles()[0].clone();
     circle.root = None;
     let apps_circles = [circle];
-    let mut apps = cahoots_badge::apps::BadgeApps::new(&apps_circles, None);
+    let mut apps = cahoots_badge::apps::BadgeApps::new(&apps_circles, None, [0u8; 16]);
     use cahoots_custodian::ChipApps;
     assert_eq!(apps.seal_key(&id, "seal/card"), Err(ErrorCode::NoChip));
     // And on a chip badge whose root is missing from the chip: a chip error, before asking.

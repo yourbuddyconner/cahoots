@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 
-use cahoots_badge::chip::ChipRecord;
 use cahoots_badge::board::{assign_places, place_for};
+use cahoots_badge::chip::ChipRecord;
+use cahoots_badge::grants::GrantsRecord;
 use cahoots_badge::{word_indices, Board, BoardError, Circle, Press};
 use cahoots_chip::{ChipOps, SoftChip};
 use cahoots_core::checkwords::{check_words, WORDLIST};
@@ -195,6 +196,10 @@ pub struct FakeBoard {
     pub chip: Option<SoftChip>,
     /// The chip record as stored: its CBOR encoding, so a test sees what a board would keep.
     pub chip_record: Option<Vec<u8>>,
+    /// The grants record as stored, its CBOR encoding.
+    pub grants: Option<Vec<u8>>,
+    /// Seconds since boot, as the board reports them.
+    pub uptime: u64,
 }
 
 impl FakeBoard {
@@ -230,6 +235,8 @@ impl FakeBoard {
             links: None,
             chip: None,
             chip_record: None,
+            grants: None,
+            uptime: 0,
         }
     }
 
@@ -401,7 +408,9 @@ impl Board for FakeBoard {
     fn open_pad(&mut self, circle: &CircleId, len: u32) -> Result<VecPad, BoardError> {
         let p = self.place(circle).ok_or(BoardError::Storage)?;
         let (pad, _) = self.region(p);
-        Ok(VecPad(pad.get(..len as usize).ok_or(BoardError::Storage)?.to_vec()))
+        Ok(VecPad(
+            pad.get(..len as usize).ok_or(BoardError::Storage)?.to_vec(),
+        ))
     }
     fn records(&mut self, circle: &CircleId, fresh: bool) -> Result<VecRecords, BoardError> {
         let p = self.place(circle).ok_or(BoardError::Storage)?;
@@ -432,11 +441,28 @@ impl Board for FakeBoard {
     fn chip_record_load(&mut self) -> Result<Option<ChipRecord>, BoardError> {
         match &self.chip_record {
             None => Ok(None),
-            Some(b) => ChipRecord::decode(b).map(Some).map_err(|_| BoardError::Storage),
+            Some(b) => ChipRecord::decode(b)
+                .map(Some)
+                .map_err(|_| BoardError::Storage),
         }
     }
     fn chip_record_store(&mut self, r: &ChipRecord) -> Result<(), BoardError> {
         self.chip_record = Some(r.encode());
         Ok(())
+    }
+    fn grants_load(&mut self) -> Result<Option<GrantsRecord>, BoardError> {
+        match &self.grants {
+            None => Ok(None),
+            Some(b) => GrantsRecord::decode(b)
+                .map(Some)
+                .map_err(|_| BoardError::Storage),
+        }
+    }
+    fn grants_store(&mut self, r: &GrantsRecord) -> Result<(), BoardError> {
+        self.grants = Some(r.encode());
+        Ok(())
+    }
+    fn uptime_secs(&self) -> u64 {
+        self.uptime
     }
 }
