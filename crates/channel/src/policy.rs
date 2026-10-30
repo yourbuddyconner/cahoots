@@ -29,7 +29,8 @@ use minicbor::Decoder;
 use sha2::{Digest, Sha256};
 
 use crate::cbor::{array_len, canonical, encode_with, Enc, EncResult, Nested, Reader, VERSION};
-use crate::{object, open_seat_signed, Action, ChannelError, ChannelId};
+use crate::quorum::check_quorum;
+use crate::{open_seat_signed, Action, ChannelError, ChannelId};
 
 /// External AAD of a policy's COSE_Sign1.
 pub const DOMAIN: &[u8] = b"cahoots/policy/v1";
@@ -341,28 +342,32 @@ fn decode_issuer(d: &mut Decoder<'_>) -> Result<Issuer, ChannelError> {
     Ok(issuer)
 }
 
-/// Verify a governed act (a policy or a channel object, signed under its own domain) against the
-/// rule that governs it: the signer is a seat of `manifest`, and the approvals for
-/// `SHA-256(signed)` under `profile` meet `rule.quorum`. Returns the payload.
+/// Verify a governed act (a policy or a channel object) against the rule that governs it: the
+/// signer is a seat of `manifest` under `domain`, and the approvals for `SHA-256(signed)` under
+/// `profile` meet `rule.quorum`. Returns the payload.
 ///
-/// The signing seat counts as one approval. Approval objects are not yet checked: a rule whose
-/// quorum is above 1 is refused.
+/// When `rule.quorum <= 1` the signer's own seat signature is the one approval, and `approvals`
+/// are not read. Otherwise the signature does not count: `approvals` must hold `rule.quorum`
+/// distinct seats at `rule.assurance` or above ([`check_quorum`]).
 pub fn verify_governed(
     signed: &[u8],
+    domain: &[u8],
     approvals: &[Vec<u8>],
     manifest: &Manifest,
     rule: &Rule,
     profile: &str,
 ) -> Result<Vec<u8>, ChannelError> {
-    let (_seat, payload) = open_seat_signed(signed, manifest, DOMAIN)
-        .or_else(|_| open_seat_signed(signed, manifest, object::DOMAIN))?;
-    let _ = (approvals, profile);
-    let have = 1;
-    if usize::from(rule.quorum) > have {
-        return Err(ChannelError::Quorum {
-            have,
-            need: rule.quorum,
-        });
+    let (_seat, payload) = open_seat_signed(signed, manifest, domain)?;
+    if rule.quorum > 1 {
+        let digest: [u8; 32] = Sha256::digest(signed).into();
+        check_quorum(
+            approvals,
+            manifest,
+            &digest,
+            profile,
+            rule.quorum,
+            rule.assurance,
+        )?;
     }
     Ok(payload)
 }

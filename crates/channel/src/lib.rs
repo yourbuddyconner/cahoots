@@ -9,6 +9,7 @@
 //! - [`message`]: the version 3 message, encrypted under a sender chain and signed by the sender.
 //! - [`grant`]: channel grants, their chains, and the evaluator that decides a request.
 //! - [`control`]: what a control message says: rotation, policy change, revocation, join, leave.
+//! - [`quorum`]: seat approvals and the quorum check.
 //! - [`session::ChannelSession`]: a member's epoch keys and sender chains; sends and receives.
 //!
 //! Every object is a canonical CBOR map (definite lengths, shortest integers, integer keys in
@@ -28,6 +29,7 @@ pub mod link;
 pub mod message;
 pub mod object;
 pub mod policy;
+pub mod quorum;
 pub mod session;
 
 pub use grant::Refusal;

@@ -248,7 +248,7 @@ fn verify_governed_takes_the_signing_seat_as_its_own_approval() {
     let govern = p.rule(Action::Govern).unwrap();
     assert_eq!(govern.quorum, 1);
     assert_eq!(
-        verify_governed(&signed, &[], &m, govern, "channel-govern").unwrap(),
+        verify_governed(&signed, DOMAIN, &[], &m, govern, "channel-govern").unwrap(),
         p.encode()
     );
 
@@ -257,12 +257,12 @@ fn verify_governed_takes_the_signing_seat_as_its_own_approval() {
         ..govern.clone()
     };
     assert!(matches!(
-        verify_governed(&signed, &[], &m, &two, "channel-govern"),
+        verify_governed(&signed, DOMAIN, &[], &m, &two, "channel-govern"),
         Err(ChannelError::Quorum { need: 2, .. })
     ));
 
     // Not signed by a seat: a member key under seat 0's kid.
     let stranger = SeatKey::from_seed(&[0x40; 32]).unwrap();
     let forged = cose::sign1(&stranger, &[0], &p.encode(), DOMAIN, false);
-    assert!(verify_governed(&forged, &[], &m, govern, "channel-govern").is_err());
+    assert!(verify_governed(&forged, DOMAIN, &[], &m, govern, "channel-govern").is_err());
 }
