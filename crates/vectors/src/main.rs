@@ -443,6 +443,8 @@ fn channel_vectors() -> Value {
     let payload = fill(703, 48);
     let wire = ch.seal_with_nonce(2, Round::Reveal, &payload, nonce);
     let (seat, round, opened) = ch.open(&wire).unwrap();
+    let commitment = fill(704, 1282);
+    let joined = cahoots_core::channel::join_code(&id, 1, &commitment);
     assert_eq!(opened, payload);
     json!({
         "description": "The ceremony channel (crates/core/src/channel.rs, docs/protocol.md section 3.7). offer = \"cahoots:ceremony:v1:\" || base64url without padding (id || key || relay length (u8) || relay (UTF-8) || params). A message is version 3 | id (16) | len (u32 LE, the bytes after it) | seat | round (1 commit, 2 reveal, 3 attest) | nonce (12) | ChaCha20-Poly1305 ciphertext and tag, under HKDF-SHA256(ikm = key, salt = id, info = \"cahoots/ceremony/channel/v1\"), with id || seat || round as associated data.",
@@ -451,6 +453,12 @@ fn channel_vectors() -> Value {
         "params": hex::encode(params.encode()),
         "relay": relay,
         "offer": offer,
+        "join": {
+            "description": "A joiner's code: \"cahoots:joined:v1:\" || base64url without padding (id || seat || SHA-256(commitment)).",
+            "seat": 1,
+            "commitment": hex::encode(&commitment),
+            "code": joined,
+        },
         "message": {
             "seat": seat,
             "round": round as u8,

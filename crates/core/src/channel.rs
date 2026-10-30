@@ -433,3 +433,151 @@ impl Mailbox {
         Some((seat, round, payload))
     }
 }
+
+/// The text every joiner's code starts with.
+pub const JOINED_PREFIX: &str = "cahoots:joined:v1:";
+/// Commitments kept per seat while the host waits to scan, so an intruder's cannot crowd out
+/// the real one.
+const CANDIDATES_PER_SEAT: usize = 4;
+/// Messages kept per seat and round while that seat's commitment waits for its scan.
+const DEFERRED_PER_SLOT: usize = 4;
+
+/// A joiner's code, shown to the host after the joiner posts its commitment:
+/// `"cahoots:joined:v1:" || base64url(channel id || seat || SHA-256(commitment))`. The
+/// commitment is the commitment payload as posted.
+pub fn join_code(channel_id: &[u8; 16], seat: u8, commitment: &[u8]) -> String {
+    use sha2::Digest;
+    let mut raw = Vec::with_capacity(ID_LEN + 1 + 32);
+    raw.extend_from_slice(channel_id);
+    raw.push(seat);
+    raw.extend_from_slice(&Sha256::digest(commitment));
+    let mut out = String::from(JOINED_PREFIX);
+    out.push_str(&URL_SAFE_NO_PAD.encode(&raw));
+    out
+}
+
+/// The channel id, seat and commitment hash in a joiner's code.
+pub fn parse_join_code(text: &str) -> Result<([u8; 16], u8, [u8; 32]), ChannelError> {
+    let body = text
+        .trim()
+        .strip_prefix(JOINED_PREFIX)
+        .ok_or(ChannelError::NotAnOffer)?;
+    let raw = URL_SAFE_NO_PAD
+        .decode(body)
+        .map_err(|_| ChannelError::Malformed)?;
+    if raw.len() != ID_LEN + 1 + 32 {
+        return Err(ChannelError::Malformed);
+    }
+    let mut id = [0u8; ID_LEN];
+    id.copy_from_slice(&raw[..ID_LEN]);
+    let mut hash = [0u8; 32];
+    hash.copy_from_slice(&raw[ID_LEN + 1..]);
+    Ok((id, raw[ID_LEN], hash))
+}
+
+/// The host's side of the handshake in both directions. Every joiner scanned the host's offer.
+/// The host scans each joiner's code, and only a commitment from the relay whose hash matches
+/// that scan reaches the host's ceremony. Until then the seat's commitments are held here, and
+/// its later messages wait too. An intruder who photographed the offer can post a commitment,
+/// but the host never takes it, so the host's manifest differs from the one the joiners build
+/// with the intruder in it, and nobody completes.
+#[derive(Default)]
+pub struct Gate {
+    candidates: BTreeMap<u8, Vec<Vec<u8>>>,
+    scanned: BTreeMap<u8, [u8; 32]>,
+    fed: BTreeSet<u8>,
+    deferred: Vec<(u8, Round, Vec<u8>)>,
+}
+
+impl Gate {
+    pub fn new() -> Gate {
+        Gate::default()
+    }
+
+    /// A commitment read from the relay for `seat`. Held until a scan matches it.
+    pub fn commitment(&mut self, seat: u8, payload: Vec<u8>) {
+        if self.fed.contains(&seat) {
+            return;
+        }
+        let c = self.candidates.entry(seat).or_default();
+        if c.len() < CANDIDATES_PER_SEAT && !c.contains(&payload) {
+            c.push(payload);
+        }
+    }
+
+    /// A joiner's code scanned on the host's screen. Returns its seat. A code for another
+    /// channel is `OtherChannel`. A second scan for a seat replaces the first until the seat's
+    /// commitment is taken.
+    pub fn scan(&mut self, channel: &Channel, text: &str) -> Result<u8, ChannelError> {
+        let (id, seat, hash) = parse_join_code(text)?;
+        if id != channel.id {
+            return Err(ChannelError::OtherChannel);
+        }
+        if !self.fed.contains(&seat) {
+            self.scanned.insert(seat, hash);
+        }
+        Ok(seat)
+    }
+
+    /// Whether the host's ceremony has taken `seat`'s commitment.
+    pub fn is_fed(&self, seat: u8) -> bool {
+        self.fed.contains(&seat)
+    }
+
+    /// A reveal or a signature from a seat whose commitment is not taken yet. It waits.
+    pub fn defer(&mut self, seat: u8, round: Round, payload: Vec<u8>) {
+        let n = self
+            .deferred
+            .iter()
+            .filter(|(s, r, _)| *s == seat && *r == round)
+            .count();
+        if n < DEFERRED_PER_SLOT && !self.deferred.iter().any(|(s, r, p)| *s == seat && *r == round && *p == payload) {
+            self.deferred.push((seat, round, payload));
+        }
+    }
+
+    /// The commitments whose hash matches a scan and are not yet taken: give each to the
+    /// ceremony, then call `fed` for the ones it accepted.
+    pub fn ready(&self) -> Vec<(u8, Vec<u8>)> {
+        use sha2::Digest;
+        self.scanned
+            .iter()
+            .filter(|(seat, _)| !self.fed.contains(seat))
+            .filter_map(|(seat, hash)| {
+                let c = self.candidates.get(seat)?;
+                c.iter()
+                    .find(|p| Sha256::digest(p).as_slice() == hash)
+                    .map(|p| (*seat, p.clone()))
+            })
+            .collect()
+    }
+
+    /// The ceremony took `seat`'s commitment. Its waiting messages can go in now.
+    pub fn fed(&mut self, seat: u8) {
+        self.fed.insert(seat);
+        self.candidates.remove(&seat);
+    }
+
+    /// The waiting messages of seats whose commitment is taken, in the order they arrived.
+    pub fn take_deferred(&mut self) -> Vec<(u8, Round, Vec<u8>)> {
+        let (go, wait): (Vec<_>, Vec<_>) = core::mem::take(&mut self.deferred)
+            .into_iter()
+            .partition(|(s, _, _)| self.fed.contains(s));
+        self.deferred = wait;
+        go
+    }
+
+    /// Seats scanned here whose commitment the ceremony took.
+    pub fn scanned(&self) -> Vec<u8> {
+        self.fed.iter().copied().collect()
+    }
+
+    /// Seats with a commitment on the relay that no scan here matches.
+    pub fn unscanned(&self) -> Vec<u8> {
+        self.candidates
+            .iter()
+            .filter(|(s, c)| !self.fed.contains(s) && !c.is_empty())
+            .map(|(s, _)| *s)
+            .collect()
+    }
+}

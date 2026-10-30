@@ -652,6 +652,18 @@ fn tick(d: &Device, id: &str) -> CeremonyState {
     s
 }
 
+/// The host scans every joiner's code it can see, and taps Continue once everyone is scanned.
+fn host_scans(host: &Device, id: &str, joiners: &[(&Device, &str)]) {
+    for (d, jid) in joiners {
+        if let Some(code) = d.phone.ceremony_state((*jid).into()).unwrap().my_join_code {
+            host.phone.ceremony_scan(id.into(), code).unwrap();
+        }
+    }
+    if host.phone.ceremony_state(id.into()).unwrap().needs_continue {
+        host.phone.ceremony_continue(id.into()).unwrap();
+    }
+}
+
 #[test]
 fn two_phones_hold_a_ceremony_through_the_relay() {
     let r = relay();
@@ -680,9 +692,10 @@ fn two_phones_hold_a_ceremony_through_the_relay() {
     assert_eq!(sb.my_seat, 1);
 
     let (mut sa, mut sb) = (None, None);
-    for _ in 0..5 {
+    for _ in 0..6 {
         sa = Some(tick(&a, &ida));
         sb = Some(tick(&b, &idb));
+        host_scans(&a, &ida, &[(&b, &idb)]);
     }
     let (sa, sb) = (sa.unwrap(), sb.unwrap());
     assert_eq!(sa.phase, CeremonyPhase::Complete);
@@ -720,7 +733,7 @@ fn a_phone_joins_a_browser_offer() {
     let idp = p.phone.join_offer(offer, 1).unwrap();
     let mut cursor = None;
     let mut state = None;
-    for _ in 0..5 {
+    for _ in 0..6 {
         for w in browser.outbound().unwrap() {
             r.lock().unwrap().post(&id, &b64_decode(&w).unwrap()).unwrap();
             browser.posted(&w);
@@ -730,6 +743,13 @@ fn a_phone_joins_a_browser_offer() {
             cursor = Some(seq);
         }
         state = Some(tick(&p, &idp));
+        // The browser host scans the phone's code.
+        if let Some(code) = state.as_ref().unwrap().my_join_code.clone() {
+            browser.scan_join(&code).unwrap();
+        }
+        if browser.needs_continue() {
+            browser.proceed();
+        }
     }
     let state = state.unwrap();
     assert_eq!(browser.phase(), "complete");
@@ -752,9 +772,10 @@ fn a_relay_ceremony_survives_a_failed_post() {
         a.phone.ceremony_tick(ida.clone()),
         Err(PhoneError::Network { .. })
     ));
-    for _ in 0..5 {
+    for _ in 0..6 {
         tick(&a, &ida);
         tick(&b, &idb);
+        host_scans(&a, &ida, &[(&b, &idb)]);
     }
     assert_eq!(
         a.phone.ceremony_state(ida.clone()).unwrap().words,
@@ -792,16 +813,21 @@ fn the_device_that_lost_a_seat_posts_nothing_more() {
     // B keeps the seat, and nobody else sees an error.
     let sb = tick(&b, &idb);
     assert!(!sb.seat_lost);
+    tick(&a, &ida);
+    host_scans(&a, &ida, &[(&b, &idb), (&c, &idc)]);
     let sa = tick(&a, &ida);
     assert_eq!(sa.missing, vec![2]);
+    assert_eq!(sa.scanned, vec![1]);
     // A third person takes seat 3, and the ceremony finishes without C.
     let d = device(&r);
     let idd = d.phone.join_offer(a.phone.offer_code(ida.clone()).unwrap(), 2).unwrap();
-    for _ in 0..5 {
+    for _ in 0..6 {
         tick(&a, &ida);
         tick(&b, &idb);
         tick(&d, &idd);
+        host_scans(&a, &ida, &[(&b, &idb), (&d, &idd)]);
         assert!(c.phone.ceremony_tick(idc.clone()).is_err());
+        assert!(c.phone.ceremony_state(idc.clone()).unwrap().my_join_code.is_none());
     }
     let words: Vec<_> = [(&a, &ida), (&b, &idb), (&d, &idd)]
         .iter()
@@ -828,4 +854,52 @@ fn a_lost_ceremony_says_to_start_over() {
         ),
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn two_phones_finish_only_after_the_host_scans() {
+    let r = relay();
+    let (a, b) = (device(&r), device(&r));
+    a.phone.set_default_relay(RELAY.into()).unwrap();
+    let ida = a.phone.start_ceremony("park".into(), 2, PAD, true).unwrap();
+    let idb = b.phone.join_offer(a.phone.offer_code(ida.clone()).unwrap(), 1).unwrap();
+    assert!(a.phone.ceremony_state(ida.clone()).unwrap().my_join_code.is_none(), "the host shows the offer");
+    for _ in 0..4 {
+        tick(&a, &ida);
+        tick(&b, &idb);
+    }
+    // B's commitment is on the relay, but A has not scanned B: A stays in step one.
+    let sa = a.phone.ceremony_state(ida.clone()).unwrap();
+    assert_eq!(sa.phase, CeremonyPhase::Commit);
+    assert_eq!(sa.unscanned, vec![1]);
+    assert!(sa.scanned.is_empty() && !sa.needs_continue);
+    assert!(a.phone.ceremony_continue(ida.clone()).is_err());
+    let code = b.phone.ceremony_state(idb.clone()).unwrap().my_join_code.unwrap();
+    assert!(code.starts_with("cahoots:joined:v1:"), "{code}");
+    // A joiner cannot take another joiner's code.
+    assert!(matches!(b.phone.ceremony_scan(idb.clone(), code.clone()), Err(PhoneError::BadCode { .. })));
+    let sa = a.phone.ceremony_scan(ida.clone(), code).unwrap();
+    assert_eq!(sa.scanned, vec![1]);
+    assert!(sa.unscanned.is_empty());
+    assert!(sa.needs_continue);
+    // Nothing moves until Continue: A posts no reveal, and asks for no signature.
+    for _ in 0..3 {
+        assert!(!tick(&a, &ida).needs_signature);
+        tick(&b, &idb);
+    }
+    assert_eq!(b.phone.ceremony_state(idb.clone()).unwrap().phase, CeremonyPhase::Reveal);
+    assert!(b.phone.ceremony_state(idb.clone()).unwrap().my_join_code.is_some());
+    a.phone.ceremony_continue(ida.clone()).unwrap();
+    for _ in 0..4 {
+        tick(&a, &ida);
+        tick(&b, &idb);
+    }
+    let (sa, sb) = (
+        a.phone.ceremony_state(ida).unwrap(),
+        b.phone.ceremony_state(idb).unwrap(),
+    );
+    assert_eq!(sa.phase, CeremonyPhase::Complete);
+    assert_eq!(sb.phase, CeremonyPhase::Complete);
+    assert_eq!(sa.words, sb.words);
+    assert!(sb.my_join_code.is_none());
 }

@@ -13,10 +13,10 @@ The QR codes carry encrypted contributions, not the shared secret in plaintext. 
 
 ## Two ways to hold a ceremony
 
-- **Through the relay.** This is the default. The host shows one code. Everyone else scans it and picks a seat. The rest goes through the relay, sealed under a key that is only in that code. Each device needs a network connection. Phones and laptops can take part together, whichever app they run.
+- **Through the relay.** This is the default. The host shows one code. Everyone else scans it and picks a seat. Each joiner's screen then shows a small code: "Show this to the host". The host scans each one. When the host's screen says "Everyone is scanned", the host selects **Continue**. The rest goes through the relay, sealed under a key that is only in the host's code. Each device needs a network connection. Phones and laptops can take part together, whichever app they run.
 - **Codes only.** Everyone shows and scans codes in turn, as in the steps below. No network is needed.
 
-Both ways make the same kind of circle, and both end with the six words. Either way, everyone must be in the same room. The host's code is scanned from the host's screen.
+Both ways make the same kind of circle, and both end with the six words. Either way, everyone must be in the same room. The relay only carries bytes. The two scans show that everyone is present: each joiner scans the host's screen, and the host scans each joiner's screen. Someone who photographs the host's code from outside the room cannot get into the circle, because the host never scans them. If the host's screen says "Seat N committed but was not scanned here" and nobody in the room is seat N, start over with a new code.
 
 With **Through the relay**, steps 2 to 4 below happen on their own. The host's screen fills in as people join. Joiners wait. Then everyone goes to step 5.
 

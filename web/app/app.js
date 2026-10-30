@@ -36,6 +36,9 @@ const ERRORS = {
   'not-an-offer': 'That is not a host\'s code.',
   offer: 'That host\'s code does not read. Scan it again.',
   'host-seat': 'Seat 1 is the host\'s. Pick another seat.',
+  'not-a-join-code': 'That is not a joiner\'s code.',
+  'other-ceremony': 'That code is for another ceremony.',
+  'not-host': 'Only the host scans a joiner\'s code.',
 };
 const friendly = (e) => {
   const s = String(e);
@@ -60,6 +63,7 @@ const LOST = 'This ceremony was lost when the app closed. Everyone starts over w
 /** A ceremony in memory is gone after a reload or a close. Joining it again cannot work. */
 const ceremonyLost = () => screen({ title: 'Ceremony lost', body: [h('div', {}, h('h1', {}, 'This ceremony is gone.'), h('p', { class: 'lead' }, LOST), h('p', { class: 'muted' }, 'Nothing was kept.'))], actions: [btn('Back to start', () => go('#/'), 'primary')] });
 const OFFER_PREFIX = 'cahoots:ceremony:v1:';
+const JOINED_PREFIX = 'cahoots:joined:v1:';
 const QR_PACKET = 300;   // payload bytes per animated frame: ~77 modules per side, readable by phone cameras
 const QR_FPS = 10;
 const TYPES = ['text', 'approve', 'vouch', 'control'];
@@ -764,8 +768,19 @@ function screenRelay(params) {
   const step = h('p', { class: 'next' });
   const stop = () => { cer.run++; };
   const leaveRelay = () => { if (confirm('Leave the ceremony? Nothing is kept.')) { stop(); ceremony = null; go('#/'); } };
-  const showOffer = () => sheet(h('h2', {}, 'Show this code to everyone joining'), panelQr(cer.offer, params.name, 'join'), copyBtn(cer.offer, 'Copy the code'));
   const host = me === 0;
+  // What decides the layout. A change in it draws the screen again.
+  const shape = () => `${c.phase()}|${c.needs_continue()}|${!!c.join_code()}`;
+  // The host scans each joiner's code. Only a commitment that matches a scan goes into the host's ceremony.
+  const scanned = h('ul', { class: 'scan-list' });
+  const takeJoin = (text) => {
+    try { const seat = c.scan_join(text.trim()); buzz(); toast(`Scanned seat ${seat + 1}`, 'ok'); st.textContent = ''; refresh(); }
+    catch (e) { st.textContent = friendly(e); }
+  };
+  const scanSheet = () => sheet((close) => h('div', { class: 'stack' },
+    h('h2', {}, 'Scan a joiner\'s code'),
+    camera((text) => { if (text.startsWith(JOINED_PREFIX)) { stopScanner(); takeJoin(text); close(); } }, 'Fill the frame with their code'),
+    btn('Paste a join code', () => { close(); pasteSheet('cahoots:joined:v1:…', takeJoin); })));
   const refresh = () => {
     const phase = c.phase();
     const missing = new Set(phase === 'commit' ? c.missing_commitments() : phase === 'reveal' ? c.missing_reveals() : phase === 'attest' ? c.missing_attestations() : []);
@@ -773,22 +788,34 @@ function screenRelay(params) {
     chips.replaceChildren(...Array.from({ length: params.n }, (_, i) =>
       h('span', { class: `chip${i === me ? ' me' : (phase === 'commit' ? missing.has(i) : false) ? '' : ' on'}` }, i === me ? `you · ${i + 1}` : `${i + 1}${phase === 'commit' && missing.has(i) ? '' : ' ✓'}`)));
     received.textContent = phase === 'commit' ? `${joined} of ${params.n} here` : `Everyone is here · ${params.n} of ${params.n}`;
-    step.textContent = phase === 'commit'
-      ? (host ? 'Show this code to everyone joining. Each person scans it and picks a seat.' : 'Wait here while everyone joins.')
-      : phase === 'reveal' ? 'Exchanging secrets through the relay.' : 'Confirming who is in the circle.';
+    if (host && phase === 'commit') {
+      const ok = new Set(c.scanned()), seen = new Set(c.unscanned());
+      scanned.replaceChildren(...Array.from({ length: params.n - 1 }, (_, k) => k + 1).map((i) =>
+        h('li', {}, ok.has(i) ? `Seat ${i + 1} · scanned ✓` : seen.has(i) ? `Seat ${i + 1} committed but was not scanned here.` : `Seat ${i + 1} · waiting`)));
+    }
+    step.textContent = c.needs_continue() ? 'Everyone is scanned.'
+      : phase === 'commit'
+        ? (host ? 'Show this code to everyone joining. Then scan the code on each of their screens.' : (c.join_code() ? 'Show this to the host.' : 'Wait here while everyone joins.'))
+        : phase === 'reveal' ? (c.join_code() ? 'Show this to the host.' : 'Exchanging secrets through the relay.') : 'Confirming who is in the circle.';
   };
   const body = [h('div', { class: 'ceremony-members' }, chips, received), step];
-  if (host && c.phase() === 'commit') body.push(h('div', { class: 'pair' }, h('div', { class: 'half' }, panelQr(cer.offer, params.name, 'join'))));
+  const join = c.join_code();
+  if (host && c.phase() === 'commit') body.push(h('div', { class: 'pair' }, h('div', { class: 'half' }, panelQr(cer.offer, params.name, 'join'))), scanned);
+  if (join) body.push(h('div', { class: 'pair' }, h('div', { class: 'half' }, panelQr(join, `seat ${me + 1}`, 'for the host'))));
   body.push(st);
+  const actions = host && c.phase() === 'commit' ? [btn('Scan a joiner\'s code', scanSheet, 'primary')]
+    : c.needs_continue() ? [btn('Continue', () => { c.proceed(); screenRelay(params); }, 'primary')] : [];
   screen({
-    title: host && c.phase() === 'commit' ? 'Show this code to everyone joining' : 'Through the relay', sub: `${params.name} · you are seat ${me + 1}`,
+    title: c.needs_continue() ? 'Everyone is scanned' : host && c.phase() === 'commit' ? 'Show this code to everyone joining' : join ? 'Show this to the host' : 'Through the relay', sub: `${params.name} · you are seat ${me + 1}`,
     back: leaveRelay,
-    menu: () => sheet(h('h2', {}, 'The code to join'), panelQr(cer.offer, params.name, 'join'), copyBtn(cer.offer, 'Copy the code'), btn('Leave the ceremony', leaveRelay, 'danger')),
+    menu: () => sheet(...(host
+      ? [h('h2', {}, 'The code to join'), panelQr(cer.offer, params.name, 'join'), copyBtn(cer.offer, 'Copy the code'), btn('Paste a join code', () => pasteSheet('cahoots:joined:v1:…', takeJoin))]
+      : join ? [h('h2', {}, 'Your code for the host'), copyBtn(join, 'Copy my join code')] : []), btn('Leave the ceremony', leaveRelay, 'danger')),
     body,
-    actions: host ? [] : [link('Show the code to join', showOffer)],
+    actions,
   }).classList.add('ceremony-screen');
   refresh();
-  const phaseShown = c.phase();
+  const shown = shape();
   const post = async () => {
     // In order, and stop at the first that fails: the rest go on the next tick.
     for (const w of c.outbound()) {
@@ -829,12 +856,12 @@ function screenRelay(params) {
     const phase = c.phase();
     if (phase === 'aborted') {
       stop(); ceremony = null;
-      screen({ title: 'Ceremony stopped', body: [h('div', {}, h('h1', {}, 'A reveal did not match its commitment.'), h('p', { class: 'lead' }, 'Nothing was kept. Start again from the beginning.'))], actions: [btn('Back to start', () => go('#/'), 'primary')] });
+      screen({ title: 'Ceremony stopped', body: [h('div', {}, h('h1', {}, 'A reveal did not match its commitment.'), h('p', { class: 'lead' }, 'Nothing was kept. Someone outside the room may have the code. Everyone starts over with a new code.'))], actions: [btn('Back to start', () => go('#/'), 'primary')] });
       return;
     }
     // Every signature is in, and ours is on the relay for the others.
     if (phase === 'complete' && !c.outbound().length) { stop(); screenWords(); return; }
-    if (phase !== phaseShown) { screenRelay(params); return; }
+    if (shape() !== shown) { screenRelay(params); return; }
     refresh();
     setTimeout(tick, CEREMONY_POLL_MS);
   };

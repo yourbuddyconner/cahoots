@@ -413,7 +413,7 @@ if (new Set(groupWords).size !== 1) throw new Error('Three-member check words di
 console.log('three-member ceremony ok: partial reveals, explicit handoffs, signatures and matching words; compact-phone actions visible.');
 
 // Through the relay: the host shows one code, the joiner reads it (pasted here), picks a seat,
-// and the rounds go through the relay. The station started here answers for the default relay.
+// shows its own code to the host, and the rounds go through the relay. The station started here answers for the default relay.
 console.log("starting a ceremony through the relay");
 const viaStation = async (p) => p.page.context().route("https://relay.cahoots.network/**", async (r) => {
   const u = new URL(r.request().url());
@@ -458,6 +458,17 @@ await G.page.waitForSelector('text=Which seat are you?');
 if (!(await G.page.$eval('.seg button[data-v="0"]', (b) => b.disabled))) throw new Error('seat 1 is the host\'s');
 await G.snap('relay-pick');
 await G.page.getByRole('button', { name: 'Make my contribution', exact: true }).click();
+// The joiner shows its code to the host, and the host scans it (pasted here, as the offer was).
+await G.page.waitForSelector('.bar .title:has-text("Show this to the host")', { timeout: 15000 });
+await G.snap('relay-join-code');
+await G.menu(); await G.page.getByRole('button', { name: 'Copy my join code', exact: true }).click(); const joined = await G.clip(); await G.closeSheet();
+if (!joined?.startsWith('cahoots:joined:v1:')) throw new Error(`join code text: ${joined}`);
+await H.page.waitForSelector('text=Seat 2 committed but was not scanned here.', { timeout: 15000 });
+await H.snap('relay-unscanned');
+await H.menu(); await H.page.getByRole('button', { name: 'Paste a join code', exact: true }).click(); await H.paste(joined); await H.closeSheet();
+await H.page.waitForSelector('.bar .title:has-text("Everyone is scanned")', { timeout: 15000 });
+await H.snap('relay-everyone-scanned');
+await H.page.getByRole('button', { name: 'Continue', exact: true }).click();
 for (const p of [H, G]) await p.page.waitForSelector('text=Step 4 of 4', { timeout: 20000 });
 const wH = await wordsOf(H.page), wG = await wordsOf(G.page);
 if (wH !== wG) throw new Error(`relay check words differ: ${wH} / ${wG}`);

@@ -160,6 +160,11 @@ A ceremony can run through a relay instead of animated codes. The rounds and the
 1. The host draws a channel: a random 16-byte id and a random 32-byte key. It shows one static QR code. The code's text is `cahoots:ceremony:v1:` followed by `id || key || relay_len || relay || params` in base64url without padding. `relay` is the host's relay address in UTF-8, at most 255 bytes, after its one-byte length. The parameters are in their encoding from section 2.1. Everyone joining uses the host's relay, and so does the circle the ceremony makes.
 2. Each person joining scans that code from the host's screen and picks a seat. The code is shown in the room. There are no remote ceremonies.
 3. Each member posts its commitment, then its sealed reveal, then its attestation to the relay under the channel id. It reads everyone else's from the same place.
+4. After a joiner posts its commitment, it shows a small static code to the host: `cahoots:joined:v1:` followed by `id || seat || SHA-256(commitment)` in base64url without padding. The commitment is the commitment payload below. The host scans each joiner's code.
+
+The host takes a seat's commitment from the relay only when its hash matches the code scanned for that seat. Until then it holds every commitment posted for that seat, and the seat's later messages wait. A commitment no scan matches never reaches the host's ceremony. The host's screen says so: "Seat N committed but was not scanned here." Once every seat is scanned, the host's screen says "Everyone is scanned". The host taps Continue, and only then posts its reveal. Joiners take commitments from the relay as they arrive.
+
+The relay only carries bytes. The two scans prove presence in both directions: each joiner scanned the host's screen, and the host scanned each joiner's screen. Someone who photographed the offer can post a commitment from anywhere. The host never takes it, so the host's manifest differs from the one the joiners build with the intruder in it, and nobody completes. If the host scanned the real person, the intruder's reveal does not match that person's commitment and the host stops. The six words then confirm the result for everyone who completes.
 
 ```
 message = 3 | id (16) | len (u32 LE) | seat | round | nonce (12) | ciphertext | tag (16)

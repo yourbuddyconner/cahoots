@@ -126,6 +126,16 @@ pub struct CeremonyState {
     /// Another device took this seat first on the relay. This phone posts nothing more:
     /// show that, and offer to leave. Joining again with a free seat works.
     pub seat_lost: bool,
+    /// On the host: the seats whose code was scanned here and whose commitment was taken.
+    pub scanned: Vec<u8>,
+    /// On the host: seats that committed on the relay but were not scanned here.
+    pub unscanned: Vec<u8>,
+    /// On the host: everyone is scanned. Show "Everyone is scanned" and a Continue button
+    /// that calls `ceremony_continue`.
+    pub needs_continue: bool,
+    /// On a joiner: the code to show the host ("Show this to the host"), drawn with
+    /// `qr_matrix`. `None` once the host has taken it.
+    pub my_join_code: Option<String>,
 }
 
 /// A circle to join, read from a host's code.
@@ -308,6 +318,10 @@ impl Phone {
             needs_signature: p.needs_signature(),
             through_relay: p.through_relay(),
             seat_lost: p.seat_lost(),
+            scanned: p.scanned(),
+            unscanned: p.unscanned(),
+            needs_continue: p.needs_continue(),
+            my_join_code: p.my_join_code(),
         }
     }
 }
@@ -403,8 +417,9 @@ impl Phone {
         Ok(id)
     }
 
-    /// The code to show everyone joining a ceremony held through the relay: one static QR code.
-    /// Anyone in the ceremony can show it.
+    /// The code to show everyone joining a ceremony held through the relay: one static QR code,
+    /// drawn with `qr_matrix`. The app shows it as a code only, with no way to copy it: a
+    /// copied code can reach the clipboard of the user's other devices.
     pub fn offer_code(&self, id: String) -> Result<String, PhoneError> {
         self.with_ceremony(&id, |p| p.offer())
     }
@@ -435,6 +450,14 @@ impl Phone {
     pub fn ceremony_tick(&self, id: String) -> Result<CeremonyState, PhoneError> {
         self.with_ceremony(&id, |p| {
             p.tick(self.http.as_ref())?;
+            Ok(Self::state_of(p))
+        })
+    }
+
+    /// The host, once everyone is scanned (`needs_continue`), lets the ceremony go on.
+    pub fn ceremony_continue(&self, id: String) -> Result<CeremonyState, PhoneError> {
+        self.with_ceremony(&id, |p| {
+            p.proceed()?;
             Ok(Self::state_of(p))
         })
     }
@@ -555,7 +578,8 @@ impl Phone {
         })
     }
 
-    /// Feed one code the camera read, or text pasted in.
+    /// Feed one code the camera read, or text pasted in. On the host of a ceremony through the
+    /// relay this takes each joiner's code (`cahoots:joined:v1:...`).
     pub fn ceremony_scan(&self, id: String, text: String) -> Result<CeremonyState, PhoneError> {
         self.with_ceremony(&id, |p| {
             p.scan(&text)?;

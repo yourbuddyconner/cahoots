@@ -1,5 +1,6 @@
 use cahoots_core::channel::{
-    parts, Channel, ChannelError, Mailbox, Round, CEREMONY_VERSION, MAX_WIRE, OFFER_PREFIX,
+    join_code, parse_join_code, parts, Channel, ChannelError, Gate, Mailbox, Round,
+    CEREMONY_VERSION, MAX_WIRE, OFFER_PREFIX,
 };
 use cahoots_core::params::CircleParams;
 use rand_core::{CryptoRng, RngCore};
@@ -234,6 +235,11 @@ fn reproduces_the_channel_vector() {
     let relay = v["relay"].as_str().unwrap();
     assert_eq!(ch.offer(&params, relay).unwrap(), v["offer"].as_str().unwrap());
     assert_eq!(Channel::from_offer(v["offer"].as_str().unwrap()).unwrap().2, relay);
+    let j = &v["join"];
+    assert_eq!(
+        join_code(&id, j["seat"].as_u64().unwrap() as u8, &h(&j["commitment"])),
+        j["code"].as_str().unwrap()
+    );
     let m = &v["message"];
     let nonce: [u8; 12] = h(&m["nonce"]).try_into().unwrap();
     let round = Round::from_u8(m["round"].as_u64().unwrap() as u8).unwrap();
@@ -241,4 +247,35 @@ fn reproduces_the_channel_vector() {
     let wire = ch.seal_with_nonce(seat, round, &h(&m["payload"]), nonce);
     assert_eq!(wire, h(&m["wire"]));
     assert_eq!(ch.open(&wire).unwrap(), (seat, round, h(&m["payload"])));
+}
+
+#[test]
+fn the_host_takes_only_a_scanned_commitment() {
+    let ch = Channel::new(&mut rng(30));
+    let real = b"the joiner's commitment".to_vec();
+    let intruder = b"an intruder's commitment".to_vec();
+    let code = join_code(&ch.id, 2, &real);
+    assert!(code.starts_with("cahoots:joined:v1:"));
+    assert_eq!(parse_join_code(&code).unwrap().1, 2);
+    let mut g = Gate::new();
+    // The intruder's comes first on the relay. Nothing is ready without a scan.
+    g.commitment(2, intruder.clone());
+    g.commitment(2, real.clone());
+    g.defer(2, Round::Reveal, b"a reveal".to_vec());
+    assert!(g.ready().is_empty());
+    assert_eq!(g.unscanned(), vec![2]);
+    assert!(g.take_deferred().is_empty());
+    // A code for another channel is refused.
+    let other = Channel::new(&mut rng(31));
+    assert_eq!(g.scan(&other, &code).unwrap_err(), ChannelError::OtherChannel);
+    // The scan picks the matching one, not the first.
+    assert_eq!(g.scan(&ch, &code).unwrap(), 2);
+    assert_eq!(g.ready(), vec![(2, real)]);
+    g.fed(2);
+    assert_eq!(g.scanned(), vec![2]);
+    assert!(g.unscanned().is_empty());
+    assert_eq!(g.take_deferred(), vec![(2, Round::Reveal, b"a reveal".to_vec())]);
+    // Once taken, later commitments for the seat are ignored.
+    g.commitment(2, intruder);
+    assert!(g.ready().is_empty() && g.unscanned().is_empty());
 }

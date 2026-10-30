@@ -17,7 +17,7 @@ use crate::{Http, PhoneError};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use cahoots_core::ceremony::{Ceremony, CeremonyError, CeremonyResult, Phase};
-use cahoots_core::channel::{Channel, Mailbox, Round};
+use cahoots_core::channel::{join_code, Channel, ChannelError, Gate, Mailbox, Round, JOINED_PREFIX};
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::PUBLIC_KEY_LEN;
 use cahoots_core::seat::SeatPublic;
@@ -399,6 +399,10 @@ pub struct Pending {
     pub relay: String,
     /// The last relay sequence number read from the channel.
     cursor: Option<u64>,
+    /// The host's scans of each joiner's code. `Some` on the host of a relay ceremony.
+    gate: Option<Gate>,
+    /// The host tapped Continue after everyone was scanned: its reveal may go.
+    proceeded: bool,
 }
 
 fn random(len: usize) -> Result<Zeroizing<Vec<u8>>, PhoneError> {
@@ -448,14 +452,63 @@ impl Pending {
             attestation: None,
             early_attestations: Vec::new(),
             receiver,
+            gate: (seat == 0 && channel.is_some()).then(Gate::new),
             mailbox: channel.map(|c| Mailbox::new(c, seat)),
             relay,
             cursor: None,
+            proceeded: false,
         })
     }
 
     pub fn through_relay(&self) -> bool {
         self.mailbox.is_some()
+    }
+
+    /// The host holds back its reveal until Continue.
+    fn held_back(&self) -> bool {
+        self.gate.is_some() && !self.proceeded
+    }
+
+    /// Seats the host scanned whose commitment it took.
+    pub fn scanned(&self) -> Vec<u8> {
+        self.gate.as_ref().map(Gate::scanned).unwrap_or_default()
+    }
+
+    /// Seats with a commitment on the relay that the host has not scanned.
+    pub fn unscanned(&self) -> Vec<u8> {
+        self.gate.as_ref().map(Gate::unscanned).unwrap_or_default()
+    }
+
+    /// Everyone is scanned, and the host's reveal waits for Continue.
+    pub fn needs_continue(&self) -> bool {
+        self.held_back() && matches!(self.phase(), Phase::Reveal | Phase::Attest)
+    }
+
+    /// The host, with everyone scanned, lets its reveal go.
+    pub fn proceed(&mut self) -> Result<(), PhoneError> {
+        if !self.needs_continue() {
+            return Err(plain("Scan everyone's code first."));
+        }
+        self.proceeded = true;
+        Ok(())
+    }
+
+    /// A joiner's code for the host to scan, from the start until the host's reveal arrives.
+    pub fn my_join_code(&self) -> Option<String> {
+        let mb = self.mailbox.as_ref()?;
+        if self.gate.is_some() || mb.lost_seat() {
+            return None;
+        }
+        let c = self.ceremony.as_ref()?;
+        let waiting = match c.phase() {
+            Phase::Commit => true,
+            Phase::Reveal => c.missing_reveals().contains(&0),
+            _ => false,
+        };
+        if !waiting {
+            return None;
+        }
+        Some(join_code(&mb.channel().id, self.seat, &self.my_commitment()?))
     }
 
     /// Another device's commitment for this seat came first on the relay.
@@ -539,7 +592,8 @@ impl Pending {
 
     /// Whether step three waits for this seat's signature.
     pub fn needs_signature(&self) -> bool {
-        self.attestation.is_none()
+        !self.held_back()
+            && self.attestation.is_none()
             && self
                 .ceremony
                 .as_ref()
@@ -623,6 +677,9 @@ impl Pending {
 
     /// Feed one decoded camera code or pasted text.
     pub fn scan(&mut self, text: &str) -> Result<(), PhoneError> {
+        if text.trim_start().starts_with(JOINED_PREFIX) {
+            return self.scan_join(text);
+        }
         let code = if text.trim_start().starts_with("cahoots-") {
             parse_tagged(text).ok_or_else(|| bad("That Cahoots code does not read."))?
         } else {
@@ -759,14 +816,16 @@ impl Pending {
             mb.queued(Round::Attest),
         );
         let commitment = if commit { None } else { self.my_commitment() };
+        let held_back = self.held_back();
         let reveal = if !reveal
+            && !held_back
             && matches!(self.phase(), Phase::Reveal | Phase::Attest | Phase::Complete)
         {
             Some(self.my_reveal()?)
         } else {
             None
         };
-        let attestation = if attest { None } else { self.attestation.clone() };
+        let attestation = if attest || held_back { None } else { self.attestation.clone() };
         let mb = self.mailbox.as_mut().expect("checked");
         if let Some(c) = commitment {
             mb.queue(Round::Commit, &c, &mut OsRng);
@@ -834,31 +893,19 @@ impl Pending {
                 let Some((seat, round, bytes)) = mb.receive(&wire) else {
                     continue;
                 };
-                let phase = self.phase();
-                let code = match round {
-                    // Every commitment is held once the phase has moved on.
-                    Round::Commit if phase != Phase::Commit => continue,
-                    Round::Commit => Code::Commit {
-                        seat,
-                        bytes,
-                        params: None,
-                    },
-                    Round::Reveal => Code::Reveal { seat, bytes },
-                    Round::Attest => Code::Attest { seat, bytes },
-                };
-                // A signature before the manifest is only kept for later, not accepted.
-                let early = round == Round::Attest && matches!(phase, Phase::Commit | Phase::Reveal);
-                match self.apply(code) {
-                    Ok(()) if !early => {
-                        self.mailbox.as_mut().expect("has a url").hold(seat, round);
+                if let Some(gate) = self.gate.as_mut() {
+                    // The host takes a seat's commitment only once its scan matches, and that
+                    // seat's later messages wait for it.
+                    if !gate.is_fed(seat) {
+                        match round {
+                            Round::Commit => gate.commitment(seat, bytes),
+                            _ => gate.defer(seat, round, bytes),
+                        }
+                        self.feed_gate()?;
+                        continue;
                     }
-                    Ok(()) => {}
-                    // A refused message is dropped, and its seat and round stay open for the
-                    // real one. Only an abort stops the ceremony.
-                    Err(e) if self.phase() == Phase::Aborted => return Err(e),
-                    Err(_) => {}
                 }
-                self.hold_attestations();
+                self.take_relay(seat, round, bytes)?;
             }
             if self.seat_lost() {
                 return Err(self.seat_lost_err());
@@ -866,6 +913,70 @@ impl Pending {
         }
         self.queue()?;
         self.post(http)
+    }
+
+    /// Apply one payload read from the relay. A refused one is dropped, and its seat and round
+    /// stay open for the real one. Only an abort is an error.
+    fn take_relay(&mut self, seat: u8, round: Round, bytes: Vec<u8>) -> Result<(), PhoneError> {
+        let phase = self.phase();
+        let code = match round {
+            // Every commitment is held once the phase has moved on.
+            Round::Commit if phase != Phase::Commit => return Ok(()),
+            Round::Commit => Code::Commit {
+                seat,
+                bytes,
+                params: None,
+            },
+            Round::Reveal => Code::Reveal { seat, bytes },
+            Round::Attest => Code::Attest { seat, bytes },
+        };
+        // A signature before the manifest is only kept for later, not accepted.
+        let early = round == Round::Attest && matches!(phase, Phase::Commit | Phase::Reveal);
+        match self.apply(code) {
+            Ok(()) if !early => {
+                self.mailbox.as_mut().expect("through the relay").hold(seat, round);
+            }
+            Ok(()) => {}
+            Err(e) if self.phase() == Phase::Aborted => return Err(e),
+            Err(_) => {}
+        }
+        self.hold_attestations();
+        Ok(())
+    }
+
+    /// Give the host's ceremony every commitment a scan matched, then the messages that waited.
+    fn feed_gate(&mut self) -> Result<(), PhoneError> {
+        let Some(gate) = self.gate.as_ref() else {
+            return Ok(());
+        };
+        for (seat, c) in gate.ready() {
+            let code = Code::Commit {
+                seat,
+                bytes: c,
+                params: None,
+            };
+            if self.phase() == Phase::Commit && self.apply(code).is_ok() {
+                self.mailbox.as_mut().expect("host").hold(seat, Round::Commit);
+                self.gate.as_mut().expect("host").fed(seat);
+            }
+        }
+        let waiting = self.gate.as_mut().expect("host").take_deferred();
+        for (seat, round, bytes) in waiting {
+            self.take_relay(seat, round, bytes)?;
+        }
+        Ok(())
+    }
+
+    /// The host scans a joiner's code.
+    fn scan_join(&mut self, text: &str) -> Result<(), PhoneError> {
+        let (Some(gate), Some(mb)) = (self.gate.as_mut(), self.mailbox.as_ref()) else {
+            return Err(bad("That is a joiner's code. Only the host scans it."));
+        };
+        gate.scan(mb.channel(), text).map_err(|e| match e {
+            ChannelError::OtherChannel => bad("That code is for another ceremony."),
+            _ => bad("That joiner's code does not read."),
+        })?;
+        self.feed_gate()
     }
 
     /// Hold every seat whose signature the ceremony has accepted, kept early ones included.
