@@ -9,10 +9,10 @@ The relay stores and delivers encrypted messages. It has no circle keys and cann
 From a checkout of the Cahoots repository, with its Rust toolchain installed:
 
 ```sh
-cargo run -p cahoots-station -- --listen 127.0.0.1:8080 --log ./station.jsonl
+cargo run -p cahoots-station -- --listen 127.0.0.1:8080 --db ./station.db
 ```
 
-Open `http://127.0.0.1:8080/` to see the relay’s feed page. The log is stored in `station.jsonl`; keep that file if you want the relay to retain its history after a restart.
+Open `http://127.0.0.1:8080/` to see the relay’s feed page. The log is stored in the SQLite database `station.db` (with `station.db-wal` beside it while the relay runs); keep those files if you want the relay to retain its history after a restart.
 
 This command accepts connections only from the same computer. On a phone, `127.0.0.1` means the phone itself, not your laptop.
 

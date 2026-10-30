@@ -40,7 +40,7 @@ sudo ip -n $NS_A addr add 192.168.77.1/24 dev va; sudo ip -n $NS_A link set va u
 sudo ip -n $NS_B addr add 192.168.77.2/24 dev vb; sudo ip -n $NS_B link set vb up; sudo ip -n $NS_B link set lo up
 
 echo "== relay (untrusted) inside namespace a"
-sudo ip netns exec $NS_A "$BIN/cahoots-station" --listen 192.168.77.1:8080 --log "$WORK/station.jsonl" >/dev/null 2>&1 &
+sudo ip netns exec $NS_A "$BIN/cahoots-station" --listen 192.168.77.1:8080 --db "$WORK/station.db" >/dev/null 2>&1 &
 STATION=$!
 RELAY=http://192.168.77.1:8080
 for _ in $(seq 1 50); do sudo ip netns exec $NS_A curl -sf "$RELAY/healthz" >/dev/null 2>&1 && break; sleep 0.1; done

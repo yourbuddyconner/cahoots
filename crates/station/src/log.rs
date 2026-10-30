@@ -135,7 +135,8 @@ impl Log {
         let conn = Connection::open(path)?;
         // `journal_mode` answers with the mode now in force, so it is read as a row.
         let _: String = conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))?;
-        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        // FULL: a commit is on disk before `append` returns, so a 201 means the entry is durable.
+        conn.pragma_update(None, "synchronous", "FULL")?;
         conn.execute_batch(SCHEMA)?;
         let mut log = Log {
             conn,
@@ -189,7 +190,9 @@ impl Log {
         Ok(())
     }
 
-    /// The database connection, for stores that share this file.
+    /// The database connection, for stores that share this file. Do not write `entries` or
+    /// `spent` through it: the in-memory entries and spent ranges are the source of truth
+    /// for reads and the reuse check, and would not see such rows until the next open.
     pub fn conn(&mut self) -> &mut Connection {
         &mut self.conn
     }
@@ -217,7 +220,7 @@ impl Log {
             })
     }
 
-    /// Append a rule-checked submission. Refuses pure-pad range reuse. Committed on return.
+    /// Append a rule-checked submission. Refuses pure-pad range reuse. Durable on return.
     pub fn append(&mut self, sub: Submission, received_at: u64) -> Result<Entry, LogError> {
         if let Some(err) = self.find_overlap(&sub) {
             return Err(err);
