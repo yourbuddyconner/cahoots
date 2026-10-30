@@ -56,8 +56,6 @@ I want a circle to be a place you return to. You leave the room and keep talking
 
 The phone and browser belong in that everyday experience. They're where people already read, type, and talk. The badge gives the circle a physical home for keys and an explicit point of approval when those keys are used. It shouldn't take a ceremony every time you want to have a conversation.
 
-Parts of that work today. The browser has a circle workspace and encrypted chat. The repository has file and network integrations, and the badge has signed real SSH logins and git commits on the bench. Those pieces still need to become a coherent experience. You can't drop a circle into every app, and making room for another member is work we still have to do. That's the gap I'm trying to close.
-
 The ambition is that making the circle once should make the next private thing easier.
 
 ## Who gets to act for us
@@ -84,7 +82,7 @@ They also don't all have the same trust model. Signal makes private keys on your
 
 My frustration is that putting these protections together still asks a lot of the person using them. Each tool has its own way to establish trust, its own recovery story, and its own boundaries. The relationship you verified in one place doesn't automatically help you in the next.
 
-Cahoots is an attempt to make the group a useful starting point across those boundaries. A shared circle can supply a pre-shared key for a WireGuard tunnel, key material for chat, or a key for encrypting a file. Members also have individual signing keys for actions that need to be attributable to one person. Applications need explicit integrations to use any of this; Cahoots doesn't magically give Signal or Tailscale a new source of keys.
+Cahoots is an attempt to make the group a useful starting point across those boundaries. A shared circle can supply a pre-shared key for a WireGuard tunnel, key material for chat, or a key for encrypting a file. Members also have individual signing keys for actions that need to be attributable to one person.
 
 There will still be infrastructure. Messages need delivery. Software needs updates. Devices break. We run a hosted relay because people should be able to start a conversation without first becoming server administrators. The relay can fail, observe traffic patterns, or refuse to deliver a message. It doesn't need the circle's keys to do its job.
 
@@ -134,8 +132,8 @@ That's the competency I care about: enough understanding, backed by usable tools
 
 ## What comes next
 
-I'm building the badge, working out how to manufacture it, and trying to make the software feel like something you'd actually use after the interesting part of the demo is over. That includes making delegation usable: the circle should be a place to decide what our programs may do as well as a place to talk.
+I'm building the badge and working out how to manufacture it. The software belongs to the same ambition: a circle should be a place to talk, use our tools, and decide what our programs may do on our behalf.
 
-The next posts will get into the board, the constraints, the mistakes, and the work of connecting these pieces. There are plenty of unfinished parts. I'd rather show them than pretend the manifesto built the product.
+The next posts will get into the board, the constraints, the mistakes, and the work of connecting these pieces.
 
 If you've built hardware like this, or tried to, I'd like to hear what you ran into. The code and board files are on [GitHub](https://github.com/yourbuddyconner/cahoots). Build one. Tell me what's wrong with it. Help make the next one better.
