@@ -341,6 +341,48 @@ async fn policy_post_then_get() {
     };
     let (s, v) = send(c.post(format!("{}/policy", ch(&base))).body(body)).await;
     assert_eq!((s, v["error"].as_str()), (403, Some("signature")));
+
+    // A policy for this channel signed by a seat of another stored circle: it names its own
+    // circle, whose manifest it verifies against, but the channel belongs to CIRCLE.
+    let other_circle = [8u8; 16];
+    let url = format!("{base}/v1/circles/{}/manifest", hex::encode(other_circle));
+    let other_manifest = seal(&manifest_with(other_circle, "other"));
+    assert_eq!(send(c.put(url).body(other_manifest)).await.0, 201);
+    let hijack = Policy::preset(
+        Preset::Closed,
+        other_circle,
+        channel_id(),
+        [0x33; 32],
+        3,
+        1_000_000,
+        [5; 16],
+    );
+    let body = policy_body(&hijack.sign(&seat_key(0), 0));
+    let (s, v) = send(c.post(format!("{}/policy", ch(&base))).body(body)).await;
+    assert_eq!((s, v["error"].as_str()), (400, Some("circle_id")));
+    let (_, v) = send(c.get(ch(&base))).await;
+    assert_eq!(v["policy"], b64(&signed));
+
+    // A policy for a channel the relay does not hold.
+    let unknown = Policy::preset(
+        Preset::GroupChat,
+        CIRCLE,
+        [0x42; 16],
+        [0x33; 32],
+        3,
+        6,
+        [4; 16],
+    );
+    let body = policy_body(&unknown.sign(&seat_key(2), 2));
+    let url = format!("{base}/v1/channels/{}/policy", hex::encode([0x42u8; 16]));
+    let (s, v) = send(c.post(url).body(body)).await;
+    assert_eq!((s, v["error"].as_str()), (404, Some("channel")));
+}
+
+fn policy_body(signed: &[u8]) -> Vec<u8> {
+    let mut e = minicbor::Encoder::new(Vec::new());
+    e.array(2).unwrap().bytes(signed).unwrap().array(0).unwrap();
+    e.into_writer()
 }
 
 #[tokio::test]
@@ -537,6 +579,17 @@ async fn requests_post_then_get() {
     assert_eq!(list[0]["id"], hex::encode(Sha256::digest(b"second")));
     assert_eq!(list[0]["body"], b64(b"second"));
     assert_eq!(list[0]["seq"], 1);
+
+    // The same body in another channel is that channel's own request.
+    let other = format!("{base}/v1/channels/{}/requests", hex::encode([0x42u8; 16]));
+    let (s, v) = send(c.post(&other).body(b"first".to_vec())).await;
+    assert_eq!((s, v["seq"].as_u64()), (201, Some(0)));
+    let (_, v) = send(c.get(&other)).await;
+    let list = v["requests"].as_array().unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0]["body"], b64(b"first"));
+    let (_, v) = send(c.get(&url)).await;
+    assert_eq!(v["requests"].as_array().unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -561,6 +614,18 @@ async fn gates_post_then_delete() {
     };
     assert_eq!(count(&dir), 1);
 
+    let retire = seat_statement(1, b"cahoots/gate-retire/v1", &token, None);
+    let delete_url = format!("{}/gates/{}", ch(&base), hex::encode(hash));
+
+    // A POST statement does not remove the token, and a retire statement does not add one.
+    let (s, v) = send(c.delete(&delete_url).body(signed.clone())).await;
+    assert_eq!((s, v["error"].as_str()), (403, Some("signature")));
+    assert_eq!(count(&dir), 1);
+    let other_token = [0x78u8; 32];
+    let other_retire = seat_statement(1, b"cahoots/gate-retire/v1", &other_token, None);
+    let (s, v) = send(c.post(format!("{}/gates", ch(&base))).body(other_retire)).await;
+    assert_eq!((s, v["error"].as_str()), (403, Some("signature")));
+
     // Signed by a key that is not seat 1's.
     let mut e = minicbor::Encoder::new(Vec::new());
     e.map(2).unwrap();
@@ -570,7 +635,7 @@ async fn gates_post_then_delete() {
         &member(0),
         &[1],
         &e.into_writer(),
-        b"cahoots/gate/v1",
+        b"cahoots/gate-retire/v1",
         false,
     );
     let (s, v) = send(
@@ -584,16 +649,12 @@ async fn gates_post_then_delete() {
     // The path's hash must be the hash of the signed token.
     let (s, _) = send(
         c.delete(format!("{}/gates/{}", ch(&base), "00".repeat(32)))
-            .body(signed.clone()),
+            .body(retire.clone()),
     )
     .await;
     assert_eq!(s, 400);
 
-    let (s, _) = send(
-        c.delete(format!("{}/gates/{}", ch(&base), hex::encode(hash)))
-            .body(signed),
-    )
-    .await;
+    let (s, _) = send(c.delete(&delete_url).body(retire)).await;
     assert_eq!(s, 204);
     assert_eq!(count(&dir), 0);
 }
@@ -620,6 +681,9 @@ async fn object_writes_answer_507_when_full() {
             .body(b"x".to_vec()),
     )
     .await;
+    assert_eq!((s, v["error"].as_str()), (507, Some("full")));
+    let gate = format!("{}/gates/{}", ch(&base), "00".repeat(32));
+    let (s, v) = send(c.delete(gate).body(vec![0])).await;
     assert_eq!((s, v["error"].as_str()), (507, Some("full")));
     // Reads still answer.
     assert_eq!(c.get(&url).send().await.unwrap().status(), 200);

@@ -28,8 +28,11 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::sync::MutexGuard;
 
-/// The domain of a gate token statement.
+/// The domain of a statement that adds a gate token.
 pub const GATE_DOMAIN: &[u8] = b"cahoots/gate/v1";
+/// The domain of a statement that removes a gate token. It differs from [`GATE_DOMAIN`] so that
+/// neither statement can be replayed as the other.
+pub const GATE_RETIRE_DOMAIN: &[u8] = b"cahoots/gate-retire/v1";
 /// The domain of a revocation statement.
 pub const REVOKE_DOMAIN: &[u8] = b"cahoots/revoke/v1";
 
@@ -327,7 +330,13 @@ fn post_policy_inner(st: &State, channel: &str, body: &[u8]) -> Answer {
     }
     let mut log = begin_write(st, body)?;
     let conn = log.conn();
-    let (_, manifest) = stored_manifest(conn, &claimed.circle_id)?;
+    // The policy is checked against the circle that owns the stored channel, never against the
+    // circle the policy names: otherwise any circle could set another circle's channel policy.
+    let row = stored_channel(conn, &channel)?;
+    if claimed.circle_id != row.circle {
+        return Err(channel_error(ChannelError::WrongCircle));
+    }
+    let (_, manifest) = stored_manifest(conn, &row.circle)?;
     let (_, verified) = Policy::verify(signed, &manifest).map_err(channel_error)?;
     let row = PolicyRow {
         id: policy::id(signed),
@@ -566,10 +575,11 @@ fn gate_token_hash(
     conn: &Connection,
     channel: &[u8; 16],
     body: &[u8],
+    domain: &[u8],
 ) -> Result<[u8; 32], Response> {
     let row = stored_channel(conn, channel)?;
     let (_, manifest) = stored_manifest(conn, &row.circle)?;
-    let payload = seat_signed(body, &manifest, GATE_DOMAIN)?;
+    let payload = seat_signed(body, &manifest, domain)?;
     let (c, token) = statement(&payload, false)
         .ok_or_else(|| malformed("expected {0: channel_id, 1: token}"))?;
     if c != channel {
@@ -590,14 +600,12 @@ pub async fn post_gate(
         let channel = channel_path(&channel)?;
         let mut log = begin_write(&st, &body)?;
         let conn = log.conn();
-        let hash = gate_token_hash(conn, &channel, &body)?;
+        let hash = gate_token_hash(conn, &channel, &body, GATE_DOMAIN)?;
         store::put_gate(conn, &channel, &hash).map_err(db)?;
         Ok(created(json!({ "token_hash": hex::encode(hash) })))
     })())
 }
 
-/// Removing a token never grows the database much and takes access away, so it is not refused
-/// when the database is full.
 pub async fn delete_gate(
     AxState(st): AxState<State>,
     Path((channel, token_hash)): Path<(String, String)>,
@@ -606,9 +614,9 @@ pub async fn delete_gate(
     finish((|| {
         let channel = channel_path(&channel)?;
         let path_hash: [u8; 32] = hex_id(&token_hash, "token_hash")?;
-        let mut log = st.log.lock().unwrap();
+        let mut log = begin_write(&st, &body)?;
         let conn = log.conn();
-        let hash = gate_token_hash(conn, &channel, &body)?;
+        let hash = gate_token_hash(conn, &channel, &body, GATE_RETIRE_DOMAIN)?;
         if hash != path_hash {
             return Err(malformed("the path names another token than the statement"));
         }

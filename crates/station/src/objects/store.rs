@@ -45,10 +45,11 @@ CREATE TABLE IF NOT EXISTS deposits (
 );
 CREATE INDEX IF NOT EXISTS deposits_channel_epoch_to ON deposits (channel, epoch, to_);
 CREATE TABLE IF NOT EXISTS requests (
-    id BLOB PRIMARY KEY,
+    id BLOB NOT NULL,
     channel BLOB NOT NULL,
     body BLOB NOT NULL,
-    seq INTEGER NOT NULL
+    seq INTEGER NOT NULL,
+    PRIMARY KEY (channel, id)
 );
 CREATE INDEX IF NOT EXISTS requests_channel_seq ON requests (channel, seq);
 CREATE TABLE IF NOT EXISTS gates (
@@ -389,9 +390,11 @@ pub fn put_request(
     body: &[u8],
 ) -> Result<u64> {
     let held: Option<i64> = conn
-        .query_row("SELECT seq FROM requests WHERE id = ?1", [&id[..]], |r| {
-            r.get(0)
-        })
+        .query_row(
+            "SELECT seq FROM requests WHERE channel = ?1 AND id = ?2",
+            params![&channel[..], &id[..]],
+            |r| r.get(0),
+        )
         .optional()?;
     if let Some(seq) = held {
         return Ok(seq as u64);

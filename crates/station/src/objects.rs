@@ -4,7 +4,7 @@
 mod handlers;
 pub mod store;
 
-pub use handlers::{GATE_DOMAIN, REVOKE_DOMAIN};
+pub use handlers::{GATE_DOMAIN, GATE_RETIRE_DOMAIN, REVOKE_DOMAIN};
 
 use crate::server::State;
 use axum::routing::{delete, get, post, put};

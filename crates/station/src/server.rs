@@ -92,15 +92,18 @@ pub fn app(state: State) -> Router {
         .layer(
             tower_http::cors::CorsLayer::new()
                 .allow_origin(tower_http::cors::Any)
-                .allow_methods([
-                    http::Method::GET,
-                    http::Method::POST,
-                    http::Method::PUT,
-                    http::Method::DELETE,
-                    http::Method::OPTIONS,
-                ])
+                .allow_methods(cors_methods())
                 .allow_headers([http::header::CONTENT_TYPE]),
         )
+}
+
+/// The methods browsers may use: the object endpoints add PUT and DELETE.
+fn cors_methods() -> Vec<http::Method> {
+    #[allow(unused_mut)]
+    let mut methods = vec![http::Method::GET, http::Method::POST, http::Method::OPTIONS];
+    #[cfg(feature = "objects")]
+    methods.extend([http::Method::PUT, http::Method::DELETE]);
+    methods
 }
 
 fn now_ms() -> u64 {
