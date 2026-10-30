@@ -36,6 +36,15 @@ pub const MESSAGES: &str = "messages.log";
 pub const CURSOR: &str = "cursor.cbor";
 pub const SETTINGS: &str = "settings.cbor";
 
+/// Load `path`, or `None` when the file does not exist. Any other failure is an error, so a
+/// file that cannot be read now (iOS protection while locked) is never replaced by defaults.
+pub fn load_if_present<T: for<'b> Decode<'b, ()>>(path: &Path) -> Result<Option<T>, PhoneError> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    load(path).map(Some)
+}
+
 pub(crate) fn io(e: std::io::Error) -> PhoneError {
     PhoneError::Storage {
         message: e.to_string(),
@@ -168,6 +177,11 @@ pub struct ChatRecord {
     pub state: ByteVec,
     #[n(1)]
     pub outbox: Vec<OutboxEntry>,
+    /// History lines saved with the state that made them, and copied to `messages.log` after.
+    /// A crash between the two leaves them here, and the next load copies the ones the log
+    /// lacks: no line is lost and none is written twice.
+    #[n(2)]
+    pub journal: Vec<MessageRecord>,
 }
 
 impl Drop for ChatRecord {

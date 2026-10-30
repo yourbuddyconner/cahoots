@@ -16,7 +16,9 @@ pub mod chat;
 pub mod signer;
 pub mod store;
 
-use crate::ceremony::Pending;
+use crate::ceremony::{Pending, Receiver};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use crate::chat::{Circle, DEFAULT_RELAY};
 use crate::store::{ChatRecord, CircleRecord, NewCircle, PhoneRecord, SettingsRecord};
 use cahoots_core::ceremony::Phase;
@@ -31,6 +33,8 @@ pub use crate::signer::Signer;
 
 /// What the phone says about where its keys are.
 pub const KEY_STORE: &str = "seat key in the Secure Enclave, secret protected by iOS";
+/// The longest circle name, in bytes, so the name fits in the step-one code.
+pub const MAX_NAME: usize = 200;
 /// The `Signer` label of this phone's own key.
 pub const PHONE_KEY: &str = "cahoots:phone";
 
@@ -114,6 +118,17 @@ pub struct CeremonyState {
     pub frames_needed: u32,
     /// The six check words once complete, else empty.
     pub words: Vec<String>,
+    /// Step three waits for this seat's signature: call `ceremony_sign`.
+    pub needs_signature: bool,
+}
+
+/// A circle to join, read from a host's code.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct JoinOffer {
+    /// Hand this to `join_ceremony` with the seat picked.
+    pub params_code: String,
+    pub members: u8,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -157,9 +172,15 @@ pub struct PhoneInfo {
 
 struct State {
     ceremonies: HashMap<String, Pending>,
+    /// Reads a host's step-one animation before there is a ceremony to feed.
+    join_receiver: Receiver,
     circles: HashMap<String, Circle>,
 }
 
+/// The app's state. Every method takes one lock and holds it across the `Http` and `Signer`
+/// callbacks it makes (a request, or a Face ID prompt). So Swift must call `Phone` off the
+/// main thread, and the callbacks must never call back into `Phone` or wait for the main
+/// thread while `Phone` waits for them: either deadlocks.
 #[derive(uniffi::Object)]
 pub struct Phone {
     dir: PathBuf,
@@ -258,6 +279,7 @@ impl Phone {
             frames_read: read,
             frames_needed: needed,
             words: p.words(),
+            needs_signature: p.needs_signature(),
         }
     }
 }
@@ -273,9 +295,11 @@ impl Phone {
     ) -> Result<Arc<Phone>, PhoneError> {
         let dir = PathBuf::from(dir);
         std::fs::create_dir_all(store::circles_dir(&dir)).map_err(store::io)?;
+        // Only a missing file is a first open. A file that cannot be read (iOS protection while
+        // locked) is an error, and nothing is made or written over it.
         let me = match PhoneRecord::load(&dir) {
             Ok(r) => r,
-            Err(_) => {
+            Err(_) if !dir.join(store::PHONE).exists() => {
                 let public = signer.make_key(PHONE_KEY.into())?;
                 let r = PhoneRecord {
                     label: PHONE_KEY.into(),
@@ -285,6 +309,7 @@ impl Phone {
                 r.save(&dir)?;
                 r
             }
+            Err(e) => return Err(e),
         };
         Ok(Arc::new(Phone {
             dir,
@@ -293,6 +318,7 @@ impl Phone {
             me,
             state: Mutex::new(State {
                 ceremonies: HashMap::new(),
+                join_receiver: Receiver::new(ceremony::JOIN_MAX_LEN),
                 circles: HashMap::new(),
             }),
         }))
@@ -331,24 +357,85 @@ impl Phone {
                 message: "Give the circle a name.".into(),
             });
         }
+        if name.len() > MAX_NAME {
+            return Err(PhoneError::Ceremony {
+                message: format!("A circle's name can be at most {MAX_NAME} bytes long. Try a shorter one."),
+            });
+        }
         let params = CircleParams::new(members, pad_len, name, false).map_err(params_err)?;
         let (id, p) = self.begin(params, 0)?;
         self.lock().ceremonies.insert(id.clone(), p);
         Ok(id)
     }
 
-    /// Join from a scanned setup line (`cahoots-params:`, the first code `ceremony_frames`
-    /// shows in step one) or a setup code that carries the circle's parameters
-    /// (`cahoots-commit:`). Takes the seat after the one that showed the code, never the
-    /// host's: people joining one from another in a chain get different seats.
-    pub fn join_ceremony(&self, params_code: String) -> Result<String, PhoneError> {
-        let (params, shown_by, kept) = ceremony::read_join(&params_code)?;
-        let seat = (1..params.n)
-            .map(|k| (shown_by + k) % params.n)
-            .find(|&s| s != 0)
-            .ok_or_else(|| PhoneError::Ceremony {
-                message: "This circle has no free seat.".into(),
-            })?;
+    /// Read one code the camera saw before joining: a setup line or setup code as text, or
+    /// a frame of a host's step-one animation (the browser app shows only the animation).
+    /// `Some` once a whole code is in; hand its `params_code` to `join_ceremony`.
+    pub fn join_scan(&self, text: String) -> Result<Option<JoinOffer>, PhoneError> {
+        let code = if text.trim_start().starts_with("cahoots-") {
+            ceremony::parse_tagged(&text).ok_or_else(|| PhoneError::BadCode {
+                message: "That is not a code to join a circle from.".into(),
+            })?
+        } else {
+            let bytes = URL_SAFE_NO_PAD
+                .decode(text.trim())
+                .map_err(|_| PhoneError::BadCode {
+                    message: "That is not a Cahoots code.".into(),
+                })?;
+            let mut st = self.lock();
+            match st.join_receiver.add(&bytes)? {
+                None => return Ok(None),
+                Some(data) => ceremony::parse_packed(&data).ok_or_else(|| PhoneError::BadCode {
+                    message: "That Cahoots code does not read.".into(),
+                })?,
+            }
+        };
+        let params_code = match &code {
+            ceremony::Code::Commit {
+                seat,
+                bytes,
+                params: Some(p),
+            } => ceremony::commit_code(*seat, bytes, p),
+            _ => text.trim().to_string(),
+        };
+        let (params, _) = ceremony::join_from(code)?;
+        Ok(Some(JoinOffer {
+            params_code,
+            members: params.n,
+            name: params.name,
+        }))
+    }
+
+    /// The number of seats in the circle a join code is for, to offer a seat picker.
+    pub fn ceremony_members(&self, params_code: String) -> Result<u8, PhoneError> {
+        Ok(ceremony::read_join(&params_code)?.0.n)
+    }
+
+    /// Join as `seat` (from 0) from a join code: a setup line (`cahoots-params:`, the first
+    /// code `ceremony_frames` shows in step one), a setup code that carries the circle's
+    /// parameters (`cahoots-commit:`), or a `JoinOffer`'s `params_code`. Seat 0 is the
+    /// host's. Each person picks a different seat, as in the browser app; two phones on one
+    /// seat are told when they scan each other.
+    pub fn join_ceremony(&self, params_code: String, seat: u8) -> Result<String, PhoneError> {
+        let (params, kept) = ceremony::read_join(&params_code)?;
+        let refuse = |message: String| Err(PhoneError::Ceremony { message });
+        if seat == 0 {
+            return refuse("Seat 1 is the host's. Pick another seat.".into());
+        }
+        if seat >= params.n {
+            return refuse(format!(
+                "This circle has {} seats. Pick one from 2 to {}.",
+                params.n, params.n
+            ));
+        }
+        if let Some(ceremony::Code::Commit { seat: theirs, .. }) = &kept {
+            if *theirs == seat {
+                return refuse(format!(
+                    "Seat {} is taken by the person you scanned. Pick another seat.",
+                    seat + 1
+                ));
+            }
+        }
         let (id, mut p) = self.begin(params, seat)?;
         if let Some(code) = kept {
             p.apply_kept(code)?;
@@ -358,9 +445,19 @@ impl Phone {
     }
 
     /// The codes to show now, as text payloads to draw one after another in a loop. In step
-    /// three this asks the `Signer` for this seat's signature, once.
+    /// three they carry this seat's reveal, for anyone still on step two, and its signature
+    /// once `ceremony_sign` has made it.
     pub fn ceremony_frames(&self, id: String) -> Result<Vec<String>, PhoneError> {
-        self.with_ceremony(&id, |p| p.frames(self.signer.as_ref()))
+        self.with_ceremony(&id, |p| p.frames())
+    }
+
+    /// Sign the circle's manifest with this seat's key, once, when `needs_signature` says so.
+    /// The `Signer` may ask for Face ID; `Locked` changes nothing and can be tried again.
+    pub fn ceremony_sign(&self, id: String) -> Result<CeremonyState, PhoneError> {
+        self.with_ceremony(&id, |p| {
+            p.sign(self.signer.as_ref())?;
+            Ok(Self::state_of(p))
+        })
     }
 
     /// Feed one code the camera read, or text pasted in.
@@ -413,6 +510,7 @@ impl Phone {
         let chat = ChatRecord {
             state: session.export_state().to_vec().into(),
             outbox: Vec::new(),
+            journal: Vec::new(),
         };
         store::create_circle(
             &self.dir,

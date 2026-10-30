@@ -69,12 +69,13 @@ impl Circle {
             ChatSession::import_state(&root, circle_id, params.n, record.seat, &chat.state)
                 .map_err(chat_err)?
         };
-        let cursor = CursorRecord::load(dir).unwrap_or_default();
-        let settings = SettingsRecord::load(dir).unwrap_or(SettingsRecord {
-            relay: DEFAULT_RELAY.into(),
-            unread: 0,
-        });
-        Ok(Circle {
+        let cursor = store::load_if_present(&dir.join(store::CURSOR))?.unwrap_or_default();
+        let settings =
+            store::load_if_present(&dir.join(store::SETTINGS))?.unwrap_or(SettingsRecord {
+                relay: DEFAULT_RELAY.into(),
+                unread: 0,
+            });
+        let mut circle = Circle {
             dir: dir.to_path_buf(),
             id_hex: hex::encode(circle_id),
             circle_id,
@@ -84,11 +85,39 @@ impl Circle {
             chat,
             cursor,
             settings,
-        })
+        };
+        circle.copy_journal()?;
+        Ok(circle)
     }
 
     fn save_chat(&mut self) -> Result<(), PhoneError> {
         self.chat.state = self.session.export_state().to_vec().into();
+        self.chat.save(&self.dir)
+    }
+
+    /// Save the chain state and outbox with the history lines they made, in one write, then
+    /// copy the lines to `messages.log`.
+    fn save_with(&mut self, lines: Vec<MessageRecord>) -> Result<(), PhoneError> {
+        self.chat.journal.extend(lines);
+        self.save_chat()?;
+        self.copy_journal()
+    }
+
+    /// Copy the journal's lines that `messages.log` lacks, then empty the journal.
+    fn copy_journal(&mut self) -> Result<(), PhoneError> {
+        if self.chat.journal.is_empty() {
+            return Ok(());
+        }
+        let held: Vec<String> = store::read_messages(&self.dir)?
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        for m in &self.chat.journal {
+            if !held.contains(&m.id) {
+                store::append_message(&self.dir, m)?;
+            }
+        }
+        self.chat.journal.clear();
         self.chat.save(&self.dir)
     }
 
@@ -119,6 +148,7 @@ impl Circle {
                 self.session.mark_synced();
                 break;
             }
+            let mut lines = Vec::new();
             for (seq, bytes) in fresh {
                 // Our own post that landed though its answer was lost: it is not sent again.
                 if let Some(i) = self.chat.outbox.iter().position(|e| e.wire[..] == bytes[..]) {
@@ -138,18 +168,19 @@ impl Circle {
                             epoch: h.epoch.number().unwrap_or(0),
                             seq: Some(seq),
                         };
-                        store::append_message(&self.dir, &m)?;
                         self.settings.unread = self.settings.unread.saturating_add(1);
                         new.push(to_message(&m, false));
+                        lines.push(m);
                     }
                 }
                 self.cursor.after = Some(seq);
             }
-            // The chain state first: read again after a crash, an entry is passed over as a
-            // replay rather than shown twice.
-            self.save_chat()?;
+            // The chain state with its history lines first, then the cursor. Read again after
+            // a crash, an entry is passed over as a replay, and its line is already kept.
+            let any = !lines.is_empty();
+            self.save_with(lines)?;
             self.cursor.save(&self.dir)?;
-            if !new.is_empty() {
+            if any {
                 self.settings.save(&self.dir)?;
             }
         }
@@ -188,8 +219,6 @@ impl Circle {
             id: id.clone(),
             wire: wire.into(),
         });
-        // The chain step and the ciphertext are on disk before anything leaves.
-        self.save_chat()?;
         let m = MessageRecord {
             id,
             sender: self.record.seat,
@@ -202,7 +231,9 @@ impl Circle {
                 .unwrap_or(0),
             seq: None,
         };
-        store::append_message(&self.dir, &m)?;
+        // The chain step, the ciphertext and the history line are on disk in one write
+        // before anything leaves.
+        self.save_with(vec![m])?;
         let _ = self.flush(http);
         Ok(())
     }

@@ -15,7 +15,7 @@ use cahoots_core::ceremony::{Ceremony, CeremonyError, CeremonyResult, Phase};
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::PUBLIC_KEY_LEN;
 use cahoots_core::seat::SeatPublic;
-use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
+use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation, PayloadId};
 use std::collections::HashMap;
 use zeroize::Zeroizing;
 
@@ -131,59 +131,117 @@ struct Partial {
     /// Each packet id seen, with its symbol: a second transfer of the same length shows up as
     /// the same id with other bytes, and the partial one is started again.
     seen: HashMap<[u8; 4], Vec<u8>>,
+    /// When this transfer last got a packet, to drop the stalest first.
+    touched: u64,
 }
 
-/// Reads animated transfers, one per transfer length at a time.
-#[derive(Default)]
+/// Transfers read at once. A camera sees one or two screens; more is noise.
+const MAX_PARTIAL: usize = 4;
+/// Finished transfers remembered, so their leftover frames are dropped.
+const MAX_DONE: usize = 8;
+/// The largest step-one transfer: type, seat, params length, params (at most 255 bytes) and
+/// the setup code, with room to spare. Enough to join from.
+pub const JOIN_MAX_LEN: u64 = 4096;
+
+/// The largest transfer a ceremony with `params` can show: a sealed reveal (header, one
+/// wrapped key per other seat, the contribution and its tag), with room to spare.
+pub fn max_transfer(params: &CircleParams) -> u64 {
+    let per_seat = 1 + 1120 + 48;
+    let header = 1 + 1 + PUBLIC_KEY_LEN + SEAT_PUBLIC_LEN + 1 + 1;
+    (1 + header + per_seat * usize::from(params.n) + params.pad_len as usize + 16) as u64 + 1024
+}
+
+/// Reads animated transfers, one per transfer length at a time. Everything in a frame is
+/// checked before the fountain decoder sees it: the decoder trusts its header, and a crafted
+/// one would divide by zero or allocate without bound.
 pub struct Receiver {
     partial: HashMap<[u8; OTI_LEN], Partial>,
-    /// The last transfer finished at each length, re-encoded, so its leftover frames are
-    /// recognised and dropped instead of starting a new transfer.
-    done: HashMap<[u8; OTI_LEN], Encoder>,
+    /// The last transfers finished, re-encoded, so their leftover frames are recognised and
+    /// dropped instead of starting a new transfer. Oldest first.
+    done: Vec<([u8; OTI_LEN], Encoder)>,
+    /// The longest transfer accepted.
+    max_len: u64,
+    clock: u64,
     /// Packets seen of the transfer most recently fed, and the minimum it needs.
     pub progress: (u32, u32),
 }
 
 impl Receiver {
+    pub fn new(max_len: u64) -> Self {
+        Receiver {
+            partial: HashMap::new(),
+            done: Vec::new(),
+            max_len,
+            clock: 0,
+            progress: (0, 0),
+        }
+    }
+
     /// Feed one frame. `Ok(Some(data))` when a transfer completes. `Err` for a frame that
-    /// is not a Cahoots animation.
+    /// is not a Cahoots animation this receiver would make sense of.
     pub fn add(&mut self, packet: &[u8]) -> Result<Option<Vec<u8>>, PhoneError> {
         if packet.len() < 4 + OTI_LEN + 4 || &packet[..4] != MAGIC {
             return Err(bad("That is not a Cahoots code."));
         }
         let mut oti = [0u8; OTI_LEN];
         oti.copy_from_slice(&packet[4..4 + OTI_LEN]);
+        let config = ObjectTransmissionInformation::deserialize(&oti);
+        let len = config.transfer_length();
+        // Only the header an encoder of ours makes for this length, and only lengths a
+        // ceremony shows.
+        if len == 0
+            || len > self.max_len
+            || ObjectTransmissionInformation::with_defaults(len, QR_PACKET).serialize() != oti
+        {
+            return Err(bad("That code is not one this step can read."));
+        }
         let body = &packet[4 + OTI_LEN..];
         let mut id = [0u8; 4];
         id.copy_from_slice(&body[..4]);
+        let symbol = &body[4..];
+        if symbol.len() != usize::from(config.symbol_size())
+            || PayloadId::deserialize(&id).source_block_number() >= config.source_blocks()
+        {
+            return Err(bad("That code is not one this step can read."));
+        }
         let pkt = EncodingPacket::deserialize(body);
-        if let Some(enc) = self.done.get(&oti) {
+        if let Some((_, enc)) = self.done.iter().find(|(o, _)| *o == oti) {
             if regenerate(enc, &pkt).as_deref() == Some(body) {
                 return Ok(None);
             }
         }
-        let config = ObjectTransmissionInformation::deserialize(&oti);
-        let needed = config
-            .transfer_length()
-            .div_ceil(u64::from(config.symbol_size().max(1)))
-            .max(1) as u32;
-        let p = self.partial.entry(oti).or_insert_with(|| Partial {
+        let needed = len.div_ceil(u64::from(config.symbol_size())).max(1) as u32;
+        self.clock += 1;
+        if !self.partial.contains_key(&oti) && self.partial.len() >= MAX_PARTIAL {
+            let stalest = *self
+                .partial
+                .iter()
+                .min_by_key(|(_, p)| p.touched)
+                .map(|(o, _)| o)
+                .expect("not empty");
+            self.partial.remove(&stalest);
+        }
+        let clock = self.clock;
+        let fresh = || Partial {
             decoder: Decoder::new(config),
             seen: HashMap::new(),
-        });
-        let symbol = &body[4..];
+            touched: clock,
+        };
+        let p = self.partial.entry(oti).or_insert_with(fresh);
         if p.seen.get(&id).is_some_and(|s| s != symbol) {
-            *p = Partial {
-                decoder: Decoder::new(config),
-                seen: HashMap::new(),
-            };
+            *p = fresh();
         }
+        p.touched = clock;
         p.seen.insert(id, symbol.to_vec());
         self.progress = (p.seen.len() as u32, needed);
         match p.decoder.decode(pkt) {
             Some(data) => {
                 self.partial.remove(&oti);
-                self.done.insert(oti, Encoder::new(&data, config));
+                self.done.retain(|(o, _)| *o != oti);
+                if self.done.len() >= MAX_DONE {
+                    self.done.remove(0);
+                }
+                self.done.push((oti, Encoder::new(&data, config)));
                 self.progress = (needed, needed);
                 Ok(Some(data))
             }
@@ -234,6 +292,11 @@ pub enum Code {
 }
 
 /// The setup line, naming the seat that shows it. The browser app reads it as a setup line.
+/// The text form of a setup code, so a join offer read from an animation can be handed back.
+pub fn commit_code(seat: u8, bytes: &[u8], params: &[u8]) -> String {
+    format!("cahoots-commit:{seat}:{}:{}", b64(bytes), b64(params))
+}
+
 pub fn params_code(params: &CircleParams, seat: u8) -> String {
     format!("cahoots-params:{seat}:{}", b64(&params.encode()))
 }
@@ -356,6 +419,7 @@ impl Pending {
             PHONE_TIER,
         )
         .map_err(ceremony_err)?;
+        let receiver = Receiver::new(max_transfer(&params));
         Ok(Pending {
             params,
             seat,
@@ -366,7 +430,7 @@ impl Pending {
             reveal: None,
             attestation: None,
             early_attestations: Vec::new(),
-            receiver: Receiver::default(),
+            receiver,
         })
     }
 
@@ -427,8 +491,30 @@ impl Pending {
         Ok(r)
     }
 
-    /// Our attestation, signed through the callback the first time it is needed. A refused
-    /// signature (a locked phone) changes nothing, and the next call asks again.
+    /// Whether step three waits for this seat's signature.
+    pub fn needs_signature(&self) -> bool {
+        self.attestation.is_none()
+            && self
+                .ceremony
+                .as_ref()
+                .is_some_and(|c| c.phase() == Phase::Attest && c.my_attestation().is_none())
+    }
+
+    /// Sign the manifest through the callback, once. A refused signature (a locked phone)
+    /// changes nothing, and the next call asks again. `WrongPhase` before step three.
+    pub fn sign(&mut self, signer: &dyn Signer) -> Result<(), PhoneError> {
+        if self.attestation.is_some() {
+            return Ok(());
+        }
+        let c = self.ceremony.as_ref().ok_or_else(|| plain("The ceremony is over."))?;
+        if !matches!(c.phase(), Phase::Attest | Phase::Complete) {
+            return Err(plain("There is nothing to sign until every reveal is in."));
+        }
+        // Anyone still on step two needs our reveal, and the root needs it sealed.
+        self.my_reveal()?;
+        self.my_attestation(signer).map(|_| ())
+    }
+
     fn my_attestation(&mut self, signer: &dyn Signer) -> Result<Vec<u8>, PhoneError> {
         if let Some(a) = &self.attestation {
             return Ok(a.clone());
@@ -455,13 +541,16 @@ impl Pending {
         Ok(a)
     }
 
-    /// The codes to show now, as text payloads.
-    pub fn frames(&mut self, signer: &dyn Signer) -> Result<Vec<String>, PhoneError> {
+    /// The codes to show now, as text payloads. Step three shows this seat's reveal, for
+    /// anyone still on step two, and its signature once `sign` has made it.
+    pub fn frames(&mut self) -> Result<Vec<String>, PhoneError> {
         match self.phase() {
             Phase::Commit => {
                 let commitment = self.my_commitment().expect("not finished in Commit");
                 let params = self.params.encode();
-                let mut packed = vec![PACK_COMMIT, self.seat, params.len() as u8];
+                let plen = u8::try_from(params.len())
+                    .map_err(|_| plain("The circle's name is too long to show in a code."))?;
+                let mut packed = vec![PACK_COMMIT, self.seat, plen];
                 packed.extend_from_slice(&params);
                 packed.extend_from_slice(&commitment);
                 // The setup line first: a single code anyone can join from.
@@ -474,15 +563,13 @@ impl Pending {
                 Ok(fountain_frames(&pack_reveal(&r)))
             }
             Phase::Attest | Phase::Complete => {
-                // Anyone still on step two needs our reveal; everyone needs our signature.
-                let r = self.my_reveal()?;
-                let a = self.my_attestation(signer)?;
+                let reveal = fountain_frames(&pack_reveal(&self.my_reveal()?));
+                let Some(a) = &self.attestation else {
+                    return Ok(reveal);
+                };
                 let mut packed = vec![PACK_ATTEST, self.seat];
-                packed.extend_from_slice(&a);
-                Ok(interleave(
-                    fountain_frames(&packed),
-                    fountain_frames(&pack_reveal(&r)),
-                ))
+                packed.extend_from_slice(a);
+                Ok(interleave(fountain_frames(&packed), reveal))
             }
             Phase::Aborted => Err(ceremony_err(CeremonyError::Aborted)),
         }
@@ -604,10 +691,14 @@ fn pack_reveal(r: &[u8]) -> Vec<u8> {
 }
 
 /// Read a join code: the setup line, or a setup code that carries the circle's parameters.
-/// Returns the parameters, the seat that showed the code (0, the host's, when it does not
-/// say), and the setup code to keep, if it was one.
-pub fn read_join(text: &str) -> Result<(CircleParams, u8, Option<Code>), PhoneError> {
+/// Returns the parameters and the setup code to keep, if it was one.
+pub fn read_join(text: &str) -> Result<(CircleParams, Option<Code>), PhoneError> {
     let code = parse_tagged(text).ok_or_else(|| bad("That is not a code to join a circle from."))?;
+    join_from(code)
+}
+
+/// The parameters in a join code, and the setup code to keep, if it was one.
+pub fn join_from(code: Code) -> Result<(CircleParams, Option<Code>), PhoneError> {
     let (params, shown_by, keep) = match code {
         Code::Params(seat, p) => (p, seat.unwrap_or(0), None),
         Code::Commit {
@@ -633,10 +724,10 @@ pub fn read_join(text: &str) -> Result<(CircleParams, u8, Option<Code>), PhoneEr
         }
     };
     let params = CircleParams::decode(&params).map_err(|_| bad("That setup code does not read."))?;
-    if shown_by >= params.n {
+    if shown_by >= params.n || params.encode().len() > 255 {
         return Err(bad("That setup code does not read."));
     }
-    Ok((params, shown_by, keep))
+    Ok((params, keep))
 }
 
 impl Pending {
