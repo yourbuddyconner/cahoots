@@ -50,28 +50,26 @@ I'd like us to have something durable underneath those tools. Something we estab
 
 The people you'd hand a house key to, you have already met. That should count for more.
 
-## Something the group can keep
+## A circle of our own
 
-Imagine meeting up with a few people you trust. You get your devices out, exchange some information, and compare the words on your screens. Everyone checks that they match. You leave with a private circle you made together.
+Imagine meeting up with a few people you trust and getting your devices out to make a private circle together. As the devices exchange information, you compare the words on your screens to check that everyone agrees. By the time you leave, the group has established something it can use beyond that room.
 
-Later, you open that circle and talk. You protect a file for the group. You connect two machines that belong to its members. You can see who belongs, and you have keys for doing things together. The next private thing starts with a relationship you've already established.
+That's the starting point for Cahoots. During the meeting, which we call a ceremony, each device contributes randomness that the devices combine into a shared secret. They also sign a record of who belongs, so membership comes from the people taking part. There's no account provider choosing the members or certificate authority vouching for the people standing in front of you, and the circle's secret stays with its members. The [ceremony guide](/docs/#/ceremony-guide) explains how that works and what everyone needs to check.
 
-That's the starting point for Cahoots. The meeting is called a ceremony. Each device contributes randomness, and the devices combine those contributions into a shared secret. They also sign a record of who belongs. The [ceremony guide](/docs/#/ceremony-guide) explains what everyone needs to check.
-
-No account provider chooses the members. No certificate authority needs to vouch for the people standing in front of you. No relay gets a copy of the circle's secret.
+What interests me is what happens afterward. When you want to keep talking, protect a file for the group, or connect two of your machines, you should be able to start with the circle you've already made. The group has its own record of membership and its own keys to bring to those tools. Each new use can build on a relationship you've already established, without asking another service to define it for you.
 
 <figure>
 <img src="/blog/img/circle-and-tools.svg" alt="People meet in person to establish their circle. The circle supplies a common foundation for chat, files, and private connections, with separate keys for each use." width="640" height="480">
 <figcaption>The ambition: establish the circle together, then carry it into the tools you use. Each use gets its own keys.</figcaption>
 </figure>
 
-There will still be infrastructure. Messages need delivery. Software needs updates. Devices break. We run a hosted relay because people should be able to start a conversation without first becoming server administrators. The relay doesn't need the circle's keys to deliver its messages. It can still observe traffic patterns or refuse delivery. You can run your own if you want that decision in your hands.
+Owning the circle still leaves us needing other people's infrastructure. We run a hosted relay so people can keep talking without first becoming server administrators, but delivering those messages doesn't require the relay to hold the circle's keys. Its operator can still observe traffic patterns or refuse delivery, which is why you should be able to run your own and choose where your conversations travel.
 
-That's a boundary I want to make clear: here's what the service does, here's what it can learn, and here's what remains with us. Moving the conversation to another relay should be a choice the group can make.
+That's what ownership should let us do: use a service while keeping enough in our hands to leave it. I want the group to understand what that service does and what it can learn, and to be able to change it without having to establish the circle all over again.
 
-Cahoots is a development project. Chat and the browser ceremony are things you can try; the integrations and hardware are at different stages. The [status page](/docs/#/status) keeps track of that. What I'm describing here is the direction: making the circle once should make the next private thing easier.
+Cahoots is still a development project, with chat and the browser ceremony available to try while the integrations and hardware are at different stages. The [status page](/docs/#/status) keeps track of that work. The direction I want to take it is simple: making the circle once should make the next private thing easier.
 
-But as soon as a circle becomes useful, another question follows. What happens when we want a program to do some of that work for us?
+As we start using that circle for more of our lives, we'll also want programs to do some of the work for us. Owning the circle should give us a say in what they're allowed to do, too.
 
 ## Who gets to act for us
 
