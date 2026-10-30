@@ -7,7 +7,7 @@
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { createReadStream, existsSync, mkdirSync, statSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, statSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,7 +33,7 @@ const stationBin = join(here, "..", "target", "debug", "cahoots-station");
 if (!existsSync(stationBin)) { console.error("build the relay first: cargo build -p cahoots-station"); process.exit(1); }
 const freePort = await new Promise((r) => { const s = createServer(); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => r(p)); }); });
 const stationUrl = `http://127.0.0.1:${freePort}`;
-const station = spawn(stationBin, ["--listen", `127.0.0.1:${freePort}`, "--log", join(out, "station.jsonl")], { stdio: ["ignore", "ignore", "inherit"] });
+const station = spawn(stationBin, ["--listen", `127.0.0.1:${freePort}`, "--log", join(mkdtempSync(join(out, "relay-")), "station.jsonl")], { stdio: ["ignore", "ignore", "inherit"] });
 for (let i = 0; ; i++) {
   try { if ((await fetch(`${stationUrl}/healthz`)).ok) break; } catch {}
   if (i > 100) { console.error("the relay did not start"); process.exit(1); }
@@ -54,7 +54,7 @@ async function person(name, viewport) {
   await page.goto(base);
   await page.waitForSelector(".screen");
   let shot = 0;
-  const snap = async (label) => { await page.waitForTimeout(260); await page.screenshot({ path: join(out, `${name}-${String(++shot).padStart(2, "0")}-${label}.png`) }); };
+  const snap = async (label) => { await page.waitForTimeout(260); await page.screenshot({ path: join(out, `${name}-${String(++shot).padStart(2, "0")}-${label}.png`), timeout: 10000 }); };
   const clip = () => page.evaluate(() => window.__clip);
   const paste = async (text) => { await page.fill("textarea.input", text); await page.click("text=Use this"); };
   const menu = async () => { await page.click('button[aria-label="More options"]'); await page.waitForSelector(".sheet-bg.on"); };
@@ -71,6 +71,8 @@ const onFail = async (e) => {
 };
 process.on("unhandledRejection", onFail);
 process.on("uncaughtException", onFail);
+const wordsOf = (p) => p.$$eval(".words div", (els) => els.map((e) => e.textContent.replace(/^\d+/, "").trim()).join(" "));
+if (!process.argv.includes("--ceremony-only")) {
 const L = await person("leader", { width: 390, height: 844 });
 const J = await person("joiner", { width: 1280, height: 900 });
 people.push(L, J);
@@ -101,14 +103,20 @@ if (!seat1Disabled) throw new Error("seat 1 should be marked taken for the joine
 await J.page.click("text=Make my contribution");
 await J.page.waitForSelector("text=Step 2 of 4"); // the joiner already holds the leader's commitment, so it is in reveal
 await J.snap("reveal");
+if (!(await J.page.getByRole('button', { name: 'Scan the remaining reveals to continue', exact: true }).isDisabled())) throw new Error('Cannot confirm sharing before collecting the missing reveal');
 await J.menu(); await J.page.click("text=Copy as text"); const revealJ = await J.clip(); await J.closeSheet();
 if (!revealJ?.startsWith("cahoots-reveal:1:")) throw new Error(`joiner reveal text: ${revealJ}`);
 
-// Leader takes the joiner's reveal as commitment plus reveal. With two people that is every reveal,
-// so the leader moves on to signing and shares its reveal and its signature from there.
+// Regression: receiving the joiner's reveal must not hide the leader's reveal.
+// The core can already sign, but the other screen still needs the leader's step-2 code.
 await L.menu(); await L.page.click("text=Paste a code"); await L.paste(revealJ);
-await L.page.waitForSelector("text=Step 3 of 4");
+await L.page.waitForSelector("text=Step 2 of 4", { timeout: 3000 });
 await L.closeSheet();
+await L.page.waitForSelector('button:text-is("They have scanned my reveal"):enabled');
+await L.page.waitForSelector('.half:visible .cap:has-text("seat 1 · step 2")');
+await L.snap("reveal-handoff");
+await L.page.click('button:text-is("They have scanned my reveal")');
+await L.page.waitForSelector("text=Step 3 of 4");
 await L.snap("sign");
 await L.menu(); await L.page.click(".sheet >> text=Copy my reveal"); const revealL = await L.clip(); await L.closeSheet();
 if (!revealL?.startsWith("cahoots-reveal:0:")) throw new Error(`leader reveal text: ${revealL}`);
@@ -117,13 +125,16 @@ if (!attestL?.startsWith("cahoots-attest:0:")) throw new Error(`leader signature
 
 // Joiner gets the leader's signature before its reveal: it is kept until the reveal arrives.
 await J.menu(); await J.page.click("text=Paste a code"); await J.paste(attestL);
-await J.page.waitForSelector("text=Kept seat 1's signature");
+await J.page.waitForSelector("text=Seat 1 is already on step 3");
+if (!(await J.page.getByRole('button', { name: 'Scan the remaining reveals to continue', exact: true }).isDisabled())) throw new Error('An early signature must not bypass a missing reveal');
 await J.closeSheet();
 await J.menu(); await J.page.click("text=Paste a code"); await J.paste(revealL);
-// Every reveal and every signature the joiner needs is in, so it completes at once and keeps
-// showing its own signature for the leader.
-await J.page.waitForSelector('button:text-is("They have scanned it")');
+// Even with an early signature buffered, the joiner must confirm sharing its reveal.
+await J.page.waitForSelector('button:text-is("They have scanned my reveal"):enabled');
 await J.closeSheet();
+await J.page.waitForSelector("text=Step 2 of 4");
+await J.page.click('button:text-is("They have scanned my reveal")');
+await J.page.waitForSelector('button:text-is("They have scanned it")');
 await J.snap("sign-done");
 await J.menu(); await J.page.click(".sheet >> text=Copy as text"); const attestJ = await J.clip(); await J.closeSheet();
 if (!attestJ?.startsWith("cahoots-attest:1:")) throw new Error(`joiner signature text: ${attestJ}`);
@@ -139,7 +150,6 @@ await J.snap("words");
 await L.page.click('button:text-is("They have scanned it")');
 await L.page.waitForSelector("text=Step 4 of 4");
 await L.snap("words");
-const wordsOf = (p) => p.$$eval(".words div", (els) => els.map((e) => e.textContent.replace(/^\d+/, "").trim()).join(" "));
 const wL = await wordsOf(L.page), wJ = await wordsOf(J.page);
 if (wL !== wJ) throw new Error(`check words differ: ${wL} / ${wJ}`);
 console.log("check words:", wL);
@@ -198,6 +208,7 @@ await J.page.keyboard.press("Enter");
 await L.page.waitForSelector('.bubble.in:has-text("reading you")', { timeout: 15000 });
 const rejected = await L.page.$$(".bubble.rejected");
 if (rejected.length) throw new Error(`${rejected.length} rejected chat messages`);
+console.log("chat exchanged; capturing chat screens");
 await L.snap("chat"); await J.snap("chat");
 const headRes = await (await fetch(`${stationUrl}/v1/head`)).json();
 if (headRes.seq !== 1) throw new Error(`relay head seq ${headRes.seq}, expected 1 (two messages)`);
@@ -232,8 +243,116 @@ await L.page.goto(base);
 await L.page.waitForSelector(".row-item");
 await L.snap("home-with-circle");
 
+}
+
+// Three participants: every incoming reveal and the outgoing handoff are separate.
+console.log("starting three-member ceremony");
+const group = [];
+for (let i = 0; i < 3; i++) {
+  const p = await person(`group-${i + 1}`, { width: i === 0 ? 375 : 390, height: i === 0 ? 667 : 844 });
+  group.push(p); people.push(p);
+}
+const copyStage = async p => { await p.menu(); await p.page.getByRole('button', { name: 'Copy as text', exact: true }).click(); const text = await p.clip(); await p.closeSheet(); return text; };
+const receive = async (p, text) => { await p.menu(); await p.page.getByRole('button', { name: 'Paste a code', exact: true }).click(); await p.paste(text); await p.closeSheet(); };
+await group[0].page.getByRole('button', { name: 'Start a ceremony', exact: true }).click();
+await group[0].page.fill('input[type=text]', 'three members');
+await group[0].page.getByRole('button', { name: 'More', exact: true }).click();
+await group[0].page.locator('.seg button').filter({ hasText: 'Small' }).click();
+await group[0].page.getByRole('button', { name: 'Continue', exact: true }).click();
+await group[0].page.getByRole('button', { name: 'Make my contribution', exact: true }).click();
+await group[0].page.waitForSelector('text=Step 1 of 4');
+const commits = [await copyStage(group[0])];
+for (let i = 1; i < 3; i++) {
+  const p = group[i];
+  await p.page.getByRole('button', { name: 'Join one', exact: true }).click();
+  await p.page.getByRole('button', { name: 'No camera? Paste a code', exact: true }).click();
+  await p.paste(commits[0]);
+  await p.page.waitForSelector('text=Which seat are you?');
+  await p.page.locator(`.seg button[data-v="${i}"]`).click();
+  await p.page.getByRole('button', { name: 'Make my contribution', exact: true }).click();
+  await p.page.waitForSelector('text=Step 1 of 4');
+  commits.push(await copyStage(p));
+}
+await receive(group[0], commits[1]);
+await receive(group[0], commits[2]);
+await receive(group[1], commits[2]);
+await receive(group[2], commits[1]);
+const reveals = [];
+for (const p of group) {
+  await p.page.waitForSelector('text=Step 2 of 4');
+  reveals.push(await copyStage(p));
+}
+await receive(group[0], reveals[1]);
+if (!(await group[0].page.getByRole('button', { name: 'Scan the remaining reveals to continue', exact: true }).isDisabled())) throw new Error('Three-member ceremony advanced with one reveal missing');
+await group[0].page.waitForSelector('text=Received 1 of 2 reveals');
+await receive(group[0], reveals[2]);
+for (let i = 1; i < 3; i++) for (let j = 0; j < 3; j++) if (i !== j) await receive(group[i], reveals[j]);
+for (const p of group) {
+  await p.page.waitForSelector('text=Received 2 of 2 reveals');
+  await p.page.waitForSelector('button:text-is("Everyone has scanned my reveal"):enabled');
+  await p.page.waitForSelector('text=Step 2 of 4');
+  const layout = await p.page.evaluate(() => {
+    const action = document.querySelector('.actions button').getBoundingClientRect();
+    const qr = document.querySelector('.half .qr svg').getBoundingClientRect();
+    const header = document.querySelector('.bar').getBoundingClientRect();
+    return { overflow: document.documentElement.scrollWidth > innerWidth, actionVisible: action.top >= 0 && action.bottom <= innerHeight, headerVisible: header.top >= 0 && header.height >= 50, screenScroll: document.querySelector('.screen').scrollTop, windowScroll: scrollY, qrVisible: qr.top >= header.bottom && qr.bottom <= action.top && qr.width >= 180 && qr.height >= 180, qr: { top: qr.top, bottom: qr.bottom, width: qr.width, height: qr.height }, actionTop: action.top };
+  });
+  if (layout.overflow || !layout.actionVisible || !layout.qrVisible || !layout.headerVisible) throw new Error(`Ceremony layout inaccessible: ${JSON.stringify(layout)}`);
+  // Decode a rendered QR frame at its displayed physical size, not a mocked code.
+  const readable = await p.page.evaluate(async () => {
+    const { qr_decode_rgba } = await import('./pkg/cahoots_wasm.js');
+    const svg = document.querySelector('.half .qr svg');
+    const rect = svg.getBoundingClientRect();
+    const image = new Image();
+    const loaded = new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; });
+    image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg.outerHTML);
+    await loaded;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = Math.floor(Math.min(rect.width, rect.height) * devicePixelRatio);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return !!qr_decode_rgba(canvas.width, canvas.height, ctx.getImageData(0, 0, canvas.width, canvas.height).data);
+  });
+  if (!readable) throw new Error('Displayed reveal QR does not decode');
+  await p.snap('reveal-handoff');
+  await p.page.getByRole('button', { name: 'Scan their reveals', exact: true }).click();
+  const cameraFits = await p.page.evaluate(() => {
+    const camera = document.querySelector('.half:last-child .cam').getBoundingClientRect();
+    const action = document.querySelector('.actions').getBoundingClientRect();
+    return camera.height >= 140 && camera.bottom <= action.top;
+  });
+  if (!cameraFits) throw new Error('Compact camera preview is obscured');
+  await p.page.getByRole('button', { name: 'Show my reveal', exact: true }).click();
+  await p.page.getByRole('button', { name: 'Everyone has scanned my reveal', exact: true }).click();
+  await p.page.waitForSelector('text=Step 3 of 4');
+  const signatureShown = await p.page.evaluate(() => {
+    const qr = document.querySelector('.half .qr svg').getBoundingClientRect();
+    return qr.width >= 180 && qr.height >= 180 && qr.bottom <= innerHeight;
+  });
+  if (!signatureShown) throw new Error('Signature collection screen has no readable QR');
+  await p.snap('collect-signatures');
+}
+const signatures = [];
+for (const p of group) signatures.push(await copyStage(p));
+for (let i = 0; i < 3; i++) for (let j = 2; j >= 0; j--) if (i !== j) await receive(group[i], signatures[j]);
+const groupWords = [];
+for (const p of group) {
+  const signatureFits = await p.page.evaluate(() => {
+    const qr = document.querySelector('.qr svg').getBoundingClientRect();
+    const action = document.querySelector('.actions').getBoundingClientRect();
+    return qr.top >= document.querySelector('.bar').getBoundingClientRect().bottom && qr.bottom <= action.top;
+  });
+  if (!signatureFits) throw new Error('Signature code is obscured on a compact phone');
+  await p.snap('signature-handoff');
+  await p.page.getByRole('button', { name: 'Everyone has scanned it', exact: true }).click();
+  await p.page.waitForSelector('text=Step 4 of 4');
+  groupWords.push(await wordsOf(p.page));
+}
+if (new Set(groupWords).size !== 1) throw new Error('Three-member check words differ');
+console.log('three-member ceremony ok: partial reveals, explicit handoffs, signatures and matching words; compact-phone actions visible.');
+
 await browser.close();
 server.close();
 station.kill();
 if (errors.length) { console.error("page errors:\n" + errors.join("\n")); process.exit(1); }
-console.log("e2e ok: two-member ceremony with signatures, chat through a relay, OTP message, replay refused. Screenshots in", out);
+console.log(process.argv.includes("--ceremony-only") ? "e2e ok: three-member ceremony and compact QR/camera layouts." : "e2e ok: two- and three-member ceremonies, chat through a relay, OTP message, replay refused.", "Screenshots in", out);

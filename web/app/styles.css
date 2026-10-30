@@ -177,3 +177,32 @@ progress::-webkit-progress-bar { background: var(--bg-3); } progress::-webkit-pr
   .sheet-bg { align-items: center; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* Ceremony: separate received progress from the next exchange instruction. */
+.ceremony-progress { margin: 0; color: var(--fg-2); font-size: 12px; line-height: 1.4; }
+.ceremony-next { display: grid; gap: 6px; }
+.ceremony-task { font-size: 17px; font-weight: 600; letter-spacing: -0.015em; }
+.ceremony-members { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+@media (max-width: 959px) {
+  /* Keep the complete code above the action on small phones. */
+  .ceremony-screen { flex: none; height: 100dvh; overflow: hidden; }
+  .ceremony-screen > .bar, .ceremony-screen > .actions { flex-shrink: 0; }
+  .ceremony-screen .body { min-height: 0; padding-top: 12px; }
+  .ceremony-screen .stage { min-height: 0; gap: 10px; padding: 0 0 10px; justify-content: flex-start; }
+  .ceremony-screen .members { gap: 4px; }
+  .ceremony-screen .chip { font-size: 11px; padding: 4px 8px; }
+  .ceremony-screen .ceremony-progress { font-size: 11px; }
+  .ceremony-screen .ceremony-next { font-size: 14px; line-height: 1.4; padding: 10px 12px; gap: 4px; }
+  .ceremony-screen .ceremony-task { font-size: 16px; }
+  .ceremony-screen .pair { display: flex; flex: 1; min-height: 0; }
+  .ceremony-screen .half { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .ceremony-screen .half > .panel,
+  .ceremony-screen .half > .stack > .panel { display: flex; flex: 1; flex-direction: column; min-height: 0; padding: 12px; }
+  .ceremony-screen .panel .cap { font-size: 10px; margin-bottom: 8px; }
+  .ceremony-screen .qr { position: relative; display: flex; flex: 1; min-height: 0; max-width: none; justify-content: center; }
+  .ceremony-screen .qr svg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .ceremony-screen .half > .stack { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .ceremony-screen .cam { flex: 1; min-height: 140px; max-height: none; aspect-ratio: auto; }
+  .ceremony-screen .cam-msg { padding: 12px; font-size: 14px; }
+  .ceremony-screen .actions { padding-top: 10px; }
+}

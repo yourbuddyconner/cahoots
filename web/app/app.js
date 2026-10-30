@@ -470,7 +470,7 @@ function screenPick(params) {
           // The ceremony holds its own copies; wipe ours.
           kemSeed.fill(0); seatSeed.fill(0); contribution.fill(0);
         }
-        ceremony = { c, params, label: extra ? 'TRNG' : 'CSPRNG', mode: 'show', attests: [] };
+        ceremony = { c, params, label: extra ? 'TRNG' : 'CSPRNG', mode: 'show', attests: [], revealShared: false };
         go(`#/ceremony/${paramsHash(params)}/run`);
       } catch (e) { err.textContent = friendly(e); }
     }, 'primary'), link('Add hardware randomness', hardwareSheet)],
@@ -489,7 +489,7 @@ function showSignSheet(me, sig, reveal) {
     link('They need my reveal instead', () => { close(); showRevealSheet(me, reveal); })));
 }
 const leave = () => { if (confirm('Leave the ceremony? Nothing is kept.')) { ceremony = null; go('#/'); } };
-const STEPS = { commit: 'Step 1 of 4 · Commit', reveal: 'Step 2 of 4 · Reveal', attest: 'Step 3 of 4 · Sign' };
+const STEPS = { commit: 'Step 1 of 4 · Meet the group', reveal: 'Step 2 of 4 · Exchange secrets', attest: 'Step 3 of 4 · Confirm members' };
 
 /** Commit, reveal and sign: one stage with Show and Scan modes, member chips that update in place. */
 function screenRun(params) {
@@ -506,12 +506,17 @@ function screenRun(params) {
     for (const p of ceremony.attests) { try { c.add_attestation(p.index, p.bytes); } catch (e) { /* shown as waiting */ } }
     ceremony.attests = [];
   }
-  const phase = c.phase();
-  if (phase === 'aborted') {
+  const corePhase = c.phase();
+  if (corePhase === 'aborted') {
     ceremony = null;
     screen({ title: 'Ceremony stopped', body: [h('div', {}, h('h1', {}, 'A reveal did not match its commitment.'), h('p', { class: 'lead' }, 'Nothing was kept. Either someone\'s contribution changed after they committed, or a code was corrupted. Start again from the beginning.'))], actions: [btn('Back to start', () => go('#/'), 'primary')] });
     return;
   }
+  // Receiving everyone else's reveal says nothing about who has scanned ours.
+  // Hold the reveal screen until the user confirms the outbound handoff too.
+  const revealHandoff = !ceremony.revealShared && ['attest', 'complete'].includes(corePhase);
+  const phase = revealHandoff ? 'reveal' : corePhase;
+  if (revealHandoff) ceremony.mode = 'show';
   if (phase === 'complete') { screenSignDone(params); return; }
   const rerender = () => screenRun(params);
   const st = status();
@@ -519,20 +524,39 @@ function screenRun(params) {
 
   // Member chips and the "waiting for" line update in place, so the camera keeps running between scans.
   const chips = h('div', { class: 'members' });
-  const waiting = next('');
+  const taskTitle = h('strong', { class: 'ceremony-task' });
+  const taskDetail = h('span');
+  const waiting = h('div', { class: 'next ceremony-next' }, taskTitle, taskDetail);
+  const received = h('p', { class: 'ceremony-progress', role: 'status', 'aria-live': 'polite' });
+  const revealDone = btn(params.n > 2 ? 'Everyone has scanned my reveal' : 'They have scanned my reveal', () => {
+    if (!['attest', 'complete'].includes(c.phase())) return;
+    ceremony.revealShared = true;
+    rerender();
+  }, 'primary');
   const refresh = () => {
-    if (c.phase() !== phase) { rerender(); return; }
+    if (c.phase() !== corePhase) { rerender(); return; }
     const missing = new Set(phase === 'commit' ? c.missing_commitments() : phase === 'reveal' ? c.missing_reveals() : c.missing_attestations());
     chips.replaceChildren(...Array.from({ length: params.n }, (_, i) =>
-      h('span', { class: `chip${i === me ? ' me' : missing.has(i) ? '' : ' on'}` }, i === me ? 'you' : `${i + 1}${missing.has(i) ? '' : ' ✓'}`)));
+      h('span', { class: `chip${i === me ? ' me' : missing.has(i) ? '' : ' on'}` }, i === me ? `you · ${i + 1}` : `${i + 1}${missing.has(i) ? '' : ' ✓'}`)));
     const left = [...missing].filter((i) => i !== me);
-    if (!left.length) { waiting.textContent = 'All in. Moving on.'; return; }
-    const who = left.map(seatName).join(' and ');
-    waiting.textContent = phase === 'commit'
-      ? `Show this to ${who}, and scan theirs. Any order. Hold still: each one takes a moment.`
+    const noun = phase === 'commit' ? 'setup codes' : phase === 'reveal' ? 'reveals' : 'signatures';
+    received.textContent = `Received ${params.n - 1 - left.length} of ${params.n - 1} ${noun}`;
+    revealDone.disabled = !revealHandoff;
+    revealDone.textContent = revealHandoff ? (params.n > 2 ? 'Everyone has scanned my reveal' : 'They have scanned my reveal') : 'Scan the remaining reveals to continue';
+    if (!left.length) {
+      taskTitle.textContent = phase === 'reveal' ? 'Your turn to show' : 'Ready for the next step';
+      taskDetail.textContent = phase === 'reveal'
+        ? 'Ask everyone to scan this code. Wait until they confirm before continuing.'
+        : 'You have everything for this step.';
+      return;
+    }
+    const who = left.map(seatName).join(', ');
+    taskTitle.textContent = phase === 'commit' ? 'Meet the other devices' : phase === 'reveal' ? 'Collect their secret contributions' : 'Confirm who’s in the circle';
+    taskDetail.textContent = phase === 'commit'
+      ? `Scan the setup codes from ${who}. They also need to scan yours. You can take turns in any order.`
       : phase === 'reveal'
-        ? `Let ${who} scan this animation. When they show you theirs, scan it.`
-        : `Let ${who} scan your signature, and scan theirs. It confirms you all hold the same list of seats.`;
+        ? `Ask ${who} to show their step-2 codes. Scan each animation until the progress bar fills.`
+        : `Scan signatures from ${who} to confirm the group’s members. They also need to scan yours.`;
   };
   const got = (i, what) => { buzz(); toast(`Got seat ${i + 1}'s ${what}`, 'ok'); refresh(); };
   // A sealed reveal that arrives before its commitment stands in for it; the core handles that.
@@ -547,7 +571,7 @@ function screenRun(params) {
           // Someone a step ahead. Keep the signature; it is checked once every reveal is in.
           ceremony.attests = ceremony.attests.filter((p) => p.index !== t.index).concat({ index: t.index, bytes: new Uint8Array(t.bytes) });
           buzz();
-          st.textContent = `Kept seat ${t.index + 1}'s signature for step 3.${c.missing_reveals().includes(t.index) ? ' You still need their reveal: ask them to show it.' : ''}`;
+          st.textContent = `Seat ${t.index + 1} is already on step 3. Their signature is saved.${c.missing_reveals().includes(t.index) ? ' You still need their step-2 reveal. Ask them to select “Someone still needs my reveal”.' : ' Keep collecting the reveals listed above.'}`;
           return;
         }
         c.add_attestation(t.index, t.bytes); got(t.index, 'signature');
@@ -581,15 +605,15 @@ function screenRun(params) {
   const desktop = matchMedia('(min-width: 960px)').matches;
   const showWrap = h('div', { class: 'half', style: desktop || ceremony.mode === 'show' ? '' : 'display:none' }, h('p', { class: 'eyebrow' }, 'Show'), show);
   const scanWrap = h('div', { class: 'half', style: desktop || ceremony.mode === 'scan' ? '' : 'display:none' }, h('p', { class: 'eyebrow' }, 'Scan'), desktop || ceremony.mode === 'scan' ? scanStage() : null);
-  const modeSeg = seg([['show', 'Show mine'], ['scan', 'Scan theirs']], ceremony.mode, (v) => {
+  const modeSeg = seg([['show', phase === 'reveal' ? 'Show my reveal' : 'Show my code'], ['scan', phase === 'reveal' ? 'Scan their reveals' : 'Scan their codes']], ceremony.mode, (v) => {
     ceremony.mode = v;
     showWrap.style.display = v === 'show' ? '' : 'none';
     scanWrap.style.display = v === 'scan' ? '' : 'none';
     if (v !== 'scan') stopScanner(); else scanWrap.replaceChildren(h('p', { class: 'eyebrow' }, 'Scan'), scanStage());
   });
   if (desktop) modeSeg.classList.add('desktop-hide');
-  screen({
-    title: STEPS[phase], sub: params.name,
+  const exchangeScreen = screen({
+    title: STEPS[phase], sub: `${params.name} · you are seat ${me + 1}`,
     back: leave,
     menu: () => sheet(
       h('h2', {}, 'Share yours another way'),
@@ -599,8 +623,10 @@ function screenRun(params) {
       btn('Paste a code', () => pasteSheet(`cahoots-${phase}:…`, feedText)),
       fileBtn('Load a file', feedText),
       btn('Leave the ceremony', leave, 'danger')),
-    body: [chips, waiting, modeSeg, h('div', { class: 'pair' }, showWrap, scanWrap), st],
+    body: [h('div', { class: 'ceremony-members' }, chips, received), waiting, modeSeg, h('div', { class: 'pair' }, showWrap, scanWrap), st],
+    actions: phase === 'reveal' ? [revealDone] : [],
   });
+  exchangeScreen.classList.add('ceremony-screen');
   refresh();
 }
 
@@ -620,7 +646,7 @@ function screenSignDone(params) {
       h('h2', {}, 'Share your signature another way'), copyBtn(text), downloadBtn(`sign-${me + 1}.txt`, text),
       h('h2', {}, 'Your reveal, for anyone still on step 2'), copyBtn(revealText, 'Copy my reveal'), downloadBtn(`reveal-${me + 1}.txt`, revealText)),
     body: [
-      next(`Your screen has everything. ${others.charAt(0).toUpperCase() + others.slice(1)} still ${params.n > 2 ? 'need' : 'needs'} to scan this animation. Hold still until their bar fills.`),
+      next(`You have every signature. Before comparing words, make sure ${others} ${params.n > 2 ? 'have' : 'has'} scanned yours too. Keep this code on screen until they confirm.`),
       animatedQr(packAttest(me, sig), `seat ${me + 1} · step 3`),
       link('Someone still needs my reveal', () => showRevealSheet(me, reveal)),
     ],
@@ -640,10 +666,10 @@ function screenWords() {
   const id = out.circle_id_hex();
   const showSign = () => showSignSheet(me, sig, reveal);
   screen({
-    title: 'Step 4 of 4 · Check', sub: params.name,
+    title: 'Step 4 of 4 · Compare words', sub: params.name,
     menu: showSign,
     body: [
-      next('One person reads these out loud. Everyone else checks their own screen shows the same six, in the same order.'),
+      next('Read all six words aloud together. Check your own screen: every word must match, in the same order. If one differs, everyone starts again.'),
       h('div', { class: 'panel' },
         h('div', { class: 'cap' }, h('span', {}, params.name), h('span', {}, `${label} · ${id.slice(0, 8)}`)),
         h('div', { class: 'words' }, ...words.map((w, i) => h('div', {}, h('small', {}, String(i + 1)), w)))),

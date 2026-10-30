@@ -36,9 +36,12 @@ The service worker fetches from the network first and falls back to its cache, s
 
 1. The host opens **Start a ceremony** and picks a name, the number of people, and a secret size (Small 16 KiB, Medium 64 KiB, Large 256 KiB). The hosted software member option is under **Advanced**; when it is on, every member's seat screen says so.
 2. The host keeps seat 1 and taps **Make my contribution**. Everyone else opens **Join one**, scans any member's code (it carries the parameters), and picks a free seat. Seats already seen are crossed out. Randomness is this device's `crypto.getRandomValues`; **Add hardware randomness** mixes in extra random bytes loaded from a file or an animated QR. The label is `TRNG` only when a full-length hardware contribution was mixed in.
-3. **Step 1, Commit.** Each member shows a short animation of their commitment and 1216-byte X-Wing public key. Others scan it. A line on the screen names whose codes are still needed; chips and the line update in place without restarting the camera. The app withholds the reveal until all commitments are in.
-4. **Step 2, Reveal.** Each member shows an animated QR of their sealed reveal: the contribution encrypted to every other member, so a camera pointed at the screen learns nothing. Receivers scan until the progress bar fills. A garbled scan is refused and can be retried; a reveal that opens but does not match its commitment aborts with nothing kept.
-5. **Step 3, Check.** Six BIP-39 words. If every screen agrees, members tap **They match** and the circle is saved. A member who scans a code for their own seat is told that two people picked the same seat and how to fix it.
+3. **Step 1, Meet the group.** Exchange commitment codes. The screen names the missing seats and counts received codes without restarting the scanner between scans.
+4. **Step 2, Exchange secrets.** Exchange encrypted reveals. The local cryptographic state can advance before peers have scanned this device’s reveal, so the UI deliberately keeps showing it. Once every reveal is received, the device switches to Show mode. The user must confirm **They have scanned my reveal** or **Everyone has scanned my reveal** before the UI advances. This confirmation is a human handoff check, not a cryptographic receipt.
+5. **Step 3, Confirm members.** Exchange signatures over the manifest. Signatures received early are buffered until the reveals allow verification. Once all signatures are in, keep showing this device’s code until the others confirm receipt.
+6. **Step 4, Compare words.** Read all six words aloud and compare every device. **They match** saves the circle. A mismatch means everyone discards the ceremony and starts again.
+
+A device that receives another member’s reveal while still collecting commitments can use that reveal as both. This must not make its own outgoing reveal disappear. The end-to-end regression covers that two-person case, an early signature arriving before its reveal, and a three-person ceremony with one reveal still missing.
 
 Messages are base64url text shown as a QR and as copyable text. Reads take a scan or a paste. Reuse and tag failures show distinct refusals.
 
@@ -102,3 +105,8 @@ Camera scanning opens the camera with `getUserMedia`, draws each frame to a canv
 - Plaintext history is stored on the device so messages can be reread. Deleting the circle removes it.
 - A message is at most 255 characters. With length hiding off (in the menu) longer messages are possible, but the compose box keeps the limit.
 - `bucket_pad` plaintext length is hidden only within the chosen bucket.
+
+
+### Ceremony UI regression checks
+
+Run `node web/e2e.mjs` for the full browser suite, or `node web/e2e.mjs --ceremony-only` for the three-member ceremony and compact-layout checks. Each run uses a fresh relay log. The suite checks both directions of the reveal handoff, buffered early signatures, matching check words, and complete QR/camera visibility on a 375 × 667 viewport. It also rasterizes a displayed reveal frame and decodes it with the real WASM QR decoder. These checks do not replace a physical phone-camera test.

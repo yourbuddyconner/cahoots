@@ -29,7 +29,7 @@ Hardware randomness is optional. If you have a suitable file, add it on your own
 
 ## 2. Exchange commitments
 
-The **Commit** screen shows a looping code and lists the members whose codes you still need.
+The **Meet the group** screen shows a looping code and lists the members whose codes you still need.
 
 Show your code to each member and scan theirs. Order does not matter. Your device advances when it has all the commitments.
 
@@ -37,15 +37,17 @@ A commitment prevents a member from changing their contribution after seeing eve
 
 ## 3. Exchange reveals
 
-The **Reveal** screen shows a longer sequence of codes. Scan every other member’s sequence.
+The **Exchange secrets** screen shows a longer sequence of codes. Scan every other member’s sequence.
 
 Hold the devices still until the progress bar fills. This is usually the longest step. Your device advances when it has everyone’s reveal.
 
-If someone still needs yours after you have moved on, use **Someone still needs my reveal** from the menu.
+Once you have every reveal, your device stays on this step and switches to showing your own code. Ask the others to scan it. Select **They have scanned my reveal** (or **Everyone has scanned my reveal**) only when they confirm they have it. Receiving their codes does not mean they received yours.
+
+If someone still needs yours after you have moved on, use **Someone still needs my reveal**. The missing-seat list and received count describe what your device has collected, not what others have scanned.
 
 ## 4. Exchange signatures
 
-The **Sign** screen shows another short sequence. Show yours to everyone and scan theirs.
+The **Confirm members** screen shows another short sequence. Show yours to everyone and scan theirs.
 
 Your device keeps showing its signature after it has collected the others. Wait for everyone to finish scanning before selecting **They have scanned it** or **Everyone has scanned it**.
 
