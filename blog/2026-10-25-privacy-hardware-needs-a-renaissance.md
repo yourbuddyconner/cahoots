@@ -19,6 +19,11 @@ I care about privacy. I have for a long time. But caring about it mostly meant c
 
 The recent certificate-authority failures made me look harder at that arrangement. The quiet machinery underneath a secure connection is people and scripts like everything else. It can be wrong. And when it is, I usually have no say in how it gets fixed and very little ability to keep going without it.
 
+<figure>
+<img src="/blog/img/dependency.jpg" alt="A cartoon tower of blocks labeled all modern digital infrastructure, balanced on a few small pieces at the bottom" width="687" height="826" class="narrow">
+<figcaption>All modern digital infrastructure, after <a href="https://xkcd.com/2347/">xkcd 2347</a>. Pick any block and ask who runs it and whether you could tell if they stopped.</figcaption>
+</figure>
+
 I don't want every private part of my life to be a tenancy. I want some of it to belong to me and the people I share it with.
 
 That's why I'm building Cahoots. And it's why I think privacy hardware needs a renaissance: small, understandable devices that give people real custody of their keys and a meaningful say in what those keys do.
