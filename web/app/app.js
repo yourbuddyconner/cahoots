@@ -22,7 +22,7 @@ const ERRORS = {
   base64url: 'That is not a Cahoots message.',
   replay: 'Already received.',
   'too-far-ahead': 'Too many messages were skipped before this one.',
-  'epoch-too-far-ahead': 'This message is from an epoch far past any this device has seen. Refused.',
+  'not-synced': 'Still reading the relay. Try again in a moment.',
   'unknown-epoch': 'This message is from an epoch whose keys this device no longer keeps.',
   'pad-epoch': 'This message uses the old pad-keyed chat, which this app no longer reads.',
   'no-root': 'This circle was made before root epochs. Run a new ceremony to chat.',
@@ -40,11 +40,10 @@ const friendly = (e) => {
   if (m && m[1] === 'conflicting-commit') return `Two different people are using seat ${Number(m[2]) + 1}. One of them needs to leave and rejoin with another seat.`;
   if (m && m[1] === 'commit-mismatch') return `Seat ${Number(m[2]) + 1}'s reveal does not match their commitment.`;
   if (m && m[1] === 'bad-index') return 'That code is for a different group size.';
-  const m2 = s.match(/^(corrupted|bad-key|bad-attestation|conflicting-attestation):(\d+)$/);
+  const m2 = s.match(/^(corrupted|bad-key|bad-attestation):(\d+)$/);
   if (m2 && m2[1] === 'corrupted') return 'That scan came through garbled. Scan it again.';
   if (m2 && m2[1] === 'bad-key') return `Seat ${Number(m2[2]) + 1}'s code is not valid. Ask them to show it again.`;
   if (m2 && m2[1] === 'bad-attestation') return `Seat ${Number(m2[2]) + 1}'s signature does not check out. Ask them to show it again.`;
-  if (m2 && m2[1] === 'conflicting-attestation') return `Seat ${Number(m2[2]) + 1} has shown two different signatures. The second one was ignored and the ceremony goes on.`;
   return s;
 };
 const CHAT_LABEL = 'End-to-end encrypted';
@@ -1020,6 +1019,9 @@ async function screenChat(id) {
     try {
       const pt = chat_bucket_pad(utf8.encode(text));
       if (!pt) throw 'Message too long.';
+      // The first send after a load waits until the relay has been read to the end, so this
+      // device knows where its own messages stopped.
+      for (let i = 0; i < 100 && !circle.chat_synced() && run === chatRun; i++) await new Promise((r) => setTimeout(r, 100));
       const wire = circle.chat_send(pt);
       await saveCircle(circle); // the chain step is recorded before the ciphertext leaves
       await post(b64_decode(wire));
@@ -1040,7 +1042,9 @@ async function screenChat(id) {
   const poll = async () => {
     while (run === chatRun) {
       const after = circle.relay_seq();
-      const url = `${relayBase()}/v1/circles/${id}/messages?wait=${POLL_WAIT_MS}${after == null ? '' : `&after=${after}`}`;
+      // Until the relay has been read to the end, poll without waiting.
+      const wait = circle.chat_synced() || !circle.has_root() ? POLL_WAIT_MS : 0;
+      const url = `${relayBase()}/v1/circles/${id}/messages?wait=${wait}${after == null ? '' : `&after=${after}`}`;
       let data;
       try {
         const res = await fetch(url);
@@ -1054,9 +1058,15 @@ async function screenChat(id) {
       }
       if (run !== chatRun) break;
       let changed = false;
-      for (const entry of data.entries || []) {
+      const entries = data.entries || [];
+      if (!entries.length && !circle.chat_synced()) circle.chat_mark_synced();
+      for (const entry of entries) {
         const bytes = b64_decode(entry.message);
-        if (bytes[0] === 2 && bytes[22] !== me) {
+        // Our own messages go through chat_receive too: it moves our sending position past
+        // them without decrypting, so a device restored from older state never reuses a key.
+        if (bytes[0] === 2 && bytes[22] === me) {
+          try { circle.chat_receive(entry.message); } catch (e) { /* a forged or damaged copy of our own: nothing to show */ }
+        } else if (bytes[0] === 2) {
           try {
             const r = circle.chat_receive(entry.message);
             const un = chat_bucket_unpad(r.text());
@@ -1094,7 +1104,7 @@ async function screenChat(id) {
     menu: () => sheet((close) => h('div', { class: 'stack' }, h('h2', {}, 'Conversation settings'), h('p', { class: 'eyebrow' }, CHAT_LABEL), h('p', { class: 'muted' }, CHAT_CLAIM),
       h('p', { class: 'wallet-fine' }, `Current keys: ${epoch()}`),
       h('p', { class: 'muted' }, 'A sender label identifies a message chain, not proof of which member typed it.'),
-      circle.has_root() ? h('p', { class: 'muted' }, 'Starting a new epoch gives everyone fresh keys from here on.') : null,
+      circle.has_root() ? h('p', { class: 'muted' }, 'Starting a new epoch moves everyone to new keys from here on. It does not protect older messages.') : null,
       circle.has_root() ? btn('Start a new epoch', async () => { try { circle.rotate_epoch(); await saveCircle(circle); toast('New epoch started', 'ok'); close(); } catch (e) { st.textContent = friendly(e); } }) : null,
       btn('Relay address', () => { close(); relaySheet(); }))),
   });

@@ -56,7 +56,9 @@ fn the_cards_chat_on_the_root_they_keep() {
         .map(|seat| {
             let d = &devices[usize::from(seat)];
             assert_eq!(d.root(), Some(&root));
-            cahoots_chat::ChatSession::new(d.root().unwrap(), id, 3, seat)
+            let mut c = cahoots_chat::ChatSession::new(d.root().unwrap(), id, 3, seat);
+            c.mark_synced(); // nothing is on any relay yet
+            c
         })
         .collect();
     let before = devices[1].remaining();

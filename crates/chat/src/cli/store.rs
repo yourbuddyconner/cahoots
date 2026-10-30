@@ -242,14 +242,24 @@ pub fn open_circle(root: &Path) -> Result<OpenedCircle, StoreError> {
 }
 
 /// Write the circle root next to the pad, encrypted under the provider key, mode 0600.
+/// The temporary file is created with mode 0600 before any byte is written.
 pub fn write_root(circle_dir: &Path, key: &[u8; 32], root: &[u8; 32]) -> Result<(), StoreError> {
     let path = circle_dir.join("root");
-    write_atomic(&path, &seal_blob(key, root)?)?;
+    let tmp = path.with_extension("tmp");
+    let _ = fs::remove_file(&tmp);
+    let mut opts = OpenOptions::new();
+    opts.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
     }
+    let mut f = opts.open(&tmp)?;
+    f.write_all(&seal_blob(key, root)?)?;
+    f.sync_all()?;
+    drop(f);
+    fs::rename(&tmp, &path)?;
+    File::open(circle_dir)?.sync_all()?;
     Ok(())
 }
 

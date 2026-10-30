@@ -51,10 +51,13 @@ fn pair() -> (Circle, Circle) {
     let (aa, ab) = (a.attestation().unwrap(), b.attestation().unwrap());
     a.add_attestation(1, &ab).unwrap();
     b.add_attestation(0, &aa).unwrap();
-    (
+    let (mut a, mut b) = (
         a.finish("CSPRNG").unwrap().into_circle(),
         b.finish("CSPRNG").unwrap().into_circle(),
-    )
+    );
+    a.chat_mark_synced();
+    b.chat_mark_synced();
+    (a, b)
 }
 
 #[test]
@@ -119,6 +122,8 @@ fn state_export_carries_chat_and_relay_seq() {
     b.set_relay_seq(Some(7));
     let saved = b.export();
     let mut r = Circle::import(&saved).unwrap();
+    assert!(!r.chat_synced());
+    r.chat_mark_synced();
     assert_eq!(r.relay_seq(), Some(7));
     assert_eq!(r.current_epoch(), b.current_epoch());
     assert_eq!(r.chat_receive(&w1).unwrap_err(), "replay");
@@ -162,4 +167,27 @@ fn a_version_4_state_opens_without_chat() {
     let again = Circle::import(&old.export()).unwrap();
     assert_eq!(old.export()[0], 5);
     assert!(!again.has_root());
+}
+
+#[test]
+fn own_messages_restore_the_sending_position() {
+    let (mut a, mut b) = pair();
+    let w0 = a.chat_send(b"zero").unwrap();
+    let old = a.export();
+    let w1 = a.chat_send(b"one").unwrap();
+    for w in [&w0, &w1] {
+        b.chat_receive(w).unwrap();
+    }
+    let mut back = Circle::import(&old).unwrap();
+    assert_eq!(back.chat_send(b"x").unwrap_err(), "not-synced");
+    for w in [&w0, &w1] {
+        let own = back.chat_receive(w).unwrap();
+        assert_eq!(own.sender(), 0);
+        assert!(own.text().is_empty());
+    }
+    back.chat_mark_synced();
+    let w2 = back.chat_send(b"two").unwrap();
+    let got = b.chat_receive(&w2).unwrap();
+    assert_eq!(got.counter(), 2);
+    assert_eq!(got.text(), b"two");
 }

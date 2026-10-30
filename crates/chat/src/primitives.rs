@@ -22,8 +22,6 @@ pub type Key = Zeroizing<[u8; KEY_LEN]>;
 
 /// The slice byte that marks a root epoch. Any other value is a retired pad epoch.
 pub const ROOT_EPOCH_SLICE: u8 = 0xFF;
-/// A root epoch more than this many past the highest one seen is refused.
-pub const MAX_AHEAD: u32 = 64;
 
 /// The public name of an epoch, 5 bytes on the wire. A root epoch `n` is `slice = 0xFF`,
 /// `offset = n`. Pad epochs, where the two fields were a pad address, are retired.
@@ -93,8 +91,9 @@ pub enum ChatError {
     /// No state for this epoch, and it cannot be made again: the epoch was dropped to make
     /// room for newer ones, or is older than one that was. Epoch 0 is never used.
     UnknownEpoch,
-    /// A root epoch more than `MAX_AHEAD` past the highest one seen.
-    EpochTooFarAhead,
+    /// This session has not read the relay to the end since it was made or imported, so it
+    /// may not know its own sending position. Call `mark_synced` after a full read.
+    NotSynced,
     /// The epoch id names a pad epoch (a slice other than `0xFF`). Pad epochs are retired.
     PadEpoch,
     /// Malformed exported state.

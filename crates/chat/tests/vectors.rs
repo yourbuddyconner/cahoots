@@ -1,4 +1,4 @@
-//! Chat vectors (docs/chat.md section 7), published to `crates/vectors/chat.json`.
+//! Chat vectors (docs/chat.md section 8), published to `crates/vectors/chat.json`.
 //! Written if missing, compared if present. Delete and rerun after a deliberate change.
 //!
 //! The root and circle id are those of `crates/vectors/root.json`, and the epoch is one of

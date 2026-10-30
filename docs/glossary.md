@@ -40,7 +40,7 @@ Terms used in the guides. For exact formats and requirements, use the [protocol 
 
 **Seal / tag:** authentication data attached to a message. The circle tag establishes that someone with the shared secret created the message; it does not identify a particular person within the circle.
 
-**Epoch:** one period of chat keys, started by a 32-byte pad spend. It can carry many chat messages.
+**Epoch:** one period of chat keys, derived from the circle root and numbered from 1. Starting one spends no pad. It can carry many chat messages.
 
 **Relay / Numbers Station / feed:** the server and public log used to deliver encrypted messages. The relay does not have the circle’s keys. See [Run a relay](relay.md).
 

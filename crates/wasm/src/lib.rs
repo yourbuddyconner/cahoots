@@ -123,7 +123,6 @@ fn ceremony_err(e: CeremonyError) -> String {
         CeremonyError::CommitMismatch(i) => format!("commit-mismatch:{i}"),
         CeremonyError::ConflictingReveal(i) => format!("conflicting-reveal:{i}"),
         CeremonyError::BadAttestation(i) => format!("bad-attestation:{i}"),
-        CeremonyError::ConflictingAttestation(i) => format!("conflicting-attestation:{i}"),
         CeremonyError::Aborted => "aborted".into(),
     }
 }
@@ -414,7 +413,7 @@ fn chat_err(e: ChatError) -> String {
         ChatError::Replay => "replay".into(),
         ChatError::TooFarAhead => "too-far-ahead".into(),
         ChatError::UnknownEpoch => "unknown-epoch".into(),
-        ChatError::EpochTooFarAhead => "epoch-too-far-ahead".into(),
+        ChatError::NotSynced => "not-synced".into(),
         ChatError::PadEpoch => "pad-epoch".into(),
         ChatError::State => "state".into(),
     }
@@ -616,21 +615,38 @@ impl Circle {
         self.chat.as_ref()?.current_epoch().map(epoch_str)
     }
 
+    /// Record that the relay has been read to the end, our own messages included. Call it
+    /// when a poll returns no entries. Until then `chat_send` refuses with `not-synced`. It
+    /// is not saved: a loaded circle starts unsynced.
+    pub fn chat_mark_synced(&mut self) {
+        if let Some(c) = self.chat.as_mut() {
+            c.mark_synced();
+        }
+    }
+
+    /// Whether `chat_mark_synced` has been called since this circle was made or loaded.
+    pub fn chat_synced(&self) -> bool {
+        self.chat.as_ref().is_some_and(ChatSession::synced)
+    }
+
     /// Move to the next root epoch. Nothing is spent. Error: `no-root`.
     pub fn rotate_epoch(&mut self) -> Result<String, String> {
         Ok(epoch_str(self.chat_mut()?.start_epoch()))
     }
 
     /// Encrypt a chat message (starting an epoch if needed) and return base64url wire bytes.
-    /// Error: `no-root`.
+    /// Errors: `no-root`, and `not-synced` until `chat_mark_synced` after a full read of the
+    /// relay since this circle was loaded.
     pub fn chat_send(&mut self, plaintext: &[u8]) -> Result<String, String> {
         let wire = self.chat_mut()?.send(plaintext).map_err(chat_err)?;
         Ok(b64_encode(&wire))
     }
 
-    /// Verify and decrypt a chat message. Errors: `no-root`, `tag`, `replay`,
-    /// `too-far-ahead`, `epoch-too-far-ahead`, `unknown-epoch`, `pad-epoch`, `wrong-circle`,
-    /// `version`, `length`, `base64url`.
+    /// Verify and decrypt a chat message. Feed our own messages here too: they are not
+    /// decrypted (the text is empty), but they move our sending position past them, so a
+    /// device restored from older state never reuses a key. Errors: `no-root`, `tag`,
+    /// `replay`, `too-far-ahead`, `unknown-epoch`, `pad-epoch`, `wrong-circle`, `version`,
+    /// `length`, `base64url`.
     pub fn chat_receive(&mut self, wire_b64: &str) -> Result<ChatReceived, String> {
         let chat = self.chat_mut()?;
         let wire = b64_decode(wire_b64)?;

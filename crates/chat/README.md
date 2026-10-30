@@ -6,15 +6,16 @@ This crate is end-to-end encrypted group chat keyed by the circle root, plus the
 
 Chat runs in numbered **epochs**. The key of epoch `n` is `HMAC-SHA256(root, "chat" || circle_id || n)`, the root's chat key, so an epoch costs no pad. Inside an epoch every sender has its own symmetric ratchet, so each message gets a fresh key and used keys are deleted. Messages are ChaCha20-Poly1305 with the header as associated data.
 
-- Confidentiality and integrity are **computational**. Only a holder of the root can derive the keys. The UI never says "unbreakable". Pure-pad text (`docs/protocol.md`) remains the mode for lines that deserve the strongest claim.
-- Deleting chain keys gives forward secrecy inside an epoch. A new epoch does not give post-compromise security: an attacker who took the root can derive every epoch.
+- Confidentiality and integrity are **computational**. Chat is as secret as the root. The UI never says "unbreakable". Pure-pad text (`docs/protocol.md`) remains the mode for lines that deserve the strongest claim.
+- Every member's device holds the root. Whoever compromises one member's device can read every message the relay still holds, past and future. Deleting chain keys bounds what one message key reveals and nothing more. A new epoch does not help.
+- A device writes its chat state before it posts, and reads the relay to the end, its own messages included, before its first send after a restart. Otherwise it could reuse a key and nonce. The session refuses to send with `NotSynced` until then.
 - Pad epochs, where 32 pad bytes keyed each epoch, are retired as of 2026-10-30. A message with a pad epoch id is refused.
 
 ## Limits
 
 - **`sender` is a chain label, not a person.** Every member can derive every sender's chain, just as every member holds every slice. The demo puts the typed name inside the plaintext as a courtesy; it proves nothing.
 - **The relay sees traffic shape.** It sees which circle posted, which epoch number and counter, when, and the bucketed size. It cannot read or forge an entry. Each member's chains refuse replays.
-- A receiver takes a new epoch only up to 64 past the highest it has seen, and keeps four epochs. An epoch older than one it dropped is refused.
+- A receiver keeps four epochs. An epoch older than one it dropped is refused.
 - The local ceremony is a development shortcut with OS randomness, so its circles carry the `CSPRNG` label.
 
 ## Demo: three terminals and a relay

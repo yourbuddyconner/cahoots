@@ -11,6 +11,9 @@ pub const ROTATE_AFTER: u32 = 1000;
 pub const MAX_SKIP: u32 = 256;
 /// Epoch states kept per session. The oldest is evicted beyond this.
 pub const MAX_EPOCHS: usize = 4;
+/// How far one of our own messages may move our sending position in one step. Our own
+/// counter rotates long before this, so a larger jump is not ours.
+pub const MAX_OWN_SKIP: u32 = 1 << 16;
 
 /// `CHS1` was the pad-epoch state. It does not import.
 const STATE_MAGIC: &[u8; 4] = b"CHS2";
@@ -63,6 +66,24 @@ impl SenderChain {
         Ok(mk)
     }
 
+    /// Move our own chain past `counter` without keeping skipped keys, and return the key
+    /// for `counter`. Our own messages are never decrypted, only checked.
+    fn own_key_for(&mut self, counter: u32) -> Result<Key, ChatError> {
+        if counter < self.next {
+            return Err(ChatError::Replay);
+        }
+        if counter - self.next > MAX_OWN_SKIP {
+            return Err(ChatError::TooFarAhead);
+        }
+        while self.next < counter {
+            let (_, next) = step(&self.chain);
+            self.chain = next;
+            self.next += 1;
+        }
+        self.skipped.clear();
+        Ok(self.advance().1)
+    }
+
     /// Next key for our own sends.
     fn advance(&mut self) -> (u32, Key) {
         let (mk, next) = step(&self.chain);
@@ -106,6 +127,9 @@ pub struct ChatSession {
     /// older than one that was. Starts at 0, so epoch 0 is never used.
     floor: u32,
     sent_in_current: u32,
+    /// Whether the caller has read the relay to the end since this session was made or
+    /// imported. Not exported: an imported session starts unsynced.
+    synced: bool,
 }
 
 impl ChatSession {
@@ -119,7 +143,18 @@ impl ChatSession {
             highest: 0,
             floor: 0,
             sent_in_current: 0,
+            synced: false,
         }
+    }
+
+    /// Record that the relay has been read to the end, our own messages included. Until
+    /// then `send` refuses with `NotSynced`, so a session restored from older state cannot
+    /// send from a counter it already used.
+    pub fn mark_synced(&mut self) {
+        self.synced = true;
+    }
+    pub fn synced(&self) -> bool {
+        self.synced
     }
 
     pub fn circle_id(&self) -> CircleId {
@@ -183,6 +218,9 @@ impl ChatSession {
         msg_type: MessageType,
         plaintext: &[u8],
     ) -> Result<Vec<u8>, ChatError> {
+        if !self.synced {
+            return Err(ChatError::NotSynced);
+        }
         if self.highest == 0
             || self.sent_in_current >= ROTATE_AFTER
             || self.epoch_mut(self.highest).is_none()
@@ -207,9 +245,13 @@ impl ChatSession {
         Ok(seal(&header, &mk, plaintext))
     }
 
-    /// Verify and decrypt. An unknown root epoch `n` is derived from the root if it is above
-    /// the floor and at most `MAX_AHEAD` past the highest seen, and kept only if the message
-    /// opens. State changes only on success.
+    /// Verify and decrypt. An unknown root epoch `n` above the floor is derived from the root
+    /// and kept only if the message opens. State changes only on success.
+    ///
+    /// A message from our own seat is not decrypted. If it is past our sending position and
+    /// its tag checks, our chain moves past it, and the plaintext returned is empty. If we
+    /// are already past it, nothing changes and the plaintext is empty too. This is how a
+    /// device that lost or rolled back its chat state finds its place again.
     pub fn receive(&mut self, wire: &[u8]) -> Result<(Header, Vec<u8>), ChatError> {
         let (header, body) = parse(wire)?;
         if header.circle_id != self.circle_id {
@@ -220,26 +262,33 @@ impl ChatSession {
         }
         let n = header.epoch.number().ok_or(ChatError::PadEpoch)?;
         let sender = usize::from(header.sender);
-        if let Some(epoch) = self.epoch_mut(n) {
-            let chain = &mut epoch.senders[sender];
-            // Work on a copy so a tag failure leaves the chain untouched.
-            let mut trial = chain.clone();
-            let mk = trial.key_for(header.counter)?;
-            let pt = open(&header, &mk, body)?;
-            *chain = trial;
-            return Ok((header, pt));
-        }
-        if n <= self.floor {
+        let own = header.sender == self.my_index;
+        let held = self.epoch_mut(n).is_some();
+        if !held && n <= self.floor {
             return Err(ChatError::UnknownEpoch);
         }
-        if u64::from(n) > u64::from(self.highest) + u64::from(MAX_AHEAD) {
-            return Err(ChatError::EpochTooFarAhead);
+        let mut fresh = None;
+        let epoch = match self.epoch_mut(n) {
+            Some(e) => e,
+            None => fresh.insert(EpochState::new(&self.root, &self.circle_id, n, self.members)),
+        };
+        let chain = &mut epoch.senders[sender];
+        if own && header.counter < chain.next {
+            return Ok((header, Vec::new()));
         }
-        let mut state = EpochState::new(&self.root, &self.circle_id, n, self.members);
-        let mk = state.senders[sender].key_for(header.counter)?;
+        // Work on a copy so a tag failure leaves the chain untouched.
+        let mut trial = chain.clone();
+        let mk = if own {
+            trial.own_key_for(header.counter)?
+        } else {
+            trial.key_for(header.counter)?
+        };
         let pt = open(&header, &mk, body)?;
-        self.install(state);
-        Ok((header, pt))
+        *chain = trial;
+        if let Some(state) = fresh {
+            self.install(state);
+        }
+        Ok((header, if own { Vec::new() } else { pt }))
     }
 
     /// Serialize epoch and chain state (secrets included) for persistence. The root is not
@@ -325,6 +374,7 @@ impl ChatSession {
             highest,
             floor,
             sent_in_current,
+            synced: false,
         })
     }
 }

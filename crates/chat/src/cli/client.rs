@@ -1,7 +1,9 @@
 //! The send/receive logic of the demo client, free of threads and stdin so tests can
 //! drive it. `Client::poll` pulls relay entries after the last seen sequence number and
-//! turns each into an `Event`. `send_line` seals and posts. State is persisted after
-//! every send and every processed entry.
+//! turns each into an `Event`. Our own messages go through the session too, so a client
+//! restored from older state finds its sending position. A poll that returns nothing marks
+//! the session synced, and `send_line` refuses until then (`sync` polls until it is).
+//! `send_line` seals, persists, then posts.
 
 use super::relay::{Relay, RelayError};
 use super::store::{self, CircleChat, CirclePad, OpenedCircle, StoreError};
@@ -14,7 +16,7 @@ use zeroize::Zeroizing;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    /// One of our own messages came back from the relay.
+    /// One of our own messages came back from the relay. Our sending position is past it.
     Own {
         seq: u64,
     },
@@ -182,12 +184,10 @@ impl<R: Relay> Client<R> {
 
     /// Process one relay entry without touching `last_seq` or persisting.
     pub fn handle_entry(&mut self, seq: u64, message: &[u8]) -> Event {
-        if let Ok(h) = parse_header(message) {
-            if h.sender == self.my_index && h.circle_id == self.circle_id {
-                return Event::Own { seq };
-            }
-        }
+        let own = parse_header(message)
+            .is_ok_and(|h| h.sender == self.my_index && h.circle_id == self.circle_id);
         match self.session.receive(message) {
+            Ok(_) if own => Event::Own { seq },
             Ok((Header { sender, .. }, pt)) => {
                 match bucket_unpad(&pt).and_then(|b| core::str::from_utf8(b).ok()) {
                     Some(text) => Event::Received {
@@ -211,9 +211,23 @@ impl<R: Relay> Client<R> {
             events.push(self.handle_entry(seq, &msg));
             self.last_seq = Some(seq);
         }
-        if !events.is_empty() {
+        if events.is_empty() {
+            self.session.mark_synced();
+        } else {
             self.persist()?;
         }
         Ok(events)
+    }
+
+    /// Poll until the relay has nothing more, so the session may send. Returns every event.
+    pub fn sync(&mut self) -> Result<Vec<Event>, ClientError> {
+        let mut all = Vec::new();
+        loop {
+            let events = self.poll(0)?;
+            if events.is_empty() {
+                return Ok(all);
+            }
+            all.extend(events);
+        }
     }
 }

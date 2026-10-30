@@ -7,10 +7,15 @@
 //! 32 pad bytes each, are retired; the pad is spent only by pure-pad messages.
 //!
 //! **Security claim.** Confidentiality and integrity are computational, from the AEAD under
-//! keys only a holder of the root can derive. Deleting chain keys gives forward secrecy
-//! inside an epoch. A new epoch does not recover from a device compromise that took the
-//! root, because every epoch key comes from it. The UI MUST NOT call this mode
-//! "unbreakable".
+//! keys derived from the root. Chat is as secret as the root. Every member's device holds
+//! it, so compromising one member's device reveals every message the relay still holds.
+//! Deleting chain keys bounds what one message key reveals and nothing more. The UI MUST
+//! NOT call this mode "unbreakable".
+//!
+//! **Sending position.** Keys depend only on the root, epoch, sender and counter. Write the
+//! exported state before posting, never roll it back, and after a restart feed the whole
+//! relay to `receive`, own messages included, then call `mark_synced`. `send` refuses with
+//! `NotSynced` until then.
 //!
 //! **The `sender` field is a chain label, not a person.** Every member can derive every
 //! sender's chain, exactly as every member holds every slice. It says which ratchet a

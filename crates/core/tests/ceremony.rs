@@ -761,12 +761,12 @@ fn a_bad_attestation_is_reported_and_does_not_abort() {
     );
     assert_eq!(devs[0].phase(), Phase::Attest, "nothing changed");
     assert_eq!(devs[0].missing_attestations(), vec![1, 2]);
-    // Our own index: ours is a no-op, anything else conflicts.
+    // Our own index: ours is a no-op, and another seat's attestation is not ours.
     let mine = devs[0].my_attestation().unwrap();
     devs[0].add_attestation(0, &mine).unwrap();
     assert_eq!(
         devs[0].add_attestation(0, &a1).unwrap_err(),
-        CeremonyError::ConflictingAttestation(0)
+        CeremonyError::BadAttestation(0)
     );
     devs[0].add_attestation(1, &a1).unwrap();
     // An embedded payload instead of a detached one is not an attestation.
@@ -775,13 +775,27 @@ fn a_bad_attestation_is_reported_and_does_not_abort() {
         devs[0].add_attestation(1, &embedded).unwrap_err(),
         CeremonyError::BadAttestation(1)
     );
-    // A different, valid attestation from seat 1: the same signature with s negated.
+    // A different, valid attestation from seat 1 (the same signature with s negated, as a
+    // signer with random nonces would make another) is ignored: the first one stays.
+    devs[0].add_attestation(1, &high_s(&a1)).unwrap();
+    // Seat 1's key signing the manifest again is accepted too.
+    let resigned = cose::sign1(&k1, &[1], &body, MANIFEST_AAD, true);
+    devs[0].add_attestation(1, &resigned).unwrap();
+    // An invalid one is still refused.
+    let mut broken = high_s(&a1);
+    let last = broken.len() - 1;
+    broken[last] ^= 1;
     assert_eq!(
-        devs[0].add_attestation(1, &high_s(&a1)).unwrap_err(),
-        CeremonyError::ConflictingAttestation(1)
+        devs[0].add_attestation(1, &broken).unwrap_err(),
+        CeremonyError::BadAttestation(1)
     );
     devs[0].add_attestation(2, &a2).unwrap();
     assert_eq!(devs[0].phase(), Phase::Complete);
+    let done = devs.remove(0).finish().unwrap();
+    assert_eq!(
+        done.manifest.attestations[1], a1,
+        "the first valid attestation is the one kept"
+    );
 }
 
 /// The other valid ECDSA signature over the same message: `s` replaced by `order - s`. The

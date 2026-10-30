@@ -74,9 +74,6 @@ pub enum CeremonyError {
     /// An attestation that does not verify against the member's seat key, our manifest
     /// bytes, and its key id. Nothing changed; receive it again.
     BadAttestation(u8),
-    /// A second, different, valid attestation for a member already held, or one for our own
-    /// index that is not ours.
-    ConflictingAttestation(u8),
     Aborted,
 }
 
@@ -550,8 +547,10 @@ impl Ceremony {
     }
 
     /// A member's attestation of the manifest. Verified with its seat key against our
-    /// manifest bytes; a bad one is `BadAttestation` and changes nothing. An identical
-    /// re-forward is accepted; a different valid one is `ConflictingAttestation`.
+    /// manifest bytes; a bad one is `BadAttestation` and changes nothing. A valid one for a
+    /// seat already held, identical or not, is accepted and ignored: the first one stays.
+    /// Seat keys may sign with random nonces (a Secure Enclave does), so two valid
+    /// attestations from one seat can differ.
     pub fn add_attestation(&mut self, from: u8, bytes: &[u8]) -> Result<(), CeremonyError> {
         if self.phase == Phase::Aborted {
             return Err(CeremonyError::Aborted);
@@ -563,12 +562,8 @@ impl Ceremony {
             return Err(CeremonyError::WrongPhase);
         };
         let i = usize::from(from);
-        if from == self.index {
-            return if self.attestations[i].as_deref() == Some(bytes) {
-                Ok(())
-            } else {
-                Err(CeremonyError::ConflictingAttestation(from))
-            };
+        if self.attestations[i].as_deref() == Some(bytes) {
+            return Ok(());
         }
         let bad = CeremonyError::BadAttestation(from);
         if cose::kid1(bytes).map_err(|_| bad)? != [from] {
@@ -576,12 +571,8 @@ impl Ceremony {
         }
         let key = self.seat_publics[i].as_ref().expect("all commitments held");
         cose::verify1(key, bytes, Some(body), MANIFEST_AAD).map_err(|_| bad)?;
-        match &self.attestations[i] {
-            Some(held) if held.as_slice() != bytes => {
-                return Err(CeremonyError::ConflictingAttestation(from));
-            }
-            Some(_) => {}
-            None => self.attestations[i] = Some(bytes.to_vec()),
+        if self.attestations[i].is_none() {
+            self.attestations[i] = Some(bytes.to_vec());
         }
         self.complete_if_all_attested();
         Ok(())

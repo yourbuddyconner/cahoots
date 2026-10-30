@@ -1,15 +1,21 @@
 //! Chat keyed by root epochs (docs/chat.md section 1): the epoch key is
 //! `chat_key(root, circle_id, n)`, and no pad is spent.
 
-use cahoots_chat::{parse, ChatError, ChatSession, EpochId, MAX_AHEAD, ROOT_EPOCH_SLICE};
+use cahoots_chat::{parse, ChatError, ChatSession, EpochId, ROOT_EPOCH_SLICE};
 use cahoots_core::root::chat_key;
 use cahoots_core::CircleId;
 
 const ROOT: [u8; 32] = [0x5a; 32];
 const CID: CircleId = [0xc1; 16];
 
+/// `n` members of one circle, each already synced with an empty relay.
 fn circle(n: u8) -> Vec<ChatSession> {
-    (0..n).map(|i| ChatSession::new(&ROOT, CID, n, i)).collect()
+    (0..n).map(|i| synced(ChatSession::new(&ROOT, CID, n, i))).collect()
+}
+
+fn synced(mut s: ChatSession) -> ChatSession {
+    s.mark_synced();
+    s
 }
 
 fn epoch_of(wire: &[u8]) -> EpochId {
@@ -18,7 +24,7 @@ fn epoch_of(wire: &[u8]) -> EpochId {
 
 /// A wire message in root epoch `n` from `sender`, sealed with the real derivation.
 fn sealed_in(root: &[u8; 32], n: u32, sender: u8, text: &[u8]) -> Vec<u8> {
-    let mut s = ChatSession::new(root, CID, 3, sender);
+    let mut s = synced(ChatSession::new(root, CID, 3, sender));
     while s.current_epoch() != Some(EpochId::root(n)) {
         s.start_epoch();
     }
@@ -106,20 +112,33 @@ fn a_message_from_another_root_is_refused() {
 }
 
 #[test]
-fn an_epoch_far_ahead_is_refused() {
+fn an_epoch_far_ahead_with_a_bad_tag_installs_nothing() {
     let mut s = circle(3);
     let w1 = s[0].send(b"e1").unwrap();
     s[1].receive(&w1).unwrap();
-    let too_far = sealed_in(&ROOT, 1 + MAX_AHEAD + 1, 0, b"far");
-    assert_eq!(
-        s[1].receive(&too_far).unwrap_err(),
-        ChatError::EpochTooFarAhead
-    );
+    // Epoch 100000 in the header: the header is authenticated, so the tag fails.
+    let mut far = w1.clone();
+    far[18..22].copy_from_slice(&100_000u32.to_le_bytes());
+    assert_eq!(s[1].receive(&far).unwrap_err(), ChatError::Tag);
     assert_eq!(s[1].current_epoch(), Some(EpochId::root(1)));
     assert_eq!(s[1].epochs(), 1);
-    let at_edge = sealed_in(&ROOT, 1 + MAX_AHEAD, 0, b"edge");
-    assert_eq!(s[1].receive(&at_edge).unwrap().1, b"edge");
-    assert_eq!(s[1].current_epoch(), Some(EpochId::root(1 + MAX_AHEAD)));
+    // A new epoch from this member still follows the highest it has read.
+    assert_eq!(s[1].start_epoch(), EpochId::root(2));
+}
+
+#[test]
+fn a_member_far_behind_catches_up() {
+    let mut s = circle(3);
+    let w1 = s[0].send(b"e1").unwrap();
+    s[2].receive(&w1).unwrap();
+    // Seat 0 moves on 500 epochs while seat 2 is away.
+    for _ in 0..500 {
+        s[0].start_epoch();
+    }
+    let latest = s[0].send(b"e501").unwrap();
+    assert_eq!(epoch_of(&latest), EpochId::root(501));
+    assert_eq!(s[2].receive(&latest).unwrap().1, b"e501");
+    assert_eq!(s[2].current_epoch(), Some(EpochId::root(501)));
 }
 
 #[test]
@@ -140,6 +159,7 @@ fn export_and_import_keep_the_place() {
     s[1].start_epoch();
     let state = s[1].export_state();
     let mut back = ChatSession::import_state(&ROOT, CID, 3, 1, &state).unwrap();
+    back.mark_synced();
     assert_eq!(back.current_epoch(), Some(EpochId::root(2)));
     assert_eq!(back.receive(&w1).unwrap().1, b"b");
     assert_eq!(back.receive(&w0).unwrap_err(), ChatError::Replay);
@@ -149,4 +169,67 @@ fn export_and_import_keep_the_place() {
     // State for another seat, or cut short, does not import.
     assert!(ChatSession::import_state(&ROOT, CID, 3, 2, &state).is_err());
     assert!(ChatSession::import_state(&ROOT, CID, 3, 1, &state[..state.len() / 2]).is_err());
+}
+
+#[test]
+fn sending_before_sync_is_refused() {
+    let mut fresh = ChatSession::new(&ROOT, CID, 3, 0);
+    assert!(!fresh.synced());
+    assert_eq!(fresh.send(b"x").unwrap_err(), ChatError::NotSynced);
+    fresh.mark_synced();
+    assert!(fresh.send(b"x").is_ok());
+    // An imported session starts unsynced too.
+    let mut back = ChatSession::import_state(&ROOT, CID, 3, 0, &fresh.export_state()).unwrap();
+    assert!(!back.synced());
+    assert_eq!(back.send(b"y").unwrap_err(), ChatError::NotSynced);
+}
+
+#[test]
+fn a_restored_session_does_not_reuse_a_counter() {
+    let mut s = circle(3);
+    let w0 = s[0].send(b"zero").unwrap();
+    let saved = s[0].export_state();
+    let w1 = s[0].send(b"one").unwrap();
+    let w2 = s[0].send(b"two").unwrap();
+    // Seat 0 comes back from the older state and reads the relay, its own messages included.
+    let mut back = ChatSession::import_state(&ROOT, CID, 3, 0, &saved).unwrap();
+    for w in [&w0, &w1, &w2] {
+        let (h, pt) = back.receive(w).unwrap();
+        assert_eq!(h.sender, 0);
+        assert!(pt.is_empty(), "our own messages are not decrypted");
+    }
+    back.mark_synced();
+    let w3 = back.send(b"three").unwrap();
+    assert_eq!(parse(&w3).unwrap().0.counter, 3);
+    assert_eq!(s[1].receive(&w3).unwrap().1, b"three");
+}
+
+#[test]
+fn a_session_that_lost_everything_finds_its_place_on_the_relay() {
+    let mut s = circle(3);
+    s[0].send(b"a").unwrap();
+    s[0].start_epoch();
+    let w = s[0].send(b"b").unwrap();
+    let mut fresh = ChatSession::new(&ROOT, CID, 3, 0);
+    fresh.receive(&w).unwrap();
+    fresh.mark_synced();
+    let next = fresh.send(b"c").unwrap();
+    assert_eq!(epoch_of(&next), EpochId::root(2));
+    assert_eq!(parse(&next).unwrap().0.counter, 1);
+}
+
+#[test]
+fn a_forged_own_message_moves_nothing() {
+    let mut s = circle(3);
+    let mut w = s[0].send(b"a").unwrap();
+    let w_counter_10 = {
+        let mut h = parse(&w).unwrap().0;
+        h.counter = 10;
+        let mut v = h.encode().to_vec();
+        v.extend_from_slice(&w[cahoots_chat::HEADER_LEN..]);
+        v
+    };
+    assert_eq!(s[0].receive(&w_counter_10).unwrap_err(), ChatError::Tag);
+    w = s[0].send(b"b").unwrap();
+    assert_eq!(parse(&w).unwrap().0.counter, 1);
 }

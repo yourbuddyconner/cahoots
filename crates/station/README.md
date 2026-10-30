@@ -7,7 +7,7 @@ An append-only, hash-chained public relay for circle ciphertext. Anyone can read
 - Stores every accepted message as one line of JSONL, in order, and never edits or removes a line.
 - Chains the lines: each entry's hash commits to the previous hash, so the head is a 32-byte summary of the whole history. On start it replays the file and re-verifies every hash. A broken chain refuses to start.
 - Refuses pure-pad address reuse. A pure-pad message names the pad bytes it spent as `(circle, slice, offset, length)`. If that range overlaps any earlier accepted entry for the same circle and slice, the station answers `409 {"error":"reuse"}`. It cannot verify a tag, because it holds no pad, but it can refuse a double spend at the address level, and a buggy client cannot get past it.
-- Accepts chat messages (version byte 2) without a reuse check. An epoch pointer appears in many chat messages by design, so reuse protection for epochs lives in each member's ledger.
+- Accepts chat messages (version byte 2) without a reuse check. An epoch id appears in many chat messages by design. Replay protection for chat lives in each member's chains.
 - Serves a read-only live feed page at `/` for a big screen, with no external assets.
 
 - Limits each client address to a burst and a rate of posts and of reads (`--posts-per-minute`, default 120; `--reads-per-minute`, default 600; 0 for none), answering `429 {"error":"rate"}` with `Retry-After: 10` past them. Behind a proxy, `--trust-forwarded` takes the client address from `Fly-Client-IP` or the first `X-Forwarded-For` entry; without it those headers are ignored, so a client cannot pick its own bucket.

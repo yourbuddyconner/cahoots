@@ -1,7 +1,7 @@
 //! What the station checks before it accepts a message. It cannot verify any tag, because
 //! it holds no pad. It can parse the public header, match the circle, and refuse pure-pad
 //! address reuse. Chat epochs are reused legitimately, so chat messages are never refused
-//! for reuse (see `docs/chat.md` section 6).
+//! for reuse (see `docs/chat.md` section 7).
 
 use cahoots_core::circle_id::CircleId;
 use cahoots_core::message::{self, MessageError};

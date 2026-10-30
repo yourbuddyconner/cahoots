@@ -3,9 +3,15 @@ use cahoots_chat::{ChatError, ChatSession, EpochId, MAX_EPOCHS, MAX_SKIP, ROTATE
 const ROOT: [u8; 32] = [0x42; 32];
 const CID: [u8; 16] = [0x0c; 16];
 
-/// `n` members of one circle.
+/// `n` members of one circle, each already synced with an empty relay.
 fn circle(n: u8) -> Vec<ChatSession> {
-    (0..n).map(|i| ChatSession::new(&ROOT, CID, n, i)).collect()
+    (0..n)
+        .map(|i| {
+            let mut s = ChatSession::new(&ROOT, CID, n, i);
+            s.mark_synced();
+            s
+        })
+        .collect()
 }
 
 #[test]
@@ -187,6 +193,7 @@ fn state_export_import_roundtrip() {
     s[1].receive(&w2).unwrap();
     let state = s[1].export_state();
     let mut restored = ChatSession::import_state(&ROOT, CID, 2, 1, &state).unwrap();
+    restored.mark_synced();
     assert_eq!(restored.receive(&w1).unwrap().1, b"b");
     assert_eq!(restored.receive(&w2).unwrap_err(), ChatError::Replay);
     let w3 = restored.send(b"d").unwrap();
