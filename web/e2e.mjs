@@ -1,6 +1,7 @@
 // End-to-end check of the browser app: two isolated browser contexts run a full ceremony through the
 // paste fallbacks (headless Chrome has no camera), exchange a one-time-pad message, then chat through
-// a Numbers Station started here.
+// a Numbers Station started here. Then three run a codes-only ceremony, and two hold a ceremony
+// through the relay (the station started here stands in for the default relay) and chat.
 //   node web/e2e.mjs            (needs the wasm build in web/app/pkg, `npm install` in web/, and
 //                                `cargo build -p cahoots-station`)
 // Screenshots land in web/e2e-out/.
@@ -29,7 +30,7 @@ await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}/`;
 
 // A relay of our own. The app ships pointing at relay.cahoots.network; the test never reaches it.
-const stationBin = join(here, "..", "target", "debug", "cahoots-station");
+const stationBin = join(process.env.CARGO_TARGET_DIR || join(here, "..", "target"), "debug", "cahoots-station");
 if (!existsSync(stationBin)) { console.error("build the relay first: cargo build -p cahoots-station"); process.exit(1); }
 const freePort = await new Promise((r) => { const s = createServer(); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => r(p)); }); });
 const stationUrl = `http://127.0.0.1:${freePort}`;
@@ -84,6 +85,7 @@ await L.snap("home");
 await L.page.click("text=Create a circle");
 await L.snap("new");
 await L.page.fill("input[type=text]", "e2e-test");
+await L.page.click("text=Codes only");
 await L.page.click("text=Continue");
 await L.snap("pick");
 await L.page.click("text=Make my contribution");
@@ -316,6 +318,7 @@ await group[0].page.getByRole('button', { name: 'Create a circle', exact: true }
 await group[0].page.fill('input[type=text]', 'three members');
 await group[0].page.getByRole('button', { name: 'More', exact: true }).click();
 await group[0].page.locator('.seg button').filter({ hasText: 'Small' }).click();
+await group[0].page.getByRole('button', { name: 'Codes only', exact: true }).click();
 await group[0].page.getByRole('button', { name: 'Continue', exact: true }).click();
 await group[0].page.getByRole('button', { name: 'Make my contribution', exact: true }).click();
 await group[0].page.waitForSelector('text=Step 1 of 4');
@@ -409,8 +412,69 @@ for (const p of group) {
 if (new Set(groupWords).size !== 1) throw new Error('Three-member check words differ');
 console.log('three-member ceremony ok: partial reveals, explicit handoffs, signatures and matching words; compact-phone actions visible.');
 
+// Through the relay: the host shows one code, the joiner reads it (pasted here), picks a seat,
+// and the rounds go through the relay. The station started here answers for the default relay.
+console.log("starting a ceremony through the relay");
+const viaStation = async (p) => p.page.context().route("https://relay.cahoots.network/**", async (r) => {
+  const u = new URL(r.request().url());
+  await r.fulfill({ response: await r.fetch({ url: stationUrl + u.pathname + u.search }) });
+});
+const H = await person("relay-host", { width: 390, height: 844 });
+const G = await person("relay-guest", { width: 390, height: 844 });
+people.push(H, G);
+await viaStation(H); await viaStation(G);
+await H.page.getByRole('button', { name: 'Create a circle', exact: true }).click();
+await H.page.fill('input[type=text]', 'through the relay');
+if (!(await H.page.locator('.seg button.on').filter({ hasText: 'Through the relay' }).count())) throw new Error('Through the relay should be the default');
+await H.page.getByRole('button', { name: 'Continue', exact: true }).click();
+await H.page.getByRole('button', { name: 'Make my contribution', exact: true }).click();
+await H.page.waitForSelector('text=Show this code to everyone joining');
+await H.snap('relay-offer');
+const offerFits = await H.page.evaluate(() => { const qr = document.querySelector('.qr svg').getBoundingClientRect(); return qr.width >= 180 && qr.height >= 180 && qr.bottom <= innerHeight; });
+if (!offerFits) throw new Error('The join code does not fit the screen');
+await H.menu(); await H.page.getByRole('button', { name: 'Copy the code', exact: true }).click(); const offer = await H.clip(); await H.closeSheet();
+if (!offer?.startsWith('cahoots:ceremony:v1:')) throw new Error(`offer text: ${offer}`);
+// The code on the host's screen reads back as the offer, at its displayed size.
+const shown = await H.page.evaluate(async () => {
+  const { qr_decode_rgba } = await import('./pkg/cahoots_wasm.js');
+  const svg = document.querySelector('.half .qr svg');
+  const rect = svg.getBoundingClientRect();
+  const image = new Image();
+  const loaded = new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; });
+  image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg.outerHTML);
+  await loaded;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = Math.floor(Math.min(rect.width, rect.height) * devicePixelRatio);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return qr_decode_rgba(canvas.width, canvas.height, ctx.getImageData(0, 0, canvas.width, canvas.height).data);
+});
+if (shown !== offer) throw new Error(`the code on screen reads as ${shown}`);
+await G.page.getByRole('button', { name: 'Join a circle', exact: true }).click();
+await G.page.waitForSelector("text=Scan the host's code");
+await G.page.getByRole('button', { name: 'No camera? Paste a code', exact: true }).click();
+await G.paste(offer);
+await G.page.waitForSelector('text=Which seat are you?');
+if (!(await G.page.$eval('.seg button[data-v="0"]', (b) => b.disabled))) throw new Error('seat 1 is the host\'s');
+await G.snap('relay-pick');
+await G.page.getByRole('button', { name: 'Make my contribution', exact: true }).click();
+for (const p of [H, G]) await p.page.waitForSelector('text=Step 4 of 4', { timeout: 20000 });
+const wH = await wordsOf(H.page), wG = await wordsOf(G.page);
+if (wH !== wG) throw new Error(`relay check words differ: ${wH} / ${wG}`);
+console.log("relay check words:", wH);
+await G.snap('relay-words');
+await H.page.click("text=They match"); await G.page.click("text=They match");
+for (const p of [H, G]) await p.page.waitForSelector('.status:has-text("Connected")', { timeout: 10000 });
+await G.page.fill('input[placeholder="Message"]', "made through the relay");
+await G.page.keyboard.press("Enter");
+await H.page.waitForSelector('.bubble.in:has-text("made through the relay")', { timeout: 15000 });
+await H.snap('relay-chat');
+console.log('relay ceremony ok: one code, a seat, the rounds through the relay, matching words, then chat.');
+// The chat screen long-polls through the proxy; let those go before the browser closes.
+for (const p of [H, G]) await p.page.context().unrouteAll({ behavior: 'ignoreErrors' });
+
 await browser.close();
 server.close();
 station.kill();
 if (errors.length) { console.error("page errors:\n" + errors.join("\n")); process.exit(1); }
-console.log(process.argv.includes("--ceremony-only") ? "e2e ok: three-member ceremony and compact QR/camera layouts." : "e2e ok: two- and three-member ceremonies, chat through a relay, OTP message, replay refused.", "Screenshots in", out);
+console.log(process.argv.includes("--ceremony-only") ? "e2e ok: three-member ceremony and compact QR/camera layouts." : "e2e ok: two- and three-member ceremonies, a ceremony through the relay, chat through a relay, OTP message, replay refused.", "Screenshots in", out);

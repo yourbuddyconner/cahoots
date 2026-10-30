@@ -18,7 +18,7 @@ You need two phones or laptops. No badge is required.
 
 1. Open the [browser app](https://cahoots.network/app/) on both devices.
 2. One person selects **Create a circle**. The other selects **Join a circle**.
-3. Follow [Create a circle](ceremony-guide.md) to exchange codes and check the words.
+3. Follow [Create a circle](ceremony-guide.md). The host shows one code, the other person scans it, and the rest goes through the relay. Then you both check the words. To hold it with no network, pick **Codes only**.
 4. Open **Chat** and talk. Messages travel through the default relay, which only ever sees encrypted bytes. To send something without any server, use **Send a message** by QR code or paste.
 
 The meeting that creates the circle is called a **ceremony**. It exchanges keys; it does not set up a chat server. Chat uses a relay that every member can reach. The app ships with one; a member can [run their own](relay.md) instead.

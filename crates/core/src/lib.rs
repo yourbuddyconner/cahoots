@@ -5,6 +5,7 @@
 extern crate alloc;
 
 pub mod ceremony;
+pub mod channel;
 pub mod checkwords;
 pub mod circle_id;
 pub mod combine;

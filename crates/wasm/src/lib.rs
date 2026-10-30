@@ -8,6 +8,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use cahoots_chat::{self as chat, ChatError, ChatSession, EpochId};
 use cahoots_core::ceremony::{Ceremony, CeremonyError, Phase};
+use cahoots_core::channel::{Channel, ChannelError, Mailbox, Round};
 use cahoots_core::ledger::{MemLedger, SpentLedger};
 use cahoots_core::manifest::{Manifest, SealedManifest};
 use cahoots_core::message::{MessageError, MessageType};
@@ -16,6 +17,7 @@ use cahoots_core::pairwise;
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::PUBLIC_KEY_LEN;
 use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
+use rand_core::{OsRng, RngCore};
 use wasm_bindgen::prelude::*;
 use zeroize::Zeroizing;
 
@@ -141,6 +143,69 @@ fn params_err(e: cahoots_core::params::ParamsError) -> String {
 #[wasm_bindgen(js_name = Ceremony)]
 pub struct WasmCeremony {
     inner: Ceremony,
+    /// The relay channel, for a ceremony held through the relay. `None` for codes only.
+    mailbox: Option<Mailbox>,
+    /// Signatures read from the relay before every reveal was in.
+    early: Vec<(u8, Vec<u8>)>,
+}
+
+fn offer_err(e: ChannelError) -> String {
+    match e {
+        ChannelError::NotAnOffer => "not-an-offer".into(),
+        _ => "offer".into(),
+    }
+}
+
+/// The circle's parameter bytes in a host's offer (`cahoots:ceremony:v1:...`), to show the seat
+/// picker before joining. Errors: `"not-an-offer"`, `"offer"` (an offer that does not read).
+#[wasm_bindgen]
+pub fn offer_params(text: &str) -> Result<Vec<u8>, String> {
+    Channel::from_offer(text)
+        .map(|(_, p)| p.encode())
+        .map_err(offer_err)
+}
+
+#[allow(clippy::too_many_arguments)] // the ceremony's inputs, as the constructor takes them
+fn build(
+    params: CircleParams,
+    index: u8,
+    contribution: &[u8],
+    extra: Option<Vec<u8>>,
+    kem_seed: &[u8],
+    seat_seed: &[u8],
+    tier: u8,
+) -> Result<Ceremony, String> {
+    // Held in `Zeroizing` so these copies are wiped; the core gets its own copies.
+    let seed: Zeroizing<[u8; 32]> = Zeroizing::new(
+        kem_seed
+            .try_into()
+            .map_err(|_| "kem-seed-length".to_string())?,
+    );
+    let seat_seed: Zeroizing<[u8; 32]> = Zeroizing::new(
+        seat_seed
+            .try_into()
+            .map_err(|_| "seat-seed-length".to_string())?,
+    );
+    match extra {
+        Some(x) => Ceremony::with_extra_source(
+            params,
+            index,
+            contribution.to_vec(),
+            &x,
+            *seed,
+            *seat_seed,
+            tier,
+        ),
+        None => Ceremony::new(
+            params,
+            index,
+            contribution.to_vec(),
+            *seed,
+            *seat_seed,
+            tier,
+        ),
+    }
+    .map_err(ceremony_err)
 }
 
 #[wasm_bindgen(js_class = Ceremony)]
@@ -165,38 +230,123 @@ impl WasmCeremony {
         tier: u8,
     ) -> Result<WasmCeremony, String> {
         let params = CircleParams::new(n, pad_len, name, agent_seat).map_err(params_err)?;
-        // Held in `Zeroizing` so these copies are wiped; the core gets its own copies.
-        let seed: Zeroizing<[u8; 32]> = Zeroizing::new(
-            kem_seed
-                .try_into()
-                .map_err(|_| "kem-seed-length".to_string())?,
-        );
-        let seat_seed: Zeroizing<[u8; 32]> = Zeroizing::new(
-            seat_seed
-                .try_into()
-                .map_err(|_| "seat-seed-length".to_string())?,
-        );
-        let inner = match extra {
-            Some(x) => Ceremony::with_extra_source(
-                params,
-                index,
-                contribution.to_vec(),
-                &x,
-                *seed,
-                *seat_seed,
-                tier,
-            ),
-            None => Ceremony::new(
-                params,
-                index,
-                contribution.to_vec(),
-                *seed,
-                *seat_seed,
-                tier,
-            ),
+        let inner = build(params, index, contribution, extra, kem_seed, seat_seed, tier)?;
+        Ok(WasmCeremony {
+            inner,
+            mailbox: None,
+            early: Vec::new(),
+        })
+    }
+
+    /// Join a ceremony held through the relay, from the host's offer, as seat `index`. The other
+    /// arguments are the constructor's. Seat 0 is the host's: `"host-seat"`.
+    #[allow(clippy::too_many_arguments)] // a JavaScript-facing constructor
+    pub fn from_offer(
+        offer: &str,
+        index: u8,
+        contribution: &[u8],
+        extra: Option<Vec<u8>>,
+        kem_seed: &[u8],
+        seat_seed: &[u8],
+        tier: u8,
+    ) -> Result<WasmCeremony, String> {
+        let (channel, params) = Channel::from_offer(offer).map_err(offer_err)?;
+        if index == 0 {
+            return Err("host-seat".into());
         }
-        .map_err(ceremony_err)?;
-        Ok(WasmCeremony { inner })
+        let inner = build(params, index, contribution, extra, kem_seed, seat_seed, tier)?;
+        Ok(WasmCeremony {
+            inner,
+            mailbox: Some(Mailbox::new(channel, index)),
+            early: Vec::new(),
+        })
+    }
+
+    /// The code to show everyone joining through the relay. The first call opens the channel:
+    /// from then on the ceremony is held through the relay.
+    pub fn offer(&mut self) -> String {
+        let index = self.inner.index();
+        let mb = self
+            .mailbox
+            .get_or_insert_with(|| Mailbox::new(Channel::new(&mut OsRng), index));
+        mb.channel().offer(self.inner.params())
+    }
+
+    pub fn through_relay(&self) -> bool {
+        self.mailbox.is_some()
+    }
+
+    /// The channel id, 32 hex characters: the relay files the messages under it where a circle
+    /// id would go. `None` for codes only.
+    pub fn channel_hex(&self) -> Option<String> {
+        self.mailbox.as_ref().map(|m| hex(&m.channel().id))
+    }
+
+    /// The sealed messages to post now, base64url: this seat's commitment, then its reveal once
+    /// every commitment is in, then its signature once every reveal is in. Each is sealed once
+    /// and returned until `posted` names it or it is read back from the relay. Post them in
+    /// order and stop at the first that fails.
+    pub fn outbound(&mut self) -> Result<Vec<String>, String> {
+        if self.mailbox.is_none() {
+            return Ok(Vec::new());
+        }
+        let commitment = self.commitment();
+        let phase = self.inner.phase();
+        let reveal = if matches!(phase, Phase::Reveal | Phase::Attest | Phase::Complete) {
+            let mut fill = |buf: &mut [u8]| OsRng.fill_bytes(buf);
+            self.inner.my_reveal(&mut fill).map(<[u8]>::to_vec)
+        } else {
+            None
+        };
+        let attestation = self.inner.my_attestation();
+        let mb = self.mailbox.as_mut().expect("checked");
+        mb.queue(Round::Commit, &commitment, &mut OsRng);
+        if let Some(r) = reveal {
+            mb.queue(Round::Reveal, &r, &mut OsRng);
+        }
+        if let Some(a) = attestation {
+            mb.queue(Round::Attest, &a, &mut OsRng);
+        }
+        Ok(mb.unposted().iter().map(|w| URL_SAFE_NO_PAD.encode(w)).collect())
+    }
+
+    /// The relay took this message, as `outbound` gave it.
+    pub fn posted(&mut self, wire_b64: &str) {
+        if let (Some(mb), Ok(w)) = (self.mailbox.as_mut(), URL_SAFE_NO_PAD.decode(wire_b64)) {
+            mb.posted(&w);
+        }
+    }
+
+    /// One message read from the relay under the channel id. `true` when it moved the ceremony.
+    /// A message that does not open (a stranger's), our own, or a second one for a seat and
+    /// round already held is passed over with `false`. Another device on our seat is
+    /// `"same-seat:<index>"`; the core's refusals are as for codes.
+    pub fn inbound(&mut self, wire: &[u8]) -> Result<bool, String> {
+        let mb = self
+            .mailbox
+            .as_mut()
+            .ok_or_else(|| "not-through-relay".to_string())?;
+        let Some((seat, round, payload)) = mb.receive(wire) else {
+            return Ok(false);
+        };
+        if seat == self.inner.index() {
+            return Err(format!("same-seat:{seat}"));
+        }
+        match (round, self.inner.phase()) {
+            (Round::Commit, Phase::Commit) => self.add_commitment(seat, &payload)?,
+            // Every commitment is held once the phase has moved on.
+            (Round::Commit, _) => return Ok(false),
+            (Round::Reveal, _) => self.add_reveal(seat, &payload)?,
+            (Round::Attest, Phase::Commit | Phase::Reveal) => self.early.push((seat, payload)),
+            (Round::Attest, _) => self.add_attestation(seat, &payload)?,
+        }
+        if self.inner.phase() == Phase::Attest {
+            for (i, a) in std::mem::take(&mut self.early) {
+                // A bad one is dropped: the relay holds only the first from each seat.
+                let _ = self.inner.add_attestation(i, &a);
+            }
+        }
+        Ok(true)
     }
 
     /// Canonical parameter bytes, shown to every member for confirmation and shared with joiners.

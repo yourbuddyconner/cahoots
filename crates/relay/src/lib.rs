@@ -1,6 +1,10 @@
 //! Relay clients for the Numbers Station: the HTTP client, and an in-memory stand-in for tests.
 //! Shared by the chat CLI and `cahoots-wg`. A relay carries sealed bytes and sequence numbers,
 //! nothing else.
+//!
+//! A ceremony held through the relay uses the same endpoints: its channel id (16 random bytes,
+//! from the host's code) goes where a circle id would, so `post` and `poll` take it as a
+//! `CircleId` (see `cahoots_core::channel`).
 
 use cahoots_core::CircleId;
 use std::sync::{Arc, Mutex};

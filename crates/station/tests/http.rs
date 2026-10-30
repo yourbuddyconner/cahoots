@@ -276,3 +276,56 @@ async fn full_log_answers_507() {
     // Reads still work on a full log.
     assert_eq!(client.get(&url).send().await.unwrap().status(), 200);
 }
+
+fn ceremony_message(id: [u8; 16], payload: &[u8]) -> Vec<u8> {
+    let ch = cahoots_core::channel::Channel::from_key(id, [5; 32]);
+    ch.seal_with_nonce(1, cahoots_core::channel::Round::Commit, payload, [9; 12])
+}
+
+#[tokio::test]
+async fn a_ceremony_message_is_stored_and_served() {
+    let (base, _dir) = start().await;
+    let client = reqwest::Client::new();
+    let id = [0x3C; 16];
+    let url = format!("{base}/v1/circles/{}/messages", hex::encode(id));
+    let first = ceremony_message(id, b"a commitment");
+    let second = ceremony_message(id, b"the same bytes are not a reuse");
+    for (m, seq) in [(&first, 0), (&second, 1), (&first, 2)] {
+        let r = client.post(&url).body(m.clone()).send().await.unwrap();
+        assert_eq!(r.status(), 201);
+        let v: Value = r.json().await.unwrap();
+        assert_eq!(v["seq"], seq);
+    }
+    let v: Value = client.get(&url).send().await.unwrap().json().await.unwrap();
+    let entries = v["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 3);
+    use base64::Engine;
+    let got = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(entries[1]["message"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(got, second);
+    // The id in the body must be the id in the path, and the length must be right.
+    let other = format!("{base}/v1/circles/{}/messages", hex::encode([0x3D; 16]));
+    let r = client.post(&other).body(first.clone()).send().await.unwrap();
+    assert_eq!(r.status(), 400);
+    let mut short = first.clone();
+    short.pop();
+    let r = client.post(&url).body(short).send().await.unwrap();
+    assert_eq!(r.status(), 400);
+}
+
+#[tokio::test]
+async fn an_oversized_ceremony_message_is_refused() {
+    let (base, _dir) = start().await;
+    let client = reqwest::Client::new();
+    let id = [0x4E; 16];
+    let url = format!("{base}/v1/circles/{}/messages", hex::encode(id));
+    let cap = cahoots_station::rules::MAX_BODY;
+    let fits = ceremony_message(id, &vec![1u8; cap - 21 - 30]);
+    assert_eq!(fits.len(), cap);
+    let r = client.post(&url).body(fits).send().await.unwrap();
+    assert_eq!(r.status(), 201);
+    let over = ceremony_message(id, &vec![1u8; cap - 21 - 30 + 1]);
+    let r = client.post(&url).body(over).send().await.unwrap();
+    assert_eq!(r.status(), 413);
+}

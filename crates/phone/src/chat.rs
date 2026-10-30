@@ -258,19 +258,25 @@ impl Circle {
     }
 
     pub fn set_relay(&mut self, url: &str) -> Result<(), PhoneError> {
-        let url = url.trim().trim_end_matches('/');
-        if !(url.starts_with("https://") || url.starts_with("http://")) || url.contains(' ') {
-            return Err(network("A relay address starts with https://."));
-        }
+        let url = check_relay(url)?;
         if url != self.settings.relay {
             // Another relay counts its entries from its own start.
-            self.settings.relay = url.into();
+            self.settings.relay = url;
             self.settings.save(&self.dir)?;
             self.cursor = CursorRecord::default();
             self.cursor.save(&self.dir)?;
         }
         Ok(())
     }
+}
+
+/// A relay address as set: trimmed, without a trailing slash, starting with https:// or http://.
+pub(crate) fn check_relay(url: &str) -> Result<String, PhoneError> {
+    let url = url.trim().trim_end_matches('/');
+    if !(url.starts_with("https://") || url.starts_with("http://")) || url.contains(' ') {
+        return Err(network("A relay address starts with https://."));
+    }
+    Ok(url.into())
 }
 
 fn to_message(m: &MessageRecord, pending: bool) -> ChatMessage {
@@ -292,7 +298,7 @@ pub(crate) fn random_id() -> Result<String, PhoneError> {
     Ok(hex::encode(b))
 }
 
-fn parse_entries(body: &[u8]) -> Result<Vec<(u64, Vec<u8>)>, PhoneError> {
+pub(crate) fn parse_entries(body: &[u8]) -> Result<Vec<(u64, Vec<u8>)>, PhoneError> {
     let v: serde_json::Value =
         serde_json::from_slice(body).map_err(|_| network("The relay's answer does not read."))?;
     let mut out = Vec::new();

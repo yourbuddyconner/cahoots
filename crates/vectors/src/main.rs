@@ -431,6 +431,34 @@ fn frame_vectors() -> Value {
     })
 }
 
+fn channel_vectors() -> Value {
+    use cahoots_core::channel::{Channel, Round};
+    let id: [u8; 16] = fill(700, 16).try_into().unwrap();
+    let key: [u8; 32] = fill(701, 32).try_into().unwrap();
+    let params = CircleParams::new(3, 65536, "park", false).unwrap();
+    let ch = Channel::from_key(id, key);
+    let offer = ch.offer(&params);
+    let nonce: [u8; 12] = fill(702, 12).try_into().unwrap();
+    let payload = fill(703, 48);
+    let wire = ch.seal_with_nonce(2, Round::Reveal, &payload, nonce);
+    let (seat, round, opened) = ch.open(&wire).unwrap();
+    assert_eq!(opened, payload);
+    json!({
+        "description": "The ceremony channel (crates/core/src/channel.rs, docs/protocol.md section 3.7). offer = \"cahoots:ceremony:v1:\" || base64url without padding (id || key || params). A message is version 3 | id (16) | len (u32 LE, the bytes after it) | seat | round (1 commit, 2 reveal, 3 attest) | nonce (12) | ChaCha20-Poly1305 ciphertext and tag, under HKDF-SHA256(ikm = key, salt = id, info = \"cahoots/ceremony/channel/v1\"), with id || seat || round as associated data.",
+        "id": hex::encode(id),
+        "key": hex::encode(key),
+        "params": hex::encode(params.encode()),
+        "offer": offer,
+        "message": {
+            "seat": seat,
+            "round": round as u8,
+            "nonce": hex::encode(nonce),
+            "payload": hex::encode(&payload),
+            "wire": hex::encode(&wire),
+        },
+    })
+}
+
 /// Inputs of a grant, every field, so a client can rebuild the payload.
 fn grant_inputs(g: &Grant) -> Value {
     json!({
@@ -926,6 +954,7 @@ fn main() {
         ("messages.json", message_vectors()),
         ("spend.json", spend_vectors()),
         ("frames.json", frame_vectors()),
+        ("channel.json", channel_vectors()),
         ("objects.json", object_vectors()),
     ];
     let mut stale = Vec::new();

@@ -1,0 +1,205 @@
+use cahoots_core::channel::{
+    parts, Channel, ChannelError, Mailbox, Round, CEREMONY_VERSION, MAX_WIRE, OFFER_PREFIX,
+};
+use cahoots_core::params::CircleParams;
+use rand_core::{CryptoRng, RngCore};
+
+/// A deterministic generator for the tests: xorshift, not for keys anyone keeps.
+struct TestRng(u64);
+
+impl RngCore for TestRng {
+    fn next_u32(&mut self) -> u32 {
+        self.next_u64() as u32
+    }
+    fn next_u64(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        for b in dest {
+            *b = (self.next_u64() >> 56) as u8;
+        }
+    }
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core::Error> {
+        self.fill_bytes(dest);
+        Ok(())
+    }
+}
+impl CryptoRng for TestRng {}
+
+fn rng(seed: u64) -> TestRng {
+    TestRng(0x9E37_79B9_7F4A_7C15 ^ seed)
+}
+
+fn params() -> CircleParams {
+    CircleParams::new(3, 65536, "park", false).unwrap()
+}
+
+#[test]
+fn offer_round_trips() {
+    let ch = Channel::new(&mut rng(1));
+    let text = ch.offer(&params());
+    assert!(text.starts_with(OFFER_PREFIX), "{text}");
+    // One small static code: well under what a version 10 QR code holds at low correction.
+    assert!(text.len() < 150, "{} characters", text.len());
+    let (back, p) = Channel::from_offer(&text).unwrap();
+    assert_eq!(back.id, ch.id);
+    assert_eq!(p, params());
+    // The same key: a message sealed by one opens with the other.
+    let wire = ch.seal(1, Round::Commit, b"hello", &mut rng(2));
+    assert_eq!(back.open(&wire).unwrap(), (1, Round::Commit, b"hello".to_vec()));
+
+    assert_eq!(
+        Channel::from_offer("cahoots-params:0:AQ").unwrap_err(),
+        ChannelError::NotAnOffer
+    );
+    assert_eq!(
+        Channel::from_offer(&format!("{OFFER_PREFIX}AAAA")).unwrap_err(),
+        ChannelError::Malformed
+    );
+    // Parameters that do not read are refused.
+    let mut bad = text.clone();
+    bad.truncate(text.len() - 2);
+    assert!(Channel::from_offer(&bad).is_err());
+}
+
+#[test]
+fn a_sealed_message_opens_only_with_the_key() {
+    let ch = Channel::new(&mut rng(3));
+    let wire = ch.seal(2, Round::Reveal, b"a sealed reveal", &mut rng(4));
+    // The station's header: version, the channel id, the length of the rest.
+    assert_eq!(wire[0], CEREMONY_VERSION);
+    assert_eq!(&wire[1..17], &ch.id);
+    let len = u32::from_le_bytes(wire[17..21].try_into().unwrap()) as usize;
+    assert_eq!(wire.len(), 21 + len);
+    assert!(!wire.windows(15).any(|w| w == b"a sealed reveal"));
+    assert_eq!(
+        ch.open(&wire).unwrap(),
+        (2, Round::Reveal, b"a sealed reveal".to_vec())
+    );
+
+    // A stranger with its own key, posting under the same id, is refused.
+    let mut stranger = Channel::new(&mut rng(5));
+    stranger.id = ch.id;
+    let theirs = stranger.seal(2, Round::Reveal, b"a sealed reveal", &mut rng(6));
+    assert_eq!(ch.open(&theirs).unwrap_err(), ChannelError::Open);
+    // Another channel's message is not this channel's.
+    let other = Channel::new(&mut rng(7));
+    assert_eq!(other.open(&wire).unwrap_err(), ChannelError::OtherChannel);
+}
+
+#[test]
+fn aad_binds_seat_and_round() {
+    let ch = Channel::new(&mut rng(8));
+    let wire = ch.seal(1, Round::Commit, b"commitment", &mut rng(9));
+    // The seat and the round travel in the clear after the length, and the tag covers them.
+    let mut seat = wire.clone();
+    seat[21] = 2;
+    assert_eq!(ch.open(&seat).unwrap_err(), ChannelError::Open);
+    let mut round = wire.clone();
+    round[22] = Round::Attest as u8;
+    assert_eq!(ch.open(&round).unwrap_err(), ChannelError::Open);
+    let mut unknown = wire.clone();
+    unknown[22] = 9;
+    assert_eq!(ch.open(&unknown).unwrap_err(), ChannelError::Malformed);
+}
+
+#[test]
+fn a_tampered_message_is_refused() {
+    let ch = Channel::new(&mut rng(10));
+    let wire = ch.seal(0, Round::Attest, b"signature", &mut rng(11));
+    for i in 23..wire.len() {
+        let mut t = wire.clone();
+        t[i] ^= 1;
+        assert_eq!(ch.open(&t).unwrap_err(), ChannelError::Open, "byte {i}");
+    }
+    let mut short = wire.clone();
+    short.pop();
+    assert_eq!(ch.open(&short).unwrap_err(), ChannelError::Malformed);
+    let mut version = wire.clone();
+    version[0] = 2;
+    assert_eq!(ch.open(&version).unwrap_err(), ChannelError::Malformed);
+    assert_eq!(ch.open(&[]).unwrap_err(), ChannelError::Malformed);
+}
+
+#[test]
+fn a_large_payload_travels_in_parts_under_the_station_cap() {
+    let big: Vec<u8> = (0..300_000u32).map(|i| (i * 7) as u8).collect();
+    let ch = Channel::new(&mut rng(12));
+    let mut host = Mailbox::new(ch.clone(), 0);
+    let mut guest = Mailbox::new(ch, 1);
+    host.queue(Round::Reveal, &big, &mut rng(13));
+    let wires = host.unposted();
+    assert_eq!(wires.len(), parts(&big).len());
+    assert!(wires.len() > 1);
+    assert!(wires.iter().all(|w| w.len() <= MAX_WIRE));
+    // Out of order, with a repeat: the payload comes out once, whole.
+    let mut got = Vec::new();
+    for w in wires.iter().rev().chain(wires.iter()) {
+        got.extend(guest.receive(w));
+    }
+    assert_eq!(got, vec![(0, Round::Reveal, big)]);
+}
+
+#[test]
+fn a_mailbox_keeps_the_first_message_per_seat_and_round() {
+    let ch = Channel::new(&mut rng(14));
+    let mut a = Mailbox::new(ch.clone(), 0);
+    let mut b = Mailbox::new(ch.clone(), 1);
+    let mut c = Mailbox::new(ch.clone(), 2);
+    b.queue(Round::Commit, b"first", &mut rng(15));
+    // Queued once: a second queue for the round changes nothing.
+    b.queue(Round::Commit, b"second", &mut rng(16));
+    assert_eq!(b.unposted().len(), 1);
+    let first = b.unposted().remove(0);
+    // A second sealing of another commitment for seat 1, as a second device on that seat.
+    let mut d = Mailbox::new(ch.clone(), 1);
+    d.queue(Round::Commit, b"other", &mut rng(17));
+    let second = d.unposted().remove(0);
+
+    assert_eq!(a.receive(&first), Some((1, Round::Commit, b"first".to_vec())));
+    assert_eq!(a.receive(&second), None);
+    assert_eq!(a.receive(&first), None);
+    // Our own message seen on the relay counts as posted.
+    assert_eq!(b.receive(&first), None);
+    assert!(b.unposted().is_empty());
+    // Another device's message for our seat is handed up, so the caller can say so.
+    assert_eq!(b.receive(&second), Some((1, Round::Commit, b"other".to_vec())));
+    // A message that does not open is dropped.
+    let stranger = Channel::new(&mut rng(18));
+    let mut s = stranger.seal(1, Round::Commit, b"x", &mut rng(19));
+    s[1..17].copy_from_slice(&ch.id);
+    assert_eq!(c.receive(&s), None);
+    // Posting by hand clears it too.
+    c.queue(Round::Commit, b"c", &mut rng(20));
+    let w = c.unposted().remove(0);
+    c.posted(&w);
+    assert!(c.unposted().is_empty());
+    assert!(c.queued(Round::Commit));
+    assert!(!c.queued(Round::Reveal));
+}
+
+#[test]
+fn reproduces_the_channel_vector() {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../vectors/channel.json"
+    ))
+    .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let h = |k: &serde_json::Value| hex::decode(k.as_str().unwrap()).unwrap();
+    let id: [u8; 16] = h(&v["id"]).try_into().unwrap();
+    let key: [u8; 32] = h(&v["key"]).try_into().unwrap();
+    let params = CircleParams::decode(&h(&v["params"])).unwrap();
+    let ch = Channel::from_key(id, key);
+    assert_eq!(ch.offer(&params), v["offer"].as_str().unwrap());
+    let m = &v["message"];
+    let nonce: [u8; 12] = h(&m["nonce"]).try_into().unwrap();
+    let round = Round::from_u8(m["round"].as_u64().unwrap() as u8).unwrap();
+    let seat = m["seat"].as_u64().unwrap() as u8;
+    let wire = ch.seal_with_nonce(seat, round, &h(&m["payload"]), nonce);
+    assert_eq!(wire, h(&m["wire"]));
+    assert_eq!(ch.open(&wire).unwrap(), (seat, round, h(&m["payload"])));
+}

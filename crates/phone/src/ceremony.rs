@@ -6,15 +6,22 @@
 //! `cahoots-reveal:<seat>:<b64>`, `cahoots-attest:<seat>:<b64>`. Animated forms: RaptorQ
 //! packets, each `CHQ1 || OTI (12) || packet`, base64url, over one of
 //! `1 || seat || params len || params || commitment`, `2 || sealed reveal`, `3 || seat || attestation`.
+//!
+//! A ceremony can also be held through the relay (`cahoots_core::channel`): the host shows one
+//! static code, `cahoots:ceremony:v1:...`, everyone joining scans it, and each round's
+//! messages go through the relay, sealed under the code's key. The payloads are the same
+//! bytes as above, and the rounds are the same `Ceremony`.
 
 use crate::signer::{Seat, Signer};
-use crate::PhoneError;
+use crate::{Http, PhoneError};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use cahoots_core::ceremony::{Ceremony, CeremonyError, CeremonyResult, Phase};
+use cahoots_core::channel::{Channel, Mailbox, Round};
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::PUBLIC_KEY_LEN;
 use cahoots_core::seat::SeatPublic;
+use rand_core::OsRng;
 use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation, PayloadId};
 use std::collections::HashMap;
 use zeroize::Zeroizing;
@@ -384,6 +391,12 @@ pub struct Pending {
     /// Signatures scanned before every reveal was in, checked once the manifest exists.
     early_attestations: Vec<(u8, Vec<u8>)>,
     receiver: Receiver,
+    /// The relay channel, for a ceremony held through the relay.
+    mailbox: Option<Mailbox>,
+    /// The relay this ceremony uses, and the circle chats through once kept.
+    pub relay: String,
+    /// The last relay sequence number read from the channel.
+    cursor: Option<u64>,
 }
 
 fn random(len: usize) -> Result<Zeroizing<Vec<u8>>, PhoneError> {
@@ -402,6 +415,8 @@ impl Pending {
         seat: u8,
         signer: &dyn Signer,
         seat_label: String,
+        channel: Option<Channel>,
+        relay: String,
     ) -> Result<Self, PhoneError> {
         let public = signer.make_key(seat_label.clone())?;
         let seat_public = SeatPublic::parse(&public).map_err(|_| PhoneError::Signer {
@@ -431,7 +446,22 @@ impl Pending {
             attestation: None,
             early_attestations: Vec::new(),
             receiver,
+            mailbox: channel.map(|c| Mailbox::new(c, seat)),
+            relay,
+            cursor: None,
         })
+    }
+
+    pub fn through_relay(&self) -> bool {
+        self.mailbox.is_some()
+    }
+
+    /// The code everyone joining scans, for a ceremony held through the relay.
+    pub fn offer(&self) -> Result<String, PhoneError> {
+        let mb = self.mailbox.as_ref().ok_or_else(|| {
+            plain("This ceremony is held with codes only. It has no code to join through the relay.")
+        })?;
+        Ok(mb.channel().offer(&self.params))
     }
 
     pub fn phase(&self) -> Phase {
@@ -680,6 +710,123 @@ impl Pending {
             .as_ref()
             .map(|r| r.check_words.iter().map(|w| w.to_string()).collect())
             .unwrap_or_default()
+    }
+}
+
+impl Pending {
+    fn channel_url(&self) -> Option<String> {
+        let mb = self.mailbox.as_ref()?;
+        Some(format!(
+            "{}/v1/circles/{}/messages",
+            self.relay.trim_end_matches('/'),
+            hex::encode(mb.channel().id)
+        ))
+    }
+
+    /// Seal what this seat can send now, each round once: the commitment, the reveal once
+    /// every commitment is in, the signature once it is made.
+    fn queue(&mut self) -> Result<(), PhoneError> {
+        let Some(mb) = &self.mailbox else {
+            return Ok(());
+        };
+        let (commit, reveal, attest) = (
+            mb.queued(Round::Commit),
+            mb.queued(Round::Reveal),
+            mb.queued(Round::Attest),
+        );
+        let commitment = if commit { None } else { self.my_commitment() };
+        let reveal = if !reveal
+            && matches!(self.phase(), Phase::Reveal | Phase::Attest | Phase::Complete)
+        {
+            Some(self.my_reveal()?)
+        } else {
+            None
+        };
+        let attestation = if attest { None } else { self.attestation.clone() };
+        let mb = self.mailbox.as_mut().expect("checked");
+        if let Some(c) = commitment {
+            mb.queue(Round::Commit, &c, &mut OsRng);
+        }
+        if let Some(r) = reveal {
+            mb.queue(Round::Reveal, &r, &mut OsRng);
+        }
+        if let Some(a) = attestation {
+            mb.queue(Round::Attest, &a, &mut OsRng);
+        }
+        Ok(())
+    }
+
+    /// Post what waits, in order. The first failure stops it, and the rest wait for the next tick.
+    fn post(&mut self, http: &dyn Http) -> Result<(), PhoneError> {
+        let Some(url) = self.channel_url() else {
+            return Ok(());
+        };
+        let mb = self.mailbox.as_mut().expect("has a url");
+        for wire in mb.unposted() {
+            let body = http.post(url.clone(), wire.clone())?;
+            let v: serde_json::Value = serde_json::from_slice(&body).map_err(|_| PhoneError::Network {
+                message: "The relay's answer does not read.".into(),
+            })?;
+            if v["seq"].as_u64().is_none() {
+                return Err(PhoneError::Network {
+                    message: "The relay did not say where it put the message.".into(),
+                });
+            }
+            mb.posted(&wire);
+        }
+        Ok(())
+    }
+
+    /// One step through the relay: post what waits, read what is new and apply it, then post
+    /// what that made ready. The first refusal from a message read is returned after the rest
+    /// are read.
+    pub fn tick(&mut self, http: &dyn Http) -> Result<(), PhoneError> {
+        let url = self.channel_url().ok_or_else(|| {
+            plain("This ceremony is held with codes only. Show and scan the codes instead.")
+        })?;
+        self.queue()?;
+        self.post(http)?;
+        let mut refused = None;
+        loop {
+            let mut get = format!("{url}?wait=0");
+            if let Some(a) = self.cursor {
+                get.push_str(&format!("&after={a}"));
+            }
+            let entries = crate::chat::parse_entries(&http.get(get)?)?;
+            let fresh: Vec<_> = entries
+                .into_iter()
+                .filter(|(seq, _)| self.cursor.is_none_or(|a| *seq > a))
+                .collect();
+            if fresh.is_empty() {
+                break;
+            }
+            for (seq, wire) in fresh {
+                self.cursor = Some(seq);
+                let mb = self.mailbox.as_mut().expect("has a url");
+                // A message that does not open, our own, or a second one for a seat and round
+                // already held is passed over.
+                let Some((seat, round, bytes)) = mb.receive(&wire) else {
+                    continue;
+                };
+                let code = match round {
+                    // Every commitment is held once the phase has moved on.
+                    Round::Commit if seat != self.seat && self.phase() != Phase::Commit => continue,
+                    Round::Commit => Code::Commit {
+                        seat,
+                        bytes,
+                        params: None,
+                    },
+                    Round::Reveal => Code::Reveal { seat, bytes },
+                    Round::Attest => Code::Attest { seat, bytes },
+                };
+                if let Err(e) = self.apply(code) {
+                    refused.get_or_insert(e);
+                }
+            }
+        }
+        self.queue()?;
+        self.post(http)?;
+        refused.map_or(Ok(()), Err)
     }
 }
 

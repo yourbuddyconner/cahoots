@@ -153,6 +153,28 @@ Two keys come from the root. The card seal key is `HMAC-SHA256(root, "seal/card"
 
 Implementation: `crates/core`.
 
+### 3.7 The ceremony channel
+
+A ceremony can run through a relay instead of animated codes. The rounds and the checks are the ones above. Only the way the bytes travel changes. The animated codes remain the way that needs no network.
+
+1. The host draws a channel: a random 16-byte id and a random 32-byte key. It shows one static QR code. The code's text is `cahoots:ceremony:v1:` followed by `id || key || params` in base64url without padding. The parameters are in their encoding from section 2.1.
+2. Each person joining scans that code from the host's screen and picks a seat. The code is shown in the room. There are no remote ceremonies.
+3. Each member posts its commitment, then its sealed reveal, then its attestation to the relay under the channel id. It reads everyone else's from the same place.
+
+```
+message = 3 | id (16) | len (u32 LE) | seat | round | nonce (12) | ciphertext | tag (16)
+```
+
+`len` counts every byte after it. `round` is 1 for the commitment, 2 for the reveal and 3 for the attestation. The cipher is ChaCha20-Poly1305. Its key is `HKDF-SHA256(ikm = key, salt = id, info = "cahoots/ceremony/channel/v1")`. The nonce is random. The associated data is `id || seat || round`.
+
+The plaintext is one part of a round's payload: `part (u16 LE) | parts (u16 LE) | bytes`. A payload is split into parts of at most 65,481 bytes, so each message fits in 64 KiB. Only a reveal for a large pad needs more than one part. The commitment payload is `C_i || pk_i || seat_pk_i || tier_i`, as in section 3. The reveal payload is the sealed reveal of section 3.2. The attestation payload is the signature of section 3.4.
+
+A reader opens each message and drops one that does not open. A stranger can post under the id, but cannot seal. The reader keeps the first complete payload for each seat and round and ignores later ones. A message from another device for the reader's own seat means two people picked one seat, and the reader says so.
+
+The relay sees the channel id, the seats, the rounds, the sizes and the timing. It cannot read the payloads. The key is only in the code on the host's screen. Members still read the six words aloud at the end.
+
+Implementation: `crates/core/src/channel.rs`. Vectors: `crates/vectors/channel.json`.
+
 ## 4. Messages
 
 Each message spends `32 + len` bytes from the sender's slice, starting at the sender's next unused offset `o`.
@@ -268,7 +290,7 @@ A custodian MUST accept only the canonical encoding of a message. It answers `Ma
 
 ## 7. Test vectors
 
-`crates/vectors/*.json` are generated from `cahoots-core` and `cahoots-objects` by `cargo run -p cahoots-vectors`, except `chat.json`, written by `crates/chat/tests/vectors.rs`, and `psk.json`, written by `crates/provider/tests/psk_vectors.rs`. They cover the ceremony (KEM seeds, public keys, sealing randomness, seat seeds and public keys, tiers, version 2 commitments and sealed reveals, each member's attestation, the manifest body and ID, the sealed manifest, a mismatch abort, and a garbled reveal), pair keys and hello words (`pair_keys` and `hello_words` in `ceremony.json`), control messages, check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. `objects.json` holds the signed objects of section 8: a root grant and a delegated grant in both versions, an approval, a fact, a receipt, and a contact card with its sealed form, each with its inputs, canonical payload, COSE_Sign1, and JSON projection, against a three-seat manifest. Every client MUST reproduce them.
+`crates/vectors/*.json` are generated from `cahoots-core` and `cahoots-objects` by `cargo run -p cahoots-vectors`, except `chat.json`, written by `crates/chat/tests/vectors.rs`, and `psk.json`, written by `crates/provider/tests/psk_vectors.rs`. They cover the ceremony (KEM seeds, public keys, sealing randomness, seat seeds and public keys, tiers, version 2 commitments and sealed reveals, each member's attestation, the manifest body and ID, the sealed manifest, a mismatch abort, and a garbled reveal), pair keys and hello words (`pair_keys` and `hello_words` in `ceremony.json`), the ceremony channel (`channel.json`: an offer, and a message sealed under a fixed nonce with its opening), control messages, check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. `objects.json` holds the signed objects of section 8: a root grant and a delegated grant in both versions, an approval, a fact, a receipt, and a contact card with its sealed form, each with its inputs, canonical payload, COSE_Sign1, and JSON projection, against a three-seat manifest. Every client MUST reproduce them.
 
 ## 8. Signed objects
 

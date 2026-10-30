@@ -95,6 +95,9 @@ pub struct PhoneRecord {
     pub public: ByteVec,
     #[n(2)]
     pub fingerprint: String,
+    /// The relay new ceremonies and circles use, when set. `None` is the default relay.
+    #[n(3)]
+    pub relay: Option<String>,
 }
 
 impl PhoneRecord {

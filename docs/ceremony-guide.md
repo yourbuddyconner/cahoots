@@ -11,12 +11,22 @@ A ceremony creates the secret your circle will share. Everyone takes part on the
 
 The QR codes carry encrypted contributions, not the shared secret in plaintext. You still need to check the words at the end.
 
+## Two ways to hold a ceremony
+
+- **Through the relay.** This is the default. The host shows one code. Everyone else scans it and picks a seat. The rest goes through the relay, sealed under a key that is only in that code. Each device needs a network connection. Phones and laptops can take part together, whichever app they run.
+- **Codes only.** Everyone shows and scans codes in turn, as in the steps below. No network is needed.
+
+Both ways make the same kind of circle, and both end with the six words. Either way, everyone must be in the same room. The host's code is scanned from the host's screen.
+
+With **Through the relay**, steps 2 to 4 below happen on their own. The host's screen fills in as people join. Joiners wait. Then everyone goes to step 5.
+
 ## 1. Set up the group
 
 One person selects **Create a circle** and chooses:
 
 - **Name:** something everyone will recognize.
 - **People in the room:** the number of participating devices, including the host.
+- **How to hold the ceremony:** **Through the relay** or **Codes only**.
 - **Secret size:** choose **Small** for a first try. Larger sizes take longer to exchange.
 
 Leave the hosted software member option under **Advanced** off for a circle made only of people. Enabling it gives a program a seat and a copy of the secret; everyone should agree before using it.
@@ -26,6 +36,8 @@ The host continues, keeps seat 1, and selects **Make my contribution**.
 Everyone else selects **Join a circle**, scans the host’s code, and chooses a different seat number. Say your number aloud to avoid duplicates. Then select **Make my contribution**.
 
 Hardware randomness is optional. If you have a suitable file, add it on your own device through **Add hardware randomness**. It is not needed for a first test.
+
+The steps 2 to 4 below are for **Codes only**.
 
 ## 2. Exchange commitments
 
