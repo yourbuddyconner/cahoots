@@ -7,6 +7,7 @@
 //! - [`policy::Policy`]: who may read, post, admit and govern, and what each needs.
 //! - [`deposit`]: an epoch key sealed to a link or to a member's X-Wing key.
 //! - [`message`]: the version 3 message, encrypted under a sender chain and signed by the sender.
+//! - [`grant`]: channel grants, their chains, and the evaluator that decides a request.
 //! - [`control`]: what a control message says: rotation, policy change, revocation, join, leave.
 //!
 //! Every object is a canonical CBOR map (definite lengths, shortest integers, integer keys in
@@ -20,12 +21,14 @@ extern crate alloc;
 mod cbor;
 pub mod control;
 pub mod deposit;
+pub mod grant;
 pub mod keys;
 pub mod link;
 pub mod message;
 pub mod object;
 pub mod policy;
 
+pub use grant::Refusal;
 pub use object::ChannelObject;
 pub use policy::{Evidence, Issuer, Policy, Preset, Rule};
 
@@ -69,23 +72,6 @@ impl Action {
     }
 }
 
-/// Why a channel grant does not allow a request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Refusal {
-    /// A grant in the chain has been revoked.
-    Revoked,
-    /// The grant is for another channel.
-    WrongChannel,
-    /// The grant does not carry the action.
-    Action,
-    /// The channel head is at or past the grant's `not_after`.
-    Expired,
-    /// The grant's post budget is spent.
-    Budget,
-    /// The signer is not the grantee.
-    Key,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChannelError {
     /// A signed object from `cahoots-objects` was refused, or a kid does not name a seat of the
@@ -110,6 +96,8 @@ pub enum ChannelError {
     Tag,
     /// No grant for the key.
     NoGrant,
+    /// A grant chain in which a link has a child but does not carry `admit`.
+    NoAdmit,
     /// A grant that does not allow the request.
     Refused(Refusal),
     /// Fewer approvals than the rule needs.
