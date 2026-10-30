@@ -65,17 +65,11 @@ The ambition is that making the circle once should make the next private thing e
 
 ## Who gets to act for us
 
-An agent that can actually do things needs access. It needs to read something, call a service, use a key, or ask another program to do part of the job. Every one of those actions raises a question: who gave it permission?
+Agents make a poorly understood distinction impossible to ignore: knowing who signed a request doesn't tell you what they're allowed to do. A program acting for me needs its own identity and a clear grant of authority. Handing it my account and hoping it behaves is a miserable foundation for that future.
 
-I think identity is poorly understood partly because we ask it to carry too much. Knowing which key signed a request doesn't tell you whether its owner may make that request. Knowing a person belongs to a group doesn't mean they can authorize anything in the group's name. And a program acting for me should have its own identity, so we can tell what it did and under whose authority.
+The web already has standards for [delegated access](https://www.rfc-editor.org/rfc/rfc8693.html). I want a circle to put that power in its members' hands. A grant should say which key may do what, within what budget, when its authority ends, and whether it can pass a smaller part onward. An agent arranging a private connection for one job shouldn't need every secret the circle holds.
 
-Delegation has a long history. The web already has standards for [delegated access](https://www.rfc-editor.org/rfc/rfc8693.html) and [more precise permission requests](https://www.rfc-editor.org/rfc/rfc9396.html). Agents make the consequences much harder to ignore. A program can use whatever access you gave it faster, more often, and further down a chain of other programs than you ever would by hand. Handing it your account and hoping it behaves is a miserable foundation for that future.
-
-The circle should give us a firm boundary and a way to authorize useful work across it. A grant should say which key may do what, how much authority it has, when that authority ends, and whether it can pass a smaller part onward. A service checking the request should be able to follow that authority back to the members who granted it. Some actions should always require a person to approve them.
-
-For example, I want an agent to be able to arrange a private connection for a particular job without giving it every secret the circle holds. If it delegates part of the job, that next program should receive only the authority it needs, within the original grant. Sharing a circle's whole secret would give it the access of a member; a limited task deserves a narrower door.
-
-That authority needs to hold all the way through: deliberate consent on the badge, grants that can only narrow as they pass between programs, and services that refuse work outside those limits. We need to be able to withdraw a grant when the job is over or something goes wrong. Giving a program permission should leave us in charge of the terms.
+That means deliberate consent on the badge, permissions that can only narrow as they pass between programs, and services that refuse work outside those limits. We should be able to withdraw a grant. Some actions should always need a person to approve them.
 
 This is the autonomy I want: a group can establish its own authority, choose its rules, and give a machine a bounded job without handing over the power to rewrite those rules. We should be able to check that arrangement without asking the machine whether it followed our instructions.
 
