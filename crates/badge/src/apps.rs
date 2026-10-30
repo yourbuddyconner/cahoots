@@ -54,8 +54,11 @@ pub const MAX_LABEL: usize = 32;
 pub struct BadgeApps<'a> {
     circles: &'a [Circle],
     hw: Hw<'a>,
-    /// The nonce a proof under a grant must be made over: the link's current one.
-    nonce: [u8; 16],
+    /// The nonce a proof under a grant must be made over: the link's current one, or `None`
+    /// when the random source failed to draw one (then no nonce is given and no use accepted).
+    nonce: Option<[u8; 16]>,
+    /// A proof over `nonce` was accepted: the link must draw a new one.
+    pub nonce_spent: bool,
     has_chip: bool,
     /// The signature under a grant this request made, for the badge to show; the link's nonce
     /// is spent.
@@ -171,7 +174,8 @@ impl<'a> BadgeApps<'a> {
         BadgeApps {
             circles,
             hw: Hw::Chip(chip),
-            nonce,
+            nonce: Some(nonce),
+            nonce_spent: false,
             has_chip,
             grant_use: None,
         }
@@ -183,13 +187,14 @@ impl<'a> BadgeApps<'a> {
         circles: &'a [Circle],
         board: &'a mut dyn GrantBoard,
         clock: &'a mut Clock,
-        nonce: [u8; 16],
+        nonce: Option<[u8; 16]>,
     ) -> Self {
         let has_chip = board.chip().is_some();
         BadgeApps {
             circles,
             hw: Hw::Board(board, clock),
             nonce,
+            nonce_spent: false,
             has_chip,
             grant_use: None,
         }
@@ -289,6 +294,10 @@ impl<'a> BadgeApps<'a> {
                 };
                 let nonce = self.nonce;
                 let (board, clock) = self.grant_board()?;
+                let Some(nonce) = nonce else {
+                    board.log("grant: no fresh nonce, use refused");
+                    return Err(ErrorCode::Busy);
+                };
                 let mut record = match board.grants_load() {
                     Ok(r) => r.unwrap_or_default(),
                     Err(_) => return Err(ErrorCode::Storage),
@@ -584,8 +593,15 @@ impl ChipApps for BadgeApps<'_> {
 
     fn nonce(&mut self, circle: &CircleId) -> Result<[u8; 16], ErrorCode> {
         self.held(circle)?;
-        self.grant_board()?;
-        Ok(self.nonce)
+        let nonce = self.nonce;
+        let (board, _) = self.grant_board()?;
+        match nonce {
+            Some(n) => Ok(n),
+            None => {
+                board.log("grant: no fresh nonce to give");
+                Err(ErrorCode::Busy)
+            }
+        }
     }
 
     fn grant_request(
@@ -604,9 +620,12 @@ impl ChipApps for BadgeApps<'_> {
         req: &UnderGrantFields,
     ) -> Result<(Vec<u8>, u32), ErrorCode> {
         let c = self.held(circle)?;
-        let nonce = self.nonce;
+        let nonce = self.nonce.ok_or(ErrorCode::Busy)?;
         let (board, clock) = self.grant_board()?;
-        let (signature, used) = grants::sign_under_grant(board, clock, c, req, &nonce)?;
+        let mut spent = false;
+        let result = grants::sign_under_grant(board, clock, c, req, &nonce, &mut spent);
+        self.nonce_spent |= spent;
+        let (signature, used) = result?;
         let remaining = used.remaining;
         self.grant_use = Some(used);
         Ok((signature, remaining))

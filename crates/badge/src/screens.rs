@@ -446,6 +446,18 @@ pub fn grant_request(agent: &str, author: &str, budget: u32, until: &str, circle
     s.done()
 }
 
+/// Whether `grant_request` shows `agent` and `author` whole and as they are: printable ASCII
+/// (the screen's fonts have no other glyphs), each within its two rows. A grant request whose
+/// fields would be cut or changed on the screen is refused before it is shown.
+pub fn grant_request_fits(agent: &str, author: &str) -> bool {
+    let printable = |s: &str| s.bytes().all(|b| (0x20..0x7f).contains(&b));
+    let w = 2 * cols(&FONT_8X13);
+    printable(agent)
+        && printable(author)
+        && agent.len() + LAPTOP.len() <= w
+        && author.len() <= w
+}
+
 /// What the badge shows, without asking, after it signs under a grant: for which agent, the
 /// commit's subject, and how many signatures are left. The title is cut to fit the band;
 /// `lines` keeps it whole.

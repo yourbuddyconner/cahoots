@@ -232,7 +232,9 @@ struct Menu<B: Board> {
     confirm_forget: bool,
     /// The nonce a proof under a grant must be made over: drawn when the menu opens, and
     /// drawn again after every signature under a grant.
-    nonce: [u8; 16],
+    /// `None` while the random source fails: no nonce is given and no use accepted until a
+    /// draw succeeds.
+    nonce: Option<[u8; 16]>,
 }
 
 /// What the menu asks of the badge after a step.
@@ -1333,6 +1335,9 @@ impl<B: Board> Badge<B> {
         payload: Vec<u8>,
     ) {
         {
+            if m.nonce.is_none() {
+                m.nonce = fresh_nonce(board);
+            }
             let req = Request::decode(&payload).ok();
             // A request longer than its kind allows is refused before the holder is asked:
             // `serve` would refuse it after the answer, and the question would be wasted.
@@ -1392,11 +1397,16 @@ impl<B: Board> Badge<B> {
                     };
                     let resp = serve(&mut served, &mut Answer(false), &payload);
                     let used = served.apps.grant_use.take();
+                    let spent = served.apps.nonce_spent;
                     respond(&mut m.down, seq, &resp);
-                    // Signed under a grant: the nonce is spent, and the badge shows what it
-                    // signed until the next gesture or screen, without waiting.
-                    if let Some(u) = used {
+                    // A proof under the nonce was accepted: the nonce is spent, whether or not
+                    // the signature followed.
+                    if spent {
                         m.nonce = fresh_nonce(board);
+                    }
+                    // Signed under a grant: the badge shows what it signed until the next
+                    // gesture or screen, without waiting.
+                    if let Some(u) = used {
                         board.note_grant_use(&u.cti, &u.agent, &u.subject, u.remaining, u.budget);
                         m.covered = true;
                     }
@@ -1425,14 +1435,17 @@ fn spends(req: &Request) -> Option<(CircleId, u32)> {
     }
 }
 
-/// 16 bytes from the board's random source for a link's nonce. A failed source is logged and
-/// leaves the nonce all zeros until the next draw.
-fn fresh_nonce<B: Board>(board: &mut B) -> [u8; 16] {
+/// 16 bytes from the board's random source for a link's nonce, or `None`, logged, when the
+/// source fails its health tests.
+fn fresh_nonce<B: Board>(board: &mut B) -> Option<[u8; 16]> {
     let mut nonce = [0u8; 16];
-    if board.entropy().fill(&mut nonce).is_err() {
-        board.log("trng: failed, the grant nonce is not fresh");
+    match board.entropy().fill(&mut nonce) {
+        Ok(()) => Some(nonce),
+        Err(_) => {
+            board.log("trng: failed, no grant nonce until a draw succeeds");
+            None
+        }
     }
-    nonce
 }
 
 /// Send `response` back as a response frame echoing the request's `seq`.

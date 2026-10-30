@@ -263,6 +263,13 @@ fn next_issue(chip: &mut dyn ChipOps) -> Result<u64, ErrorCode> {
 /// The uses a chip counter reading `raw` stands for under a grant with `base` and `budget`,
 /// or `None` when the counter cannot be this grant's: below its base, or past its budget
 /// (a later grant in the same slot, whose base is at least 2^32 higher).
+/// A base the badge gives on a chip: a nonzero issue number shifted up 32 bits. Only one such
+/// base lies within a budget below any counter value, so the chip alone decides the count
+/// whatever the flash says.
+fn base_ok(base: u64) -> bool {
+    base != 0 && base & 0xFFFF_FFFF == 0
+}
+
 fn uses(raw: u64, base: u64, budget: u32) -> Option<u64> {
     raw.checked_sub(base).filter(|&n| n <= u64::from(budget))
 }
@@ -333,6 +340,8 @@ pub fn check_request<G: GrantBoard + ?Sized>(
             .is_some_and(|l| l.len() > LOCATION_MAX)
     {
         Some("a field is too long")
+    } else if !crate::screens::grant_request_fits(&req.agent, &req.author) {
+        Some("the agent or the author would not show whole on the screen")
     } else if cnf.is_err() {
         Some("the agent's key is not a P-256 key")
     } else if record.live() >= GRANTS_MAX {
@@ -442,7 +451,15 @@ pub fn issue<G: GrantBoard + ?Sized>(
     let signed = sign_grant(board, c, &grant)?;
     let mut base = 0;
     if let Some(chip) = board.chip() {
-        base = next_issue(chip)? << 32;
+        let issue_no = next_issue(chip)?;
+        // An issue number past 32 bits would lose its high bits in the base: refuse.
+        base = match u32::try_from(issue_no) {
+            Ok(n) if n != 0 => u64::from(n) << 32,
+            _ => {
+                board.log("grant request refused: the chip's issue counter is used up");
+                return Err(ErrorCode::Denied);
+            }
+        };
         // Anything left in a free slot is stale: the record does not know it.
         let _ = chip.delete(counter_id(slot));
         chip.put_counter(counter_id(slot), base)
@@ -544,7 +561,14 @@ pub fn evaluate_request<G: GrantBoard + ?Sized>(
     };
     let used = match board.chip() {
         Some(chip) => match chip.counter_get(counter_id(rec.slot)) {
-            Ok(raw) => match uses(raw, rec.base, rec.budget) {
+            Ok(_) if !base_ok(rec.base) => {
+                return say(
+                    board,
+                    "the record's base is not one the badge gives",
+                    Refuse(ErrorCode::Denied),
+                );
+            }
+            Ok(raw) => match uses(raw, rec.base, grant.budget) {
                 Some(n) => n,
                 None => {
                     // The slot's counter is another grant's: this record is older than it
@@ -632,21 +656,27 @@ pub fn evaluate_request<G: GrantBoard + ?Sized>(
 /// Sign under a grant: [`evaluate_request`] again (a request that would ask is refused here,
 /// since nobody was asked), the use counted first (the chip's counter, or the record, stored
 /// before the signature), the stored time written if it is behind, then the signature, checked
-/// with the seat public key. Returns the SSH signature and what to show.
+/// with the seat public key. Returns the SSH signature and what to show. `nonce_spent` is set
+/// once the proof is accepted, before the count moves: the caller replaces the nonce even if
+/// the signature then fails, so no proof is accepted twice.
 pub fn sign_under_grant<G: GrantBoard + ?Sized>(
     board: &mut G,
     clock: &mut Clock,
     c: &Circle,
     req: &UnderGrantFields,
     nonce: &[u8; 16],
+    nonce_spent: &mut bool,
 ) -> Result<(Vec<u8>, GrantUse), ErrorCode> {
     let mut record = load(board)?;
     let a = evaluate_request(board, clock, &mut record, c, req, nonce).map_err(|f| match f {
         Fallback::Prompt(_) => ErrorCode::Denied,
         Fallback::Refuse(code) => code,
     })?;
+    // The proof is accepted: it is never accepted again, whatever happens below.
+    *nonce_spent = true;
     let g = &record.grants[a.index];
-    let (slot, budget, base) = (g.slot, g.budget, g.base);
+    // The budget is the signed grant's; the record's copy is for the page.
+    let (slot, budget, base) = (g.slot, a.grant.budget, g.base);
     // Without a chip the count is in the record, which must be written before the signature.
     let mut counted_here = false;
     let used = match board.chip() {
@@ -734,7 +764,10 @@ pub fn sweep<G: GrantBoard + ?Sized>(board: &mut G) -> Vec<String> {
                 // A counter that cannot be this grant's reads as spent.
                 chip.counter_get(counter_id(g.slot))
                     .ok()
-                    .map(|raw| uses(raw, g.base, g.budget).unwrap_or(u64::MAX))
+                    .map(|raw| match base_ok(g.base) {
+                        true => uses(raw, g.base, g.budget).unwrap_or(u64::MAX),
+                        false => u64::MAX,
+                    })
             }
             (Some(_), _) => None,
             (None, _) => Some(g.used_soft),

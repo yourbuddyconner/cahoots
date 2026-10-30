@@ -14,10 +14,11 @@ use cahoots_custodian::wire::{
     ChipRequest, ChipResponse, ErrorCode, Request, Response, KIND_REQUEST, KIND_RESPONSE,
 };
 use cahoots_custodian::CircleId;
+use cahoots_hal::health::{HealthTests, Tested};
 use cahoots_hal::Link;
 use cahoots_objects::authz::{proof_sign, SignGrant};
 use cahoots_objects::grant::key_id;
-use common::{cable, FakeBoard, FakeLink};
+use common::{cable, FailingChip, FakeBoard, FakeLink, Xorshift};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use sha2::{Digest, Sha256};
 use ssh_encoding::Encode;
@@ -32,6 +33,8 @@ const EXP: u64 = 1_795_953_600;
 /// A month before.
 const NOW: u64 = 1_793_361_600;
 const SUBJECT: &str = "Fix the parser for long names";
+/// A base the badge could have given: issue 1.
+const BASE: u64 = 1 << 32;
 const PROMPT_FOOTER: &str = "refuse  A+B  allow  refuse";
 
 fn commit_by(author: &str, committer: &str) -> String {
@@ -792,7 +795,7 @@ fn grant_record(slot: u8, id: CircleId) -> GrantRecord {
         exp: Some(EXP),
         revoked: false,
         used_soft: 0,
-        base: 0,
+        base: BASE,
     }
 }
 
@@ -805,8 +808,8 @@ fn sweep_deletes_orphans() {
     chip.put_counter(KeyId::new(KeyKind::Grant, 5), 0).unwrap();
     chip.put_counter(KeyId::new(KeyKind::Grant, ISSUE_SLOT), 7)
         .unwrap();
-    chip.put_counter(KeyId::new(KeyKind::Grant, 1), 3).unwrap();
-    chip.put_counter(KeyId::new(KeyKind::Grant, 2), 0).unwrap();
+    chip.put_counter(KeyId::new(KeyKind::Grant, 1), BASE + 3).unwrap();
+    chip.put_counter(KeyId::new(KeyKind::Grant, 2), BASE).unwrap();
     let mut expired = grant_record(2, id);
     expired.exp = Some(NOW - 1);
     let stored = GrantsRecord {
@@ -856,4 +859,156 @@ fn the_record_round_trips_and_refuses_what_is_not_canonical() {
     };
     assert!(GrantsRecord::decode(&twice.encode()).is_err());
     assert!(GrantsRecord::decode(&[bytes.as_slice(), &[0]].concat()).is_err());
+}
+
+// ---- review fixes ----
+
+fn busy() -> Response {
+    Response::Error {
+        code: ErrorCode::Busy,
+    }
+}
+
+#[test]
+fn a_field_that_would_not_show_whole_is_refused_before_any_screen() {
+    let (mut badge, mut laptop, id, _) = serving(true);
+    let long_author = "Conner Swann <a-very-long-address-for-a-test@connerswann.me>";
+    assert_eq!(long_author.len(), 60);
+    let cases = [
+        (AGENT, long_author),
+        ("claude\non connerswann-mbp", AUTHOR),
+        (AGENT, "Zo\u{eb} Swann <me@connerswann.me>"),
+        // 40 characters: with " (laptop)" one more than two rows hold.
+        ("an agent with a name of forty characters", AUTHOR),
+    ];
+    for (agent, author) in cases {
+        let mut op = grant_request(50, Some(EXP), false, NOW);
+        if let ChipRequest::GrantRequest {
+            agent: a,
+            author: b,
+            ..
+        } = &mut op
+        {
+            *a = agent.into();
+            *b = author.into();
+        }
+        assert_eq!(
+            ask_now(&mut badge, &mut laptop, id, op),
+            denied(),
+            "{agent:?} {author:?}"
+        );
+    }
+    assert!(record(&mut badge).grants.is_empty());
+    assert!(badge.board().log.iter().any(|l| l.contains("show whole")));
+}
+
+#[test]
+fn a_failed_random_source_gives_no_nonce_and_no_use() {
+    let (mut badge, mut laptop, id, _) = serving(true);
+    let (grant, _) = issue(
+        &mut badge,
+        &mut laptop,
+        id,
+        grant_request(50, Some(EXP), false, NOW),
+    );
+    let n = nonce(&mut badge, &mut laptop, id);
+    // From here the source gives only zeros, which fail its health tests.
+    badge.board().entropy = Tested::new(Xorshift(0), HealthTests::for_min_entropy(6));
+    let op = under_grant(&grant, &n, &commit(), &agent_key(), NOW);
+    assert_eq!(
+        remaining_of(&ask_unprompted(&mut badge, &mut laptop, id, op.clone())),
+        49
+    );
+    // The spent nonce could not be replaced: none is given, and no use is accepted.
+    assert_eq!(
+        ask_now(&mut badge, &mut laptop, id, ChipRequest::Nonce),
+        busy()
+    );
+    assert_eq!(ask_unprompted(&mut badge, &mut laptop, id, op), busy());
+    let zeros = under_grant(&grant, &[0; 16], &commit(), &agent_key(), NOW);
+    assert_eq!(ask_unprompted(&mut badge, &mut laptop, id, zeros), busy());
+    assert_eq!(counter(&mut badge, 0), Some(1));
+    // A source that recovers gives a nonce again.
+    badge.board().entropy = Tested::new(Xorshift(77), HealthTests::for_min_entropy(6));
+    let r = use_grant(&mut badge, &mut laptop, id, &grant, NOW);
+    assert_eq!(remaining_of(&r), 48);
+}
+
+#[test]
+fn a_record_with_a_base_the_badge_does_not_give_is_refused() {
+    let (mut badge, mut laptop, id, _) = serving(true);
+    let (grant, _) = issue(
+        &mut badge,
+        &mut laptop,
+        id,
+        grant_request(2, Some(EXP), false, NOW),
+    );
+    let r = use_grant(&mut badge, &mut laptop, id, &grant, NOW);
+    assert_eq!(remaining_of(&r), 1);
+    let honest = record(&mut badge);
+    let raw = raw_counter(&mut badge, 0).unwrap();
+    // A crafted record that moves its base up to the counter to win the budget back, and one
+    // with no base at all, are both refused, and the counter does not move.
+    for base in [raw, 0] {
+        let mut crafted = honest.clone();
+        crafted.grants[0].base = base;
+        badge.board().grants = Some(crafted.encode());
+        let r = use_grant(&mut badge, &mut laptop, id, &grant, NOW);
+        assert_eq!(r, denied(), "base {base:#x}");
+        assert_eq!(raw_counter(&mut badge, 0), Some(raw));
+    }
+    assert!(badge.board().log.iter().any(|l| l.contains("base")));
+}
+
+#[test]
+fn the_signed_budget_counts_not_the_record() {
+    let (mut badge, mut laptop, id, _) = serving(true);
+    let (grant, _) = issue(
+        &mut badge,
+        &mut laptop,
+        id,
+        grant_request(1, Some(EXP), false, NOW),
+    );
+    let mut r = record(&mut badge);
+    r.grants[0].budget = 1000;
+    badge.board().grants = Some(r.encode());
+    let used = use_grant(&mut badge, &mut laptop, id, &grant, NOW);
+    assert_eq!(remaining_of(&used), 0);
+    let r = use_grant(&mut badge, &mut laptop, id, &grant, NOW);
+    assert_eq!(r, denied());
+}
+
+#[test]
+fn a_proof_is_not_accepted_twice_even_when_signing_fails() {
+    let (mut badge, mut laptop, id, _) = serving(true);
+    let (grant, _) = issue(
+        &mut badge,
+        &mut laptop,
+        id,
+        grant_request(50, Some(EXP), false, NOW),
+    );
+    let base = record(&mut badge).grants[0].base;
+    let n = nonce(&mut badge, &mut laptop, id);
+    let chip = badge.board().chip.take().unwrap();
+    badge.board().failing = Some(FailingChip {
+        inner: chip,
+        fail_sign: true,
+    });
+    let op = under_grant(&grant, &n, &commit(), &agent_key(), NOW);
+    let r = ask_unprompted(&mut badge, &mut laptop, id, op.clone());
+    assert_eq!(
+        r,
+        Response::Error {
+            code: ErrorCode::ChipError
+        }
+    );
+    // The use was counted before the signature failed; the same proof cannot count again.
+    badge.board().failing.as_mut().unwrap().fail_sign = false;
+    let r = ask_unprompted(&mut badge, &mut laptop, id, op);
+    assert_eq!(r, unparseable());
+    let failing = badge.board().failing.as_mut().unwrap();
+    assert_eq!(
+        failing.inner.counter_get(KeyId::new(KeyKind::Grant, 0)),
+        Ok(base + 1)
+    );
 }

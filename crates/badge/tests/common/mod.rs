@@ -4,7 +4,7 @@ use cahoots_badge::board::{assign_places, place_for};
 use cahoots_badge::chip::ChipRecord;
 use cahoots_badge::grants::GrantsRecord;
 use cahoots_badge::{word_indices, Board, BoardError, Circle, Press};
-use cahoots_chip::{ChipOps, SoftChip};
+use cahoots_chip::{Attested, ChipError, ChipOps, Curve, KeyId, Signature64, SoftChip, Version};
 use cahoots_core::checkwords::{check_words, WORDLIST};
 use cahoots_core::circle_id::{circle_id, CircleId};
 use cahoots_core::params::CircleParams;
@@ -200,6 +200,66 @@ pub struct FakeBoard {
     pub grants: Option<Vec<u8>>,
     /// Seconds since boot, as the board reports them.
     pub uptime: u64,
+    /// A chip that can be made to fail its signatures. When set, `chip()` hands it out
+    /// instead of `chip`.
+    pub failing: Option<FailingChip>,
+}
+
+/// A SoftChip whose P-256 signatures fail while `fail_sign` is set.
+pub struct FailingChip {
+    pub inner: SoftChip,
+    pub fail_sign: bool,
+}
+
+impl ChipOps for FailingChip {
+    fn version(&mut self) -> Result<Version, ChipError> {
+        self.inner.version()
+    }
+    fn random(&mut self, n: usize) -> Result<Vec<u8>, ChipError> {
+        self.inner.random(n)
+    }
+    fn generate(&mut self, id: KeyId, curve: Curve) -> Result<Vec<u8>, ChipError> {
+        self.inner.generate(id, curve)
+    }
+    fn public(&mut self, id: KeyId) -> Result<Vec<u8>, ChipError> {
+        self.inner.public(id)
+    }
+    fn delete(&mut self, id: KeyId) -> Result<(), ChipError> {
+        self.inner.delete(id)
+    }
+    fn exists(&mut self, id: KeyId) -> Result<bool, ChipError> {
+        self.inner.exists(id)
+    }
+    fn ids(&mut self) -> Result<Vec<KeyId>, ChipError> {
+        self.inner.ids()
+    }
+    fn sign_p256(&mut self, id: KeyId, digest: &[u8; 32]) -> Result<Signature64, ChipError> {
+        if self.fail_sign {
+            return Err(ChipError::Transport);
+        }
+        self.inner.sign_p256(id, digest)
+    }
+    fn sign_ed25519(&mut self, id: KeyId, message: &[u8]) -> Result<Signature64, ChipError> {
+        self.inner.sign_ed25519(id, message)
+    }
+    fn attest(&mut self, id: KeyId, freshness: &[u8; 16]) -> Result<Attested, ChipError> {
+        self.inner.attest(id, freshness)
+    }
+    fn put_hmac_key(&mut self, id: KeyId, key: &[u8; 32]) -> Result<(), ChipError> {
+        self.inner.put_hmac_key(id, key)
+    }
+    fn hmac(&mut self, id: KeyId, data: &[u8]) -> Result<[u8; 32], ChipError> {
+        self.inner.hmac(id, data)
+    }
+    fn put_counter(&mut self, id: KeyId, value: u64) -> Result<(), ChipError> {
+        self.inner.put_counter(id, value)
+    }
+    fn counter_next(&mut self, id: KeyId) -> Result<u64, ChipError> {
+        self.inner.counter_next(id)
+    }
+    fn counter_get(&mut self, id: KeyId) -> Result<u64, ChipError> {
+        self.inner.counter_get(id)
+    }
 }
 
 impl FakeBoard {
@@ -237,6 +297,7 @@ impl FakeBoard {
             chip_record: None,
             grants: None,
             uptime: 0,
+            failing: None,
         }
     }
 
@@ -436,6 +497,9 @@ impl Board for FakeBoard {
         self.screens.push(lines.to_vec());
     }
     fn chip(&mut self) -> Option<&mut dyn ChipOps> {
+        if let Some(f) = self.failing.as_mut() {
+            return Some(f as &mut dyn ChipOps);
+        }
         self.chip.as_mut().map(|c| c as &mut dyn ChipOps)
     }
     fn chip_record_load(&mut self) -> Result<Option<ChipRecord>, BoardError> {
