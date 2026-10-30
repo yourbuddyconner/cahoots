@@ -7,7 +7,9 @@ use crate::rules::{RuleError, Submission, MAX_BODY};
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State as AxState};
 use axum::http::StatusCode;
-use axum::response::{Html, IntoResponse, Response};
+#[cfg(feature = "feed-page")]
+use axum::response::Html;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use cahoots_core::circle_id::CircleId;
@@ -25,7 +27,7 @@ pub struct State {
     log: Arc<Mutex<Log>>,
     notify: Arc<Notify>,
     limiter: Limiter,
-    /// Refuse posts once the log file is this large. `None` for no cap.
+    /// Refuse posts once the database is this large. `None` for no cap.
     max_log_bytes: Option<u64>,
 }
 
@@ -54,9 +56,12 @@ impl State {
 
 pub fn app(state: State) -> Router {
     let limiter = state.limiter.clone();
-    Router::new()
-        .route("/", get(index))
+    let router = Router::new();
+    #[cfg(feature = "feed-page")]
+    let router = router.route("/", get(index));
+    router
         .route("/healthz", get(|| async { "ok" }))
+        .route("/v1/info", get(info))
         .route("/v1/head", get(global_head))
         .route("/v1/circles", get(circles))
         .route(
@@ -229,6 +234,36 @@ async fn circles(AxState(st): AxState<State>) -> Response {
     Json(json!({ "circles": c })).into_response()
 }
 
+/// The features compiled in, in a fixed order.
+pub fn features() -> Vec<&'static str> {
+    [
+        ("feed-page", cfg!(feature = "feed-page")),
+        ("objects", cfg!(feature = "objects")),
+        ("channels", cfg!(feature = "channels")),
+        ("gate", cfg!(feature = "gate")),
+        ("issuer", cfg!(feature = "issuer")),
+        ("anchor", cfg!(feature = "anchor")),
+    ]
+    .into_iter()
+    .filter_map(|(name, on)| on.then_some(name))
+    .collect()
+}
+
+async fn info(AxState(st): AxState<State>) -> Response {
+    let limits = st.limits();
+    Json(json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "features": features(),
+        "limits": {
+            "max_body": MAX_BODY,
+            "posts_per_minute": limits.posts_per_minute,
+            "reads_per_minute": limits.reads_per_minute,
+        },
+    }))
+    .into_response()
+}
+
+#[cfg(feature = "feed-page")]
 async fn index() -> Html<&'static str> {
     Html(include_str!("index.html"))
 }

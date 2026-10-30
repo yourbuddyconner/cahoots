@@ -33,7 +33,7 @@ const stationBin = join(here, "..", "target", "debug", "cahoots-station");
 if (!existsSync(stationBin)) { console.error("build the relay first: cargo build -p cahoots-station"); process.exit(1); }
 const freePort = await new Promise((r) => { const s = createServer(); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => r(p)); }); });
 const stationUrl = `http://127.0.0.1:${freePort}`;
-const station = spawn(stationBin, ["--listen", `127.0.0.1:${freePort}`, "--log", join(mkdtempSync(join(out, "relay-")), "station.jsonl")], { stdio: ["ignore", "ignore", "inherit"] });
+const station = spawn(stationBin, ["--listen", `127.0.0.1:${freePort}`, "--db", join(mkdtempSync(join(out, "relay-")), "station.db")], { stdio: ["ignore", "ignore", "inherit"] });
 for (let i = 0; ; i++) {
   try { if ((await fetch(`${stationUrl}/healthz`)).ok) break; } catch {}
   if (i > 100) { console.error("the relay did not start"); process.exit(1); }

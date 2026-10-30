@@ -1,5 +1,5 @@
 //! What a public relay needs before it faces the internet: a per-client rate limit and a cap
-//! on the log file. Both are plain and in-process, so a single station needs no proxy to be
+//! on the database size. Both are plain and in-process, so a single station needs no proxy to be
 //! safe to expose. The limit is a token bucket per client address: a client gets `per_minute`
 //! requests of each kind in a burst and then that many per minute.
 

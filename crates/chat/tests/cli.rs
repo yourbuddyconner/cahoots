@@ -151,7 +151,7 @@ fn three_clients_chat_rotate_reject_tamper_and_resume() {
 fn http_end_to_end_against_station() {
     let dir = tempfile::tempdir().unwrap();
     ceremony(dir.path(), 2);
-    let log = dir.path().join("station.jsonl");
+    let log = dir.path().join("station.db");
     let rt = tokio::runtime::Runtime::new().unwrap();
     let listener = rt
         .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))

@@ -1,6 +1,6 @@
 # The default relay for the Cahoots app: relay.cahoots.network.
 # Deploy from the repository root:  fly launch --copy-config --no-deploy  (once)  then  fly deploy
-# The log lives on a volume; create it once with:  fly volumes create station_data --size 1
+# The database lives on a volume; create it once with:  fly volumes create station_data --size 1
 app = "cahoots-relay"
 primary_region = "sjc"
 
@@ -12,8 +12,9 @@ primary_region = "sjc"
 
 [processes]
   # Fly terminates HTTPS and sets Fly-Client-IP, so the station can trust it for the rate limit.
-  # The cap is 4 GiB; a chat message is about 100 bytes on disk, so that is tens of millions of messages.
-  # The image's ENTRYPOINT already runs the binary with --listen and --log; Fly appends this to it.
+  # The cap is 4 GiB, measured as the database file plus its write-ahead log; a chat message is
+  # about 200 bytes in the database, so that is about twenty million messages.
+  # The image's ENTRYPOINT already runs the binary with --listen and --db; Fly appends this to it.
   app = "--trust-forwarded --posts-per-minute 120 --reads-per-minute 600 --max-log-bytes 4294967296"
 
 [[mounts]]

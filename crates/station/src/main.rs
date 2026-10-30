@@ -1,7 +1,7 @@
 use cahoots_station::limits::Limits;
 use cahoots_station::server::{app, State};
-use std::net::SocketAddr;
 use clap::Parser;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 /// The Numbers Station relay.
@@ -11,9 +11,9 @@ struct Args {
     /// Address to listen on.
     #[arg(long, default_value = "127.0.0.1:8080")]
     listen: String,
-    /// Append-only JSONL log file. Replayed and chain-verified on start.
-    #[arg(long, default_value = "./station.jsonl")]
-    log: PathBuf,
+    /// SQLite database holding the log. Replayed and chain-verified on start.
+    #[arg(long, default_value = "./station.db")]
+    db: PathBuf,
     /// Posts accepted per client per minute. 0 for no limit.
     #[arg(long, default_value_t = 120)]
     posts_per_minute: u32,
@@ -24,7 +24,8 @@ struct Args {
     /// that sets them.
     #[arg(long)]
     trust_forwarded: bool,
-    /// Refuse posts once the log file reaches this many bytes. 0 for no cap.
+    /// Refuse posts once the database (with its write-ahead log) reaches this many bytes.
+    /// 0 for no cap.
     #[arg(long, default_value_t = 0)]
     max_log_bytes: u64,
 }
@@ -38,7 +39,7 @@ async fn main() {
         trust_forwarded: args.trust_forwarded,
     };
     let state = match State::open_with(
-        &args.log,
+        &args.db,
         limits,
         (args.max_log_bytes > 0).then_some(args.max_log_bytes),
     ) {
@@ -56,9 +57,9 @@ async fn main() {
         }
     };
     eprintln!(
-        "numbers station listening on http://{} (log: {})",
+        "numbers station listening on http://{} (db: {})",
         args.listen,
-        args.log.display()
+        args.db.display()
     );
     let shutdown = async {
         let _ = tokio::signal::ctrl_c().await;

@@ -4,14 +4,15 @@ An append-only, hash-chained public relay for circle ciphertext. Anyone can read
 
 ## What it does
 
-- Stores every accepted message as one line of JSONL, in order, and never edits or removes a line.
-- Chains the lines: each entry's hash commits to the previous hash, so the head is a 32-byte summary of the whole history. On start it replays the file and re-verifies every hash. A broken chain refuses to start.
+- Stores every accepted message as one row of a SQLite database (one file, WAL mode), in order, and never edits or removes a row.
+- Chains the entries: each entry's hash commits to the previous hash, so the head is a 32-byte summary of the whole history. On start it replays every entry in order and re-verifies every hash. A broken chain refuses to start.
 - Refuses pure-pad address reuse. A pure-pad message names the pad bytes it spent as `(circle, slice, offset, length)`. If that range overlaps any earlier accepted entry for the same circle and slice, the station answers `409 {"error":"reuse"}`. It cannot verify a tag, because it holds no pad, but it can refuse a double spend at the address level, and a buggy client cannot get past it.
 - Accepts chat messages (version byte 2) without a reuse check. An epoch pointer appears in many chat messages by design, so reuse protection for epochs lives in each member's ledger.
-- Serves a read-only live feed page at `/` for a big screen, with no external assets.
+- Serves a read-only live feed page at `/` for a big screen, with no external assets (feature `feed-page`, on by default).
+- Reports its version, compiled features and limits at `GET /v1/info`.
 
 - Limits each client address to a burst and a rate of posts and of reads (`--posts-per-minute`, default 120; `--reads-per-minute`, default 600; 0 for none), answering `429 {"error":"rate"}` with `Retry-After: 10` past them. Behind a proxy, `--trust-forwarded` takes the client address from `Fly-Client-IP` or the first `X-Forwarded-For` entry; without it those headers are ignored, so a client cannot pick its own bucket.
-- Refuses posts with `507 {"error":"full"}` once the log file reaches `--max-log-bytes` (0, the default, for no cap). Reads keep working. The log is never truncated.
+- Refuses posts with `507 {"error":"full"}` once the database file and its write-ahead log together reach `--max-log-bytes` (0, the default, for no cap). Reads keep working. The log is never truncated.
 
 ## What it does not do
 
@@ -22,8 +23,10 @@ An append-only, hash-chained public relay for circle ciphertext. Anyone can read
 ## Run
 
 ```sh
-cargo run -p cahoots-station -- --listen 127.0.0.1:8080 --log ./station.jsonl
+cargo run -p cahoots-station -- --listen 127.0.0.1:8080 --db ./station.db
 ```
+
+`--db` names the SQLite database (default `./station.db`). It replaces the old `--log` flag. The old JSONL log is not read and there is no migration: the project is pre-release; the previous log is discarded.
 
 Docker, from the workspace root:
 
@@ -31,6 +34,24 @@ Docker, from the workspace root:
 docker build -f crates/station/Dockerfile -t cahoots-station .
 docker run -p 8080:8080 -v station-data:/data cahoots-station
 ```
+
+The image is built with the features `objects,channels,gate` and keeps its database at `/data/station.db`.
+
+## Features
+
+Cargo features choose what the station serves. The default features reproduce the plain relay, so an operator who changes nothing runs what they ran before.
+
+| Feature | Adds | Needs |
+|---|---|---|
+| (base) | circles, messages, hash chain, rate limits, size cap, `/v1/head`, `/v1/info`, `/healthz` | |
+| `feed-page` | the live feed page at `/` | base. On by default |
+| `objects` | manifests, channel objects, policies, grants, revocations, deposits, join requests: stored, served, listed by channel | base |
+| `channels` | version 3 messages chained per channel, per-channel heads, long-poll by channel | `objects` |
+| `gate` | read and post checks: a gate token or a verified grant to read a channel; a verified post grant, signature, budget and quorum to post | `channels` |
+| `issuer` | the relay checks evidence and issues grants and deposits under its own key | `gate`, and the TVC build only |
+| `anchor` | periodic head anchoring to the TVC log | base |
+
+Only `feed-page` changes behaviour today. The other features are declared so that `/v1/info` can name them; their routes come in later changes.
 
 ## API
 
@@ -42,13 +63,14 @@ docker run -p 8080:8080 -v station-data:/data cahoots-station
 | `GET /v1/head` | | global `{"seq", "hash"}`; `seq` is `null` when empty |
 | `GET /v1/circles` | | `{"circles":[{"circle_id","count","last_seq"}]}` |
 | `GET /v1/feed` | `after=<seq>` | up to 500 entries across all circles, for the display page |
+| `GET /v1/info` | | `{"version", "features":[...], "limits":{"max_body":65536, "posts_per_minute", "reads_per_minute"}}`; `features` lists the compiled features in the order `feed-page, objects, channels, gate, issuer, anchor`; a limit that is off is `null` |
 | `GET /healthz` | | `ok` |
 
 Any request under `/v1` can also answer `429 {"error":"rate"}` (over the per-client limit) and a post `507 {"error":"full"}` (the log has reached its cap).
 
 `circle_id` is 32 hex characters and must match the circle ID inside the message header.
 
-An entry on the wire and on disk:
+An entry on the wire:
 
 ```json
 {"seq":12,"received_at":1760900000000,"circle_id":"6f86…","message":"AQ…","hash":"3c1e…"}
@@ -81,7 +103,7 @@ The station is built as an OCI image so it can run inside [Turnkey Verifiable Cl
 The deploy record must pin:
 
 - the image digest of `cahoots-station`;
-- the log file location inside the sealed volume (`/data/station.jsonl`);
+- the database location inside the sealed volume (`/data/station.db`);
 - the policy hash. The station has no policy today, so this is a placeholder for the hosted-member policy that will share the workload (`appManifestDigest`).
 
 What anchoring adds once deployed: the station periodically commits its head hash to the [TVC](https://docs.turnkey.com/features/verifiable-cloud/overview) log. A reader who verifies the anchored head against the chain knows the history is the one everyone else sees.

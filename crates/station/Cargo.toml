@@ -23,6 +23,24 @@ clap = { version = "4.5", features = ["derive"] }
 thiserror = "2.0"
 tower-http = { version = "0.6", features = ["cors"] }
 http = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+cahoots-objects = { workspace = true, features = ["std"], optional = true }
+cahoots-channel = { workspace = true, features = ["std"], optional = true }
+
+[features]
+default = ["feed-page"]
+# The live feed page at `/`.
+feed-page = []
+# Manifests, channel objects, policies, grants, revocations, deposits, join requests.
+objects = ["dep:cahoots-objects", "dep:cahoots-channel"]
+# Version 3 messages chained per channel.
+channels = ["objects"]
+# Read and post checks on channels.
+gate = ["channels"]
+# The relay issues grants under its own key (TVC build only).
+issuer = ["gate"]
+# Periodic head anchoring to the TVC log.
+anchor = []
 
 [dev-dependencies]
 tempfile = "3.10"

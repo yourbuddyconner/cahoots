@@ -32,7 +32,7 @@ fn hash_chains_from_genesis() {
 #[test]
 fn append_and_replay_verify_chain() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("station.jsonl");
+    let path = dir.path().join("station.db");
     let (seq1, h1) = {
         let mut log = Log::open(&path).unwrap();
         assert_eq!(log.head().seq, None);
@@ -59,7 +59,7 @@ fn append_and_replay_verify_chain() {
 #[test]
 fn broken_chain_refuses_to_open() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("station.jsonl");
+    let path = dir.path().join("station.db");
     {
         let mut log = Log::open(&path).unwrap();
         for i in 0..3 {
@@ -68,16 +68,28 @@ fn broken_chain_refuses_to_open() {
                 .unwrap();
         }
     }
-    let text = std::fs::read_to_string(&path).unwrap();
-    let mut lines: Vec<String> = text.lines().map(String::from).collect();
-    // Tamper with the middle entry's message.
-    lines[1] = lines[1].replace("\"message\":\"Ag", "\"message\":\"Aw");
-    assert_ne!(
-        lines[1],
-        text.lines().nth(1).unwrap(),
-        "test must actually tamper"
-    );
-    std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+    // Tamper with the middle entry's message: its first byte (the version) 2 becomes 3.
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let before: Vec<u8> = conn
+            .query_row("SELECT message FROM entries WHERE seq = 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let mut after = before.clone();
+        after[0] = 3;
+        conn.execute(
+            "UPDATE entries SET message = ?1 WHERE seq = 1",
+            rusqlite::params![after],
+        )
+        .unwrap();
+        let stored: Vec<u8> = conn
+            .query_row("SELECT message FROM entries WHERE seq = 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_ne!(stored, before, "test must actually tamper");
+    }
     assert!(matches!(
         Log::open(&path),
         Err(LogError::BrokenChain { seq: 1 })
@@ -88,7 +100,7 @@ fn broken_chain_refuses_to_open() {
 fn pure_pad_reuse_is_refused_after_replay_too() {
     use cahoots_core::message::{seal, MessageType};
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("station.jsonl");
+    let path = dir.path().join("station.db");
     let pad: Vec<u8> = (0..64).map(|i| i as u8).collect();
     let m1 = seal(&cid(7), 0, 100, MessageType::Text, b"hi", &pad[..34]).unwrap();
     let m_overlap = seal(&cid(7), 0, 120, MessageType::Text, b"yo", &pad[..34]).unwrap();
@@ -131,11 +143,44 @@ fn pure_pad_reuse_is_refused_after_replay_too() {
 #[test]
 fn chat_messages_are_never_refused_for_reuse() {
     let dir = tempfile::tempdir().unwrap();
-    let mut log = Log::open(&dir.path().join("s.jsonl")).unwrap();
+    let mut log = Log::open(&dir.path().join("s.db")).unwrap();
     let m = chat_msg(cid(1), [0, 7, 0, 0, 0], 2, 0, 10);
     log.append(Submission::parse(&cid(1), &m).unwrap(), 1)
         .unwrap();
     log.append(Submission::parse(&cid(1), &m).unwrap(), 2)
         .unwrap();
     assert_eq!(log.head().seq, Some(1));
+}
+
+#[test]
+fn database_survives_reopen_and_chain_verifies() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("station.db");
+    let head = {
+        let mut log = Log::open(&path).unwrap();
+        let mut prev = GENESIS;
+        for i in 0..3u32 {
+            let m = chat_msg(cid(4), [0; 5], 1, i, 2);
+            let e = log
+                .append(Submission::parse(&cid(4), &m).unwrap(), 100 + i as u64)
+                .unwrap();
+            assert_eq!(e.seq, i as u64);
+            assert_eq!(e.hash, entry_hash(&prev, i as u64, 100 + i as u64, &m));
+            prev = e.hash;
+        }
+        assert!(log.bytes() > 0);
+        log.head()
+    };
+    let log = Log::open(&path).unwrap();
+    assert_eq!(log.head(), head);
+    assert_eq!(log.head().seq, Some(2));
+    assert_eq!(log.len(), 3);
+    assert_eq!(log.circle_head(&cid(4)), head);
+    let all = log.all_after(None, 10);
+    assert_eq!(all.len(), 3);
+    assert_eq!(all[1].received_at, 101);
+    assert_eq!(all[1].message, chat_msg(cid(4), [0; 5], 1, 1, 2));
+    let page = log.all_after(Some(0), 1);
+    assert_eq!(page.len(), 1);
+    assert_eq!(page[0].seq, 1);
 }
