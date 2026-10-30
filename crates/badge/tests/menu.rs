@@ -449,3 +449,21 @@ fn a_gesture_before_the_prompt_is_drawn_is_not_an_answer() {
         assert_eq!(remaining(&mut badge, &mut laptop, id), before - 32);
     }
 }
+
+#[test]
+fn a_request_over_the_forget_question_cancels_it() {
+    let (mut badge, mut laptop, id) = serving();
+    press(&mut badge, Press::Left);
+    press(&mut badge, Press::Both);
+    assert!(badge.board().shows("forget this circle?"));
+    ask_psk(&mut badge, &mut laptop, id, 3);
+    assert!(badge.board().shows("spend 32 bytes"));
+    press(&mut badge, Press::Both);
+    assert!(matches!(responses(&mut laptop).as_slice(), [(3, Response::Psk { .. })]));
+    assert!(on_page(&mut badge, 5, "forget this circle"));
+    // Both now is the page's, which asks again; it forgets nothing.
+    press(&mut badge, Press::Both);
+    assert!(badge.circle().is_some());
+    assert!(badge.board().shows("forget this circle?"));
+    assert_eq!(badge.circles().len(), 1);
+}

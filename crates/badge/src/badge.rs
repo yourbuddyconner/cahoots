@@ -1183,6 +1183,12 @@ impl<B: Board> Badge<B> {
             m.rx.extend_from_slice(&buf[..n]);
             Self::menu_decode(board, circles, m, clock);
         }
+        // A request's prompt drawn over the revoke or forget question replaces it. Once that
+        // is answered the page is back, and a Both then is the page's, not an answer.
+        if m.pending.is_some() || m.connect.is_some() {
+            m.confirm_revoke = false;
+            m.confirm_forget = false;
+        }
 
         // A gesture made before the prompt was on the screen is not an answer to it: on the
         // Nano the prompt's refresh blocks for hundreds of milliseconds. Drop the gesture

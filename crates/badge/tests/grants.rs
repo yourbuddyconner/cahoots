@@ -1059,3 +1059,39 @@ fn revoking_from_the_page_ends_the_grant() {
         denied()
     );
 }
+
+#[test]
+fn a_request_over_the_revoke_question_cancels_it() {
+    let (mut badge, mut laptop, id, _) = serving(true);
+    let (_, slot) = issue(
+        &mut badge,
+        &mut laptop,
+        id,
+        grant_request(50, Some(EXP), false, NOW),
+    );
+    press(&mut badge, Press::Right);
+    press(&mut badge, Press::Right);
+    press(&mut badge, Press::Both);
+    assert!(badge.board().shows("revoke this grant?"));
+    send(
+        &mut laptop,
+        31,
+        &Request::Psk {
+            circle: id,
+            context: b"wg".to_vec(),
+        },
+    );
+    badge.idle_step();
+    assert!(badge.board().shows("spend 32 bytes"));
+    press(&mut badge, Press::Both);
+    assert!(matches!(
+        responses(&mut laptop).as_slice(),
+        [(31, Response::Psk { .. })]
+    ));
+    assert!(badge.board().shows("3/5"));
+    // Both now is the page's: it asks again and revokes nothing.
+    press(&mut badge, Press::Both);
+    assert!(badge.board().shows("revoke this grant?"));
+    assert!(!record(&mut badge).grants[0].revoked);
+    assert_eq!(counter(&mut badge, slot), Some(0));
+}
