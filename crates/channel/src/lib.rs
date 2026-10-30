@@ -5,6 +5,9 @@
 //! - [`link`]: the invite link and the keys derived from its secret.
 //! - [`keys`]: epoch ids, epoch keys and chain starts.
 //! - [`policy::Policy`]: who may read, post, admit and govern, and what each needs.
+//! - [`deposit`]: an epoch key sealed to a link or to a member's X-Wing key.
+//! - [`message`]: the version 3 message, encrypted under a sender chain and signed by the sender.
+//! - [`control`]: what a control message says: rotation, policy change, revocation, join, leave.
 //!
 //! Every object is a canonical CBOR map (definite lengths, shortest integers, integer keys in
 //! ascending order) signed as a COSE_Sign1 with the payload embedded, kid `[seat]`, and the
@@ -15,8 +18,11 @@
 extern crate alloc;
 
 mod cbor;
+pub mod control;
+pub mod deposit;
 pub mod keys;
 pub mod link;
+pub mod message;
 pub mod object;
 pub mod policy;
 
@@ -100,6 +106,8 @@ pub enum ChannelError {
     WrongCircle,
     /// A signature that does not verify.
     Signature,
+    /// A ChaCha20-Poly1305 tag that does not verify: the wrong key, or changed bytes.
+    Tag,
     /// No grant for the key.
     NoGrant,
     /// A grant that does not allow the request.
