@@ -94,6 +94,7 @@ impl SignGrant {
                 author: Some(self.author.clone()),
                 locations: Some(self.locations.clone()),
                 agent: Some(self.agent.clone()),
+                channel: None,
             }],
             log_not_after: None,
             parent: None,

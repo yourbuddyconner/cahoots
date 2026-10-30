@@ -95,6 +95,7 @@ impl Claims {
                     ("author", d.author.as_ref().map(|a| json!(a))),
                     ("locations", d.locations.as_ref().map(|a| json!(a))),
                     ("agent", d.agent.as_ref().map(|a| json!(a))),
+                    ("channel", d.channel.as_ref().map(|a| json!(a))),
                 ];
                 for (k, f) in fields {
                     if let Some(f) = f {

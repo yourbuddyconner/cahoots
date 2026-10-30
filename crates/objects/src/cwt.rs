@@ -73,11 +73,15 @@ pub const PAD_TYPE: &str = "cahoots:pad";
 const NUMBERED: &str = "cahoots:purpose-";
 /// The detail type of a sign grant.
 pub const SIGN_TYPE: &str = "cahoots:sign";
+/// The detail type of a channel grant.
+pub const CHANNEL_TYPE: &str = "cahoots:channel";
 /// An `aud` naming a seat: `"cahoots:seat:<circle id hex>:<seat>"`.
 pub const AUD_PREFIX: &str = "cahoots:seat:";
 
 /// The actions a sign grant can allow.
 const SIGN_ACTIONS: [&str; 3] = ["git-commit", "ssh-login", "file"];
+/// The actions a channel grant can allow, in the order they are written.
+const CHANNEL_ACTIONS: [&str; 4] = ["read", "post", "admit", "govern"];
 /// The most signatures a sign grant can allow.
 const MAX_SIGN_BUDGET: u32 = 1000;
 /// The most entries in a detail's `actions` or `locations`.
@@ -100,6 +104,8 @@ pub struct Detail {
     pub locations: Option<Vec<String>>,
     /// Which agent holds the grant, on a [`SIGN_TYPE`] detail; may be empty.
     pub agent: Option<String>,
+    /// The channel id, 32 lowercase hex characters, on a [`CHANNEL_TYPE`] detail.
+    pub channel: Option<String>,
 }
 
 impl Detail {
@@ -117,6 +123,7 @@ impl Detail {
             + u64::from(self.author.is_some())
             + u64::from(self.locations.is_some())
             + u64::from(self.agent.is_some())
+            + u64::from(self.channel.is_some())
     }
 }
 
@@ -127,6 +134,12 @@ pub enum Kind {
     Pad { purposes: Vec<u8>, budget: u32 },
     /// Signatures by an agent.
     Sign(SignDetail),
+    /// Actions in one channel. A budget of 0 is no limit.
+    Channel {
+        channel: [u8; 16],
+        actions: Vec<String>,
+        budget: u32,
+    },
 }
 
 /// The one detail of a sign grant.
@@ -321,6 +334,9 @@ impl Claims {
                     e.str(a)?;
                 }
             }
+            if let Some(c) = &d.channel {
+                e.str("channel")?.str(c)?;
+            }
             if let Some(list) = &d.locations {
                 e.str("locations")?.array(list.len() as u64)?;
                 for l in list {
@@ -421,7 +437,13 @@ impl Claims {
         if self.sub != subject(&self.cnf) {
             return Err(m);
         }
-        let kind = if self.log_not_after.is_some() {
+        let kind = if self
+            .authorization_details
+            .iter()
+            .any(|d| d.r#type == CHANNEL_TYPE)
+        {
+            self.channel_kind()?
+        } else if self.log_not_after.is_some() {
             self.pad_kind()?
         } else {
             self.sign_kind(&circle_id)?
@@ -440,6 +462,7 @@ impl Claims {
             || pad.author.is_some()
             || pad.locations.is_some()
             || pad.agent.is_some()
+            || pad.channel.is_some()
         {
             return Err(m);
         }
@@ -461,6 +484,43 @@ impl Claims {
         }
         Ok(Kind::Pad {
             purposes: list,
+            budget,
+        })
+    }
+
+    fn channel_kind(&self) -> Result<Kind, ObjectError> {
+        let m = ObjectError::Malformed;
+        if self.aud.is_some()
+            || self.exp.is_some()
+            || self.base.is_some()
+            || self.log_not_after.is_none()
+        {
+            return Err(m);
+        }
+        let [d] = self.authorization_details.as_slice() else {
+            return Err(m);
+        };
+        if d.author.is_some() || d.locations.is_some() || d.agent.is_some() {
+            return Err(m);
+        }
+        let actions = d.actions.clone().ok_or(m)?;
+        let budget = d.budget.ok_or(m)?;
+        let channel = unhex(d.channel.as_deref().ok_or(m)?).ok_or(m)?;
+        // Each action once, in the order of CHANNEL_ACTIONS.
+        let mut last = None;
+        for a in &actions {
+            let at = CHANNEL_ACTIONS.iter().position(|c| *c == a).ok_or(m)?;
+            if last.is_some_and(|l| at <= l) {
+                return Err(m);
+            }
+            last = Some(at);
+        }
+        if actions.is_empty() {
+            return Err(m);
+        }
+        Ok(Kind::Channel {
+            channel,
+            actions,
             budget,
         })
     }
@@ -562,7 +622,7 @@ fn read_details(d: &mut Decoder<'_>) -> Result<Vec<Detail>, ObjectError> {
     let mut out = Vec::new();
     for _ in 0..n {
         let fields = definite_map(d)?;
-        if !(1..=6).contains(&fields) {
+        if !(1..=7).contains(&fields) {
             return Err(m);
         }
         let mut r#type = None;
@@ -571,6 +631,7 @@ fn read_details(d: &mut Decoder<'_>) -> Result<Vec<Detail>, ObjectError> {
         let mut author = None;
         let mut locations = None;
         let mut agent = None;
+        let mut channel = None;
         for _ in 0..fields {
             match d.str().map_err(|_| m)? {
                 "type" => once(&mut r#type, String::from(d.str().map_err(|_| m)?))?,
@@ -582,6 +643,7 @@ fn read_details(d: &mut Decoder<'_>) -> Result<Vec<Detail>, ObjectError> {
                 "author" => once(&mut author, String::from(d.str().map_err(|_| m)?))?,
                 "locations" => once(&mut locations, read_strings(d)?)?,
                 "agent" => once(&mut agent, String::from(d.str().map_err(|_| m)?))?,
+                "channel" => once(&mut channel, String::from(d.str().map_err(|_| m)?))?,
                 _ => return Err(m),
             }
         }
@@ -592,6 +654,7 @@ fn read_details(d: &mut Decoder<'_>) -> Result<Vec<Detail>, ObjectError> {
             author,
             locations,
             agent,
+            channel,
         });
     }
     Ok(out)

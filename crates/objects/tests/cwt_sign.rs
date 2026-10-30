@@ -14,6 +14,7 @@ fn sign_detail() -> Detail {
         locations: Some(vec!["github.com/yourbuddyconner/cahoots".into()]),
         agent: Some("claude on connerswann-mbp".into()),
         budget: Some(50),
+        channel: None,
     }
 }
 
