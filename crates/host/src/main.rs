@@ -17,6 +17,10 @@
 //! cahoots-host card fetch (--serial <port> | --sim <socket>) --circle <name> --state <dir> --in <file>... [--out <dir>]
 //! cahoots-host card show --circle <name> --state <dir> <signed card file>
 //! cahoots-host grant (--serial <port> | --sim <socket>) --circle <name> --to <key hex> --purpose <name>... --budget N --until N [--depth N] [--v2] [--out <file>]
+//! cahoots-host grant request (--serial <port> | --sim <socket>) --circle <name> --agent <text> --author <text> [--location <repo>] --budget N (--until YYYY-MM-DD | --standing)
+//! cahoots-host grant list
+//! cahoots-host grant show <file>
+//! cahoots-host grant verify <file> --state <dir> --circle <name>
 //! ```
 //!
 //! `pile` runs a stack of cards on this machine, bottom first, over Unix sockets. With
@@ -33,7 +37,9 @@
 //! `cahoots-host-git-sign`, the one to name in `gpg.ssh.program`). `roster` prints a circle's
 //! seat keys as `authorized_keys` lines. `attest` asks the badge's chip to attest a seat key.
 //! `card` makes, opens and shows contact cards, and `grant` has the badge sign a grant; see
-//! [`cahoots_host::card`].
+//! [`cahoots_host::card`]. `grant request`, `list`, `show` and `verify` are grants for an
+//! agent: the badge lets the agent's key sign git commits without a press; see
+//! [`cahoots_host::grants`].
 //! `--sim` is the socket a simulated badge listens on (its `--listen`).
 
 use base64::Engine;
@@ -368,7 +374,10 @@ fn main() {
                 })
         }
         "card" => run_card(&args),
-        "grant" => run_grant(&args),
+        "grant" => match args.0.first().map(String::as_str) {
+            Some("request" | "list" | "show" | "verify") => run_agent_grant(&args),
+            _ => run_grant(&args),
+        },
         _ => Err(format!("unknown command {cmd}")),
     };
     if let Err(e) = result {
@@ -496,6 +505,98 @@ fn run_grant(args: &Args) -> Result<(), String> {
     let projection = if v2 { g.to_v2().to_json() } else { g.to_json() };
     eprintln!("{}", serde_json::to_string_pretty(&projection).unwrap_or_default());
     Ok(())
+}
+
+/// `grant request`, `grant list`, `grant show` and `grant verify`: grants for an agent.
+fn run_agent_grant(args: &Args) -> Result<(), String> {
+    use cahoots_host::{agentkey, grants};
+    let home = agentkey::dir();
+    // The file named last, for `show` and `verify`.
+    let file = || -> Result<PathBuf, String> {
+        args.0
+            .get(1)
+            .filter(|f| !f.starts_with("--"))
+            .map(PathBuf::from)
+            .ok_or_else(|| "name the grant file after the command".into())
+    };
+    let read = |path: &Path| std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()));
+    match args.0.first().map(String::as_str) {
+        Some("request") => {
+            let circle = args.req("--circle");
+            let budget: u32 = args
+                .req("--budget")
+                .parse()
+                .map_err(|_| "--budget: a number")?;
+            let standing = args.has("--standing");
+            let until = match (args.get("--until"), standing) {
+                (Some(d), false) => Some(
+                    grants::parse_date(d)
+                        .ok_or("--until: a date as YYYY-MM-DD, from 1970 on")?,
+                ),
+                (None, true) => None,
+                _ => return Err("say when the grant ends: --until YYYY-MM-DD, or --standing for until revoked".into()),
+            };
+            let key = agentkey::load_or_create(&home)?;
+            let mut badge = args.badge()?;
+            eprintln!("the badge asks its holder to allow the grant");
+            let stored = grants::request(
+                &mut badge,
+                &circle,
+                &args.req("--agent"),
+                &args.req("--author"),
+                args.get("--location"),
+                budget,
+                until,
+                standing,
+                &key,
+            )?;
+            let path = grants::save(&home, &stored)?;
+            eprintln!(
+                "{}",
+                serde_json::to_string_pretty(&grants::show(&stored.bytes)?).unwrap_or_default()
+            );
+            println!("{}", path.display());
+            Ok(())
+        }
+        Some("list") => {
+            let all = grants::load_all(&home);
+            if all.is_empty() {
+                eprintln!("no grants in {}", home.join("grants").display());
+            }
+            for s in all {
+                let budget = grants::show(&s.bytes)
+                    .ok()
+                    .and_then(|j| j["authorization_details"][0]["budget"].as_u64());
+                let left = match (s.remaining, budget) {
+                    (Some(n), Some(b)) => format!("{n} left of {b}"),
+                    (Some(n), None) => format!("{n} left"),
+                    (None, Some(b)) => format!("? left of {b}"),
+                    (None, None) => "? left".into(),
+                };
+                println!("{}  {}  {}  {left}", s.path(&home).display(), s.circle, s.agent);
+            }
+            Ok(())
+        }
+        Some("show") => {
+            let shown = grants::show(&read(&file()?)?)?;
+            println!("{}", serde_json::to_string_pretty(&shown).unwrap_or_default());
+            Ok(())
+        }
+        Some("verify") => {
+            let bytes = read(&file()?)?;
+            let circle = args.req("--circle");
+            let manifest = cahoots_host::roster::manifest(Path::new(&args.req("--state")), &circle)?;
+            let seat = grants::seat_of(&bytes)?;
+            grants::verify(&bytes, &manifest, seat)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&grants::show(&bytes)?).unwrap_or_default()
+            );
+            eprintln!("the grant verifies: signed by seat {seat} of {circle}, under the key in the circle's manifest");
+            Ok(())
+        }
+        _ => Err("grant request, grant list, grant show or grant verify".into()),
+    }
 }
 
 fn hex(b: &[u8]) -> String {

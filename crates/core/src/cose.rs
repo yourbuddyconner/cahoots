@@ -178,3 +178,12 @@ pub fn verify1(
 pub fn kid1(bytes: &[u8]) -> Result<Vec<u8>, CoseError> {
     parse(bytes).map(|p| p.kid.to_vec())
 }
+
+/// The embedded payload of a COSE_Sign1, without verifying the signature: for showing what an
+/// object says before (or without) checking who signed it.
+pub fn payload1(bytes: &[u8]) -> Result<Vec<u8>, CoseError> {
+    parse(bytes)?
+        .payload
+        .map(<[u8]>::to_vec)
+        .ok_or(CoseError::Malformed)
+}

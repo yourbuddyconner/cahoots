@@ -164,6 +164,24 @@ ssh-keygen -Y verify -f allowed_signers -I you@example.com -n file -s release.ta
 
 What the badge shows depends on the file's size. Up to 12 KiB, the file goes to the badge, which checks that the hash it is asked to sign is the hash of that file and shows "sign a file", the namespace, the size, and the file's first line (or "binary"). Bigger than that, the badge is sent only the hash, and shows it marked "(laptop)": it is signing what the laptop says the file is. `ssh-keygen -Y sign` through the agent does the same for any namespace but `git`, which still needs the commit text. A file signature can never be mistaken for a login or a commit: the signature names its namespace, and a verifier checks it.
 
+### Grants for an agent
+
+A grant lets a coding agent on this laptop sign git commits with the seat key without a press on the badge, as one author, a fixed number of times:
+
+```sh
+cahoots-host grant request --serial /dev/cu.usbmodem1101 --circle sf --agent "claude on my laptop" \
+    --author "Ada Lovelace <ada@example.com>" --budget 50 --until 2026-11-29 [--location github.com/you/repo]
+cahoots-host grant list
+cahoots-host grant show ~/.config/cahoots/grants/sf-1a2b3c4d.cwt
+cahoots-host grant verify ~/.config/cahoots/grants/sf-1a2b3c4d.cwt --state /tmp/b0 --circle sf
+```
+
+`grant request` makes the agent's own key the first time (`agent.key`, 32 secret bytes as hex, readable by you only), then asks the badge. The badge shows "let an agent sign", the agent's name marked "(laptop)", the author, how many signatures, and until when (`--until` is midnight UTC that day, or `--standing` for until revoked). Both buttons allow it. The grant is kept in `grants/` beside the key, in `$CAHOOTS_HOME` or `~/.config/cahoots`, and its path is printed.
+
+Start the agent after that (or keep it running: it reads the grants when git signs). When git signs a commit through `cahoots-host-git-sign` with the circle's key, the agent sees the grant, checks that the commit's author is the grant's author, asks the badge for a fresh nonce, and sends the commit with the grant and a proof made with its key. The badge signs without asking and shows "signed for <agent>", the commit's subject and "37 left of 50". The agent's log says "signed under a grant, 37 left". When the grant is used up, expired or revoked, the badge refuses it, the agent marks it used up, and asks for the signature the ordinary way: the badge shows "sign a git commit" and waits for its holder. `--location` limits the grant to one repository, compared with the `remote.origin.url` the helper reads. That is the laptop's word, and the weakest check.
+
+`grant list` prints each kept grant with what the badge last said was left. `grant show` prints any grant's claims as JSON. `grant verify` checks the grant as any CWT verifier would, against the seat's key in the circle's manifest (read from `--state`, as `roster` reads it), with nothing from Cahoots but the manifest. The holder revokes a grant on the badge's grants page.
+
 ### A circle as `authorized_keys`
 
 ```sh

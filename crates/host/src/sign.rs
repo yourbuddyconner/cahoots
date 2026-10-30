@@ -45,7 +45,7 @@ pub fn sign_file(
 ) -> Result<Signed, String> {
     let content = std::fs::read(file).map_err(|e| format!("{}: {e}", file.display()))?;
     let (armored, shown) = if content.len() <= SHOW_LIMIT {
-        (sign_one(socket, key, namespace, &content)?, true)
+        (sign_one(socket, key, namespace, &content, "")?, true)
     } else {
         let data = ssh_key::SshSig::signed_data(namespace, ssh_key::HashAlg::Sha512, &content)
             .map_err(|e| e.to_string())?;

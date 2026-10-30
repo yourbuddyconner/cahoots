@@ -15,14 +15,23 @@
 //!   session, with the host's name from `known_hosts`. The badge checks the signature.
 //! - `SSH_AGENTC_EXTENSION` (27) `sign-with-content@cahoots`: the key, an `SSHSIG` envelope
 //!   to sign, and the content it hashes. `cahoots-host-git-sign` sends it so the badge can show
-//!   the commit it signs. Answered `SSH_AGENT_SUCCESS` (6) followed by the signature.
+//!   the commit it signs. Answered `SSH_AGENT_SUCCESS` (6) followed by the signature. A
+//!   fourth string, the repository's `remote.origin.url` (empty when there is none), may
+//!   follow. When the agent keeps a grant for the key's circle (see [`crate::grants`]) and the
+//!   envelope is a git signature by the grant's author, it asks the badge for a nonce and sends
+//!   `SshSignUnderGrant` with a proof by its own key: the badge signs without asking its holder.
+//!   A grant the badge refuses as used up, expired, revoked or unknown is marked used up here
+//!   and the signature asked for as an ordinary one, which the badge shows its holder.
 //! - Anything else: `SSH_AGENT_FAILURE`.
 
-use crate::badge_client::{describe_error, BadgeClient};
+use crate::badge_client::{describe_error, BadgeClient, ASK_TIMEOUT};
+use crate::{agentkey, grants};
 use base64::Engine;
-use cahoots_custodian::wire::{ChipRequest, ChipResponse, Request, Response, SshHost};
+use cahoots_custodian::wire::{ChipRequest, ChipResponse, ErrorCode, Request, Response, SshHost};
 use cahoots_custodian::CircleId;
+use cahoots_objects::authz::{location_matches, proof_sign, SignGrant};
 use hmac::{Hmac, Mac};
+use sha2::{Digest, Sha256};
 use std::io::{self, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -60,6 +69,8 @@ const KNOWN_FORGES: &[&str] = &[
 #[derive(Clone, Debug)]
 struct Identity {
     circle: CircleId,
+    /// The circle's name.
+    name: String,
     /// The SSH public key blob.
     blob: Vec<u8>,
     comment: String,
@@ -80,6 +91,18 @@ pub struct Agent {
     circles: Vec<String>,
     identities: Mutex<Option<Vec<Identity>>>,
     known_hosts: PathBuf,
+    /// Where the agent's key and grants are kept: [`agentkey::dir`].
+    home: PathBuf,
+}
+
+/// How a signature under a grant went.
+enum UnderGrant {
+    /// The badge signed, under the grant or after asking its holder.
+    Signed(Vec<u8>),
+    /// Ask again as an ordinary signature.
+    Plain,
+    /// Give up: the badge could not be asked, or refused for a reason a retry would not change.
+    Failed,
 }
 
 impl Agent {
@@ -91,6 +114,7 @@ impl Agent {
             circles,
             identities: Mutex::new(None),
             known_hosts,
+            home: agentkey::dir(),
         }
     }
 
@@ -202,9 +226,16 @@ impl Agent {
             let key = r.string()?;
             let data = r.string()?.to_vec();
             let content = r.string()?.to_vec();
+            // The repository, from a helper that sends it; empty means none.
+            let location = if r.0.is_empty() {
+                None
+            } else {
+                let l = r.string()?;
+                (!l.is_empty()).then(|| String::from_utf8_lossy(l).into_owned())
+            };
             r.end()?;
             let id = self.identity(key)?;
-            let sig = self.badge_sign(&id, data, None, Some(content))?;
+            let sig = self.sign_content(&id, data, content, location)?;
             let mut out = vec![SSH_AGENT_SUCCESS];
             put_string(&mut out, &sig);
             Some(out)
@@ -232,6 +263,157 @@ impl Agent {
             name,
             user,
         })
+    }
+
+    /// A signature over `data` with `content` shown: under a grant when the agent keeps one
+    /// that fits, else (or when the badge turns the grant down) as an ordinary signature.
+    fn sign_content(
+        &self,
+        id: &Identity,
+        data: Vec<u8>,
+        content: Vec<u8>,
+        location: Option<String>,
+    ) -> Option<Vec<u8>> {
+        if sshsig_namespace(&data) == Some(b"git".as_slice()) {
+            if let Some(stored) = grants::find(&self.home, &id.name) {
+                if grant_fits(&stored, &content, location.as_deref()) {
+                    match self.sign_under_grant(id, stored, &data, &content, location) {
+                        UnderGrant::Signed(sig) => return Some(sig),
+                        UnderGrant::Failed => return None,
+                        UnderGrant::Plain => {}
+                    }
+                }
+            }
+        }
+        self.badge_sign(id, data, None, Some(content))
+    }
+
+    /// Ask for a fresh nonce, then for a signature under `stored` with the agent key's proof
+    /// over the hash of `data` and the nonce. A badge that is busy is asked once more.
+    fn sign_under_grant(
+        &self,
+        id: &Identity,
+        mut stored: grants::Stored,
+        data: &[u8],
+        content: &[u8],
+        location: Option<String>,
+    ) -> UnderGrant {
+        let key = match agentkey::load_or_create(&self.home) {
+            Ok(k) => k,
+            Err(e) => {
+                eprintln!("agent: {}: no agent key: {e}", id.comment);
+                return UnderGrant::Plain;
+            }
+        };
+        let hash: [u8; 32] = Sha256::digest(data).into();
+        let mut badge = self.badge.lock().unwrap_or_else(|e| e.into_inner());
+        for attempt in 0..2 {
+            let again = attempt == 0;
+            let nonce = match badge.request(Request::Chip {
+                circle: id.circle,
+                op: ChipRequest::Nonce,
+            }) {
+                Ok(Response::Chip {
+                    result: ChipResponse::Nonce { nonce },
+                }) => nonce,
+                Ok(Response::Error {
+                    code: ErrorCode::Busy,
+                }) if again => {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    continue;
+                }
+                Ok(Response::Error { code }) => {
+                    eprintln!("agent: {}: no nonce: {}", id.comment, describe_error(code));
+                    return UnderGrant::Plain;
+                }
+                Ok(other) => {
+                    eprintln!("agent: {}: unexpected answer {other:?}", id.comment);
+                    return UnderGrant::Failed;
+                }
+                Err(e) => {
+                    eprintln!("agent: {}: {e}", id.comment);
+                    return UnderGrant::Failed;
+                }
+            };
+            let req = Request::Chip {
+                circle: id.circle,
+                op: ChipRequest::SshSignUnderGrant {
+                    data: data.to_vec(),
+                    content: content.to_vec(),
+                    grant: stored.bytes.clone(),
+                    proof: proof_sign(&key, &hash, &nonce),
+                    location: location.clone(),
+                    time: grants::now(),
+                },
+            };
+            // The badge may fall back to asking its holder, so wait as long as for any prompt.
+            match badge.request_within(req, ASK_TIMEOUT) {
+                Ok(Response::Chip {
+                    result: ChipResponse::GrantSignature {
+                        signature,
+                        remaining,
+                    },
+                }) => {
+                    eprintln!(
+                        "agent: {} signed under a grant, {remaining} left",
+                        id.comment
+                    );
+                    stored.remaining = Some(remaining);
+                    if let Err(e) = grants::save(&self.home, &stored) {
+                        eprintln!("agent: {e}");
+                    }
+                    return UnderGrant::Signed(signature);
+                }
+                // The badge did not take the grant for this one and asked its holder instead.
+                Ok(Response::Chip {
+                    result: ChipResponse::Signature { signature },
+                }) => {
+                    eprintln!("agent: {} signed after a prompt", id.comment);
+                    return UnderGrant::Signed(signature);
+                }
+                Ok(Response::Error {
+                    code: ErrorCode::Busy,
+                }) if again => {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                }
+                Ok(Response::Error {
+                    code: ErrorCode::Denied,
+                }) => {
+                    eprintln!(
+                        "agent: {}: the badge refused the grant (used up, expired, revoked or unknown; the badge's log says which); asking as an ordinary signature",
+                        id.comment
+                    );
+                    stored.remaining = Some(0);
+                    if let Err(e) = grants::save(&self.home, &stored) {
+                        eprintln!("agent: {e}");
+                    }
+                    return UnderGrant::Plain;
+                }
+                Ok(Response::Error {
+                    code: ErrorCode::Unparseable,
+                }) => {
+                    eprintln!(
+                        "agent: {}: the badge could not check the grant or the proof; asking as an ordinary signature",
+                        id.comment
+                    );
+                    return UnderGrant::Plain;
+                }
+                Ok(Response::Error { code }) => {
+                    eprintln!("agent: {}: {}", id.comment, describe_error(code));
+                    return UnderGrant::Failed;
+                }
+                Ok(other) => {
+                    eprintln!("agent: {}: unexpected answer {other:?}", id.comment);
+                    return UnderGrant::Failed;
+                }
+                Err(e) => {
+                    eprintln!("agent: {}: {e}", id.comment);
+                    return UnderGrant::Failed;
+                }
+            }
+        }
+        eprintln!("agent: {}: the badge stayed busy; asking as an ordinary signature", id.comment);
+        UnderGrant::Plain
     }
 
     /// One `SshSign` request to the badge. `None` for a refusal or any error, logged.
@@ -306,6 +488,7 @@ fn fetch_identities(
             } => match seat_blob(&public) {
                 Some(blob) => ids.push(Identity {
                     circle: info.circle_id,
+                    name: info.name.clone(),
                     blob,
                     comment: format!("cahoots:{}:{}", info.name, info.seat),
                 }),
@@ -322,6 +505,44 @@ fn fetch_identities(
         }
     }
     Ok((ids, complete))
+}
+
+/// The namespace of an `SSHSIG` envelope (the data `ssh-keygen -Y sign` has signed), or
+/// `None` for anything else.
+fn sshsig_namespace(data: &[u8]) -> Option<&[u8]> {
+    let mut r = Reader(data.strip_prefix(b"SSHSIG")?);
+    r.string()
+}
+
+/// The author of a commit: its `author` header line, less the time and zone at its end.
+fn commit_author(content: &[u8]) -> Option<&str> {
+    let text = std::str::from_utf8(content).ok()?;
+    let line = text
+        .lines()
+        .take_while(|l| !l.is_empty())
+        .find_map(|l| l.strip_prefix("author "))?;
+    let (rest, _zone) = line.rsplit_once(' ')?;
+    let (author, _time) = rest.rsplit_once(' ')?;
+    Some(author)
+}
+
+/// Whether the badge would sign `content` at `location` under `stored` without asking: the
+/// commit's author and the repository are the grant's, and it has not ended by the laptop's
+/// clock. The badge checks all of it again; this only keeps a commit the grant does not cover
+/// from being sent under it, where a refusal on the badge would be taken for the grant's end.
+fn grant_fits(stored: &grants::Stored, content: &[u8], location: Option<&str>) -> bool {
+    let Some(g) = stored
+        .claims()
+        .ok()
+        .and_then(|c| SignGrant::from_claims(&c).ok())
+    else {
+        return false;
+    };
+    let place = g.locations.is_empty()
+        || location.is_some_and(|l| g.locations.iter().any(|x| location_matches(x, l)));
+    commit_author(content) == Some(g.author.as_str())
+        && place
+        && g.exp.is_none_or(|e| grants::now() < e)
 }
 
 /// A P-256 public key (SEC1, either form) as an SSH public key blob.
@@ -534,19 +755,21 @@ fn agent_call(socket: &Path, msg: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 /// Call the agent at `socket` with `sign-with-content@cahoots`: sign `data` with the key
-/// `key` (an SSH public key blob), showing the badge `content`. The SSH signature blob, or an
-/// error in words.
+/// `key` (an SSH public key blob), showing the badge `content`, for the repository `location`
+/// (its `remote.origin.url`, or empty). The SSH signature blob, or an error in words.
 pub fn sign_with_content(
     socket: &Path,
     key: &[u8],
     data: &[u8],
     content: &[u8],
+    location: &str,
 ) -> Result<Vec<u8>, String> {
     let mut msg = vec![SSH_AGENTC_EXTENSION];
     put_string(&mut msg, SIGN_WITH_CONTENT.as_bytes());
     put_string(&mut msg, key);
     put_string(&mut msg, data);
     put_string(&mut msg, content);
+    put_string(&mut msg, location.as_bytes());
     let reply = agent_call(socket, &msg)?;
     let mut r = Reader(&reply[1..]);
     match reply[0] {
@@ -609,6 +832,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(host_name(&path, k4).as_deref(), Some("build.internal"));
+    }
+
+    #[test]
+    fn sshsig_namespace_and_commit_author() {
+        let data = ssh_key::SshSig::signed_data("git", ssh_key::HashAlg::Sha512, b"x").unwrap();
+        assert_eq!(sshsig_namespace(&data), Some(b"git".as_slice()));
+        assert_eq!(sshsig_namespace(b"session"), None);
+        let commit = b"tree 4b82\nauthor Ada Lovelace <ada@example.com> 1700000000 +0000\n\
+                       committer Bob <b@example.com> 1700000000 +0000\n\nauthor in the body\n";
+        assert_eq!(commit_author(commit), Some("Ada Lovelace <ada@example.com>"));
+        assert_eq!(commit_author(b"tree 4b82\n\nauthor A <a> 1 +0000\n"), None);
     }
 
     #[test]

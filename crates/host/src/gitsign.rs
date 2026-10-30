@@ -6,8 +6,10 @@
 //! to standard output, as `ssh-keygen -Y sign` does. To sign, this program builds the `SSHSIG`
 //! envelope (the namespace and the SHA-512 of the text), and asks the agent at
 //! `SSH_AUTH_SOCK` (`cahoots-host agent`) to have the badge sign it, sending the text too so
-//! the badge can show the commit's author and subject. The key file names the seat key, as
-//! `ssh-add -L` prints it; the agent signs only with a key it holds.
+//! the badge can show the commit's author and subject, and the repository's
+//! `remote.origin.url` (read with `git config` where it runs), which a grant for the agent may
+//! be limited to. The key file names the seat key, as `ssh-add -L` prints it; the agent signs
+//! only with a key it holds.
 //!
 //! Every other `-Y` operation (`verify`, `find-principals`, `check-novalidate`, which git runs
 //! for `git log --show-signature`) needs no key and is handed to `ssh-keygen` as it is.
@@ -80,12 +82,13 @@ fn sign(args: &[String]) -> Result<(), String> {
         .map(PathBuf::from)
         .ok_or("no agent: set SSH_AUTH_SOCK to the socket `cahoots-host agent` printed")?;
 
+    let location = origin_url();
     if files.is_empty() || files == ["-"] {
         let mut content = Vec::new();
         std::io::stdin()
             .read_to_end(&mut content)
             .map_err(|e| format!("standard input: {e}"))?;
-        let armored = sign_one(&socket, &key, &namespace, &content)?;
+        let armored = sign_one(&socket, &key, &namespace, &content, &location)?;
         std::io::stdout()
             .write_all(armored.as_bytes())
             .map_err(|e| format!("standard output: {e}"))?;
@@ -93,11 +96,23 @@ fn sign(args: &[String]) -> Result<(), String> {
     }
     for file in &files {
         let content = std::fs::read(file).map_err(|e| format!("{file}: {e}"))?;
-        let armored = sign_one(&socket, &key, &namespace, &content)?;
+        let armored = sign_one(&socket, &key, &namespace, &content, &location)?;
         let out = format!("{file}.sig");
         std::fs::write(&out, armored).map_err(|e| format!("{out}: {e}"))?;
     }
     Ok(())
+}
+
+/// `git config --get remote.origin.url` where this program runs, or empty when git has none.
+fn origin_url() -> String {
+    Command::new("git")
+        .args(["config", "--get", "remote.origin.url"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
 }
 
 /// The public key in `path`, as `ssh-add -L` prints it, or in `<path>.pub` when `path` is a
@@ -118,17 +133,19 @@ pub fn read_key(path: &Path) -> Result<ssh_key::PublicKey, String> {
         .ok_or_else(|| format!("{}: no public key in it", path.display()))
 }
 
-/// One armored signature over `content`, with the content shown to the badge.
+/// One armored signature over `content`, with the content shown to the badge, for the
+/// repository `location` (empty for none).
 pub fn sign_one(
     socket: &Path,
     key: &ssh_key::PublicKey,
     namespace: &str,
     content: &[u8],
+    location: &str,
 ) -> Result<String, String> {
     let hash = ssh_key::HashAlg::Sha512;
     let data = ssh_key::SshSig::signed_data(namespace, hash, content).map_err(|e| e.to_string())?;
     let blob = key.to_bytes().map_err(|e| e.to_string())?;
-    let sig = agent::sign_with_content(socket, &blob, &data, content)?;
+    let sig = agent::sign_with_content(socket, &blob, &data, content, location)?;
     armor(key, namespace, &sig)
 }
 

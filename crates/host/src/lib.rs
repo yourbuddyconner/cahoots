@@ -12,8 +12,11 @@
 //! - [`agent`], [`gitsign`], [`roster`], [`attest`]: SSH logins and git signatures with a
 //!   badge's seat key, the circle as `authorized_keys`, and the chip's attestation.
 //! - [`card`]: contact cards and grants the badge signs.
+//! - [`agentkey`], [`grants`]: an agent's own key, and the grants that let it sign git commits
+//!   without a press on the badge.
 
 pub mod agent;
+pub mod agentkey;
 pub mod attest;
 pub mod badge_client;
 pub mod board;
@@ -22,6 +25,7 @@ pub mod device;
 pub mod display;
 mod font;
 pub mod gitsign;
+pub mod grants;
 pub mod link;
 pub mod pile;
 pub mod roster;
