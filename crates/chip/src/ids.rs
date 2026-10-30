@@ -11,6 +11,8 @@ pub enum KeyKind {
     Root = 2,
     /// A circle's chat epoch counter.
     Epoch = 3,
+    /// A circle's grant counter: how many grants the badge has handed out.
+    Grant = 4,
 }
 
 /// A 32-bit object id: `0x4C41_0000 | kind << 8 | slot`.
@@ -36,6 +38,7 @@ impl KeyId {
             1 => KeyKind::Seat,
             2 => KeyKind::Root,
             3 => KeyKind::Epoch,
+            4 => KeyKind::Grant,
             _ => return None,
         };
         Some((kind, id as u8))

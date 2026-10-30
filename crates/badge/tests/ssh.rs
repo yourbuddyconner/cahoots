@@ -933,6 +933,9 @@ impl ChipOps for Lying {
     fn counter_next(&mut self, id: KeyId) -> Result<u64, cahoots_chip::ChipError> {
         self.0.counter_next(id)
     }
+    fn counter_get(&mut self, id: KeyId) -> Result<u64, cahoots_chip::ChipError> {
+        self.0.counter_get(id)
+    }
 }
 
 #[test]

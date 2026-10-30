@@ -94,4 +94,6 @@ pub trait ChipOps {
     fn put_counter(&mut self, id: KeyId, value: u64) -> Result<(), ChipError>;
     /// Adds one and returns the new value.
     fn counter_next(&mut self, id: KeyId) -> Result<u64, ChipError>;
+    /// Reads a counter without moving it. `NoSuchKey` if there is none.
+    fn counter_get(&mut self, id: KeyId) -> Result<u64, ChipError>;
 }

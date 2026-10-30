@@ -305,4 +305,11 @@ impl ChipOps for SoftChip {
             _ => Err(ChipError::NoSuchKey),
         }
     }
+
+    fn counter_get(&mut self, id: KeyId) -> Result<u64, ChipError> {
+        match self.objects.get(&id.0) {
+            Some(Object::Counter(c)) => Ok(*c),
+            _ => Err(ChipError::NoSuchKey),
+        }
+    }
 }

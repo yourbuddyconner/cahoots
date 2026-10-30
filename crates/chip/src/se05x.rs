@@ -581,6 +581,15 @@ impl<I: I2c, D: DelayNs> ChipOps for Se05xChip<I, D> {
         be[8 - raw.len()..].copy_from_slice(&raw);
         Ok(u64::from_be_bytes(be))
     }
+
+    fn counter_get(&mut self, id: KeyId) -> Result<u64, ChipError> {
+        if !self.exists(id)? {
+            return Err(ChipError::NoSuchKey);
+        }
+        let raw = self.read_object(oid(id))?;
+        let be: [u8; 8] = raw.as_slice().try_into().map_err(|_| ChipError::Transport)?;
+        Ok(u64::from_be_bytes(be))
+    }
 }
 
 #[cfg(test)]

@@ -12,7 +12,7 @@ fn key_ids_round_trip() {
     assert_eq!(KeyId::parse(KeyId::new(KeyKind::Root, 255).0), Some((KeyKind::Root, 255)));
     assert_eq!(KeyId::parse(KeyId::new(KeyKind::Epoch, 0).0), Some((KeyKind::Epoch, 0)));
     assert_eq!(KeyId::parse(0), None);
-    assert_eq!(KeyId::parse(0x4C41_0403), None, "kind 4 is not ours");
+    assert_eq!(KeyId::parse(0x4C41_0503), None, "kind 5 is not ours");
     assert_eq!(KeyId::parse(0x4C41_0003), None, "kind 0 is not ours");
     assert_eq!(KeyId::parse(0x4C42_0103), None, "outside the range");
 }

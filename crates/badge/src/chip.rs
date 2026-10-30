@@ -96,6 +96,8 @@ impl SlotEntry {
             KeyKind::Seat => self.has_seat,
             KeyKind::Root => self.has_root,
             KeyKind::Epoch => self.has_epoch,
+            // The record does not track grant counters yet; a later task adds that.
+            KeyKind::Grant => false,
         }
     }
 
@@ -104,6 +106,7 @@ impl SlotEntry {
             KeyKind::Seat => self.has_seat = false,
             KeyKind::Root => self.has_root = false,
             KeyKind::Epoch => self.has_epoch = false,
+            KeyKind::Grant => {}
         }
     }
 }

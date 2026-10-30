@@ -285,6 +285,9 @@ impl ChipOps for HostChip {
         let r = self.chip.counter_next(id);
         self.kept(r)
     }
+    fn counter_get(&mut self, id: KeyId) -> Result<u64, ChipError> {
+        self.chip.counter_get(id)
+    }
 }
 
 impl HostBoard {
