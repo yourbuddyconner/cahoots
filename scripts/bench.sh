@@ -127,6 +127,34 @@ REPO="$STATE/repo"; rm -rf "$REPO"; mkdir -p "$REPO"
   && echo hello > hello.txt && git add hello.txt && git commit -q -m "A commit signed on the badge" ) >>"$LOG" 2>&1 \
   && ( cd "$REPO" && git log --show-signature -1 2>&1 | grep -q 'Good "git" signature' ) \
   && say "a git commit signed by the chip verifies" || say "FAILED: the git commit was not signed or did not verify; see $LOG"
+say "a grant for an agent: two commits signed with no press"
+# The grant request talks to the badge itself, so the agent lets go of the port first. The
+# bench driver allows the "let an agent sign" screen as it allows every consent prompt.
+kill $AGENT 2>/dev/null; wait $AGENT 2>/dev/null
+GRANT_HOME="$STATE/home"; rm -rf "$GRANT_HOME"; mkdir -p "$GRANT_HOME"
+UNTIL=$(date -v+1m +%F 2>/dev/null || date -d "+1 month" +%F)
+if CAHOOTS_HOME="$GRANT_HOME" CAHOOTS_BENCH=serve "$HOST" grant request --serial "$PORT" --circle "$NAME" \
+     --agent "claude on the bench" --author "Bench <bench@example.com>" --budget 2 --until "$UNTIL" >>"$LOG" 2>&1; then
+  say "grant issued on the badge: $(CAHOOTS_HOME="$GRANT_HOME" "$HOST" grant list 2>/dev/null | head -1)"
+  rm -f "$SOCK"
+  CAHOOTS_HOME="$GRANT_HOME" CAHOOTS_BENCH=serve "$HOST" agent --serial "$PORT" --circle "$NAME" --socket "$SOCK" >"$STATE/agent.env" 2>>"$LOG" &
+  AGENT=$!
+  i=0; while [ ! -S "$SOCK" ] && [ $i -lt 120 ]; do sleep 1; i=$((i+1)); done; sleep 2
+  ok=1
+  for n in 1 2; do
+    ( cd "$REPO" && echo "change $n" >> hello.txt && git add hello.txt && git commit -q -m "Commit $n under a grant" ) >>"$LOG" 2>&1 || ok=0
+    ( cd "$REPO" && git log --show-signature -1 2>&1 | grep -q 'Good "git" signature' ) || ok=0
+  done
+  left=$(( 2 - $(grep -c "signed under a grant" "$LOG") ))
+  if [ $ok = 1 ] && grep -q "signed under a grant, 1 left" "$LOG" && grep -q "signed under a grant, 0 left" "$LOG"; then
+    say "two commits signed under the grant with no press, 1 left then 0 left; both verify"
+  else
+    say "FAILED: the commits under the grant; see $LOG"
+  fi
+  grep -oE "screen: signed for [^|]*\| [^|]*\| [0-9]+ left of 2" "$LOG" | tail -2 | while read -r l; do say "badge: $l"; done
+else
+  say "FAILED: grant request on the badge; see $LOG"
+fi
 if [ "$GITHUB" = 1 ]; then
   say "github: adding the key and logging in"
   gh ssh-key add "$STATE/bench.pub" --title "cahoots bench $(date +%F)" --type authentication >>"$LOG" 2>&1 || say "gh ssh-key add (authentication) failed or exists"
