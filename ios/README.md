@@ -54,6 +54,54 @@ space (E174.1).
 Every scan screen has a field to paste a code under the camera, for the simulator and for anyone
 who cannot use the camera.
 
+## Ship to TestFlight
+
+### Once
+
+1. In Xcode, sign into the developer account (Settings, Accounts). Team id `9Z585PW7QR`.
+2. `cp ios/Signing.xcconfig.example ios/Signing.xcconfig` and set `DEVELOPMENT_TEAM` to the team
+   id. The file is git-ignored.
+3. In App Store Connect, create the app record: My Apps, New App, platform iOS, name Cahoots,
+   bundle id `network.cahoots.app`. The App ID itself already exists: the first archive made it
+   with automatic signing.
+4. In App Store Connect, Users and Access, Integrations, make an API key with the App Manager
+   role. Save the downloaded file as `~/.appstoreconnect/private_keys/AuthKey_<key id>.p8`, and
+   note the key id and the issuer id.
+
+### Every release
+
+```
+ASC_KEY_ID=<key id> ASC_ISSUER_ID=<issuer id> scripts/ios-archive.sh
+```
+
+The script builds the Rust library, generates the project, archives a Release build, exports
+`Cahoots.ipa` signed for the App Store, and uploads it with `xcrun altool`. The build number is
+the UTC date and time (`YYYYMMDDHHMM`). The version is `MARKETING_VERSION` in `project.yml`.
+`--no-upload` stops after the export. Without the two variables and the key file, the script
+exports and says how to upload (the key, or Transporter with the `.ipa`).
+
+The first time a build reaches TestFlight, App Store Connect asks about export compliance.
+Answer that the app uses non-exempt encryption: it encrypts messages itself, with ChaCha20.
+Classify it yourself as mass-market encryption, and file the annual self-classification report
+with BIS (the US Bureau of Industry and Security) each year the app is available.
+
+Tried on 2026-10-30: `scripts/ios-archive.sh --no-upload` archived build 202610302129 and
+exported the `.ipa`. Xcode made an Apple Development certificate on this Mac, and the export is
+signed "Apple Distribution: Conner Swann (9Z585PW7QR)" with the profile "iOS Team Store
+Provisioning Profile: network.cahoots.app". The upload was not tried: it needs the app record
+and the API key above.
+
+### What to try first on a device
+
+- The camera: scan a host's code to join, and as host scan a joiner's code. Then a codes-only
+  ceremony between two phones, where both show and scan animations.
+- Face ID at the ceremony's signature: the prompt, "Confirm with Face ID" on screen, and what a
+  cancelled prompt does ("Sign with Face ID" to try again).
+- Background refresh and the badge: leave a chat with the app closed and the phone unlocked,
+  have someone send, and see whether the icon's count changes. iOS decides when refresh runs.
+- Settings should say "Seat key in the Secure Enclave, secret protected by iOS." with no
+  simulator note.
+
 ## Tried in the simulator
 
 On 2026-10-30, Xcode 15.4, iOS 17.5, on a Mac with Apple silicon.
