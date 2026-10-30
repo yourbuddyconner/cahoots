@@ -107,8 +107,12 @@ pub struct ChannelSession {
     my_key: SeatKey,
     my_kid: [u8; 32],
     epochs: Vec<EpochState>,
+    /// Always the held epoch with the highest number.
     current: Option<EpochId>,
     sent_in_current: u32,
+    /// The highest epoch number dropped from the window. An epoch at or below it is never
+    /// installed again, so the session never holds a second key for one epoch number.
+    dropped_through: Option<u32>,
 }
 
 impl core::fmt::Debug for ChannelSession {
@@ -119,6 +123,7 @@ impl core::fmt::Debug for ChannelSession {
             .field("epochs", &self.epochs.len())
             .field("current", &self.current)
             .field("sent_in_current", &self.sent_in_current)
+            .field("dropped_through", &self.dropped_through)
             .finish_non_exhaustive()
     }
 }
@@ -133,6 +138,7 @@ impl ChannelSession {
             epochs: Vec::new(),
             current: None,
             sent_in_current: 0,
+            dropped_through: None,
         }
     }
 
@@ -161,29 +167,44 @@ impl ChannelSession {
         self.epochs.iter().any(|e| e.id == *id)
     }
 
-    /// Install an epoch key and make it current, dropping the oldest epoch beyond
-    /// [`MAX_EPOCHS`]. An epoch id already held is [`ChannelError::Reuse`]: the session never
-    /// holds two keys for one epoch. An epoch of another channel is
-    /// [`ChannelError::WrongChannel`].
+    /// Install an epoch key. It becomes current only when its number is higher than the
+    /// current epoch's; an older epoch is installed for reading only. Beyond [`MAX_EPOCHS`] the
+    /// lowest epoch number is dropped.
+    ///
+    /// Refused with [`ChannelError::Reuse`], changing nothing: an epoch already held, an epoch
+    /// at or below one already dropped, or, with the window full, an epoch lower than every one
+    /// held (it would be dropped at once). The session never holds two keys for one epoch. An
+    /// epoch of another channel is [`ChannelError::WrongChannel`].
     pub fn install_epoch(&mut self, id: EpochId, key: Key) -> Result<(), ChannelError> {
         if id.channel_id != self.channel_id {
             return Err(ChannelError::WrongChannel);
         }
-        if self.has_epoch(&id) {
+        if self.has_epoch(&id) || self.dropped_through.is_some_and(|d| id.epoch <= d) {
+            return Err(ChannelError::Reuse);
+        }
+        // Epochs are kept in ascending number order.
+        let at = self.epochs.partition_point(|e| e.id.epoch < id.epoch);
+        if at == 0 && self.epochs.len() >= MAX_EPOCHS {
             return Err(ChannelError::Reuse);
         }
         let send = SenderChain::new(&key, &self.my_kid);
-        self.epochs.push(EpochState {
-            id,
-            key,
-            send,
-            receive: Vec::new(),
-        });
+        self.epochs.insert(
+            at,
+            EpochState {
+                id,
+                key,
+                send,
+                receive: Vec::new(),
+            },
+        );
         while self.epochs.len() > MAX_EPOCHS {
-            self.epochs.remove(0);
+            let dropped = self.epochs.remove(0);
+            self.dropped_through = Some(dropped.id.epoch);
         }
-        self.current = Some(id);
-        self.sent_in_current = 0;
+        if self.current.is_none_or(|c| id.epoch > c.epoch) {
+            self.current = Some(id);
+            self.sent_in_current = 0;
+        }
         Ok(())
     }
 
@@ -248,7 +269,13 @@ impl ChannelSession {
     ///
     /// ```text
     /// {0: 1, 1: seed, 2: channel_id, 3: current epoch_id or nil, 4: sent_in_current,
-    ///  5: [{0: epoch_id, 1: epoch_key, 2: send chain, 3: [{0: kid, 1: chain}, ...]}, ...]}
+    ///  5: [{0: epoch_id, 1: epoch_key, 2: send chain, 3: [{0: kid, 1: chain}, ...]}, ...],
+    ///  6: highest dropped epoch number or nil}
+    /// ```
+    ///
+    /// Epochs are in ascending number order, and the current epoch is the last.
+    ///
+    /// ```text
     /// chain = {0: chain key, 1: next counter, 2: [{0: counter, 1: message key}, ...]}
     /// ```
     pub fn export_state(&self) -> Zeroizing<Vec<u8>> {
@@ -261,7 +288,7 @@ impl ChannelSession {
     /// shape with an impossible state, is [`ChannelError::Malformed`] or
     /// [`ChannelError::NotCanonical`].
     pub fn import_state(bytes: &[u8]) -> Result<Self, ChannelError> {
-        let mut r = Reader::open(bytes, 6)?;
+        let mut r = Reader::open(bytes, 7)?;
         let seed: Zeroizing<[u8; 32]> = Zeroizing::new(r.array()?);
         let my_key = SeatKey::from_seed(&seed).map_err(|_| M)?;
         let channel_id: ChannelId = r.array()?;
@@ -287,7 +314,8 @@ impl ChannelSession {
         for _ in 0..n {
             let mut e = Nested::open(d, 4)?;
             let id = epoch_id(e.bytes()?)?;
-            if id.channel_id != channel_id || s.has_epoch(&id) {
+            let ascending = s.epochs.last().is_none_or(|l| l.id.epoch < id.epoch);
+            if id.channel_id != channel_id || !ascending {
                 return Err(M);
             }
             let key = key(e.bytes()?)?;
@@ -313,13 +341,25 @@ impl ChannelSession {
                 receive,
             });
         }
+        let dropped_through = {
+            let d = r.key()?;
+            match d.datatype().map_err(|_| M)? {
+                Type::Null => {
+                    d.null().map_err(|_| M)?;
+                    None
+                }
+                _ => Some(d.u32().map_err(|_| M)?),
+            }
+        };
         r.finish()?;
-        if let Some(id) = current {
-            if !s.has_epoch(&id) {
+        s.dropped_through = dropped_through;
+        if current != s.epochs.last().map(|e| e.id) || (current.is_none() && sent_in_current != 0) {
+            return Err(M);
+        }
+        if let (Some(d), Some(first)) = (dropped_through, s.epochs.first()) {
+            if first.id.epoch <= d {
                 return Err(M);
             }
-        } else if sent_in_current != 0 {
-            return Err(M);
         }
         if *s.export_state() != *bytes {
             return Err(ChannelError::NotCanonical);
@@ -328,7 +368,7 @@ impl ChannelSession {
     }
 
     fn encode<W: Write>(&self, e: &mut Encoder<W>) -> Result<(), EncodeError<W::Error>> {
-        e.map(6)?.u8(0)?.u8(VERSION)?;
+        e.map(7)?.u8(0)?.u8(VERSION)?;
         e.u8(1)?.bytes(self.my_key.to_bytes().as_ref())?;
         e.u8(2)?.bytes(&self.channel_id)?;
         e.u8(3)?;
@@ -350,6 +390,11 @@ impl ChannelSession {
                 encode_chain(e, chain)?;
             }
         }
+        e.u8(6)?;
+        match self.dropped_through {
+            Some(n) => e.u32(n)?,
+            None => e.null()?,
+        };
         Ok(())
     }
 }

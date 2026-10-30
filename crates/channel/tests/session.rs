@@ -118,6 +118,24 @@ fn a_skipped_message_still_opens_later_ones_within_max_skip() {
 }
 
 #[test]
+fn past_max_skip_skipped_keys_the_earliest_are_forgotten() {
+    let mut carol = member(2);
+    let mut dave = member(1);
+    let c = carol.my_public();
+    let m = MAX_SKIP as usize;
+    let wires: Vec<Vec<u8>> = (0..m + 4).map(|_| text(&mut carol, b"x")).collect();
+    // Open 0, then m + 1 (skipping 1..=m, a full cache), then m + 3 (skipping m + 2 too).
+    dave.receive(&wires[0], &c).unwrap();
+    dave.receive(&wires[m + 1], &c).unwrap();
+    dave.receive(&wires[m + 3], &c).unwrap();
+    // The cache keeps MAX_SKIP keys: the earliest skipped (counter 1) is gone, the rest open.
+    assert_eq!(dave.receive(&wires[1], &c), Err(ChannelError::Reuse));
+    assert!(dave.receive(&wires[2], &c).is_ok());
+    assert!(dave.receive(&wires[m], &c).is_ok());
+    assert!(dave.receive(&wires[m + 2], &c).is_ok());
+}
+
+#[test]
 fn two_readers_decrypt_the_same_message_independently() {
     let mut alice = member(0);
     let mut bob = member(1);
@@ -194,6 +212,73 @@ fn epochs_are_installed_once_and_at_most_four_are_kept() {
 }
 
 #[test]
+fn an_older_epoch_installed_late_is_for_reading_only() {
+    let mut alice = member(0);
+    alice.install_epoch(epoch(3), key(3)).unwrap();
+    let a = alice.my_public();
+    let old = {
+        let mut a1 = member(0);
+        text(&mut a1, b"from epoch one")
+    };
+    let new = text(&mut alice, b"from epoch three");
+
+    // Bob gets epoch 3 first, then a catch-up deposit for epoch 1.
+    let mut bob = ChannelSession::new(CHANNEL, seat_key(1));
+    bob.install_epoch(epoch(3), key(3)).unwrap();
+    text(&mut bob, b"sent in three");
+    bob.install_epoch(epoch(1), key(1)).unwrap();
+    assert_eq!(bob.current_epoch(), Some(epoch(3)));
+    assert_eq!(bob.sent_in_current(), 1);
+    assert_eq!(bob.receive(&old, &a).unwrap().1, b"from epoch one");
+    assert_eq!(bob.receive(&new, &a).unwrap().1, b"from epoch three");
+    // Bob still sends under epoch 3.
+    let w = text(&mut bob, b"still three");
+    assert_eq!(split(&w).unwrap().2.epoch_id, epoch(3));
+}
+
+#[test]
+fn a_fifth_epoch_drops_the_lowest_number_and_it_never_comes_back() {
+    let mut s = ChannelSession::new(CHANNEL, seat_key(0));
+    // Installed out of order: 5, 2, 9, 4.
+    for n in [5, 2, 9, 4] {
+        s.install_epoch(epoch(n), key(n)).unwrap();
+    }
+    assert_eq!(s.current_epoch(), Some(epoch(9)));
+    // A fifth, lower than the current, drops 2 (the lowest), not 9.
+    s.install_epoch(epoch(7), key(7)).unwrap();
+    assert!(!s.has_epoch(&epoch(2)));
+    for n in [4, 5, 7, 9] {
+        assert!(s.has_epoch(&epoch(n)));
+    }
+    assert_eq!(s.current_epoch(), Some(epoch(9)));
+
+    // The dropped number, or anything below it, is refused and changes nothing.
+    let before = s.export_state();
+    assert_eq!(s.install_epoch(epoch(2), key(2)), Err(ChannelError::Reuse));
+    assert_eq!(s.install_epoch(epoch(1), key(1)), Err(ChannelError::Reuse));
+    // With the window full, an epoch below every one held would be dropped at once: refused.
+    assert_eq!(s.install_epoch(epoch(3), key(3)), Err(ChannelError::Reuse));
+    assert_eq!(*s.export_state(), *before);
+
+    // The refusal survives export and import.
+    let mut back = ChannelSession::import_state(&s.export_state()).unwrap();
+    assert_eq!(
+        back.install_epoch(epoch(2), key(2)),
+        Err(ChannelError::Reuse)
+    );
+    assert_eq!(back.current_epoch(), Some(epoch(9)));
+
+    // A higher one still goes in, drops 4 and becomes current.
+    back.install_epoch(epoch(10), key(10)).unwrap();
+    assert!(!back.has_epoch(&epoch(4)));
+    assert_eq!(back.current_epoch(), Some(epoch(10)));
+    assert_eq!(
+        back.install_epoch(epoch(3), key(3)),
+        Err(ChannelError::Reuse)
+    );
+}
+
+#[test]
 fn export_import_keeps_chains_and_counters() {
     let mut alice = member(0);
     let mut bob = member(1);
@@ -242,7 +327,8 @@ fn wrong_signer_is_refused_before_any_chain_moves() {
     assert_eq!(*bob.export_state(), *before);
     // A flipped ciphertext byte breaks the signature too.
     let mut bad = w.clone();
-    bad[100] ^= 1;
+    let body_len = split(&w).unwrap().0.len();
+    bad[body_len - 1] ^= 1;
     assert_eq!(
         bob.receive(&bad, &alice.my_public()),
         Err(ChannelError::Signature)
