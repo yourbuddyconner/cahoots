@@ -20,8 +20,9 @@
 //!   follow. When the agent keeps a grant for the key's circle (see [`crate::grants`]) and the
 //!   envelope is a git signature by the grant's author, it asks the badge for a nonce and sends
 //!   `SshSignUnderGrant` with a proof by its own key: the badge signs without asking its holder.
-//!   A grant the badge refuses as used up, expired, revoked or unknown is marked used up here
-//!   and the signature asked for as an ordinary one, which the badge shows its holder.
+//!   A grant is retired here when the badge's answers count it down to 0. A refusal under a
+//!   grant (`Denied`) fails the signature and leaves the grant as it is: it cannot be told
+//!   apart from the holder refusing a prompt the badge fell back to.
 //! - Anything else: `SSH_AGENT_FAILURE`.
 
 use crate::badge_client::{describe_error, BadgeClient, ASK_TIMEOUT};
@@ -298,8 +299,12 @@ impl Agent {
         content: &[u8],
         location: Option<String>,
     ) -> UnderGrant {
-        let key = match agentkey::load_or_create(&self.home) {
-            Ok(k) => k,
+        let key = match agentkey::load(&self.home) {
+            Ok(Some(k)) => k,
+            Ok(None) => {
+                eprintln!("agent: {}: a grant is kept but no agent key; not using it", id.comment);
+                return UnderGrant::Plain;
+            }
             Err(e) => {
                 eprintln!("agent: {}: no agent key: {e}", id.comment);
                 return UnderGrant::Plain;
@@ -379,15 +384,13 @@ impl Agent {
                 Ok(Response::Error {
                     code: ErrorCode::Denied,
                 }) => {
+                    // The holder refusing a fallback prompt and a grant the badge no longer
+                    // honours look the same: leave the grant as it is and ask nobody again.
                     eprintln!(
-                        "agent: {}: the badge refused the grant (used up, expired, revoked or unknown; the badge's log says which); asking as an ordinary signature",
+                        "agent: {}: refused on the badge, or the grant is no longer valid: run `cahoots-host grant list`",
                         id.comment
                     );
-                    stored.remaining = Some(0);
-                    if let Err(e) = grants::save(&self.home, &stored) {
-                        eprintln!("agent: {e}");
-                    }
-                    return UnderGrant::Plain;
+                    return UnderGrant::Failed;
                 }
                 Ok(Response::Error {
                     code: ErrorCode::Unparseable,

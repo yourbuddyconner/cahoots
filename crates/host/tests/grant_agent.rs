@@ -144,8 +144,10 @@ fn an_agent_signs_under_a_grant_until_it_is_spent() {
             .wait_with_output()
             .unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        let screen = wait_line(&top, "signed for claude");
-        assert!(screen.lines().any(|l| l == left), "{screen}");
+        // The badge answers before it redraws, so wait for this commit's count itself.
+        let screen = wait_screen(&top, |s| {
+            s.lines().any(|l| l == "signed for claude") && s.lines().any(|l| l == left)
+        });
         assert!(screen.lines().any(|l| l == "Fix the parser for long names"), "{screen}");
         let armored = std::fs::read_to_string(tmp.path().join(format!("{name}.sig"))).unwrap();
         let sig = ssh_key::SshSig::from_pem(&armored).unwrap();
@@ -153,6 +155,25 @@ fn an_agent_signs_under_a_grant_until_it_is_spent() {
             .verify("git", COMMIT.as_bytes(), &sig)
             .expect("the signature verifies");
     }
+
+    // The badge refuses a use the laptop thought it had left (here, a count out of step with
+    // the badge's): the signature fails once, nobody is asked, and the grant is left alone.
+    let meta = Path::new(&grant_file).with_extension("json");
+    let spent = std::fs::read_to_string(&meta).unwrap();
+    assert!(spent.contains("\"remaining\": 0"), "{spent}");
+    std::fs::write(&meta, spent.replace("\"remaining\": 0", "\"remaining\": 1")).unwrap();
+    let refused = tmp.path().join("refused");
+    std::fs::write(&refused, COMMIT).unwrap();
+    let out = git_sign(tmp.path(), &agent_sock, &keyfile, &refused)
+        .wait_with_output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(!tmp.path().join("refused.sig").exists());
+    let screen = std::fs::read_to_string(top.join("screen.txt")).unwrap();
+    assert!(!screen.lines().any(|l| l == "sign a git commit"), "{screen}");
+    let after = std::fs::read_to_string(&meta).unwrap();
+    assert!(after.contains("\"remaining\": 1"), "the grant is left as it was: {after}");
+    std::fs::write(&meta, spent).unwrap();
 
     // Spent: the third commit is asked about as any other.
     let commit = tmp.path().join("three");
