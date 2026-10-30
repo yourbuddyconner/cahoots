@@ -32,7 +32,32 @@ fn local_ceremony_writes_file_provider_circles_that_agree() {
         assert_eq!(c.my_slice, i);
         assert_eq!(c.params.n, 3);
         assert_eq!(c.label, "CSPRNG");
+        // Every member keeps the same root, in a file only its owner can read.
+        let root = c.root.expect("the ceremony wrote the root");
+        let first = open_circle(&dir.path().join("member-0")).unwrap().root.unwrap();
+        assert_eq!(*root, *first);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(c.dir.join("root")).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
     }
+}
+
+#[test]
+fn a_circle_without_a_root_does_not_open_for_chat() {
+    let dir = tempfile::tempdir().unwrap();
+    ceremony(dir.path(), 2);
+    let member = dir.path().join("member-0");
+    let c = open_circle(&member).unwrap();
+    std::fs::remove_file(c.dir.join("root")).unwrap();
+    drop(c);
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    assert!(matches!(
+        Client::open(&member, MemRelay::shared(relay), 1000),
+        Err(cahoots_chat::cli::client::ClientError::NoRoot)
+    ));
 }
 
 fn clients(dir: &Path, relay: &Arc<Mutex<MemRelay>>, rotate_after: u32) -> Vec<Client<MemRelay>> {

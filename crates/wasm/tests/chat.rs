@@ -67,14 +67,14 @@ fn chat_round_trips_both_ways_and_reports_epoch() {
     assert_eq!(got.sender(), 0);
     assert_eq!(got.counter(), 0);
     assert_eq!(got.epoch(), a.current_epoch().unwrap());
-    assert_eq!(got.epoch(), "0:0");
+    assert_eq!(got.epoch(), "1");
     // A receiver adopts the newest epoch it has seen, so b replies in a's epoch.
-    assert_eq!(b.current_epoch().unwrap(), "0:0");
+    assert_eq!(b.current_epoch().unwrap(), "1");
     let r = b.chat_send(b"hi a").unwrap();
     let got = a.chat_receive(&r).unwrap();
     assert_eq!(got.text(), b"hi a");
     assert_eq!(got.sender(), 1);
-    assert_eq!(got.epoch(), "0:0");
+    assert_eq!(got.epoch(), "1");
 }
 
 #[test]
@@ -94,13 +94,15 @@ fn chat_errors_are_stable_strings() {
 }
 
 #[test]
-fn rotate_epoch_spends_and_peers_follow() {
+fn rotate_epoch_spends_nothing_and_peers_follow() {
     let (mut a, mut b) = pair();
+    assert!(a.has_root() && b.has_root());
     let w1 = a.chat_send(b"one").unwrap();
     b.chat_receive(&w1).unwrap();
     let before = a.remaining();
     let id = a.rotate_epoch().unwrap();
-    assert_eq!(a.remaining(), before - 32);
+    assert_eq!(id, "2");
+    assert_eq!(a.remaining(), before);
     assert_eq!(id, a.current_epoch().unwrap());
     let w2 = a.chat_send(b"two").unwrap();
     let got = b.chat_receive(&w2).unwrap();
@@ -131,4 +133,33 @@ fn chat_buckets() {
     let p = chat_bucket_pad(b"abc").unwrap();
     assert_eq!(p.len(), 64);
     assert_eq!(chat_bucket_unpad(&p).unwrap(), b"abc");
+}
+
+/// A version 4 state: the version 5 layout without the root trailer, with pad-epoch chat
+/// state in the chat slot.
+fn as_version_4(v5: &[u8]) -> Vec<u8> {
+    assert_eq!(v5[0], 5);
+    let mut v4 = v5[..v5.len() - 33].to_vec();
+    v4[0] = 4;
+    v4
+}
+
+#[test]
+fn a_version_4_state_opens_without_chat() {
+    let (mut a, mut b) = pair();
+    let w = a.chat_send(b"one").unwrap();
+    b.chat_receive(&w).unwrap();
+    let pure = a.send(0, b"pure pad").unwrap();
+    let mut old = Circle::import(&as_version_4(&b.export())).unwrap();
+    assert!(!old.has_root());
+    assert!(old.has_seat_key());
+    assert_eq!(old.current_epoch(), None);
+    assert_eq!(old.chat_send(b"x").unwrap_err(), "no-root");
+    assert_eq!(old.chat_receive(&w).unwrap_err(), "no-root");
+    assert_eq!(old.rotate_epoch().unwrap_err(), "no-root");
+    // The pad still works, and it saves as version 5 with no root.
+    assert_eq!(old.receive(&pure).unwrap().plaintext(), b"pure pad");
+    let again = Circle::import(&old.export()).unwrap();
+    assert_eq!(old.export()[0], 5);
+    assert!(!again.has_root());
 }

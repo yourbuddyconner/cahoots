@@ -1,21 +1,30 @@
 //! Chat vectors (docs/chat.md section 7), published to `crates/vectors/chat.json`.
 //! Written if missing, compared if present. Delete and rerun after a deliberate change.
+//!
+//! The root and circle id are those of `crates/vectors/root.json`, and the epoch is one of
+//! its chat key epochs, so the epoch key here is the chat key published there.
 
 use cahoots_chat::{chain_init, epoch_key, open, parse, seal, step, EpochId, Header, MessageType};
 use serde_json::{json, Value};
 
-const CID: [u8; 16] = [
-    0x63, 0x61, 0x68, 0x6f, 0x6f, 0x74, 0x73, 0x2d, 0x63, 0x68, 0x61, 0x74, 0x2d, 0x76, 0x65, 0x63,
-];
+const EPOCH: u32 = 7;
+
+fn root_vectors() -> Value {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../vectors/root.json");
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+fn hex_array<const N: usize>(v: &Value) -> [u8; N] {
+    hex::decode(v.as_str().unwrap()).unwrap().try_into().unwrap()
+}
 
 #[allow(clippy::type_complexity)]
 fn vectors() -> Value {
-    let eid = EpochId {
-        slice: 1,
-        offset: 96,
-    };
-    let psk: [u8; 32] = core::array::from_fn(|i| (i as u8).wrapping_mul(37).wrapping_add(11));
-    let ek = epoch_key(&CID, &eid, &psk);
+    let rv = root_vectors();
+    let root: [u8; 32] = hex_array(&rv["root"]);
+    let cid: [u8; 16] = hex_array(&rv["circle_id"]);
+    let eid = EpochId::root(EPOCH);
+    let ek = epoch_key(&root, &cid, EPOCH);
     let mut senders = Vec::new();
     let mut messages = Vec::new();
     let plaintexts: [(u8, u32, &[u8]); 3] = [
@@ -49,7 +58,7 @@ fn vectors() -> Value {
             .unwrap();
         let h = Header {
             version: 2,
-            circle_id: CID,
+            circle_id: cid,
             epoch: eid,
             sender,
             counter,
@@ -72,10 +81,11 @@ fn vectors() -> Value {
     let (ph, body) = parse(&tampered).unwrap();
     assert!(open(&ph, &mk0, body).is_err());
     json!({
-        "description": "docs/chat.md v1. epoch_key = HKDF-SHA256(salt = \"cahoots/chat/epoch/v1\" || circle_id || slice || offset LE, ikm = psk, info = \"\"). chain_0[i] = HKDF-Expand(epoch_key, \"cahoots/chat/chain/v1\" || i); msg_key = Expand(chain, \"cahoots/chat/msg/v1\"); next = Expand(chain, \"cahoots/chat/next/v1\"). AEAD ChaCha20-Poly1305, nonce = sender || counter LE || 7 zero bytes, aad = header.",
-        "circle_id": hex::encode(CID),
-        "epoch_id": {"slice": eid.slice, "offset": eid.offset},
-        "psk": hex::encode(psk),
+        "description": "docs/chat.md v2, root epochs. epoch_id = 0xFF || n as u32 LE. epoch_key = HMAC-SHA256(root, \"chat\" || circle_id || n as u64 BE), the chat key of root.json, whose root and circle_id these are. chain_0[i] = HKDF-Expand(epoch_key, \"cahoots/chat/chain/v1\" || i); msg_key = Expand(chain, \"cahoots/chat/msg/v1\"); next = Expand(chain, \"cahoots/chat/next/v1\"). AEAD ChaCha20-Poly1305, nonce = sender || counter LE || 7 zero bytes, aad = header.",
+        "root": hex::encode(root),
+        "circle_id": hex::encode(cid),
+        "epoch": EPOCH,
+        "epoch_id": hex::encode(eid.encode()),
         "epoch_key": hex::encode(*ek),
         "senders": senders,
         "messages": messages,
@@ -86,12 +96,15 @@ fn vectors() -> Value {
 #[test]
 fn chat_vectors_are_stable() {
     let v = vectors();
-    assert_eq!(v["epoch_key"].as_str().unwrap().len(), 64);
-    // Pinned after first generation so an accidental derivation change is caught here too.
-    assert_eq!(
-        v["epoch_key"],
-        "6e71df340bf3ed1ec3b269b39bca76043e752b62efdd94f88126fe628b569851"
-    );
+    // The epoch key is the chat key root.json publishes for the same epoch.
+    let published = root_vectors()["chat_keys"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["epoch"] == EPOCH)
+        .unwrap()["key"]
+        .clone();
+    assert_eq!(v["epoch_key"], published);
 }
 
 #[test]

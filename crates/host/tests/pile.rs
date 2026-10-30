@@ -42,6 +42,40 @@ fn each_circle_file_keeps_its_seat_key_and_the_one_manifest() {
 }
 
 #[test]
+fn the_cards_chat_on_the_root_they_keep() {
+    let tmp = tempfile::tempdir().unwrap();
+    let devices = run_pile(3, None, "bench", 16 * 1024, tmp.path(), Some(80)).unwrap();
+    // Read back from disk: every card keeps the same root in root.bin.
+    let devices: Vec<Device> = devices
+        .iter()
+        .map(|d| Device::open(d.dir()).unwrap())
+        .collect();
+    let root = *devices[0].root().unwrap();
+    let id = devices[0].circle_id();
+    let mut chats: Vec<cahoots_chat::ChatSession> = (0..3u8)
+        .map(|seat| {
+            let d = &devices[usize::from(seat)];
+            assert_eq!(d.root(), Some(&root));
+            cahoots_chat::ChatSession::new(d.root().unwrap(), id, 3, seat)
+        })
+        .collect();
+    let before = devices[1].remaining();
+    let w = chats[1].send(b"from seat 1").unwrap();
+    assert_eq!(chats[0].receive(&w).unwrap().1, b"from seat 1");
+    assert_eq!(chats[2].receive(&w).unwrap().1, b"from seat 1");
+    assert_eq!(devices[1].remaining(), before, "chat spends no pad");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let meta = std::fs::metadata(devices[0].dir().join("root.bin")).unwrap();
+        assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+    }
+    // A state directory from before root.bin opens with no root.
+    std::fs::remove_file(devices[2].dir().join("root.bin")).unwrap();
+    assert!(Device::open(devices[2].dir()).unwrap().root().is_none());
+}
+
+#[test]
 fn a_circle_file_from_before_seat_keys_still_opens() {
     let tmp = tempfile::tempdir().unwrap();
     let devices = run_pile(2, None, "bench", 16 * 1024, tmp.path(), Some(79)).unwrap();

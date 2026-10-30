@@ -17,7 +17,7 @@ The hard part is getting the same random file to every member without anyone els
 
 ![The ceremony in six steps](docs/diagrams/ceremony.svg)
 
-The group is now a **circle**. The pad is a key budget. Spending 32 bytes seeds a session of any size in WireGuard, HPKE, age, or the pad-seeded chat. An attacker then has to break both the math and the pad. Spending one byte per byte encrypts a short message that nothing can break. The device records every spend in a ledger and erases the bytes, so no key is ever used twice.
+The group is now a **circle**. The pad is a key budget. Spending 32 bytes seeds a session of any size in WireGuard, HPKE, or age. An attacker then has to break both the math and the pad. Spending one byte per byte encrypts a short message that nothing can break. The device records every spend in a ledger and erases the bytes, so no key is ever used twice.
 
 ![The pad: everyone holds all of it, each member sends from their own part](docs/diagrams/pad.svg)
 
@@ -65,7 +65,7 @@ Every Rust crate lives under `crates/`. The PWA lives under `web/app`.
 | `crates/esp32s3` | `cahoots-esp32s3` | `esp-hal` firmware for the Arduino Nano ESP32 with the 1.54" e-paper and two buttons: the four HAL traits on real hardware, the pile over USB with the laptop as the other cards. Built with the esp toolchain, outside the workspace. | in progress (M4b, first board) |
 | `crates/rp2350` | `cahoots-rp2350` | `rp235x-hal` firmware for the Raspberry Pi Pico 2 on V1's pin map: the e-paper, two buttons, the chip's TRNG, the pad and ledger in flash through the boot ROM, USB to a laptop and two UARTs up and down a pile. | done on a breadboard Pico 2 (M4b, 2026-10-27): a ceremony with the laptop as the pile, the circle kept in flash |
 | `crates/dabao` | | Xous app for the Baochip-1x Dabao, the V2 card. | placeholder (M4c, M5) |
-| `crates/chat` | `cahoots-chat` | Pad-seeded end-to-end chat: epoch keys, sender ratchets, ChaCha20-Poly1305, plus the `cahoots-chat` CLI demo. | done (C1, C3) |
+| `crates/chat` | `cahoots-chat` | End-to-end chat keyed by the circle root: epoch keys, sender ratchets, ChaCha20-Poly1305, plus the `cahoots-chat` CLI demo. | done (C1, C3) |
 | `crates/station` | `cahoots-station` | The Numbers Station relay: hash-chained log, reuse refusal, long-poll feed, display page, per-client rate limit, log cap, Dockerfile, and the [deploy recipe](deploy/relay/README.md) for the default relay. | done (C2, C7; `relay.cahoots.network` is up); the [TVC](https://docs.turnkey.com/features/verifiable-cloud/overview) deploy pending |
 | `crates/fuzz` | | `cargo-fuzz` targets for every parser. Not a workspace member. | done |
 | `docs/` | | Protocol spec, threat model, use cases, plan, ceremony guide. | |

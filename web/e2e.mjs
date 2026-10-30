@@ -188,13 +188,13 @@ await L.page.setViewportSize({ width: 390, height: 844 });
 await L.page.getByLabel('Message', { exact: true }).fill('');
 await L.snap("hub"); await J.snap("hub");
 
-// The saved circle is state version 4 and carries the seat key and the signed manifest.
+// The saved circle is state version 5 and carries the seat key, the signed manifest and the circle root.
 const saved = (p) => p.evaluate(() => new Promise((res, rej) => {
   const req = indexedDB.open("cahoots");
   req.onsuccess = () => { const g = req.result.transaction("circles").objectStore("circles").getAll(); g.onsuccess = () => res(g.result.map((r) => r.state[0])); g.onerror = () => rej(g.error); };
   req.onerror = () => rej(req.error);
 }));
-for (const p of [L, J]) { const v = await saved(p.page); if (v.length !== 1 || v[0] !== 4) throw new Error(`${p.name} saved state versions: ${v}`); }
+for (const p of [L, J]) { const v = await saved(p.page); if (v.length !== 1 || v[0] !== 5) throw new Error(`${p.name} saved state versions: ${v}`); }
 
 // Hello words: what the leader says is what the joiner expects, both move together, and the number survives a reload.
 await L.page.getByRole('button', { name: 'Circle tools', exact: true }).click();

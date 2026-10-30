@@ -1,6 +1,6 @@
 # cahoots-station: the Numbers Station
 
-An append-only, hash-chained public relay for circle ciphertext. Anyone can read it. Only pad holders can decrypt what is on it. It is the public feed every circle posts to and the relay for pad-seeded chat (`docs/chat.md`).
+An append-only, hash-chained public relay for circle ciphertext. Anyone can read it. Only pad holders can decrypt what is on it. It is the public feed every circle posts to and the relay for chat (`docs/chat.md`).
 
 ## What it does
 

@@ -22,6 +22,10 @@ const ERRORS = {
   base64url: 'That is not a Cahoots message.',
   replay: 'Already received.',
   'too-far-ahead': 'Too many messages were skipped before this one.',
+  'epoch-too-far-ahead': 'This message is from an epoch far past any this device has seen. Refused.',
+  'unknown-epoch': 'This message is from an epoch whose keys this device no longer keeps.',
+  'pad-epoch': 'This message uses the old pad-keyed chat, which this app no longer reads.',
+  'no-root': 'This circle was made before root epochs. Run a new ceremony to chat.',
   version: 'Not a chat message.',
   length: 'Malformed message.',
   'wrong-phase': 'Not yet. Every commitment has to be in first.',
@@ -43,8 +47,8 @@ const friendly = (e) => {
   if (m2 && m2[1] === 'conflicting-attestation') return `Seat ${Number(m2[2]) + 1} has shown two different signatures. The second one was ignored and the ceremony goes on.`;
   return s;
 };
-const CHAT_LABEL = 'End-to-end encrypted, pad-hedged';
-const CHAT_CLAIM = 'The pad seeds the keys and ChaCha20-Poly1305 encrypts. The relay sees ciphertext and traffic shape only.';
+const CHAT_LABEL = 'End-to-end encrypted';
+const CHAT_CLAIM = 'The circle root from your ceremony seeds the keys and ChaCha20-Poly1305 encrypts. The relay sees ciphertext and traffic shape only.';
 // The relay the app ships with. A circle can point at another one from the chat menu.
 const DEFAULT_RELAY = 'https://relay.cahoots.network';
 const POLL_WAIT_MS = 25000;
@@ -955,7 +959,7 @@ async function screenHello(id, peerStr) {
   render();
 }
 
-// ---------------------------------------------------------------- chat (pad-seeded, over the Numbers Station)
+// ---------------------------------------------------------------- chat (root epochs, over the Numbers Station)
 const pendingChatSends = new Map(); // One in-flight send per circle, across remounted views.
 const chatDrafts = new Map(); // Unsent text stays in memory, scoped to its circle.
 let chatRun = 0; // bumps on every render; a stale poll loop sees a different value and stops
@@ -1017,7 +1021,7 @@ async function screenChat(id) {
       const pt = chat_bucket_pad(utf8.encode(text));
       if (!pt) throw 'Message too long.';
       const wire = circle.chat_send(pt);
-      await saveCircle(circle); // keys and any epoch spend are recorded before the ciphertext leaves
+      await saveCircle(circle); // the chain step is recorded before the ciphertext leaves
       await post(b64_decode(wire));
       const m = { circle: id, dir: 'out', sender: me, epoch: circle.current_epoch(), text, ts: Date.now() };
       await saveChat(m); append(m); titleSub.textContent = `${circle.members()} people · End-to-end encrypted`;
@@ -1079,7 +1083,9 @@ async function screenChat(id) {
       btn('Circle tools', () => workspace.tools(), 'dashboard-tools-trigger')),
     h('div', { class: 'conversation-thread' }, ...(relayBase() ? [history.length ? null : empty, list] : [noRelay])),
     st,
-    relayBase() ? h('div', { class: 'dashboard-composer composer' }, inp, sendBtn) : null);
+    !relayBase() ? null
+      : circle.has_root() ? h('div', { class: 'dashboard-composer composer' }, inp, sendBtn)
+      : h('p', { class: 'muted' }, 'This circle was made before root epochs. Run a new ceremony to chat.'));
   const aside = h('aside', { class: 'dashboard-aside' }, h('header', {}, h('h2', {}, 'People'), h('span', {}, String(circle.members()))),
     h('div', { class: 'dashboard-members' }, ...Array.from({ length: circle.members() }, (_, seat) => h('a', { href: `#/c/${id}/people` }, circleMark(id.slice(seat * 2) || id, String(seat + 1)), h('div', {}, h('b', {}, seat === me ? 'You' : nameOf(settings, seat)), h('span', {}, `Seat ${seat + 1}${seat === me ? ' · this device' : ''}`))))),
     h('a', { class: 'manage-people', href: `#/c/${id}/people` }, 'Manage names ↗'),
@@ -1088,7 +1094,8 @@ async function screenChat(id) {
     menu: () => sheet((close) => h('div', { class: 'stack' }, h('h2', {}, 'Conversation settings'), h('p', { class: 'eyebrow' }, CHAT_LABEL), h('p', { class: 'muted' }, CHAT_CLAIM),
       h('p', { class: 'wallet-fine' }, `Current keys: ${epoch()}`),
       h('p', { class: 'muted' }, 'A sender label identifies a message chain, not proof of which member typed it.'),
-      btn('Start a new epoch', async () => { try { circle.rotate_epoch(); await saveCircle(circle); toast('New epoch started', 'ok'); close(); } catch (e) { st.textContent = friendly(e); } }),
+      circle.has_root() ? h('p', { class: 'muted' }, 'Starting a new epoch gives everyone fresh keys from here on.') : null,
+      circle.has_root() ? btn('Start a new epoch', async () => { try { circle.rotate_epoch(); await saveCircle(circle); toast('New epoch started', 'ok'); close(); } catch (e) { st.textContent = friendly(e); } }) : null,
       btn('Relay address', () => { close(); relaySheet(); }))),
   });
   if (!workspace) return;

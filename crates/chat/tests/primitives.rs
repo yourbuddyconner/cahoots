@@ -8,21 +8,15 @@ use sha2::Sha256;
 const CID: [u8; 16] = [0xC1; 16];
 
 #[test]
-fn epoch_key_is_hkdf_with_domain_salt() {
-    let eid = EpochId {
-        slice: 2,
-        offset: 0x01020304,
-    };
-    let psk = [7u8; 32];
-    let mut salt = Vec::new();
-    salt.extend_from_slice(b"cahoots/chat/epoch/v1");
-    salt.extend_from_slice(&CID);
-    salt.push(2);
-    salt.extend_from_slice(&0x01020304u32.to_le_bytes());
-    let hk = Hkdf::<Sha256>::new(Some(&salt), &psk);
-    let mut want = [0u8; 32];
-    hk.expand(b"", &mut want).unwrap();
-    assert_eq!(*epoch_key(&CID, &eid, &psk), want);
+fn epoch_key_is_hmac_of_the_root_with_the_chat_label() {
+    use hkdf::hmac::{Hmac, Mac};
+    let root = [7u8; 32];
+    let mut m = <Hmac<Sha256> as Mac>::new_from_slice(&root).unwrap();
+    m.update(b"chat");
+    m.update(&CID);
+    m.update(&0x01020304u64.to_be_bytes());
+    let want: [u8; 32] = m.finalize().into_bytes().into();
+    assert_eq!(*epoch_key(&root, &CID, 0x01020304), want);
 }
 
 #[test]
@@ -56,10 +50,7 @@ fn header() -> Header {
     Header {
         version: 2,
         circle_id: CID,
-        epoch: EpochId {
-            slice: 1,
-            offset: 64,
-        },
+        epoch: EpochId::root(64),
         sender: 3,
         counter: 7,
         len: 5,
@@ -73,7 +64,7 @@ fn header_layout_is_little_endian_and_32_bytes() {
     let h = header().encode();
     assert_eq!(h[0], 2);
     assert_eq!(&h[1..17], &CID);
-    assert_eq!(h[17], 1);
+    assert_eq!(h[17], 0xFF);
     assert_eq!(&h[18..22], &64u32.to_le_bytes());
     assert_eq!(h[22], 3);
     assert_eq!(&h[23..27], &7u32.to_le_bytes());

@@ -1,6 +1,6 @@
 [package]
 name = "cahoots-chat"
-description = "Pad-seeded end-to-end encrypted chat: epoch keys from pad spends, per-sender symmetric ratchets, ChaCha20-Poly1305."
+description = "End-to-end encrypted chat: epoch keys from the circle root, per-sender symmetric ratchets, ChaCha20-Poly1305."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

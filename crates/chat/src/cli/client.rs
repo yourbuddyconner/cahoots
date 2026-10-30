@@ -4,7 +4,7 @@
 //! every send and every processed entry.
 
 use super::relay::{Relay, RelayError};
-use super::store::{self, CircleChat, OpenedCircle, StoreError};
+use super::store::{self, CircleChat, CirclePad, OpenedCircle, StoreError};
 use crate::{bucket_pad, bucket_unpad, parse_header, ChatError, EpochId, Header};
 use cahoots_core::CircleId;
 use std::path::{Path, PathBuf};
@@ -40,6 +40,8 @@ pub enum ClientError {
     Relay(RelayError),
     Chat(ChatError),
     LineTooLong,
+    /// The circle has no root file: it was made before chat moved to root epochs.
+    NoRoot,
 }
 
 impl From<StoreError> for ClientError {
@@ -65,6 +67,10 @@ impl core::fmt::Display for ClientError {
             ClientError::Relay(e) => write!(f, "{e}"),
             ClientError::Chat(e) => write!(f, "chat: {e:?}"),
             ClientError::LineTooLong => write!(f, "line longer than the largest bucket"),
+            ClientError::NoRoot => write!(
+                f,
+                "this circle was made before root epochs; run a new ceremony to chat"
+            ),
         }
     }
 }
@@ -76,6 +82,7 @@ pub struct Client<R: Relay> {
     my_index: u8,
     label: String,
     session: CircleChat,
+    pad: CirclePad,
     relay: R,
     last_seq: Option<u64>,
     rotate_after: u32,
@@ -89,14 +96,19 @@ impl<R: Relay> Client<R> {
             dir,
             key,
             circle_id,
+            params,
             my_slice,
             label,
             pad,
+            root,
             ..
         } = store::open_circle(member_dir)?;
+        let root = root.ok_or(ClientError::NoRoot)?;
         let session = match store::load_chat_state(&dir, &key)? {
-            Some(state) => CircleChat::import_state(pad, my_slice, &state)?,
-            None => CircleChat::new(pad, my_slice),
+            Some(state) => {
+                CircleChat::import_state(&root, circle_id, params.n, my_slice, &state)?
+            }
+            None => CircleChat::new(&root, circle_id, params.n, my_slice),
         };
         let last_seq = store::load_seq(&dir)?;
         Ok(Client {
@@ -106,6 +118,7 @@ impl<R: Relay> Client<R> {
             my_index: my_slice,
             label,
             session,
+            pad,
             relay,
             last_seq,
             rotate_after: rotate_after.max(1),
@@ -129,7 +142,7 @@ impl<R: Relay> Client<R> {
         self.session.current_epoch()
     }
     pub fn remaining(&self) -> u32 {
-        self.session.pad().remaining()
+        self.pad.remaining()
     }
 
     fn persist(&mut self) -> Result<(), ClientError> {
@@ -141,7 +154,7 @@ impl<R: Relay> Client<R> {
 
     fn seal_line(&mut self, text: &str) -> Result<Vec<u8>, ClientError> {
         if self.session.current_epoch().is_none() || self.sent_in_epoch >= self.rotate_after {
-            self.session.start_epoch()?;
+            self.session.start_epoch();
             self.sent_in_epoch = 0;
         }
         let padded = bucket_pad(text.as_bytes()).ok_or(ClientError::LineTooLong)?;

@@ -1,20 +1,20 @@
 # cahoots-chat
 
-This crate is pad-seeded end-to-end encrypted group chat, plus the demo client that runs it over the Numbers Station relay (the public feed). The design is in `docs/chat.md`.
+This crate is end-to-end encrypted group chat keyed by the circle root, plus the demo client that runs it over the Numbers Station relay (the public feed). The design is in `docs/chat.md`.
 
 ## The security claim
 
-One 32-byte pad spend keys an **epoch**. Inside an epoch every sender has its own symmetric ratchet, so each message gets a fresh key and used keys are deleted. Messages are ChaCha20-Poly1305 with the header as associated data.
+Chat runs in numbered **epochs**. The key of epoch `n` is `HMAC-SHA256(root, "chat" || circle_id || n)`, the root's chat key, so an epoch costs no pad. Inside an epoch every sender has its own symmetric ratchet, so each message gets a fresh key and used keys are deleted. Messages are ChaCha20-Poly1305 with the header as associated data.
 
-- Confidentiality and integrity are **computational, hedged by the pad**. There is no public-key step an attacker could break instead. The UI says "end-to-end encrypted, pad-hedged", never "unbreakable". Pure-pad text (`docs/protocol.md`) remains the mode for lines that deserve the strongest claim.
-- Deleting chain keys gives forward secrecy inside an epoch. The next epoch spend gives post-compromise security, because the attacker never had the pad.
-- One epoch costs the circle 32 pad bytes, however many messages it carries.
+- Confidentiality and integrity are **computational**. Only a holder of the root can derive the keys. The UI never says "unbreakable". Pure-pad text (`docs/protocol.md`) remains the mode for lines that deserve the strongest claim.
+- Deleting chain keys gives forward secrecy inside an epoch. A new epoch does not give post-compromise security: an attacker who took the root can derive every epoch.
+- Pad epochs, where 32 pad bytes keyed each epoch, are retired as of 2026-10-30. A message with a pad epoch id is refused.
 
 ## Limits
 
 - **`sender` is a chain label, not a person.** Every member can derive every sender's chain, just as every member holds every slice. The demo puts the typed name inside the plaintext as a courtesy; it proves nothing.
-- **The relay sees traffic shape.** It sees which circle posted, which epoch pointer and counter, when, and the bucketed size. It cannot read or forge an entry and cannot refuse chat messages for reuse, because an epoch pointer legitimately appears in many messages. Each member's own ledger refuses epoch reuse.
-- A tampered message that is the **first** sighting of a new epoch still burns that epoch's 32-byte range on the reader, before the tag check. The untampered copy then decrypts.
+- **The relay sees traffic shape.** It sees which circle posted, which epoch number and counter, when, and the bucketed size. It cannot read or forge an entry. Each member's chains refuse replays.
+- A receiver takes a new epoch only up to 64 past the highest it has seen, and keeps four epochs. An epoch older than one it dropped is refused.
 - The local ceremony is a development shortcut with OS randomness, so its circles carry the `CSPRNG` label.
 
 ## Demo: three terminals and a relay
@@ -57,8 +57,8 @@ Every reader prints `[rejected seq N: Tag]`, and the next real message still dec
 
 ## Files the client keeps
 
-The member directory is the `cahoots-provider` `FileProvider` format (`key`, `<circle_id>/{params, slice, pad.enc, ledger}`), written by `local-ceremony` through the provider crate. The chat client reads it through its own adapters in `src/cli/store.rs`, because `FileProvider` does not hand out its `Pad`. It adds `label`, `chat.state` (exported session state, encrypted under the same key), and `chat.seq`.
+The member directory is the `cahoots-provider` `FileProvider` format (`key`, `<circle_id>/{params, slice, pad.enc, ledger}`), written by `local-ceremony` through the provider crate. The chat client reads it through its own adapters in `src/cli/store.rs`, because `FileProvider` does not hand out its `Pad`. It adds `label`, `root` (the circle root from the ceremony, encrypted under the same key, mode 0600), `chat.state` (exported session state, encrypted under the same key), and `chat.seq`. A circle directory without `root` was made before root epochs, and `run` refuses it.
 
 ## Library
 
-Without the `cli` feature the crate is `no_std` + `alloc` and builds for wasm32 and thumbv7em. The API is `ChatSession` over any `cahoots_core::pad::Pad`, plus the primitives (`epoch_key`, `chain_init`, `step`, `seal`, `open`, bucket padding). Vectors are in `crates/vectors/chat.json`.
+Without the `cli` feature the crate is `no_std` + `alloc` and builds for wasm32 and thumbv7em. The API is `ChatSession::new(root, circle_id, members, seat)`, plus the primitives (`epoch_key`, `chain_init`, `step`, `seal`, `open`, bucket padding). Vectors are in `crates/vectors/chat.json`.

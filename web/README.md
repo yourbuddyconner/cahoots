@@ -12,7 +12,7 @@ A commitment code carries the circle parameters, so a joiner scans any member wh
 
 | Path | What |
 |---|---|
-| `crates/wasm/` | `cahoots-wasm`: wasm-bindgen API over the core. Ceremony, `Circle` (pad + ledger + label + chat session + relay cursor) with pure-pad send/receive, chat send/receive, epoch rotation, and export/import for IndexedDB; RaptorQ fountain coding for animated QR; QR rendering to SVG; bucket padding; base64url. Also compiles natively, so `cargo test -p cahoots-wasm` exercises the whole API. |
+| `crates/wasm/` | `cahoots-wasm`: wasm-bindgen API over the core. Ceremony, `Circle` (pad + ledger + label + circle root + chat session + relay cursor) with pure-pad send/receive, chat send/receive, epoch rotation, and export/import for IndexedDB; RaptorQ fountain coding for animated QR; QR rendering to SVG; bucket padding; base64url. Also compiles natively, so `cargo test -p cahoots-wasm` exercises the whole API. |
 | `app/` | The static PWA: `index.html`, `app.js` (ES module), `styles.css`, `sw.js` (network-first service worker with a cache fallback; bump `VERSION` on every release), `manifest.json`, icons. |
 | `e2e.mjs` | End-to-end check: two isolated browser contexts run a full ceremony through the paste fallbacks, chat through a Numbers Station the script starts, and exchange a pure-pad message. `cargo build -p cahoots-station && node web/e2e.mjs`. |
 | `app/pkg/` | Build output of `wasm-pack`. Not committed. |
@@ -51,12 +51,12 @@ Messages are base64url text shown as a QR and as copyable text. Reads take a sca
 
 The words come from the pair keys made during the sealed reveal step, so a circle made before that step has none and the screen says so. The hello number is saved with the cahoot. Nothing about hello words touches the pad or the network.
 
-## Chat (pad-seeded, over a relay)
+## Chat (root epochs, over a relay)
 
-**Chat** on a circle's screen opens the chat for that circle. The header reads "End-to-end encrypted, pad-hedged": the pad seeds the keys and ChaCha20-Poly1305 encrypts, per `docs/chat.md`. The relay sees ciphertext and traffic shape only.
+**Chat** on a circle's screen opens the chat for that circle. The header reads "End-to-end encrypted": the circle root from the ceremony seeds the keys and ChaCha20-Poly1305 encrypts, per `docs/chat.md`. The relay sees ciphertext and traffic shape only. A circle saved before root epochs has no root. Its chat screen says "This circle was made before root epochs. Run a new ceremony to chat." in place of the message box, and its pure-pad messages still work.
 
 - **Relay.** The app ships pointing at `https://relay.cahoots.network` (`DEFAULT_RELAY` in `app.js`). **Relay address** in the menu sets another one per circle, stored in IndexedDB, and **Use the default relay** switches back; a circle saved before the default existed gets it on load. For a local relay: `cargo run -p cahoots-station -- --listen 127.0.0.1:8080 --log station.jsonl`. The screen long-polls `GET /v1/circles/{id}/messages?after=<seq>&wait=25000` while open and posts sealed messages as raw bytes.
-- **Epochs.** The first send spends 32 pad bytes to start an epoch. **Start a new epoch** in the menu spends 32 more. Peers switch to the newest epoch they see; the subtitle under the circle name shows the current one. Rotation also happens on its own after 1000 of your own messages in an epoch.
+- **Epochs.** Epochs are numbered from 1, and each one's keys come from the circle root. The first send starts epoch 1. **Start a new epoch** in the menu moves to the next number. Neither spends pad. Peers switch to the newest epoch they see, and the menu shows the current one. Rotation also happens on its own after 1000 of your own messages in an epoch.
 - **Padding.** Plaintext is padded to 64, 256, 1024, or 4096 bytes before encryption.
 - **Rejections** show inline and muted as `rejected · <reason> · seq N`, where the reason is the friendly text for the error (see `friendly()` in `app.js`). Your own messages coming back from the relay are skipped by sender index.
 - **Persistence.** Chat keys, the epoch state, and the last relay sequence number are exported with the circle, so a reload resumes where it left off without re-reading the feed. Plaintext history is stored on the device.

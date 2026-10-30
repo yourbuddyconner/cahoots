@@ -43,7 +43,7 @@ The relay receives encrypted messages. It does not receive the secret. It can st
 
 ### Rotate chat keys
 
-An **epoch** is a period using one set of chat keys. Starting an epoch spends 32 secret bytes. Chat starts the first one when needed and rotates after 1,000 of your own messages in an epoch.
+An **epoch** is a period using one set of chat keys. Every member derives them from the circle root, so starting an epoch spends no secret bytes. Chat starts the first one when needed and rotates after 1,000 of your own messages in an epoch. A circle made before root epochs cannot chat. Run a new ceremony to chat in it.
 
 Use **Start a new epoch** in the chat menu to rotate sooner. Automatic rotation after a time interval is not implemented.
 

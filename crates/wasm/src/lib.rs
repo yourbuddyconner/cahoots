@@ -321,6 +321,9 @@ impl WasmCeremony {
         )
         .map_err(pad_err)?;
         let mut circle = Circle::from_pad_with_pairs(pad, label, r.pair_keys);
+        if let Some(root) = &r.root {
+            circle.set_root(root);
+        }
         circle.seat_key = r.seat_key.as_ref().map(|k| k.to_bytes());
         circle.tier = r.tier;
         circle.manifest = r.manifest.encode();
@@ -396,8 +399,9 @@ fn pad_err(e: PadError) -> String {
 
 /// State format: v1 is pad + ledger + label; v2 appends chat session state and the relay seq;
 /// v3 appends the pair keys and hello counters; v4 appends the seat key seed, the tier and the
-/// sealed manifest.
-const STATE_VERSION: u8 = 4;
+/// sealed manifest; v5 appends the circle root, and its chat state is in root epochs. The chat
+/// state of v2 to v4 is in pad epochs, which are retired, so those import without chat.
+const STATE_VERSION: u8 = 5;
 
 fn chat_err(e: ChatError) -> String {
     match e {
@@ -407,24 +411,34 @@ fn chat_err(e: ChatError) -> String {
         ChatError::Tag => "tag".into(),
         ChatError::WrongCircle => "wrong-circle".into(),
         ChatError::BadSender => "bad-sender".into(),
-        ChatError::Reuse => "reuse".into(),
         ChatError::Replay => "replay".into(),
         ChatError::TooFarAhead => "too-far-ahead".into(),
         ChatError::UnknownEpoch => "unknown-epoch".into(),
+        ChatError::EpochTooFarAhead => "epoch-too-far-ahead".into(),
+        ChatError::PadEpoch => "pad-epoch".into(),
         ChatError::State => "state".into(),
-        ChatError::Pad(p) => pad_err(p),
     }
 }
 
+/// A root epoch as its number, `"3"`. A retired pad epoch id never gets this far.
 fn epoch_str(id: EpochId) -> String {
-    format!("{}:{}", id.slice, id.offset)
+    match id.number() {
+        Some(n) => n.to_string(),
+        None => format!("{}:{}", id.slice, id.offset),
+    }
 }
 
-/// A circle on this device: the pad and ledger, the pad-seeded chat session over them,
-/// the randomness label, and the last relay sequence number this device has consumed.
+const NO_ROOT: &str = "no-root";
+
+/// A circle on this device: the pad and ledger, the circle root and the chat session keyed
+/// by it, the randomness label, and the last relay sequence number this device has consumed.
 #[wasm_bindgen]
 pub struct Circle {
-    chat: ChatSession<MemPadStorage, MemLedger>,
+    pad: Pad<MemPadStorage, MemLedger>,
+    /// The circle root. `None` for a circle made before root epochs: it cannot chat.
+    root: Option<Zeroizing<[u8; 32]>>,
+    /// The chat session, present exactly when the root is.
+    chat: Option<ChatSession>,
     label: Label,
     relay_seq: Option<u64>,
     /// One X-Wing-derived key per other member, from the sealed reveals. See `cahoots_core::pairwise`.
@@ -461,7 +475,7 @@ impl ChatReceived {
     pub fn counter(&self) -> u32 {
         self.counter
     }
-    /// `"<slice>:<offset>"` of the 32 pad bytes that key this epoch.
+    /// The root epoch number, as text.
     pub fn epoch(&self) -> String {
         self.epoch.clone()
     }
@@ -477,10 +491,11 @@ impl Circle {
         label: Label,
         pair_keys: Vec<Option<Zeroizing<[u8; 32]>>>,
     ) -> Circle {
-        let me = pad.my_slice();
         let n = pair_keys.len();
         Circle {
-            chat: ChatSession::new(pad, me),
+            pad,
+            root: None,
+            chat: None,
             label,
             relay_seq: None,
             pair_keys,
@@ -491,10 +506,19 @@ impl Circle {
         }
     }
     fn pad(&self) -> &Pad<MemPadStorage, MemLedger> {
-        self.chat.pad()
+        &self.pad
     }
     fn pad_mut(&mut self) -> &mut Pad<MemPadStorage, MemLedger> {
-        self.chat.pad_mut()
+        &mut self.pad
+    }
+    /// Keep `root` and start a fresh chat session keyed by it.
+    fn set_root(&mut self, root: &[u8; 32]) {
+        let (id, n, me) = (self.pad.circle_id(), self.pad.params().n, self.pad.my_slice());
+        self.root = Some(Zeroizing::new(*root));
+        self.chat = Some(ChatSession::new(root, id, n, me));
+    }
+    fn chat_mut(&mut self) -> Result<&mut ChatSession, String> {
+        self.chat.as_mut().ok_or_else(|| NO_ROOT.to_string())
     }
 }
 
@@ -579,29 +603,38 @@ impl Circle {
         self.pad().remaining()
     }
 
-    // ---- pad-seeded chat (docs/chat.md) ----
+    // ---- chat on root epochs (docs/chat.md) ----
 
-    /// `"<slice>:<offset>"` of the epoch this device sends in, if any.
-    pub fn current_epoch(&self) -> Option<String> {
-        self.chat.current_epoch().map(epoch_str)
+    /// Whether this circle holds the circle root, which chat needs. A circle made before root
+    /// epochs does not.
+    pub fn has_root(&self) -> bool {
+        self.root.is_some()
     }
 
-    /// Spend 32 bytes from this member's slice and switch to a fresh epoch.
+    /// The number of the root epoch this device sends in, if any.
+    pub fn current_epoch(&self) -> Option<String> {
+        self.chat.as_ref()?.current_epoch().map(epoch_str)
+    }
+
+    /// Move to the next root epoch. Nothing is spent. Error: `no-root`.
     pub fn rotate_epoch(&mut self) -> Result<String, String> {
-        self.chat.start_epoch().map(epoch_str).map_err(chat_err)
+        Ok(epoch_str(self.chat_mut()?.start_epoch()))
     }
 
     /// Encrypt a chat message (starting an epoch if needed) and return base64url wire bytes.
+    /// Error: `no-root`.
     pub fn chat_send(&mut self, plaintext: &[u8]) -> Result<String, String> {
-        let wire = self.chat.send(plaintext).map_err(chat_err)?;
+        let wire = self.chat_mut()?.send(plaintext).map_err(chat_err)?;
         Ok(b64_encode(&wire))
     }
 
-    /// Verify and decrypt a chat message. Errors: `reuse`, `tag`, `replay`, `too-far-ahead`,
-    /// `wrong-circle`, `version`, `length`, `base64url`.
+    /// Verify and decrypt a chat message. Errors: `no-root`, `tag`, `replay`,
+    /// `too-far-ahead`, `epoch-too-far-ahead`, `unknown-epoch`, `pad-epoch`, `wrong-circle`,
+    /// `version`, `length`, `base64url`.
     pub fn chat_receive(&mut self, wire_b64: &str) -> Result<ChatReceived, String> {
+        let chat = self.chat_mut()?;
         let wire = b64_decode(wire_b64)?;
-        let (hdr, text) = self.chat.receive(&wire).map_err(chat_err)?;
+        let (hdr, text) = chat.receive(&wire).map_err(chat_err)?;
         Ok(ChatReceived {
             text,
             sender: hdr.sender,
@@ -728,8 +761,12 @@ impl Circle {
         let mut bytes = Zeroizing::new(vec![0u8; pad_len as usize]);
         pad.storage().read(0, &mut bytes);
         out.extend_from_slice(&bytes);
-        // v2 trailer: chat state and relay seq.
-        let chat_state = self.chat.export_state();
+        // v2 trailer: chat state and relay seq. Empty chat state without a root.
+        let chat_state = self
+            .chat
+            .as_ref()
+            .map(ChatSession::export_state)
+            .unwrap_or_default();
         out.extend_from_slice(&(chat_state.len() as u32).to_le_bytes());
         out.extend_from_slice(&chat_state);
         match self.relay_seq {
@@ -763,6 +800,14 @@ impl Circle {
         out.push(self.tier);
         out.extend_from_slice(&(self.manifest.len() as u32).to_le_bytes());
         out.extend_from_slice(&self.manifest);
+        // v5 trailer: the circle root.
+        match &self.root {
+            Some(k) => {
+                out.push(1);
+                out.extend_from_slice(k.as_ref());
+            }
+            None => out.extend_from_slice(&[0; 33]),
+        }
         out
     }
 
@@ -871,11 +916,41 @@ impl Circle {
         } else {
             (None, 0, Vec::new())
         };
+        let root = if version >= 5 {
+            let present = r.u8().map_err(err)?;
+            let bytes = r.take(32).map_err(err)?;
+            match present {
+                0 => None,
+                1 => {
+                    let mut k = Zeroizing::new([0u8; 32]);
+                    k.copy_from_slice(bytes);
+                    Some(k)
+                }
+                _ => return Err("state".into()),
+            }
+        } else {
+            None
+        };
         if !r.0.is_empty() {
             return Err("state".into());
         }
-        let chat = ChatSession::import_state(pad, my_slice, chat_state).map_err(chat_err)?;
+        // Chat state before version 5 is in retired pad epochs: it is dropped.
+        let chat = match &root {
+            None => None,
+            Some(root) if chat_state.is_empty() => Some(ChatSession::new(
+                root,
+                circle_id,
+                params_n,
+                my_slice,
+            )),
+            Some(root) => Some(
+                ChatSession::import_state(root, circle_id, params_n, my_slice, chat_state)
+                    .map_err(chat_err)?,
+            ),
+        };
         Ok(Circle {
+            pad,
+            root,
             chat,
             label,
             relay_seq,

@@ -492,6 +492,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "cahoots-badge",
+ "cahoots-chat",
  "cahoots-chip",
  "cahoots-core",
  "cahoots-custodian",

@@ -112,7 +112,7 @@ Implementation: `crates/core/src/pairwise.rs`. Vectors: `pair_keys` and `hello_w
 
 When the last reveal is in, the ceremony builds the manifest (section 3.5) from what it holds. Every device builds the same bytes. The phase is now Attest, and no member has finished yet.
 
-**Seat keys.** A seat key is a P-256 key pair. Its 32-byte seed is the secret scalar, and a seed that is zero or not below the curve order is refused and drawn again. Signatures are deterministic ECDSA (RFC 6979) over SHA-256 of the message, as raw `r || s`, 64 bytes. The key is made at the ceremony, one per circle, and never reused across circles. The ring driver draws the seat seed from the entropy source after the KEM seed.
+**Seat keys.** A seat key is a P-256 key pair. Its 32-byte seed is the secret scalar, and a seed that is zero or not below the curve order is refused and drawn again. Signatures are ECDSA over SHA-256 of the message, as raw `r || s`, 64 bytes. A signature MUST verify under the seat key. Deterministic signing (RFC 6979) is recommended, not required, because a key in a phone's Secure Enclave signs with random nonces. The key is made at the ceremony, one per circle, and never reused across circles. The ring driver draws the seat seed from the entropy source after the KEM seed.
 
 **Attestation.** Each member signs the manifest bytes once. The attestation is a detached COSE_Sign1 (section 8.1) with the manifest as payload, kid `[seat]` (the one byte of the seat index), and external AAD `cahoots/manifest/v1`. Each device checks every attestation it receives against the sender's seat key from the manifest and the kid. A bad signature is refused and does not abort. A second, different, valid attestation for a seat already held is refused as a conflict. The ceremony is complete when all `n` attestations are held.
 
@@ -149,7 +149,7 @@ Implementation: `crates/core/src/manifest.rs`.
 
 A circle root is a 32-byte secret that every member computes and no outsider can. It is `HKDF-SHA256(ikm, salt, info)`, where `ikm` is the content key of each seat's reveal joined in seat order, `salt` is the circle ID, and `info` is `cahoots/root/v1`. The content key of a reveal is the key that reveal is encrypted under. Every member opens every reveal, so every member holds all of them. The pairwise X-Wing secrets are not used, because they differ for each pair of members.
 
-Two keys come from the root. The card seal key is `HMAC-SHA256(root, "seal/card" || circle_id)`. The chat key is `HMAC-SHA256(root, "chat" || circle_id || epoch)`, with the epoch as a big-endian u64. A badge computes the root at the ceremony. With a chip, it stores the root in the chip beside the seat key and keeps none in its circle record; without a chip, the root is in the circle record. Members who are honest get the same root. Nothing in the manifest or the check words checks that yet, so a member who sends different content keys to different members could split the root. A reveal sealed again under another content key by a member already revealed is refused as a conflicting reveal.
+Two keys come from the root. The card seal key is `HMAC-SHA256(root, "seal/card" || circle_id)`. The chat key is `HMAC-SHA256(root, "chat" || circle_id || epoch)`, with the epoch as a big-endian u64. It keys chat epoch `epoch` (`docs/chat.md`). A badge computes the root at the ceremony. With a chip, it stores the root in the chip beside the seat key and keeps none in its circle record; without a chip, the root is in the circle record. Members who are honest get the same root. Nothing in the manifest or the check words checks that yet, so a member who sends different content keys to different members could split the root. A reveal sealed again under another content key by a member already revealed is refused as a conflicting reveal.
 
 Implementation: `crates/core`.
 
@@ -281,7 +281,7 @@ Every signature in Cahoots is a COSE_Sign1 (RFC 9052), so any COSE library verif
 - The structure is the untagged CBOR array `[protected, unprotected, payload, signature]`. `protected` is a byte string, `unprotected` is the empty map, `payload` is a byte string or nil (detached), and `signature` is 64 bytes.
 - The protected header is the canonical map `{1: -7, 4: kid}`. Label `1` is `alg` and `-7` is ES256. Label `4` is `kid`, a byte string the signer chooses. A protected header with any other content is refused.
 - For a seat, the kid is the one byte of the seat index. For a grantee key, it is the SHA-256 of the key's 33 bytes.
-- The signature covers `Sig_structure = ["Signature1", protected, external_aad, payload]`, encoded canonically, with the seat key's deterministic ECDSA (section 3.4).
+- The signature covers `Sig_structure = ["Signature1", protected, external_aad, payload]`, encoded canonically, with the seat key's ECDSA (section 3.4). A verifier checks the signature under the key and never compares signature bytes, since two valid signatures over the same bytes can differ.
 - Canonical CBOR is RFC 8949 section 4.2.1: definite lengths, shortest integers, map keys in ascending order of their encoding. Every map here has integer keys in ascending order. A decoder MUST refuse a non-canonical encoding.
 - The external AAD is the object's domain string. A signature made for one kind of object does not verify as another.
 

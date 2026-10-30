@@ -8,7 +8,7 @@ This is a snapshot of the repository’s documented status on October 29, 2026. 
 |---|---|---|
 | Browser ceremony | Create a circle by animated QR or paste. | Automated end-to-end checks cover the paste path. Camera scanning remains unverified end to end. |
 | Short messages | Encrypt directly with the pad and exchange by code or text. | Browser checks cover decryption and refusal of a replay. |
-| Group chat | Pad-seeded chat over a Numbers Station relay. | The app ships pointing at `relay.cahoots.network`, which is deployed; the end-to-end check chats through a local station. |
+| Group chat | Chat keyed by the circle root, over a Numbers Station relay. | The app ships pointing at `relay.cahoots.network`, which is deployed; the end-to-end check chats through a local station. |
 | Relay | Run the station locally, in Docker, or from the [deploy recipe](../deploy/relay/README.md). | Per-client rate limit and a log size cap are built in. No deployed enclave or external log anchoring. |
 | WireGuard integration | Announce peers and exchange preshared keys. | A two-host tunnel is exercised in CI. |
 | File encryption | age plugin and HPKE adapter. | Development integrations; read their current [adapter notes](../crates/ADAPTERS.md). |
