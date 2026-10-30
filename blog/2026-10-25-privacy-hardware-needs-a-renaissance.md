@@ -4,14 +4,15 @@ date: 2026-10-25
 author: Conner Swann
 role: Building Cahoots
 tags: Building in public, Privacy
-about: Why I'm building Cahoots. A circle should be able to establish its own trust, use it across everyday tools, and carry it on hardware its members own.
+about: Why I'm building Cahoots. A circle should be able to establish its own trust, decide who can act on its behalf, and carry that authority on hardware its members own.
 audience: People who want more control over their private lives, and the hardware and software builders who want to help.
 learn:
 - What it means for a group to own its trust
 - Where Cahoots fits alongside existing privacy tools
 - What a circle should let you do after meeting in person
+- How agents can act for a circle under explicit, limited grants
 - Why the badge matters, and what it cannot promise
-description: The people you trust should be able to make a private circle and carry it into the tools they use every day. That's why I'm building Cahoots, and why I think privacy hardware needs another run at it.
+description: The people you trust should be able to make a private circle, set the terms for agents acting on their behalf, and carry that authority on hardware they own. That's why I'm building Cahoots.
 ---
 
 I care about privacy. I have for a long time. But caring about it mostly meant choosing the right tools and hoping the people behind them kept doing their jobs. A good messaging app. A password manager. A VPN. I could make those choices and get on with my life.
@@ -21,6 +22,8 @@ The recent certificate-authority failures made me look harder at that arrangemen
 I don't want every private part of my life to be a tenancy. I want some of it to belong to me and the people I share it with.
 
 That's why I'm building Cahoots. And it's why I think privacy hardware needs a renaissance: small, understandable devices that give people real custody of their keys and a meaningful say in what those keys do.
+
+That matters even more as we put software agents to work on our behalf. I want the authority those programs use to start with us, with limits we can understand and enforce.
 
 ## The people you already know
 
@@ -57,6 +60,22 @@ Parts of that work today. The browser has a circle workspace and encrypted chat.
 
 The ambition is that making the circle once should make the next private thing easier.
 
+## Who gets to act for us
+
+An agent that can actually do things needs access. It needs to read something, call a service, use a key, or ask another program to do part of the job. Every one of those actions raises a question: who gave it permission?
+
+I think identity is poorly understood partly because we ask it to carry too much. Knowing which key signed a request doesn't tell you whether its owner may make that request. Knowing a person belongs to a group doesn't mean they can authorize anything in the group's name. And a program acting for me should have its own identity, so we can tell what it did and under whose authority.
+
+Delegation has a long history. The web already has standards for [delegated access](https://www.rfc-editor.org/rfc/rfc8693.html) and [more precise permission requests](https://www.rfc-editor.org/rfc/rfc9396.html). Agents make the consequences much harder to ignore. A program can use whatever access you gave it faster, more often, and further down a chain of other programs than you ever would by hand. Handing it your account and hoping it behaves is a miserable foundation for that future.
+
+The circle should give us a firm boundary and a way to authorize useful work across it. A grant should say which key may do what, how much authority it has, when that authority ends, and whether it can pass a smaller part onward. A service checking the request should be able to follow that authority back to the members who granted it. Some actions should always require a person to approve them.
+
+For example, I want an agent to be able to arrange a private connection for a particular job without giving it every secret the circle holds. If it delegates part of the job, that next program should receive only the authority it needs, within the original grant. Sharing a circle's whole secret would give it the access of a member; a limited task deserves a narrower door.
+
+That authority needs to hold all the way through: deliberate consent on the badge, grants that can only narrow as they pass between programs, and services that refuse work outside those limits. We need to be able to withdraw a grant when the job is over or something goes wrong. Giving a program permission should leave us in charge of the terms.
+
+This is the autonomy I want: a group can establish its own authority, choose its rules, and give a machine a bounded job without handing over the power to rewrite those rules. We should be able to check that arrangement without asking the machine whether it followed our instructions.
+
 ## Good tools, more control
 
 Signal is good. Tailscale is good. A password manager and a hardware security key are good things to have. Please don't read this as an argument to throw them away.
@@ -78,6 +97,8 @@ A phone can make and use a circle. It is also a general-purpose computer with a 
 A badge gives us a chance to make those consequences smaller and more legible. A device with a narrow job. A screen you can read. Buttons you have to press. Keys that can stay in a secure element while the device uses them. Board files and firmware you can inspect, build, and argue with.
 
 I want to plug it into a laptop and have it tell me what I'm approving. I want it to carry several circles without turning them into one public identity. I want it to be useful enough that someone actually keeps it with them.
+
+That includes delegation. I want to read the authority I'm giving a program on a screen it doesn't control, approve it deliberately, and let it get on with the work inside those limits. Having agency shouldn't mean pressing a button for every routine action. It should mean having a real say in which actions can happen without me.
 
 That takes more than declaring a piece of hardware secure. A screen is only useful if it shows enough to make a decision. A button is only useful if the firmware can't quietly go around it. An open board doesn't prove the device in your hand was built correctly. Randomness, manufacturing, updates, theft, and recovery all deserve actual answers.
 
@@ -103,6 +124,8 @@ I don't want to become a part-time administrator just to have a private life. I 
 
 But I do want to be able to answer three questions: Who else can read this? What would they have to do to read it? What happens if they're compromised?
 
+And when a program acts for us: Who authorized it? What can it do? How do we stop it? Those answers need to live in the tools, where the people granting access can see and change them.
+
 Too often the answer is somewhere behind a subscription, a reassuring illustration, and a promise that somebody has it covered. I am tired of how little purchase that gives me on the actual situation. If the answer changes tomorrow, I'd like a choice beyond accepting it or abandoning the people and work I've built there.
 
 For a family, that might mean a private place to talk and keep things together. For a small organization, it might mean keys and connections it can keep using when a vendor has a bad week. Neither should require everyone involved to study cryptography. Both deserve tools that make their choices understandable.
@@ -111,7 +134,7 @@ That's the competency I care about: enough understanding, backed by usable tools
 
 ## What comes next
 
-I'm building the badge, working out how to manufacture it, and trying to make the software feel like something you'd actually use after the interesting part of the demo is over.
+I'm building the badge, working out how to manufacture it, and trying to make the software feel like something you'd actually use after the interesting part of the demo is over. That includes making delegation usable: the circle should be a place to decide what our programs may do as well as a place to talk.
 
 The next posts will get into the board, the constraints, the mistakes, and the work of connecting these pieces. There are plenty of unfinished parts. I'd rather show them than pretend the manifesto built the product.
 
