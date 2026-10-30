@@ -61,6 +61,11 @@ const _: () = assert!(RECORDS_BASE + (PLACES as u32 - 1) * SECTOR <= BLOCKS_BASE
 pub const CHIP_RECORD_BASE: u32 = 0x3F_4000;
 const _: () = assert!(BLOCKS_BASE + (PLACES as u32 - 1) * BLOCK <= CHIP_RECORD_BASE);
 const _: () = assert!(CHIP_RECORD_BASE + SECTOR <= 0x40_0000);
+/// The grants record (`cahoots_badge::grants::GrantsRecord`): the agent grants the badge
+/// holds. One sector after the chip record, under 4 MiB.
+pub const GRANTS_BASE: u32 = 0x3F_5000;
+const _: () = assert!(CHIP_RECORD_BASE + SECTOR <= GRANTS_BASE);
+const _: () = assert!(GRANTS_BASE + SECTOR <= 0x40_0000);
 /// One sector after the circle record: the message of the last panic, shown at the next boot.
 pub const PANIC_BASE: u32 = 0x31_1000;
 /// One sector after the panic record: the last log lines and screens before a panic,
@@ -380,6 +385,40 @@ pub fn save_chip_record(body: &[u8]) -> Result<(), ()> {
     rec.extend_from_slice(&(body.len() as u16).to_le_bytes());
     rec.extend_from_slice(body);
     erase_sectors(CHIP_RECORD_BASE, SECTOR).and_then(|()| program_any(CHIP_RECORD_BASE, &rec))
+}
+
+const GRANTS_MAGIC: &[u8; 4] = b"CAHG";
+
+/// The grants record's bytes: `Ok(None)` if the sector is blank, `Err` if it holds something
+/// that is not a grants record. The bytes are `CAHG`, a little-endian u16 length and the body.
+pub fn load_grants() -> Result<Option<Vec<u8>>, ()> {
+    let mut head = [0u8; 6];
+    read_any(GRANTS_BASE, &mut head);
+    if head == [0xFF; 6] {
+        return Ok(None);
+    }
+    if &head[..4] != GRANTS_MAGIC {
+        return Err(());
+    }
+    let len = u16::from_le_bytes([head[4], head[5]]) as usize;
+    if len > SECTOR as usize - 6 {
+        return Err(());
+    }
+    let mut body = vec![0u8; len];
+    read_any(GRANTS_BASE + 6, &mut body);
+    Ok(Some(body))
+}
+
+/// Replace the grants record, rewritten whole in its sector.
+pub fn save_grants(body: &[u8]) -> Result<(), ()> {
+    if body.len() > SECTOR as usize - 6 {
+        return Err(());
+    }
+    let mut rec = Vec::with_capacity(6 + body.len());
+    rec.extend_from_slice(GRANTS_MAGIC);
+    rec.extend_from_slice(&(body.len() as u16).to_le_bytes());
+    rec.extend_from_slice(body);
+    erase_sectors(GRANTS_BASE, SECTOR).and_then(|()| program_any(GRANTS_BASE, &rec))
 }
 
 const PANIC_MAGIC: &[u8; 4] = b"CAHP";

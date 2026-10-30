@@ -177,3 +177,17 @@ fn a_host_board_keeps_the_chip_slot_the_root_and_the_chip_record() {
     std::fs::write(dir.join("chip.cbor"), b"not cbor").unwrap();
     assert_eq!(board.chip_record_load(), Err(cahoots_badge::BoardError::Storage));
 }
+
+#[test]
+fn grants_record_round_trips_and_a_corrupt_one_is_a_storage_error() {
+    use cahoots_badge::grants::GrantsRecord;
+    use cahoots_badge::BoardError;
+    let dir = tempfile::tempdir().unwrap();
+    let mut board = HostBoard::new(dir.path(), "-", "-", "t", PAD_LEN, Some(1));
+    assert_eq!(board.grants_load(), Ok(None));
+    let rec = GrantsRecord { known_time: 1234, grants: Vec::new() };
+    board.grants_store(&rec).unwrap();
+    assert_eq!(board.grants_load(), Ok(Some(rec)));
+    std::fs::write(dir.path().join("grants.cbor"), b"not cbor").unwrap();
+    assert_eq!(board.grants_load(), Err(BoardError::Storage));
+}

@@ -15,6 +15,7 @@
 //!   (for example `echo B > buttons.txt`, or write a side file and rename it in).
 //! - `a_down`: while this file exists, button A is held.
 //! - `chip.cbor`: the chip record (see `cahoots_badge::chip`), once a chip has made a key.
+//! - `grants.cbor`: the agent grants the board holds (see `cahoots_badge::grants`).
 //! - `softchip.bin`: the software chip's objects, for a board made with
 //!   [`HostBoard::with_soft_chip`] (`cahoots-host badge --chip soft`). Written after every
 //!   chip call, so a restarted simulator keeps its chip keys. It holds the keys in the clear:
@@ -24,6 +25,7 @@ use crate::display::PngDisplay;
 use crate::link::{Absent, SocketLink};
 use crate::store::{FilePadStore, FileRecordStore};
 use cahoots_badge::chip::ChipRecord;
+use cahoots_badge::grants::GrantsRecord;
 use cahoots_badge::board::{assign_places, place_for};
 use cahoots_badge::{word_indices, Board, BoardError, Circle, Press};
 use cahoots_core::circle_id::CircleId;
@@ -164,6 +166,8 @@ pub struct HostBoard {
     chip: Option<HostChip>,
     /// The place a pad was written to for a circle not stored yet.
     pending: Option<(CircleId, usize)>,
+    /// When the board was made: `uptime_secs` counts from here.
+    started: Instant,
 }
 
 /// The simulated chip: a [`SoftChip`] kept in a file and written after every call that can
@@ -327,6 +331,7 @@ impl HostBoard {
             seed,
             chip: None,
             pending: None,
+            started: Instant::now(),
         }
     }
 
@@ -592,6 +597,27 @@ impl Board for HostBoard {
 
     fn chip_record_store(&mut self, r: &ChipRecord) -> Result<(), BoardError> {
         std::fs::write(self.dir.join("chip.cbor"), r.encode()).map_err(|_| BoardError::Storage)
+    }
+
+    /// `grants.cbor`: `Ok(None)` if it is missing, an error if it cannot be read or does not
+    /// decode.
+    fn grants_load(&mut self) -> Result<Option<GrantsRecord>, BoardError> {
+        let bytes = match std::fs::read(self.dir.join("grants.cbor")) {
+            Ok(b) => b,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(BoardError::Storage),
+        };
+        GrantsRecord::decode(&bytes)
+            .map(Some)
+            .map_err(|_| BoardError::Storage)
+    }
+
+    fn grants_store(&mut self, r: &GrantsRecord) -> Result<(), BoardError> {
+        std::fs::write(self.dir.join("grants.cbor"), r.encode()).map_err(|_| BoardError::Storage)
+    }
+
+    fn uptime_secs(&self) -> u64 {
+        self.started.elapsed().as_secs()
     }
 }
 

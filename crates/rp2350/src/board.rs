@@ -14,6 +14,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use cahoots_badge::board::{assign_places, place_for};
 use cahoots_badge::chip::ChipRecord;
+use cahoots_badge::grants::GrantsRecord;
 use cahoots_badge::{screens, Board, BoardError, Circle, Press};
 use cahoots_chip::se05x::Se05xChip;
 use cahoots_chip::{ChipOps, KeyId, KeyKind};
@@ -236,6 +237,23 @@ impl Board for PicoBoard {
 
     fn chip_record_store(&mut self, r: &ChipRecord) -> Result<(), BoardError> {
         store::save_chip_record(&r.encode()).map_err(|()| BoardError::Storage)
+    }
+
+    fn grants_load(&mut self) -> Result<Option<GrantsRecord>, BoardError> {
+        match store::load_grants() {
+            Ok(None) => Ok(None),
+            Ok(Some(body)) => GrantsRecord::decode(&body).map(Some).map_err(|_| BoardError::Storage),
+            Err(()) => Err(BoardError::Storage),
+        }
+    }
+
+    fn grants_store(&mut self, r: &GrantsRecord) -> Result<(), BoardError> {
+        store::save_grants(&r.encode()).map_err(|()| BoardError::Storage)
+    }
+
+    fn uptime_secs(&self) -> u64 {
+        // The timer counts microseconds since boot.
+        self.delay.get_counter().ticks() / 1_000_000
     }
 
     fn log(&mut self, line: &str) {
