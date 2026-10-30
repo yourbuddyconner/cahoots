@@ -9,7 +9,7 @@ Generated from `cahoots-core` and `cahoots-objects`. Regenerate with `cargo run 
 | `messages.json` | Seal and open for every message type, plus a tag failure |
 | `spend.json` | Two sends, sender erasure, receiver replay rejection, ledger contents |
 | `frames.json` | Touch-link framing with CRC-32 |
-| `objects.json` | The four signed objects: a root grant and a delegated grant, an approval, a fact and a receipt, each with its inputs, canonical CBOR payload, COSE_Sign1 and JSON projection, against a three-seat manifest |
+| `objects.json` | The four signed objects: a root grant and a delegated grant, an approval, a fact and a receipt, and a sign grant with an agent's proof, each with its inputs, canonical CBOR payload, COSE_Sign1 and JSON projection, against a three-seat manifest |
 | `root.json` | The circle root from the content keys of the ceremony in `ceremony.json`, chat keys for four epochs, and seal keys for two labels, among them the card seal key |
 | `ssh.json` | Requests to sign for ssh and git: four logins (bound to a P-256 host key, host-bound, unbound, bound to another session) and a git commit, each with the badge's screen lines and the signature it returns |
 
@@ -21,7 +21,7 @@ Per-member fields are arrays with one entry per member, in seat order: `seat_see
 
 ## `objects.json` fields
 
-`manifest` is the canonical body of a three-seat circle whose keys come from `seat_seeds`. Every object is signed by `seat` (1) under kid `[1]`, except the delegated grant, signed by `delegate_seed` under kid SHA-256 of its public key. Each object has `inputs` (every field), `payload` (canonical CBOR), `signed` (the COSE_Sign1 with the payload embedded) and `json` (the informative projection). The test in `crates/objects/tests/vectors.rs` rebuilds all of them from the inputs.
+`manifest` is the canonical body of a three-seat circle whose keys come from `seat_seeds`. Every object is signed by `seat` (1) under kid `[1]`, except the delegated grant, signed by `delegate_seed` under kid SHA-256 of its public key. Each object has `inputs` (every field), `payload` (canonical CBOR), `signed` (the COSE_Sign1 with the payload embedded) and `json` (the informative projection). The test in `crates/objects/tests/vectors.rs` rebuilds all of them from the inputs. `sign_grant` is a sign grant (protocol section 8.3) signed by `seat` for the key of `agent_seed`, with its claims as `payload`, and `sign_grant.proof` is that key's proof over a fixed hash and nonce.
 
 ## `root.json` fields
 

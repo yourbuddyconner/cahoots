@@ -159,6 +159,7 @@
     "signed": "845826a201260458201301c6910fc7ef475b1e6bb576ded17d351ea6cfc49390b148cb21bb813a47aea0589faa0001015072cdd5cb1e305306c6ba19449d8c5ce702582103eea1bbf11d40a876c75bb2d9cf1cb3a249bde65e4cb1133be7b1e1a681e05495035821023fe6a2d966c47bc435210f3be13e3c55b8b439318f6b28ab934ee3c47b469c1d0481010519040006190384070008582061b38162cf40d57931a82713d614ca175af023ad4883e0cb65c258cc665967c90950900608aa090cb87d2f909dbc522230545840eb3189321f291c841b810a9d6f4b2737cc2acdfcdc13f0233c9014b835dd36e5e24f2aad5823ad1321686eb817eb2ff0da4aa55e7f17e7435f08643473d1b0ab"
   },
   "description": "The four signed objects (docs/superpowers/specs/2026-10-26-seats-manifest-objects.md section 6). Each payload is a canonical CBOR map with integer keys 0.. ascending, key 0 the version 1; each signed form is an untagged COSE_Sign1 [protected {1: -7, 4: kid}, {}, payload, signature] with ES256 (RFC 6979 deterministic, so the signatures reproduce) and external AAD the object's domain: cahoots/grant/v1, cahoots/approval/v1, cahoots/fact/v1, cahoots/receipt/v1. The manifest is a three-seat circle whose seat keys come from seat_seeds; every object is signed by seat 1 under kid [1], except the delegated grant, signed by the root grant's grantee (delegate_seed) under kid SHA-256 of its 33-byte public key. The delegated grant's parent is SHA-256 of the root's signed bytes; the receipt's grant is SHA-256 of the delegated grant's signed bytes. The fact's nonce is SHA-256(\"cahoots/fact-nonce/v1\" || circle_id || log as 8 bytes LE). json is the informative JSON projection.",
+  "description_sign_grant": "A sign grant (docs/protocol.md section 8.3). sign_grant is a CWT claims set (crates/objects/src/cwt.rs) issued by seat 1: aud cahoots:seat:<circle id hex>:1 (key 3), exp (key 4), and one cahoots:sign authorization detail (key -65539) whose keys are in RFC 8949 canonical order. It is signed by seat 1 under kid [1] with external AAD cahoots/grant/v1. The grantee is the public key of agent_seed. sign_grant.proof is the agent key's proof of possession: a COSE_Sign1 under kid SHA-256 of its public key and external AAD cahoots/proof/v1, whose payload is the CBOR array [data_hash, nonce]. The proof MUST fail under any other nonce or hash.",
   "description_v2": "Contact cards and version 2 grants (docs/superpowers/specs/2026-10-28-chip-apps-design.md sections 6 and 8). grant_v2_root is root_grant's inputs as a CBOR Web Token claims set (crates/objects/src/cwt.rs, docs/protocol.md section 8), signed by seat 1 under kid [1] with the same external AAD cahoots/grant/v1; grant_v2_delegated is delegated_grant's inputs with parent SHA-256 of grant_v2_root's signed bytes, as a CWT signed by the delegate. card is a contact card signed by seat 1 under kid [1] with external AAD cahoots/card/v1; card.seal gives a circle root, the card seal key HMAC-SHA256(root, \"seal/card\" || circle_id), a nonce, and the sealed card nonce || AES-256-GCM(key, nonce, aad cahoots/card/v1, signed card).",
   "fact": {
     "inputs": {
@@ -371,5 +372,31 @@
     "2884c6e9b1cfe2126891b75846841957b4ce7cf869190c8e23d6c23e42e31c9e",
     "34d6961f4af134cb474555400f47d42ea34215db5a63ee32eab403c7073c61f6",
     "2f583cfc36680363f8414b967408250a860c1a3f75b710d02d42862eb5be71da"
-  ]
+  ],
+  "sign_grant": {
+    "agent_seed": "244d94e2dddb8a64e9e716f2c0c053395c1e7ae5ef3356919edff274c1c1b17b",
+    "inputs": {
+      "actions": [
+        "git-commit"
+      ],
+      "agent": "claude on connerswann-mbp",
+      "author": "Conner Swann <me@connerswann.me>",
+      "budget": 50,
+      "circle_id": "72cdd5cb1e305306c6ba19449d8c5ce7",
+      "cti": "63a31548d2e0fe0802065a7d206608f6",
+      "exp": 1764374400,
+      "grantee": "0321cbceed2331fa646047e63e0b8153833e5cbcce9ce42239c17c137263b17ef3",
+      "locations": [
+        "github.com/yourbuddyconner/cahoots"
+      ],
+      "seat": 1
+    },
+    "payload": "a901782f6361686f6f74733a636972636c653a373263646435636231653330353330366336626131393434396438633563653702784c6361686f6f74733a6b65793a3438636130623132636138353131303566646538356438356665376131613739353436646662303430633635313733303664343934383731313161323033636403782f6361686f6f74733a736561743a37326364643563623165333035333036633662613139343439643863356365373a31041a692a3780075063a31548d2e0fe0802065a7d206608f608a101a40102200121582021cbceed2331fa646047e63e0b8153833e5cbcce9ce42239c17c137263b17ef3225820d7975ef36adf44ad970db574a0c43a3fe753613d91099da5490fe4a2cd78911b3a0001000281a664747970656c6361686f6f74733a7369676e656167656e747819636c61756465206f6e20636f6e6e65727377616e6e2d6d627066617574686f727820436f6e6e6572205377616e6e203c6d6540636f6e6e65727377616e6e2e6d653e66627564676574183267616374696f6e73816a6769742d636f6d6d6974696c6f636174696f6e738178226769746875622e636f6d2f796f75726275646479636f6e6e65722f6361686f6f74733a00010003003a0001000401",
+    "proof": {
+      "data_hash": "e0a796b13125000a438eff02589bb3f8eea4ae9a50d1ac5abdc0039cfe56fd5d",
+      "nonce": "6bce07cc75518868368bb5fa73824bfd",
+      "signed": "845826a2012604582048ca0b12ca851105fde85d85fe7a1a79546dfb040c6517306d49487111a203cda05834825820e0a796b13125000a438eff02589bb3f8eea4ae9a50d1ac5abdc0039cfe56fd5d506bce07cc75518868368bb5fa73824bfd58407f364b0469686d4170a9fec12a57f5c6146a4b37168140adbc1c471001ba45ea6da8d06db4ed477b54cbae7f641dce833550792512bcd3ff695ede6672c922b6"
+    },
+    "signed": "8446a20126044101a05901d5a901782f6361686f6f74733a636972636c653a373263646435636231653330353330366336626131393434396438633563653702784c6361686f6f74733a6b65793a3438636130623132636138353131303566646538356438356665376131613739353436646662303430633635313733303664343934383731313161323033636403782f6361686f6f74733a736561743a37326364643563623165333035333036633662613139343439643863356365373a31041a692a3780075063a31548d2e0fe0802065a7d206608f608a101a40102200121582021cbceed2331fa646047e63e0b8153833e5cbcce9ce42239c17c137263b17ef3225820d7975ef36adf44ad970db574a0c43a3fe753613d91099da5490fe4a2cd78911b3a0001000281a664747970656c6361686f6f74733a7369676e656167656e747819636c61756465206f6e20636f6e6e65727377616e6e2d6d627066617574686f727820436f6e6e6572205377616e6e203c6d6540636f6e6e65727377616e6e2e6d653e66627564676574183267616374696f6e73816a6769742d636f6d6d6974696c6f636174696f6e738178226769746875622e636f6d2f796f75726275646479636f6e6e65722f6361686f6f74733a00010003003a00010004015840534d18bae6ed815fde5af14e5af5e18eee5412d27f9888833158350030e0319428216d46f8572e8075c1396b2ad9396e97450ddf9d6dfdb92bdb2e9ee23d02a0"
+  }
 }

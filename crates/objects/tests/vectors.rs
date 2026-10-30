@@ -291,3 +291,52 @@ fn the_card_is_reproduced() {
     assert_eq!(hex::encode(&sealed), s["sealed"].as_str().unwrap());
     assert_eq!(card::open(&sealed, &seal_key).unwrap(), signed);
 }
+
+#[test]
+fn the_sign_grant_and_its_proof_are_reproduced() {
+    use cahoots_objects::authz::{proof_sign, proof_verify, Action, SignGrant};
+    use cahoots_objects::cwt::Claims;
+    let v = vectors();
+    let m = manifest(&v);
+    let seat = uint(&v["seat"]) as u8;
+    let seat_key = key(&v["seat_seeds"][usize::from(seat)]);
+    let g = &v["sign_grant"];
+    let i = &g["inputs"];
+    let agent = key(&g["agent_seed"]);
+    let want = SignGrant {
+        circle_id: arr(&i["circle_id"]),
+        seat: uint(&i["seat"]) as u8,
+        grantee: public(&i["grantee"]),
+        cti: arr(&i["cti"]),
+        actions: vec![Action::GitCommit],
+        author: i["author"].as_str().unwrap().into(),
+        locations: i["locations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l.as_str().unwrap().into())
+            .collect(),
+        agent: i["agent"].as_str().unwrap().into(),
+        budget: uint(&i["budget"]) as u32,
+        exp: Some(uint(&i["exp"])),
+    };
+    assert_eq!(want.grantee, agent.public());
+    assert_eq!(want.exp, Some(1_764_374_400));
+
+    let payload = unhex(&g["payload"]);
+    assert_eq!(want.claims().encode(), payload);
+    assert_eq!(SignGrant::from_claims(&Claims::decode(&payload).unwrap()).unwrap(), want);
+    let signed = want.sign(&seat_key, seat);
+    assert_eq!(hex::encode(&signed), g["signed"].as_str().unwrap());
+    let got = SignGrant::verify(&signed, m.seat_key(seat).unwrap(), &m.circle_id, seat).unwrap();
+    assert_eq!(got, want);
+
+    let hash: [u8; 32] = arr(&g["proof"]["data_hash"]);
+    let nonce: [u8; 16] = arr(&g["proof"]["nonce"]);
+    let proof = unhex(&g["proof"]["signed"]);
+    assert_eq!(proof_sign(&agent, &hash, &nonce), proof);
+    assert!(proof_verify(&proof, &got.grantee, &hash, &nonce));
+    let mut other = nonce;
+    other[0] ^= 1;
+    assert!(!proof_verify(&proof, &got.grantee, &hash, &other));
+}

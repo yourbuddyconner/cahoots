@@ -35,6 +35,7 @@ On a V1 board with the NXP SE051 secure element, the chip makes and holds each c
 - Sign SSH logins, git commits and files. A laptop program asks, the badge shows the user and host, the commit's author and subject, or the file's first line and size, and it signs when both buttons are pressed.
 - Sign a contact card and share its circle's card seal key, so a circle can swap cards.
 - Sign grants as CBOR Web Tokens.
+- Give an agent a grant to sign git commits on a budget, so each commit needs no press. The chip counts the uses.
 
 A badge also keeps several circles at once, with nothing linking them, whether or not it has the chip: up to 16 on the Pico 2, and 4 on the Nano ESP32, which has no chip.
 

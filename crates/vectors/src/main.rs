@@ -17,6 +17,7 @@ use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::{self, randomness_len};
 use cahoots_core::seat::SeatKey;
 use cahoots_objects::grant::{self, verify_chain, Grant, Grantor};
+use cahoots_objects::authz::{proof_sign, proof_verify, Action, SignGrant};
 use cahoots_objects::card::{self, Card, PURPOSE_CHAT, PURPOSE_SSH};
 use cahoots_objects::{assurance, fact_nonce, Approval, Fact, Receipt};
 use serde_json::{json, Value};
@@ -626,11 +627,57 @@ fn object_vectors() -> Value {
         "sealed": hex::encode(&sealed),
     });
 
+    // A sign grant: seat 1 lets an agent key sign commits as a named author, fifty times.
+    let agent_seed: [u8; 32] = fill(570, 32).try_into().unwrap();
+    let agent = SeatKey::from_seed(&agent_seed).unwrap();
+    let sign_grant = SignGrant {
+        circle_id: circle,
+        seat,
+        grantee: agent.public(),
+        cti: fill(571, 16).try_into().unwrap(),
+        actions: vec![Action::GitCommit],
+        author: "Conner Swann <me@connerswann.me>".into(),
+        locations: vec!["github.com/yourbuddyconner/cahoots".into()],
+        agent: "claude on connerswann-mbp".into(),
+        budget: 50,
+        exp: Some(1_764_374_400),
+    };
+    let sign_grant_signed = sign_grant.sign(seat_key, seat);
+    assert_eq!(
+        SignGrant::verify(&sign_grant_signed, &seat_key.public(), &circle, seat).unwrap(),
+        sign_grant
+    );
+    let proof_hash: [u8; 32] = fill(572, 32).try_into().unwrap();
+    let proof_nonce: [u8; 16] = fill(573, 16).try_into().unwrap();
+    let proof = proof_sign(&agent, &proof_hash, &proof_nonce);
+    assert!(proof_verify(&proof, &agent.public(), &proof_hash, &proof_nonce));
+    let mut sign_grant_vector = signed_object(json!({
+        "circle_id": hex::encode(sign_grant.circle_id),
+        "seat": sign_grant.seat,
+        "grantee": hex::encode(sign_grant.grantee.0),
+        "cti": hex::encode(sign_grant.cti),
+        "actions": ["git-commit"],
+        "author": sign_grant.author,
+        "locations": sign_grant.locations,
+        "agent": sign_grant.agent,
+        "budget": sign_grant.budget,
+        "exp": sign_grant.exp,
+    }), sign_grant.claims().encode(), &sign_grant_signed, Value::Null);
+    sign_grant_vector.as_object_mut().unwrap().remove("json");
+    sign_grant_vector["agent_seed"] = json!(hex::encode(agent_seed));
+    sign_grant_vector["proof"] = json!({
+        "data_hash": hex::encode(proof_hash),
+        "nonce": hex::encode(proof_nonce),
+        "signed": hex::encode(&proof),
+    });
+
     json!({
         "description_v2": "Contact cards and version 2 grants (docs/superpowers/specs/2026-10-28-chip-apps-design.md sections 6 and 8). grant_v2_root is root_grant's inputs as a CBOR Web Token claims set (crates/objects/src/cwt.rs, docs/protocol.md section 8), signed by seat 1 under kid [1] with the same external AAD cahoots/grant/v1; grant_v2_delegated is delegated_grant's inputs with parent SHA-256 of grant_v2_root's signed bytes, as a CWT signed by the delegate. card is a contact card signed by seat 1 under kid [1] with external AAD cahoots/card/v1; card.seal gives a circle root, the card seal key HMAC-SHA256(root, \"seal/card\" || circle_id), a nonce, and the sealed card nonce || AES-256-GCM(key, nonce, aad cahoots/card/v1, signed card).",
         "grant_v2_root": signed_object(grant_inputs(&root), root.encode_v2(), &root_v2_signed, root.to_v2().to_json()),
         "grant_v2_delegated": signed_object(grant_inputs(&delegated_v2), delegated_v2.encode_v2(), &delegated_v2_signed, delegated_v2.to_v2().to_json()),
         "card": card_vector,
+        "description_sign_grant": "A sign grant (docs/protocol.md section 8.3). sign_grant is a CWT claims set (crates/objects/src/cwt.rs) issued by seat 1: aud cahoots:seat:<circle id hex>:1 (key 3), exp (key 4), and one cahoots:sign authorization detail (key -65539) whose keys are in RFC 8949 canonical order. It is signed by seat 1 under kid [1] with external AAD cahoots/grant/v1. The grantee is the public key of agent_seed. sign_grant.proof is the agent key's proof of possession: a COSE_Sign1 under kid SHA-256 of its public key and external AAD cahoots/proof/v1, whose payload is the CBOR array [data_hash, nonce]. The proof MUST fail under any other nonce or hash.",
+        "sign_grant": sign_grant_vector,
         "description": "The four signed objects (docs/superpowers/specs/2026-10-26-seats-manifest-objects.md section 6). Each payload is a canonical CBOR map with integer keys 0.. ascending, key 0 the version 1; each signed form is an untagged COSE_Sign1 [protected {1: -7, 4: kid}, {}, payload, signature] with ES256 (RFC 6979 deterministic, so the signatures reproduce) and external AAD the object's domain: cahoots/grant/v1, cahoots/approval/v1, cahoots/fact/v1, cahoots/receipt/v1. The manifest is a three-seat circle whose seat keys come from seat_seeds; every object is signed by seat 1 under kid [1], except the delegated grant, signed by the root grant's grantee (delegate_seed) under kid SHA-256 of its 33-byte public key. The delegated grant's parent is SHA-256 of the root's signed bytes; the receipt's grant is SHA-256 of the delegated grant's signed bytes. The fact's nonce is SHA-256(\"cahoots/fact-nonce/v1\" || circle_id || log as 8 bytes LE). json is the informative JSON projection.",
         "manifest": hex::encode(manifest.encode()),
         "circle_id": hex::encode(circle),

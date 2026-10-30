@@ -243,13 +243,20 @@ Messages are CBOR (RFC 8949), array-encoded. A request travels in a frame of kin
 | `SshSign` | `data`, `host` (optional), `content` (optional) | `Signature`, in SSH wire format |
 | `Card` | `card` | `Signature`, a COSE_Sign1 |
 | `GrantSign` | `grant` | `Signature`, a COSE_Sign1 |
+| `Nonce` | none | `Nonce { nonce }`, 16 fresh bytes from the badge |
+| `GrantRequest` | `action`, `author`, `location` (optional), `agent`, `budget`, `exp` (optional), `standing`, `cnf`, `time` | `Grant { grant, slot }`, a signed sign grant and the chip counter slot the badge gave it |
+| `SshSignUnderGrant` | `data`, `content`, `grant`, `proof`, `location` (optional), `time` | `GrantSignature { signature, remaining }`, in SSH wire format, and the signatures the grant has left |
 | `SealKey` | `label` | `Key { key }` |
 
 `host` is `{ host_key, session_id, host_sig, name, user }`, what the laptop learned from OpenSSH. The badge checks it before it trusts it. `content` is the text a signature covers: a git commit (namespace `git`, which is refused without it) or a file in any other namespace. A file request without `content` is a signature over a hash the laptop chose, and the badge says so on its screen.
 
 Any request can get `Error { code }` as its response. The codes are `UnknownCircle`, `Exhausted`, `AlreadySpent`, `OutOfRange`, `Config`, `Storage`, `Malformed`, `Denied`, `Busy`, `NoChip` (the badge has no chip to do this with), `ChipError` (the chip failed) and `Unparseable` (the bytes to sign are not something the badge signs).
 
-A request is at most 16 KiB. Only `SshSign` may be longer than 4 KiB; any other request over 4 KiB is `Malformed`, and a badge refuses it before it asks its owner anything.
+`GrantRequest` asks the badge to issue a sign grant (section 8.3) to the agent key `cnf`. The badge shows the agent, the author, the place, the budget and the end, and signs when both buttons are pressed. It refuses an action other than `git-commit`, a budget outside 1 to 1000, an agent or author that would not show whole on its screen (39 and 48 printable ASCII characters), and a request with neither an `exp` nor `standing`, or with both. `time` is the laptop's clock in seconds. The badge keeps the latest time it was told and never goes back. `Nonce` gives the laptop the 16 bytes the agent's proof (section 8.3) is made over.
+
+`SshSignUnderGrant` is a git commit signature the badge makes without a press, because a sign grant covers it. `grant` is the signed sign grant and `proof` is the agent's proof over the SHA-256 of `data` and a nonce from `Nonce`. The badge checks the grant against its own seat key and its own record, checks the proof, and checks the author in `content`, the place, the time and the budget. It counts the use in the chip before it signs. When the grant does not cover the commit, the badge asks its owner as it would for `SshSign`, or refuses, as the grant was issued.
+
+A request is at most 16 KiB. Only `SshSign` and `SshSignUnderGrant` may be longer than 4 KiB; any other request over 4 KiB is `Malformed`, and a badge refuses it before it asks its owner anything.
 
 The laptop program and the badge firmware must come from the same release. `Identity` gained the field `chip`, and a decoder rejects any message that does not re-encode to the same bytes, so a laptop program from before it calls a new badge's `Identity` malformed.
 
@@ -295,7 +302,7 @@ Higher includes lower. The device tier travels separately, in the manifest. See 
 
 ### 8.3 Grant
 
-Domain `cahoots/grant/v1`. A seat lets a key spend pad on some purposes, up to a budget and a log position, and lets that key delegate a narrower grant.
+Domain `cahoots/grant/v1`. A grant is one of two kinds. A pad grant lets a key spend pad on some purposes, up to a budget and a log position, and lets that key delegate a narrower grant. A sign grant lets an agent's key sign git commits as a named author, a fixed number of times. The sections below give the pad grant first, in versions 1 and 2, and the sign grant after them.
 
 | Key | Value |
 |---|---|
@@ -330,11 +337,39 @@ A version 2 grant has the same meaning and the same chain rules. Its payload is 
 
 IANA's CWT Claims registry has no key for `authorization_details` (RFC 9396 registers it for JWT only), so it takes the private key -65539. The keys are in canonical order: the positive ones, then the negative ones from -65537 down.
 
-Each detail is a map with text keys. `type` is `cahoots:<purpose>` for a purpose (`cahoots:wireguard` 0, `cahoots:tls` 1, `cahoots:mls` 2, `cahoots:wifi` 3, `cahoots:meshtastic` 4, `cahoots:other` 5), or `cahoots:purpose-<n>` for a purpose byte with no name. The purposes come first, in ascending order, with no repeats. The last detail is `{"type": "cahoots:pad", "budget": uint}`, the bytes of pad. Only that detail has a `budget`.
+Each detail is a map with text keys. `type` is `cahoots:<purpose>` for a purpose (`cahoots:wireguard` 0, `cahoots:tls` 1, `cahoots:mls` 2, `cahoots:wifi` 3, `cahoots:meshtastic` 4, `cahoots:other` 5), or `cahoots:purpose-<n>` for a purpose byte with no name. The purposes come first, in ascending order, with no repeats. The last detail is `{"type": "cahoots:pad", "budget": uint}`, the bytes of pad. In a pad grant only that detail has a `budget`.
 
 A decoder MUST refuse a claims set with an unknown claim or detail type, a missing claim, an `iss` that does not name a circle, a `sub` that is not the key id of the `cnf` key, a named purpose written as a number, or a non-canonical encoding. The `cnf` key is the grantee: the next link in a chain must be signed by it, under its key id.
 
 The badge signs root grants of either version for its own seat. Its screen shows the purposes, the budget and whether the grantee may delegate, all read from the grant. It marks two values with "(laptop)" because it cannot check them: the short key id of the grantee, and `not_after`, a log position the badge does not track.
+
+#### Sign grant
+
+A sign grant is a version 2 grant, a CWT claims set signed by a seat under kid `[seat]` and domain `cahoots/grant/v1`. A verifier tells it from a pad grant by its claims. A pad grant has the log claim -65537 and no `aud` and no `exp`. A sign grant has no log claim, an `aud`, and one detail of type `cahoots:sign`. It is never delegated: its depth is 0 and it has no parent.
+
+| Key | Claim | Value |
+|---|---|---|
+| 1 | `iss` | tstr `cahoots:circle:<circle_id as lowercase hex>` |
+| 2 | `sub` | tstr `cahoots:key:<key id of the agent's key, lowercase hex>` |
+| 3 | `aud` (RFC 8392) | tstr `cahoots:seat:<circle_id as lowercase hex>:<seat>`, the seat that issued the grant and checks it |
+| 4 | `exp` (RFC 8392) | uint, Unix time at which the grant ends. Absent for a standing grant |
+| 7 | `cti` | nonce, bstr 16 |
+| 8 | `cnf` | the agent's key, as in a pad grant |
+| -65539 | `authorization_details` | array of one detail, below |
+| -65540 | `cahoots-depth` | uint, 0 |
+| -65541 | `cahoots-grantor` | uint, the issuing seat |
+
+The detail is `{"type": "cahoots:sign", "agent": tstr, "author": tstr, "budget": uint, "actions": [tstr], "locations": [tstr]}`. `agent` is a name for people to read. `author` is who commits are signed as, written exactly as the commit's author line. `budget` is 1 to 1000, the signatures the grant allows. `actions` is a non-empty list drawn from `git-commit`, `ssh-login` and `file`. `locations` names the repositories or hosts where the grant applies, and an empty list means anywhere. A location is compared with the scheme, `git@`, a trailing `.git` and a trailing `/` removed, `:` read as `/`, and the host in lower case. The path keeps its case. `agent` and `locations` may be absent. A badge today issues only `git-commit`.
+
+The key -65539 is a private key, as for a pad grant, and stays until IANA registers one for `authorization_details` in the CWT Claims registry. The keys inside a detail are text and are written in RFC 8949 canonical order, shorter first and then bytewise: `type`, `agent`, `author`, `budget`, `actions`, `locations`. The claims are in canonical order too. A decoder MUST refuse a sign grant with a second detail, a missing `aud`, `author`, `budget` or `actions`, an `aud` for another circle, a depth other than 0, a parent, or a non-canonical encoding.
+
+A verifier answers one question: may this key do this action here and now. It takes a subject (the key id), an action, a resource (the circle and the place) and a context (the author named in the commit, the time, the signatures used, whether the grant is revoked), the shape of an AuthZEN access request. It checks in this order and stops at the first failure: revoked, key, circle, action, author, place, expiry, budget. A grant with an `exp` and a verifier with no clock is allowed, because only a verifier with a clock can judge expiry. The badge has its own time, the latest a laptop told it plus its uptime since, and it never goes back. A laptop can make a grant end early and cannot make it last longer.
+
+On a badge with a chip, the chip counts the uses. Each grant has a counter in a chip slot. A grant starts its counter at `base`, which is the chip-wide issue counter at the time of issue shifted up 32 bits, so a grant's uses are its counter less its base. A later grant in the same slot has a higher base, and a flash image restored from before cannot refund a use. A badge without a chip counts in its record.
+
+An agent proves it holds its key with a proof of possession. The proof is a COSE_Sign1 under external AAD `cahoots/proof/v1` and kid the key id of the agent's key. Its payload is the CBOR array `[data_hash, nonce]`, where `data_hash` is the SHA-256 of what the agent wants signed (bstr 32) and `nonce` is 16 fresh bytes from the badge (bstr 16). The badge accepts the proof only for the nonce it gave. A proof does not verify under another nonce or another hash.
+
+`objects.json` has a sign grant, signed by seat 1 for a fixed agent key, with its claims, its signed bytes, and a proof over a fixed hash and nonce.
 
 ### 8.4 Approval
 
