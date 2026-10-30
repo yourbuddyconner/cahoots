@@ -4,7 +4,7 @@ date: 2026-10-25
 author: Conner Swann
 role: Building Cahoots
 tags: Building in public, Privacy
-about: Why I'm building Cahoots. A circle should be able to establish its own trust, decide who can act on its behalf, and carry that authority on hardware its members own.
+about: Why I'm building Cahoots. A circle should establish its own trust. Its members should decide who can act on their behalf. They should own the hardware that protects their keys.
 audience: People who want more control over their private lives, and the hardware and software builders who want to help.
 learn:
 - What it means for a group to own its trust
@@ -13,7 +13,7 @@ learn:
 - How agents can act for a circle under explicit, limited grants
 - Why the badge matters, and what it cannot promise
 - Why verification has to reach through the software stack and hardware supply chain
-description: The people you trust should be able to make a private circle, set the terms for agents acting on their behalf, and carry that authority on hardware they own. That's why I'm building Cahoots.
+description: The people you trust should be able to make a private circle. They should decide what agents may do on their behalf. That's why I'm building Cahoots.
 ---
 
 I care about privacy. I have for a long time. But caring about it mostly meant choosing the right tools and hoping the people behind them kept doing their jobs. A good messaging app. A password manager. A VPN. I could make those choices and get on with my life.
@@ -29,7 +29,7 @@ I don't want every private part of my life to be a tenancy. I want some of it to
 
 That's why I'm building Cahoots. And it's why I think privacy hardware needs a renaissance: small, understandable devices that give people real custody of their keys and a meaningful say in what those keys do.
 
-That matters even more as we put software agents to work on our behalf. I want the authority those programs use to start with us, with limits we can understand and enforce.
+That matters even more as we put software agents to work on our behalf. We should decide what those programs may do. We should be able to enforce that decision.
 
 ## The people you already know
 
@@ -47,7 +47,7 @@ The people you'd hand a house key to, you have already met. That should count fo
 
 ## Make a circle, then use it
 
-Cahoots starts with a group meeting in person. Each person's device contributes randomness. The devices exchange encrypted contributions, combine them, and produce a shared secret. The group compares the words on their screens to check that they agree. The ceremony also records the members' public signing keys in a membership record they sign together.
+Cahoots starts with a group meeting in person. Each person's device contributes randomness. The devices exchange encrypted contributions. Each device combines the contributions into the same shared secret. The group compares the words on their screens to check that they agree. Each member's device signs a membership record. That record lists the members' public signing keys.
 
 No account provider chooses the members. No certificate authority needs to vouch for the people standing in front of you. No relay gets a copy of the circle's secret.
 
@@ -68,11 +68,11 @@ The ambition is that making the circle once should make the next private thing e
 
 Agents make a poorly understood distinction impossible to ignore: knowing who signed a request doesn't tell you what they're allowed to do. A program acting for me needs its own identity and a clear grant of authority. Handing it my account and hoping it behaves is a miserable foundation for that future.
 
-The web already has standards for [delegated access](https://www.rfc-editor.org/rfc/rfc8693.html). I want a circle to put that power in its members' hands. A grant should say which key may do what, within what budget, when its authority ends, and whether it can pass a smaller part onward. An agent arranging a private connection for one job shouldn't need every secret the circle holds.
+The web already has standards for [delegated access](https://www.rfc-editor.org/rfc/rfc8693.html). I want the circle's members to decide what access they grant. A grant should specify which operations a program's key authorizes. It should set a budget for that work. It should specify when the authority ends. It should also say whether the program may delegate part of that authority. An agent arranging a private connection for one job shouldn't need every secret the circle holds.
 
-That means deliberate consent on the badge, permissions that can only narrow as they pass between programs, and services that refuse work outside those limits. We should be able to withdraw a grant. Some actions should always need a person to approve them.
+We should approve grants deliberately on the badge. A program that delegates work should only be able to reduce the permissions it received. Services should refuse requests outside those permissions. We should be able to withdraw a grant. Some actions should always need a person to approve them.
 
-This is the autonomy I want: a group can establish its own authority, choose its rules, and give a machine a bounded job without handing over the power to rewrite those rules. We should be able to check that arrangement without asking the machine whether it followed our instructions.
+This is the autonomy I want. The group chooses its rules. It gives a machine a job within those rules. The machine gets no authority to rewrite them. We should be able to check what it was authorized to do. Its own assurance that it followed our instructions shouldn't settle the question.
 
 ## Good tools, more control
 
@@ -86,7 +86,7 @@ Cahoots is an attempt to make the group a useful starting point across those bou
 
 There will still be infrastructure. Messages need delivery. Software needs updates. Devices break. We run a hosted relay because people should be able to start a conversation without first becoming server administrators. It doesn't need the circle's keys to do its job. A relay operator can still observe traffic patterns or refuse to deliver messages. We promise we won't use ours to surveil your circle or selectively block its conversations. But you shouldn't have to take our word for it. You can run the relay yourself and keep that decision in your own hands.
 
-I want the convenience of hosting to come with verifiable limits on the host's power. (Secure enclaves, through infrastructure such as [Turnkey Verifiable Cloud](https://docs.turnkey.com/features/verifiable-cloud/overview), offer a way to verify which code is running and isolate its work from the operator.) That's the world we're trying to help bring about: you can let someone else run the service and check the rules it runs under, without having to trust their promise to follow them. That still rests on the hardware and its verification, but it gives us something stronger than a privacy policy.
+I want to use hosted services whose operators can't quietly change the rules. (With infrastructure such as [Turnkey Verifiable Cloud](https://docs.turnkey.com/features/verifiable-cloud/overview), clients can check evidence of which code a service is running. Secure enclaves isolate that code's execution from the operator.) That's the world we're trying to help bring about. Someone else can run the service. You can check which program handles your requests. You don't have to rely on the operator's promise to run it. You still rely on the enclave hardware and the checks that identify its software. Those checks give you more to go on than a privacy policy.
 
 I want to be able to draw that line clearly: here's what the service does, here's what it can learn, and here's what remains with us.
 
@@ -96,9 +96,9 @@ A phone can make and use a circle. It is also a general-purpose computer with a 
 
 A badge gives us a chance to make those consequences smaller and more legible. A device with a narrow job. A screen you can read. Buttons you have to press. Keys that can stay in a secure element while the device uses them. Board files and firmware you can inspect, build, and argue with.
 
-I want to plug it into a laptop and have it tell me what I'm approving. I want it to carry several circles without turning them into one public identity. I want it to be useful enough that someone actually keeps it with them.
+I want to plug it into a laptop and have it tell me what I'm approving. I want it to store keys for several circles. Those circles shouldn't become one public identity. I want it to be useful enough that someone actually keeps it with them.
 
-That includes delegation. I want to read the authority I'm giving a program on a screen it doesn't control, approve it deliberately, and let it get on with the work inside those limits. Having agency shouldn't mean pressing a button for every routine action. It should mean having a real say in which actions can happen without me.
+That includes delegation. The badge should show me what I'm authorizing a program to do. The program shouldn't control that screen. I should approve the grant deliberately. Then the program can work within its permissions. Having agency shouldn't mean pressing a button for every routine action. It should mean having a real say in which actions can happen without me.
 
 That takes more than declaring a piece of hardware secure. A screen is only useful if it shows enough to make a decision. A button is only useful if the firmware can't quietly go around it. An open board doesn't prove the device in your hand was built correctly. Randomness, manufacturing, updates, theft, and recovery all deserve actual answers.
 
@@ -110,11 +110,11 @@ There should be more people trying this. More boards. More approaches. More thin
 
 An open app on an opaque foundation only takes us so far. Who built the binary? What dependencies went into it? Which firmware is the badge running? Did the factory deliver the chip its label claims? The hardware supply chain belongs in the same conversation as the software supply chain. Otherwise we keep moving the demand for trust down a layer and calling the problem solved.
 
-That's why [Baochip-1x, the chip on the Dabao board](https://www.crowdsupply.com/baochip/dabao), matters to me. Its boot software is open and reproducible, much of its logic design is published, and the chip is packaged for infrared inspection of the silicon itself. You can gather evidence about the thing in your hand instead of stopping at the manufacturer's word. That's the direction I want privacy hardware to go.
+That's why [Baochip-1x, the chip on the Dabao board](https://www.crowdsupply.com/baochip/dabao), matters to me. You can inspect its boot software's source. You can reproduce the boot software's binary from that source. Baochip publishes much of the chip's logic design. Its packaging lets you inspect the silicon with infrared imaging. You can compare physical features of the chip in your hand with the expected design. The manufacturer's word doesn't have to be your only evidence. That's the direction I want privacy hardware to go.
 
-The same ambition has to run through the entire software stack: the app, its dependencies, the tools that build it, the relay, the badge firmware, and the boot code. Published source gives us something to inspect. Reproducible builds let us compare what we built with what we were given. Attestation can provide evidence of which code a remote service is running. Each layer should give the next one something checkable.
+I want us to be able to inspect the entire software stack. That includes the app's dependencies and the tools used to build it. It includes the relay software. It includes the badge firmware and its boot code. Publishing source lets people review what the software does. Reproducible builds let them rebuild a binary from that source. They can compare the rebuilt binary with the one distributed to users. A client can check a remote service's attestation against the program it expects that service to run. We should be able to explain what each check establishes. We should also say which assumptions it leaves in place.
 
-This is the point of tiered security. A circle should be able to choose how much evidence it needs, from using familiar devices to checking the software and inspecting the hardware beneath it. At the highest tier, I want users to have a path to verify the system for themselves, through to the silicon, with every remaining assumption exposed. That's the utopian end of this for me: keep replacing demands for trust with things people can actually check.
+This is the point of tiered security. A circle's members should choose what evidence they require. They might accept the protections of a familiar device. They might require independently checked software. They might also require physical inspection of the hardware. At the highest tier, I want users to be able to perform those checks themselves. The path should reach down to the silicon. Every remaining assumption should be explicit. That's the utopian end of this for me: keep replacing demands for trust with things people can actually check.
 
 ## The limits matter
 
@@ -126,15 +126,15 @@ There is a narrower, useful property: a truly random pad, kept secret and never 
 
 A compromised member's device can still expose what it holds. Another member can share a secret you wanted them to keep. A badge doesn't solve coercion. Those limits belong in the explanation, because owning a tool ought to include knowing where it stops helping.
 
-I still think there's something worth building here. We can give a group more control over how it establishes trust, where its keys live, and what it authorizes, while being honest about the assumptions underneath it.
+I still think there's something worth building here. The group should decide whom it trusts. Its members should control where their keys live. They should decide what they authorize. We owe them an honest account of what those protections depend on.
 
 ## Privacy as a core competency
 
 I don't want to become a part-time administrator just to have a private life. I don't think anyone else should have to, either. The tools need to do more of the work.
 
-Being secure isn't enough. It has to be usable by normal people, on an ordinary day, when they're tired and have something else to do. A confusing ceremony, a warning nobody understands, or a stream of approval prompts can wear the whole thing down. Fatigue kills it. People click through, take shortcuts, or leave, and a beautiful security model becomes irrelevant.
+Being secure isn't enough. Normal people have to be able to use it. That includes days when they're tired and have something else to do. A confusing ceremony can wear them down. So can a warning nobody understands or a stream of approval prompts. Fatigue kills it. People start clicking through. They take shortcuts or leave. A beautiful security model becomes irrelevant.
 
-Verification needs that same care. People should be able to run checks, understand the results, and choose whose independent work they rely on without learning chip design or auditing every dependency themselves. The deeper inspection should remain available to anyone who wants it. Everyday use should make the safe path easy and save people's attention for decisions that deserve it.
+Verification needs that same care. Ordinary users should be able to run the checks. The results should tell them what passed and what they still have to trust. They should be able to choose an independent reviewer's work to rely on. Using the tool shouldn't require them to learn chip design. It shouldn't require them to audit every dependency. Anyone who wants to inspect more deeply should be able to. Everyday use should make the safe path easy. We should save people's attention for decisions that deserve it.
 
 But I do want to be able to answer three questions: Who else can read this? What would they have to do to read it? What happens if they're compromised?
 
