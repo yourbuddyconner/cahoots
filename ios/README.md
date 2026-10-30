@@ -90,7 +90,7 @@ exported the `.ipa`. Xcode made an Apple Development certificate on this Mac, an
 signed "Apple Distribution: Conner Swann (9Z585PW7QR)" with the profile "iOS Team Store
 Provisioning Profile: network.cahoots.app". The upload was not tried: it needs the app record
 and the API key above. Later that day, with Xcode 27.2 and the iOS 27.2 SDK, the script uploaded
-build 202610302326 to App Store Connect (delivery 462fbaa7).
+build 202610302331 to App Store Connect (delivery 462fbaa7).
 
 ### What to try first on a device
 
