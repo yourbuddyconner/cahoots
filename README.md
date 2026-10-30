@@ -59,6 +59,7 @@ Every Rust crate lives under `crates/`. The PWA lives under `web/app`.
 | `crates/relay` | `cahoots-relay` | Numbers Station client shared by the CLIs. | done |
 | `crates/wasm` | `cahoots-wasm` | Browser bindings: ceremony, circle, fountain-coded animated QR, QR rendering. | done (M2) |
 | `web/app` | | Offline PWA phone and laptop client, including hello words for calls. | done (M2), camera scanning untested |
+| `crates/phone` | `cahoots-phone` | The iOS app's state machine behind UniFFI: ceremonies as animated codes, circles as CBOR records, chat through the relay with an outbox, hello words. Swift supplies the enclave signer and HTTP. `scripts/ios-framework.sh` builds the XCFramework. | in progress (the Rust side; the app is not built yet) |
 | `crates/hal` | `cahoots-hal` | HAL traits, the ceremony driver over any set of touch links (a pile, a ring, a pair), pile discovery (seat and count from the stack), SP 800-90B health tests, persistent ledger. `no_std`. | done (M4a) |
 | `crates/badge` | `cahoots-badge` | The badge crate: the `Board` trait and the badge program that runs on it. It boots, runs the ceremony, keeps the circle, and shows the words, a key as a code, or serves custodian requests. `no_std`. | done (M4e) |
 | `crates/host` | `cahoots-host` | Desktop simulator: socket Link, file PadStore, PNG Display. Four processes, each with a socket to both neighbours, run a ceremony. | done (M4a) |
