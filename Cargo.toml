@@ -14,6 +14,7 @@ members = [
     "crates/age-plugin-cahoots",
     "crates/chat",
     "crates/objects",
+    "crates/channel",
     "crates/station",
     "crates/relay",
     "crates/chip",
@@ -38,6 +39,7 @@ cahoots-custodian = { path = "crates/custodian", default-features = false }
 cahoots-provider = { path = "crates/provider" }
 cahoots-chat = { path = "crates/chat", default-features = false }
 cahoots-objects = { path = "crates/objects", default-features = false }
+cahoots-channel = { path = "crates/channel", default-features = false }
 cahoots-station = { path = "crates/station" }
 cahoots-chip = { path = "crates/chip", default-features = false }
 sha2 = { version = "0.10", default-features = false }

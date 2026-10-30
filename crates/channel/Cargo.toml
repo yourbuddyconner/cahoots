@@ -1,0 +1,22 @@
+[package]
+name = "cahoots-channel"
+description = "Channels: a group chat published under a circle. The channel object and its policy, as COSE-signed canonical CBOR. no_std + alloc."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["std"]
+std = ["cahoots-core/std", "cahoots-objects/std"]
+
+[dependencies]
+cahoots-core = { workspace = true }
+cahoots-objects = { workspace = true }
+minicbor = { version = "2.3", default-features = false, features = ["alloc", "derive"] }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+minicbor = { version = "2.3", default-features = false, features = ["alloc"] }
+sha2 = { workspace = true, features = ["std"] }

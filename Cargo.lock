@@ -401,6 +401,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cahoots-channel"
+version = "0.1.0"
+dependencies = [
+ "cahoots-core",
+ "cahoots-objects",
+ "minicbor",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "cahoots-chat"
 version = "0.1.0"
 dependencies = [
