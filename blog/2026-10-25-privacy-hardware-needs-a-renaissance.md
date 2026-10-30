@@ -73,17 +73,15 @@ As we start using that circle for more of our lives, we'll also want programs to
 
 ## Who gets to act for us
 
-An agent arranging a private connection for one job shouldn't need every secret the circle holds. It needs enough authority to do that job, for long enough to finish it. We should be able to tell what we gave it and take that authority back.
+An agent establishing a private connection for a single task shouldn't require access to every piece of sensitive information the circle protects. I want to be able to give it that job without also giving it permission to read our conversations, open our files, or authorize unrelated work. The access it receives should follow from what we've asked it to do and end when we no longer need it doing that work.
 
-Knowing who signed a request doesn't tell you what they're allowed to do. A program acting for me needs its own identity and a clear grant of authority. Handing it my account and hoping it behaves is a miserable foundation for that future.
+A program acting on our behalf needs its own identity, so we can distinguish its actions from ours. But knowing who signed a request only gets us part of the way. We also need to know who authorized it and whether that authorization covers what it's asking to do. Handing a program my account and hoping it behaves leaves far too much of that unanswered.
 
-I want the circle's members to decide what they grant. Which operations can the program perform? What can it spend? When does its authority end? Can it delegate any of the work? If it does, the next program should receive only a narrower portion of the authority it was given. Services should refuse requests outside those permissions.
+I want the circle's members to make those decisions through explicit grants that define the permitted operations, set a budget, and say when the authority expires. We should be able to inspect a grant and withdraw it when our plans change. If the agent needs another program's help, any authority it passes along should be limited to a narrower portion of what it received. The services carrying out those requests should enforce the limits, so the arrangement holds even when a program makes a mistake or tries to exceed its permissions.
 
-Some actions should always need a person to approve them. Others should be able to happen while we're busy with something else. Having agency shouldn't mean pressing a button for every routine action. It should mean having a real say in which actions can happen without us.
+That would let us decide which work can happen while we're busy with something else and which actions still need a person to approve them. I want programs to be useful without having to supervise every step, and I want to understand what I've allowed them to do while I'm away. Owning the circle should include being able to set those boundaries and change them later.
 
-That makes the moment of approval matter a great deal. If a program asks for permission on a screen it controls, what exactly am I agreeing to? If the computer holding my keys is compromised, what stops it from agreeing for me?
-
-The circle needs somewhere we can make those decisions deliberately. That's where I started wanting a separate piece of hardware.
+For that to mean much, we need to trust the moment when we grant the authority. If a program controls the screen explaining its request, it can misrepresent what we're being asked to approve. If the computer holding our keys is compromised, it might approve the request without us at all. I want somewhere we can read the actual terms and make that decision ourselves. That's where I started wanting a separate piece of hardware.
 
 ## Somewhere to keep the keys
 
