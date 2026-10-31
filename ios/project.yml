@@ -37,6 +37,14 @@ targets:
         embed: false
       - sdk: SystemConfiguration.framework
       - sdk: Security.framework
+    # Universal links: cahoots.network/app/ links open here, once the site serves
+    # /.well-known/apple-app-site-association. Automatic signing adds the capability.
+    # XcodeGen writes the file from these properties.
+    entitlements:
+      path: Cahoots/Cahoots.entitlements
+      properties:
+        com.apple.developer.associated-domains:
+          - applinks:cahoots.network
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: network.cahoots.app

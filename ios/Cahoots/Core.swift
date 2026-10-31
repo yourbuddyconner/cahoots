@@ -91,7 +91,7 @@ func plain(_ error: Error) -> String {
         return "This needs Face ID or your passcode."
     case let PhoneError.Network(m), let PhoneError.Storage(m), let PhoneError.NotFound(m),
          let PhoneError.BadCode(m), let PhoneError.Ceremony(m), let PhoneError.Chat(m),
-         let PhoneError.Signer(m):
+         let PhoneError.Signer(m), let PhoneError.Channel(m):
         return m
     default:
         return "Something went wrong."

@@ -28,7 +28,8 @@ to `$CARGO_TARGET_DIR/ios` when the target directory is elsewhere.
   camera calls `decode_frame` from its own queue, since that call reads no state.
 - `EnclaveSigner.swift`: keys made in the Secure Enclave with user presence, their handles in
   the keychain (`WhenUnlockedThisDeviceOnly`). On the simulator, a CryptoKit key in the keychain.
-- `UrlSessionHttp.swift`: blocking GET and POST with a 25 second timeout.
+- `UrlSessionHttp.swift`: blocking GET and POST with a 25 second timeout, and `request` (any
+  method and headers) for the channel calls, which returns the status rather than throwing.
 - `PhoneStore.swift`: Application Support/cahoots, left out of backups. `circles/` has complete
   protection. `phone.cbor` and each circle's `cursor.cbor` and `settings.cbor` hold nothing secret
   and get protection until first unlock, set again after every poll.
@@ -44,7 +45,9 @@ to `$CARGO_TARGET_DIR/ios` when the target directory is elsewhere.
 - The look: `Theme.swift` (colours, type, buttons, sections) and `FaceView.swift` (a seat's
   cahoot, drawn from `Phone.facePixels`). `DESIGN.md` has the plan.
 - The screens: `CirclesView`, `NewCircleView`, `JoinView`, `CeremonyView` (with `CeremonyModel`),
-  `ChatView`, `PeopleView` and `HelloView`, `SettingsView`.
+  `ChatView`, `PeopleView` and `HelloView`, `SettingsView`, and for channels `ChannelsView`
+  (the list section and the start sheet), `ChannelView`, `JoinChannelView`,
+  `ChannelRequestsView` and `ChannelMembersView`.
 
 In People, tap the pencil beside any seat to give it a name. Names are private to this phone,
 appear in chat and hello words, and are stored in the circle's protected `seat-names.json` file.
@@ -65,6 +68,27 @@ space (E174.1).
 
 Every scan screen has a field to paste a code under the camera, for the simulator and for anyone
 who cannot use the camera.
+
+## Channels
+
+A channel posts to everyone who has its link. The circles screen lists the channels on this
+phone and, for each circle, "Start a channel" (a name and one of five policies). The channel
+screen shows the posts and a composer for those who may post, and reads the relay every three
+seconds while it is open. The owner's menu shares the link, retires it, starts new keys, and
+opens Members (revoke, which shows the new link) and Requests (allow or refuse, and a toggle to
+allow automatically what the policy permits, kept in UserDefaults). Every step is a `channel_*`
+call on `Phone`; the screens follow `web/app/channels.js` and use its words. `pollAll` reads
+every live channel after the circles, and channel unread counts add to the icon badge.
+
+## Universal links
+
+`Cahoots/Cahoots.entitlements` (written by XcodeGen from `project.yml`) holds
+`com.apple.developer.associated-domains` with `applinks:cahoots.network`. iOS gives the app a
+link under `https://cahoots.network/app/` only once the site serves
+`/.well-known/apple-app-site-association` naming the app, which happens when main deploys. Until
+then, channel links open in Safari and the web app. `AppModel.openLink` sends a link whose
+fragment is `#/ch/<relay host>/<channel id>/<secret>` to the join screen, and any other `/app/`
+link to Safari.
 
 ## Ship to TestFlight
 

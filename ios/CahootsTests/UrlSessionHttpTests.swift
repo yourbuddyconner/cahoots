@@ -55,6 +55,24 @@ final class UrlSessionHttpTests: XCTestCase {
                        "The relay answered 502.")
     }
 
+    func testRequestReturnsARefusalWithItsStatus() throws {
+        let base = try station()
+        let answer = try UrlSessionHttp().request(method: "GET", url: "\(base)/v1/circles/not-hex/messages",
+                                                  headers: [HttpHeader(name: "Cahoots-Kid", value: "00")], body: nil)
+        XCTAssertGreaterThanOrEqual(answer.status, 400)
+        XCTAssertLessThan(answer.status, 500)
+    }
+
+    func testRequestWithNoRelayIsANetworkError() {
+        XCTAssertThrowsError(try UrlSessionHttp().request(method: "GET", url: "http://127.0.0.1:9/v1/head",
+                                                          headers: [], body: nil)) { error in
+            guard case let PhoneError.Network(message) = error else {
+                return XCTFail("expected PhoneError.Network, got \(error)")
+            }
+            XCTAssertEqual(message, UrlSessionHttp.unreachable)
+        }
+    }
+
     func testNoRelayIsANetworkError() {
         XCTAssertThrowsError(try UrlSessionHttp().get(url: "http://127.0.0.1:9/v1/head")) { error in
             guard case let PhoneError.Network(message) = error else {

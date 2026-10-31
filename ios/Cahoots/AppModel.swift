@@ -10,6 +10,12 @@ enum Route: Hashable {
     case people(String)
     case hello(String, UInt8)
     case settings
+    /// A channel on this phone, by id.
+    case channel(String)
+    /// A channel link opened from outside, the whole URL.
+    case joinChannel(String)
+    case channelMembers(String)
+    case channelRequests(String)
 }
 
 /// What the whole app shares: the opened phone, the list of circles, and where the person is.
@@ -18,6 +24,12 @@ final class AppModel: ObservableObject {
     @Published var core: Core?
     @Published var openError: String?
     @Published var circles: [CircleSummary] = []
+    /// Every channel this phone owns or reads.
+    @Published var channels: [ChannelSummary] = []
+    /// A channel just started here: its screen opens with the share sheet.
+    @Published var shareOnOpen: String?
+    /// A link that arrived before the phone opened, followed once it has.
+    private var waitingLink: URL?
     /// Each circle's faces, drawn, in seat order, by circle id.
     @Published var faces: [String: [Data]] = [:]
     @Published private(set) var seatNames: [String: [String: String]] = [:]
@@ -51,7 +63,13 @@ final class AppModel: ObservableObject {
         opening = t
         let c = await t.value
         opening = nil
-        if c != nil { await refresh() }
+        if c != nil {
+            await refresh()
+            if let link = waitingLink {
+                waitingLink = nil
+                openLink(link)
+            }
+        }
         return c
     }
 
@@ -62,6 +80,7 @@ final class AppModel: ObservableObject {
         guard let core, UIApplication.shared.isProtectedDataAvailable else { return false }
         guard let list = try? await core.run({ $0.circles() }) else { return false }
         circles = list
+        if let chs = try? await core.run({ $0.channels() }) { channels = chs }
         seatNames = Dictionary(uniqueKeysWithValues: list.map {
             ($0.id, (try? core.store.seatNames(circle: $0.id)) ?? [:])
         })
@@ -75,6 +94,40 @@ final class AppModel: ObservableObject {
 
     func circle(_ id: String) -> CircleSummary? {
         circles.first { $0.id == id }
+    }
+
+    func channel(_ id: String) -> ChannelSummary? {
+        channels.first { $0.id == id }
+    }
+
+    /// A link from outside the app: a universal link, or one tapped in another app.
+    /// `https://cahoots.network/app/#/ch/<relay host>/<channel id>/<secret>` opens the channel's
+    /// join screen. Any other link into the web app goes to Safari, which is where iOS sends a
+    /// universal link the app opens itself.
+    func openLink(_ url: URL) {
+        guard url.scheme == "https", url.host == "cahoots.network",
+              url.path == "/app" || url.path.hasPrefix("/app/") else { return }
+        guard let id = Self.channelLinkId(url) else {
+            UIApplication.shared.open(url, options: [.universalLinksOnly: false])
+            return
+        }
+        guard core != nil else {
+            waitingLink = url
+            return
+        }
+        if channel(id)?.role == .owner {
+            path = [.channel(id)]
+        } else {
+            path = [.joinChannel(url.absoluteString)]
+        }
+    }
+
+    /// The channel id in a link whose fragment is `/ch/<host>/<id>/<secret>`, or nil.
+    nonisolated static func channelLinkId(_ url: URL) -> String? {
+        guard let fragment = url.fragment else { return nil }
+        let parts = fragment.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        guard parts.count == 4, parts[0] == "ch" else { return nil }
+        return parts[2]
     }
 
     func seatName(circle: String, seat: UInt8) -> String {
@@ -103,6 +156,12 @@ final class AppModel: ObservableObject {
                 continue
             }
         }
+        // Channels: a dead link or a relay that cannot be reached leaves the circles' pass alone.
+        let channelIds = (try? await core.run { $0.channels() })?.filter { !$0.dead }.map(\.id) ?? []
+        for id in channelIds {
+            if Task.isCancelled { return false }
+            _ = await core.run(within: 20, { try $0.channelPoll(id: id) })
+        }
         core.store.relax()
         if Task.isCancelled { return false }
         guard await refresh(), ok else { return false }
@@ -111,7 +170,7 @@ final class AppModel: ObservableObject {
     }
 
     func updateBadge() async {
-        let unread = circles.reduce(0) { $0 + Int($1.unread) }
+        let unread = circles.reduce(0) { $0 + Int($1.unread) } + channels.reduce(0) { $0 + Int($1.unread) }
         try? await UNUserNotificationCenter.current().setBadgeCount(unread)
     }
 
@@ -143,6 +202,24 @@ final class AppModel: ObservableObject {
     func leave() {
         path = []
         Task { await refresh() }
+    }
+
+    /// Start a channel owned by `circle`, then open it with the share sheet.
+    func startChannel(circle: String, name: String, preset: UInt8) async throws {
+        guard let core else { return }
+        let summary = try await core.run { try $0.channelStart(circle: circle, name: name, preset: preset) }
+        await refresh()
+        shareOnOpen = summary.id
+        path = [.channel(summary.id)]
+    }
+
+    /// Remove a channel from this phone, and its keys with it.
+    func deleteChannel(_ id: String) async throws {
+        guard let core else { return }
+        try await core.run { try $0.channelDelete(id: id) }
+        path = []
+        await refresh()
+        await updateBadge()
     }
 
     /// Delete a circle from this phone, and its seat key with it.

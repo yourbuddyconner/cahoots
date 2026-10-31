@@ -22,6 +22,7 @@ struct CirclesView: View {
                     }
                     .padding(.top, Space.s)
                 }
+                ChannelsSection()
                 Text("Circles and history are saved on this phone. No account needed.")
                     .font(.footnote)
                     .foregroundStyle(Color.muted)

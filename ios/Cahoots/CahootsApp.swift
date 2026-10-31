@@ -67,6 +67,11 @@ struct RootView: View {
             }
         }
         .task { await model.open() }
+        // A channel link: tapped in another app, or a universal link to cahoots.network/app.
+        .onOpenURL { model.openLink($0) }
+        .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+            if let url = activity.webpageURL { model.openLink(url) }
+        }
         .alert("Ceremony lost", isPresented: Binding(get: { model.lostCeremony != nil },
                                                      set: { if !$0 { model.lostCeremony = nil } })) {
             Button("OK") { model.lostCeremony = nil }
@@ -93,6 +98,10 @@ struct RootView: View {
         case let .people(id): PeopleView(core: core, circle: id)
         case let .hello(id, seat): HelloView(core: core, circle: id, seat: seat)
         case .settings: SettingsView(core: core)
+        case let .channel(id): ChannelView(core: core, id: id)
+        case let .joinChannel(link): JoinChannelView(core: core, link: link)
+        case let .channelMembers(id): ChannelMembersView(core: core, id: id)
+        case let .channelRequests(id): ChannelRequestsView(core: core, id: id)
         }
     }
 }
