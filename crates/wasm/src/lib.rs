@@ -1044,6 +1044,9 @@ impl Circle {
     /// base64url for the relay. Errors: `no-root`, `cannot-bump`, `not-synced`, `state` without
     /// a seat key.
     pub fn bump_generation(&mut self) -> Result<String, String> {
+        if self.pending_bump.is_some() {
+            return Err("reset-pending".into());
+        }
         let seed = self.seat_key.as_ref().ok_or("state")?;
         let key = cahoots_core::seat::SeatKey::from_seed(seed).map_err(|_| "state".to_string())?;
         let (circle_id, me) = (self.pad().circle_id(), self.pad().my_slice());

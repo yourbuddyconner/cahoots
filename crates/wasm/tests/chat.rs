@@ -257,3 +257,33 @@ fn a_version_5_state_still_imports() {
     assert!(back.has_root());
     assert_eq!(back.export()[0], 6);
 }
+
+#[test]
+fn a_second_reset_waits_for_the_first_to_be_posted() {
+    let (mut a, _) = pair();
+    let first = a.bump_generation().unwrap();
+    let id = a.generation_id_hex();
+    assert_eq!(a.bump_generation().unwrap_err(), "reset-pending");
+    assert_eq!(a.generation_id_hex(), id);
+    assert_eq!(a.pending_bump().as_deref(), Some(first.as_str()));
+    a.clear_pending_bump();
+    assert!(a.bump_generation().is_ok());
+}
+
+#[test]
+fn an_old_bump_read_again_moves_nothing() {
+    let (mut a, mut b) = pair();
+    let w0 = a.bump_generation().unwrap();
+    a.clear_pending_bump();
+    assert!(!b.chat_receive(&w0).unwrap().ignored());
+    let current = b.generation_id_hex();
+    // A later bump moves b on, then the first wire again.
+    let w1 = a.bump_generation().unwrap();
+    a.clear_pending_bump();
+    b.chat_receive(&w1).unwrap();
+    let newest = b.generation_id_hex();
+    assert_ne!(newest, current);
+    // The older bump's wire again is sealed in a generation b has dropped: refused, nothing moves.
+    assert_eq!(b.chat_receive(&w0).unwrap_err(), "needs-generation");
+    assert_eq!(b.generation_id_hex(), newest);
+}

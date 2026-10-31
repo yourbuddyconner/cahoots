@@ -27,6 +27,7 @@ const ERRORS = {
   'too-far-ahead': 'Too many messages were skipped before this one.',
   'not-synced': 'Still reading the relay. Try again in a moment.',
   'unknown-epoch': 'This device no longer has the encryption keys needed to read this message.',
+  'reset-pending': 'A reset is still waiting for the relay.',
   'cannot-bump': 'This device cannot reset the keys.',
   'needs-generation': 'This device needs its card to read the new keys.',
   'pad-epoch': 'This message uses an older chat format that this app no longer supports.',
@@ -58,6 +59,7 @@ const friendly = (e) => {
   if (m2 && m2[1] === 'bad-attestation') return `Seat ${Number(m2[2]) + 1}'s signature does not check out. Ask them to show it again.`;
   return s;
 };
+const bumpFlights = new Map(); // circle id -> the post of its pending reset, while one is under way
 const CHAT_LABEL = 'End-to-end encrypted';
 const CHAT_CLAIM = 'Messages are encrypted before they leave your device. The relay delivers them without being able to read them. It can still see when messages are sent.';
 // The relay the app ships with. A circle can point at another one from the chat menu.
@@ -1193,13 +1195,22 @@ async function screenChat(id) {
     if (!res.ok) throw `relay ${res.status}: ${await res.text()}`;
     return res.json();
   };
-  // A reset that was sent but not yet accepted by the relay is posted again until it is.
-  const flushBump = async () => {
-    const w = circle.pending_bump();
-    if (!w) return;
-    await post(b64_decode(w));
-    circle.clear_pending_bump();
-    await saveCircle(circle);
+  // A reset that was sent but not yet accepted by the relay is posted again until it is. One
+  // flight at a time per circle: a second caller waits for the first instead of posting again.
+  const flushBump = () => {
+    if (bumpFlights.has(id)) return bumpFlights.get(id);
+    const flight = (async () => {
+      const w = circle.pending_bump();
+      if (!w) return;
+      await post(b64_decode(w));
+      // Cleared in memory first, so a failed save is retried as a save and never as a post.
+      circle.clear_pending_bump();
+      for (let i = 0; ; i++) {
+        try { await saveCircle(circle); return; } catch (e) { if (i >= 5) throw e; await new Promise((r) => setTimeout(r, 1000)); }
+      }
+    })().finally(() => bumpFlights.delete(id));
+    bumpFlights.set(id, flight);
+    return flight;
   };
   const doSend = async () => {
     const text = inp.value;
@@ -1262,6 +1273,8 @@ async function screenChat(id) {
         // Our own messages go through chat_receive too: it moves our sending position past
         // them without decrypting, so a device restored from older state never reuses a key.
         if (bytes[0] === 2 && bytes[22] === me) {
+          // Our reset is on the relay, even if the reply to the post was lost.
+          if (circle.pending_bump() === entry.message) circle.clear_pending_bump();
           try { circle.chat_receive(entry.message); } catch (e) { /* a forged or damaged copy of our own: nothing to show */ }
         } else if (bytes[0] === 2) {
           try {
@@ -1306,7 +1319,7 @@ async function screenChat(id) {
       h('p', { class: 'muted' }, 'Sender names help you follow a conversation. They do not independently verify who typed a message.'),
       circle.has_root() ? h('p', { class: 'muted' }, 'Renewing the encryption keys changes the keys used for future messages. It does not change the protection of messages already sent.') : null,
       circle.has_root() ? btn('Renew encryption keys', async () => { try { circle.rotate_epoch(); await saveCircle(circle); toast('Encryption keys renewed', 'ok'); close(); } catch (e) { st.textContent = friendly(e); } }) : null,
-      circle.has_root() && circle.has_seat_key() ? btn('Reset keys for everyone', async () => { try { for (let i = 0; i < 100 && !circle.chat_synced() && run === chatRun; i++) await new Promise((r) => setTimeout(r, 100)); circle.bump_generation(); await saveCircle(circle); } catch (e) { st.textContent = `Not reset: ${friendly(e)}`; return; } try { await flushBump(); toast('Keys reset for everyone', 'ok'); } catch (e) { toast('Reset saved. It reaches the others when the relay answers.', 'ok'); } close(); }) : null,
+      circle.has_root() && circle.has_seat_key() ? btn('Reset keys for everyone', async () => { try { if (circle.pending_bump()) { st.textContent = 'A reset is still waiting for the relay.'; return; } for (let i = 0; i < 100 && !circle.chat_synced() && run === chatRun; i++) await new Promise((r) => setTimeout(r, 100)); circle.bump_generation(); await saveCircle(circle); } catch (e) { st.textContent = `Not reset: ${friendly(e)}`; return; } try { await flushBump(); toast('Keys reset for everyone', 'ok'); } catch (e) { toast('Reset saved. It reaches the others when the relay answers.', 'ok'); } close(); }) : null,
       circle.has_root() && circle.has_seat_key() ? h('p', { class: 'wallet-fine' }, 'Every member moves to new keys. A device that cannot reach its card reads nothing new until it taps.') : null,
       btn('Relay address', () => { close(); relaySheet(); }))),
   });
