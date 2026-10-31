@@ -1255,8 +1255,10 @@ impl ChannelOwner {
     /// epoch to the member's X-Wing key, keeps the member for later rotations, and returns the
     /// CBOR array `[grant chain, key deposit, join control wire]`: post the chain to
     /// `…/grants`, the deposit to `…/deposits`, the control to `…/messages`.
-    /// Errors: `malformed`, `signature`, `wrong-channel`, `actions`, `name`, `evidence`,
-    /// `unknown-epoch`, `hpke`.
+    /// A request for `post` is refused with `policy` when the post rule has no evidence (only
+    /// the owner's seats post, as in an announcements channel).
+    /// Errors: `malformed`, `signature`, `wrong-channel`, `actions`, `name`, `policy`,
+    /// `evidence`, `unknown-epoch`, `hpke`.
     pub fn admit(&mut self, request: &[u8], actions: &str) -> Result<Vec<u8>, String> {
         let bad = || s("malformed");
         let payload = cose::payload1(request).map_err(|_| bad())?;
@@ -1297,6 +1299,14 @@ impl ChannelOwner {
             return Err(s("actions"));
         }
         let policy = read_policy(&self.policy)?;
+        // A post rule with no evidence is only the owner's seats: nobody is admitted to post.
+        if granted.contains(&Action::Post)
+            && policy
+                .rule(Action::Post)
+                .is_none_or(|r| r.evidence.is_empty())
+        {
+            return Err(s("policy"));
+        }
         for action in &granted {
             let Some(rule) = policy.rule(*action) else {
                 continue;
@@ -1395,7 +1405,12 @@ impl ChannelOwner {
     /// Replace the policy with a preset (numbers as for `Circle::channel_owner`; `quorum` is the
     /// approvals each announcement needs, read for preset 1 only). Makes a link secret if the
     /// preset admits by link and there is none. Returns `[signed policy, [approvals]]`, the
-    /// body of `POST …/policy`; then post `policy_change_control()`.
+    /// body of `POST …/policy`.
+    ///
+    /// It also reissues the channel object: a new signed object with `policy_id` the new
+    /// policy's id and `created_log` the new policy's `log` (same name and nonce, so the same
+    /// channel id), which `channel_object()` then returns. Post the policy, then the channel
+    /// object, then `policy_change_control()`.
     ///
     /// In this version the approvals are always empty: when the current policy's `govern`
     /// rule needs more than one seat, this refuses with `needs-approvals`.
@@ -1422,6 +1437,11 @@ impl ChannelOwner {
         );
         next.parent = Some(policy::id(&self.policy));
         let signed = next.sign(&self.seat_key(), self.seat);
+        let payload = cose::payload1(&self.object).map_err(|_| s("malformed"))?;
+        let mut object = ChannelObject::decode(&payload).map_err(err)?;
+        object.policy_id = policy::id(&signed);
+        object.created_log = next.log;
+        self.object = object.sign(&self.seat_key(), self.seat);
         self.policy = signed.clone();
         self.member.inner.borrow_mut().policy = Some(signed.clone());
         let mut e = Encoder::new(Vec::new());
@@ -1597,26 +1617,41 @@ pub fn verify_channel_object(bytes: &[u8], manifest: &[u8]) -> Result<String, St
     ))
 }
 
-/// Who a rule lets in, for the summary.
-fn who(rule: Option<&Rule>) -> &'static str {
+/// Who may read under a rule, for the summary: link evidence admits anyone with the link;
+/// otherwise readers get key deposits from the owner.
+fn reader(rule: Option<&Rule>) -> &'static str {
+    match rule {
+        Some(r) if has_link(r) => "anyone with the link",
+        _ => "members the owner lets in",
+    }
+}
+
+/// Who may post under a rule without a quorum: no rule or no evidence is only the owner's
+/// seats (spec §3); link evidence is anyone with the link; other evidence (a key, or any key
+/// the owner admits by hand) is the members the owner lets in.
+fn poster(rule: Option<&Rule>) -> &'static str {
     match rule {
         None => "only the owner",
+        Some(r) if r.evidence.is_empty() => "only the owner",
         Some(r) if has_link(r) => "anyone with the link",
         Some(_) => "members the owner lets in",
     }
 }
 
-/// The policy in one line, as the app shows it: `"anyone with the link can read and post"`,
-/// `"anyone with the link can read; the owner can post, with 2 approvals"`. Reads the signed
-/// policy without checking who signed it. Errors: `malformed`, `not-canonical`.
+/// The policy in one line, as the app shows it. Per preset:
 ///
-/// A post rule with no evidence and no quorum reads "members the owner lets in": the
-/// announcements and members-post presets make the same rule, and only the owner's choice of
-/// whom to admit tells them apart.
+/// - announcements: `"anyone with the link can read; only the owner can post"`
+/// - with approvals: `"anyone with the link can read; the owner can post, with 2 approvals"`
+/// - group chat: `"anyone with the link can read and post"`
+/// - members post: `"anyone with the link can read; members the owner lets in can post"`
+/// - closed: `"members the owner lets in can read; only the owner can post"`
+///
+/// Reads the signed policy without checking who signed it. Errors: `malformed`,
+/// `not-canonical`.
 #[wasm_bindgen]
 pub fn policy_summary(bytes: &[u8]) -> Result<String, String> {
     let p = read_policy(bytes)?;
-    let read = who(p.rule(Action::Read));
+    let read = reader(p.rule(Action::Read));
     let post_rule = p.rule(Action::Post);
     let quorum = post_rule.filter(|r| !has_link(r)).map_or(0, |r| r.quorum);
     if quorum > 0 {
@@ -1625,7 +1660,7 @@ pub fn policy_summary(bytes: &[u8]) -> Result<String, String> {
             "{read} can read; the owner can post, with {quorum} approval{plural}"
         ));
     }
-    let post = who(post_rule);
+    let post = poster(post_rule);
     Ok(if read == post {
         format!("{read} can read and post")
     } else {

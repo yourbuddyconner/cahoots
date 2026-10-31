@@ -168,9 +168,19 @@ fn presets_have_the_documented_rules() {
     assert_eq!(chat.rule(Action::Post).unwrap().evidence, link);
     assert_eq!(chat.rule(Action::Post).unwrap().quorum, 0);
 
+    // Members post: one key evidence with no key named, any key the owner admits by hand.
     let members = make(Preset::MembersPost, 3);
     assert_eq!(members.rule(Action::Read).unwrap().evidence, link);
-    assert!(members.rule(Action::Post).unwrap().evidence.is_empty());
+    assert_eq!(
+        members.rule(Action::Post).unwrap().evidence,
+        vec![evidence(1, &[], "")]
+    );
+    assert_eq!(members.rule(Action::Post).unwrap().quorum, 0);
+    assert_ne!(
+        members.rule(Action::Post),
+        ann.rule(Action::Post),
+        "announcements and members post differ"
+    );
 
     let closed = make(Preset::Closed, 3);
     assert!(closed.rules.iter().all(|r| r.evidence.is_empty()));
@@ -214,6 +224,16 @@ fn policy_refuses_rules_out_of_action_order_or_repeated_and_unknown_kinds() {
             "kind {kind}"
         );
     }
+
+    // A key evidence names one key (33 bytes) or none (empty); any other length is refused.
+    for len in [1usize, 32, 34] {
+        let mut odd_key = base.clone();
+        odd_key.rules[0].evidence = vec![evidence(1, &vec![2; len], "")];
+        assert_eq!(refused(&odd_key), Err(ChannelError::Malformed), "{len}");
+    }
+    let mut any_key = base.clone();
+    any_key.rules[0].evidence = vec![evidence(1, &[], "")];
+    assert_eq!(Policy::decode(&any_key.encode()), Ok(any_key));
 
     let mut short_link = base.clone();
     short_link.rules[0].evidence = vec![evidence(0, &[0; 31], "")];

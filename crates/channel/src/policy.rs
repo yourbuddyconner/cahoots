@@ -42,7 +42,7 @@ const M: ChannelError = ChannelError::Malformed;
 pub mod kind {
     /// `ref` is a link id, bstr 32.
     pub const LINK: u8 = 0;
-    /// `ref` is one explicit key, bstr 33.
+    /// `ref` is one explicit key, bstr 33; or empty, for any key the owner admits by hand.
     pub const KEY: u8 = 1;
     /// `ref` is a manifest id, bstr 32.
     pub const CIRCLE: u8 = 2;
@@ -109,7 +109,7 @@ pub enum Preset {
     AnnouncementsQuorum(u8),
     /// Read and post by link.
     GroupChat,
-    /// Read by link, post by key once the owner admits it.
+    /// Read by link, post by key once the owner admits it (one key evidence with an empty ref).
     MembersPost,
     /// Read by key only.
     Closed,
@@ -140,6 +140,14 @@ impl Policy {
                 scope: String::new(),
             }]
         };
+        // A key evidence with no key named: any key the owner admits by hand.
+        let admitted = || {
+            vec![Evidence {
+                kind: kind::KEY,
+                r#ref: Vec::new(),
+                scope: String::new(),
+            }]
+        };
         let rule = |action, evidence, quorum| Rule {
             action,
             evidence,
@@ -151,7 +159,7 @@ impl Policy {
             Preset::Announcements => (link(), Vec::new(), 0),
             Preset::AnnouncementsQuorum(k) => (link(), Vec::new(), k),
             Preset::GroupChat => (link(), link(), 0),
-            Preset::MembersPost => (link(), Vec::new(), 0),
+            Preset::MembersPost => (link(), admitted(), 0),
             Preset::Closed => (Vec::new(), Vec::new(), 0),
         };
         let govern_quorum = if seats == 1 { 1 } else { seats / 2 + 1 };
@@ -320,7 +328,7 @@ fn decode_evidence(d: &mut Decoder<'_>) -> Result<Evidence, ChannelError> {
     m.finish()?;
     let ref_ok = match ev.kind {
         kind::LINK | kind::CIRCLE | kind::ACCOUNT => ev.r#ref.len() == 32,
-        kind::KEY => ev.r#ref.len() == 33,
+        kind::KEY => ev.r#ref.is_empty() || ev.r#ref.len() == 33,
         kind::DOCUMENT => true,
         _ => return Err(M),
     };

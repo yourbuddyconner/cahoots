@@ -361,10 +361,9 @@ fn policy_summary_for_each_preset() {
         let owner = c.channel_owner("P", preset, 1).unwrap();
         policy_summary(&owner.policy()).unwrap()
     };
-    // Announcements and members-post presets give the same post rule: no evidence, no quorum.
     assert_eq!(
         summary(0),
-        "anyone with the link can read; members the owner lets in can post"
+        "anyone with the link can read; only the owner can post"
     );
     assert_eq!(
         summary(1),
@@ -375,7 +374,10 @@ fn policy_summary_for_each_preset() {
         summary(3),
         "anyone with the link can read; members the owner lets in can post"
     );
-    assert_eq!(summary(4), "members the owner lets in can read and post");
+    assert_eq!(
+        summary(4),
+        "members the owner lets in can read; only the owner can post"
+    );
     assert_eq!(c.channel_owner("P", 5, 1).unwrap_err(), "preset");
     assert_eq!(c.channel_owner("", 2, 1).unwrap_err(), "name");
 }
@@ -405,6 +407,17 @@ fn set_policy_returns_the_post_body_and_a_matching_control() {
     assert!(approvals.is_empty());
     assert_eq!(signed, owner.policy());
     assert_ne!(owner.policy_id_hex(), first);
+    // The channel object is reissued: it names the new policy at the policy's log.
+    let object = owner.channel_object();
+    let json = verify_channel_object(&object, &manifest).unwrap();
+    assert!(json.contains(&format!("\"policy_id\":\"{}\"", owner.policy_id_hex())));
+    assert!(json.contains(&format!("\"channel_id\":\"{}\"", owner.channel_id_hex())));
+    assert!(json.contains("\"name\":\"Garden\""));
+    let claims = cahoots_channel::ChannelObject::decode(&cose::payload1(&object).unwrap()).unwrap();
+    let policy =
+        cahoots_channel::Policy::decode(&cose::payload1(&owner.policy()).unwrap()).unwrap();
+    assert_eq!(claims.created_log, policy.log);
+    assert_eq!(policy.log, 1);
     assert_eq!(
         policy_summary(&signed).unwrap(),
         "anyone with the link can read; the owner can post, with 2 approvals"
@@ -500,4 +513,22 @@ fn a_circle_without_a_seat_key_cannot_own_a_channel() {
     let old = Circle::import(&v3).unwrap();
     assert!(!old.has_seat_key());
     assert_eq!(old.channel_owner("X", 2, 1).unwrap_err(), "no-seat-key");
+}
+
+#[test]
+fn an_announcements_channel_admits_readers_but_no_posters() {
+    for (preset, post_ok) in [(0u8, false), (1, false), (3, true)] {
+        let mut owner = circle().channel_owner("News", preset, 1).unwrap();
+        let link = owner.link_url("relay.example").unwrap();
+        owner.rotate().unwrap();
+        let member = joined(&owner, &link);
+        let request = member.join_request("Fi", "read,post").unwrap();
+        let got = owner.admit(&request, "read,post");
+        if post_ok {
+            assert_eq!(split(&got.unwrap()).len(), 3, "preset {preset}");
+        } else {
+            assert_eq!(got.unwrap_err(), "policy", "preset {preset}");
+        }
+        assert_eq!(split(&owner.admit(&request, "read").unwrap()).len(), 3);
+    }
 }
