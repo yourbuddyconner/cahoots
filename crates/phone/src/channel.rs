@@ -38,38 +38,38 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-const DEAD: &str = "This link no longer works. Ask for a new one.";
-const WAITING: &str = "Waiting for the owner to let you post.";
-const READ_ONLY: &str = "You can read this channel. Only the owner posts.";
-const READ_GRANT: &str = "The owner let you read this channel, not post.";
-const CLOSED: &str = "Only people the owner lets in can read this channel.";
-const NO_LINK: &str = "This channel has no link. Only people you let in can read.";
-const NEEDS_SEATS: &str = "Announcements with approvals need more than one owner device to approve, which this version cannot collect yet.";
-const OTHER_RELAY: &str = "This link names a different relay than the one this channel uses.";
+const DEAD: &str = "You no longer have access through this link. Ask the owner for a new link or an invitation.";
+const WAITING: &str = "Your request to post is waiting for the owner’s approval.";
+const READ_ONLY: &str = "You can read this channel. Posting is limited to the owner.";
+const READ_GRANT: &str = "You have permission to read this channel, but not to post.";
+const CLOSED: &str = "This channel is private. Only people approved by the owner can read it.";
+const NO_LINK: &str = "This is a private channel with no shared link. Only people you approve can read it.";
+const NEEDS_SEATS: &str = "This channel type requires approvals from other circle members. This version cannot collect those approvals yet.";
+const OTHER_RELAY: &str = "This link points to a different relay from the one saved for this channel. Ask the owner to confirm the correct link.";
 const OWNER_ONLY: &str = "Only the channel's owner can do that.";
 const REMOVED: &str = "removed by the owner";
-const NOTE_REVOKED: &str = "The owner removed a member and will start new keys.";
+const NOTE_REVOKED: &str = "The owner removed a member. Future messages will use new encryption keys.";
 
 /// The plain words for a core's error code, as `channels.js` shows them.
 fn friendly(code: &str) -> String {
     match code {
-        "needs-approvals" => "This circle has more than one member; changing the policy needs their approval, which this version cannot collect yet.".into(),
+        "needs-approvals" => "Changing access rules requires approval from other members of this circle. This version cannot collect those approvals yet.".into(),
         "relay" => "That relay address cannot go in a link.".into(),
-        "name" => "Give a name of up to 64 bytes.".into(),
+        "name" => "Enter a shorter name. The limit is 64 bytes, which may be fewer than 64 characters.".into(),
         "policy" => "This channel lets only the owner post.".into(),
-        "evidence" => "This request came with an old link, so it cannot be allowed.".into(),
+        "evidence" => "This request uses an outdated link. Ask the person to open the current link and request access again.".into(),
         "signature" => "This does not carry a valid signature.".into(),
         "unknown-epoch" => "This message uses keys this device does not hold.".into(),
-        "link" => "That link does not read.".into(),
+        "link" => "This channel link is invalid. Check that you copied the whole link.".into(),
         "no-link" => NO_LINK.into(),
-        "seat" => "This phone's seat key is not the one the circle's member list names.".into(),
-        "manifest" => "The circle's member list does not check out.".into(),
-        "state" => "This channel's record on this phone does not read.".into(),
+        "seat" => "This phone’s key does not match its seat in the circle.".into(),
+        "manifest" => "The circle’s member list could not be verified.".into(),
+        "state" => "The saved data for this channel is damaged or cannot be read.".into(),
         c if c.starts_with("refused:revoked") => "Sent by a member who was removed.".into(),
         c if c.starts_with("refused:") || c.starts_with("grant:") => {
-            "Sent by someone without a grant to post.".into()
+            "The sender does not have permission to post in this channel.".into()
         }
-        other => format!("The channel could not do that ({other})."),
+        other => format!("Couldn’t complete this channel action ({other})."),
     }
 }
 
@@ -92,7 +92,7 @@ fn network(message: impl Into<String>) -> PhoneError {
 }
 
 fn unreadable() -> PhoneError {
-    network("The relay's answer does not read.")
+    network("The relay returned an unreadable response. Try again in a moment.")
 }
 
 /// A relay refusal, kept apart so the flows can read its status, or any other error.
@@ -120,12 +120,12 @@ impl From<Fail> for PhoneError {
                 code,
                 reason,
             } => network(match status {
-                401 => "The relay refused the read.".to_string(),
+                401 => "The relay denied access to this channel.".to_string(),
                 403 => format!(
                     "The relay refused it ({}).",
                     if reason.is_empty() { &code } else { &reason }
                 ),
-                404 => "The relay does not hold this channel.".into(),
+                404 => "This channel was not found on the relay. Check the link or ask the owner.".into(),
                 429 => "The relay is busy. Try again in a moment.".into(),
                 s if code.is_empty() => format!("The relay answered {s}."),
                 s => format!("The relay answered {s} ({code})."),
@@ -295,7 +295,7 @@ impl Ch {
     fn load(dir: PathBuf, id: &str) -> Result<Ch, PhoneError> {
         let meta = ChannelMeta::load(&dir)?;
         let bad = |_| PhoneError::Storage {
-            message: "This channel's record on this phone does not read.".into(),
+            message: "The saved data for this channel is damaged or cannot be read.".into(),
         };
         let (owner, member) = if meta.owner {
             let bytes =
@@ -466,7 +466,7 @@ impl Phone {
 
     fn seat_for(&self, meta: &ChannelMeta) -> Result<Seat<'_>, PhoneError> {
         let public = SeatPublic::parse(&meta.seat_public).map_err(|_| PhoneError::Storage {
-            message: "This channel's record on this phone does not read.".into(),
+            message: "The saved data for this channel is damaged or cannot be read.".into(),
         })?;
         Ok(Seat {
             signer: self.signer.as_ref(),
@@ -914,7 +914,7 @@ impl Phone {
                     }
                     Some(Control::PolicyChange { .. }) => {
                         self.refresh_policy(ch);
-                        let text = format!("The policy changed: {}.", ch.meta.policy_line);
+                        let text = format!("Channel access rules changed: {}.", ch.meta.policy_line);
                         Ok(Some(line(String::new(), text, 2, true)))
                     }
                     Some(Control::Revocation { .. }) => {
@@ -1129,7 +1129,7 @@ impl Phone {
         )?)?;
         let policy = match v["policy"].as_str() {
             Some(p) => b64(p)?,
-            None => return Err(channel("The relay holds no policy for this channel.").into()),
+            None => return Err(channel("The relay is missing the access rules for this channel. Ask the owner to check its setup.").into()),
         };
         let manifest = b64(v["manifest"].as_str().unwrap_or(""))?;
         let object = b64(v["channel"].as_str().unwrap_or(""))?;
@@ -1137,10 +1137,10 @@ impl Phone {
         let (_, obj) = ChannelObject::verify(&object, &m)
             .map_err(|e| ch_err(cahoots_channel::member::code(e)))?;
         if obj.channel_id != link.channel_id {
-            return Err(channel("The relay answered with another channel.").into());
+            return Err(channel("The relay returned a different channel from the one requested.").into());
         }
         if <[u8; 32]>::from(Sha256::digest(&policy)) != obj.policy_id {
-            return Err(channel("The relay's copy of this channel does not check out.").into());
+            return Err(channel("The channel information returned by the relay could not be verified.").into());
         }
         let line = policy_summary(&policy).map_err(ch_err)?;
         Ok(Fetched {
@@ -1153,7 +1153,7 @@ impl Phone {
 
     fn join(&self, url: &str) -> R<Ch> {
         let link = Link::parse(url).ok_or_else(|| PhoneError::BadCode {
-            message: "That link does not read.".into(),
+            message: "This channel link is invalid. Check that you copied the whole link.".into(),
         })?;
         let id = hex::encode(link.channel_id);
         let dir = self.channel_dir(&id);
@@ -1239,7 +1239,7 @@ impl Phone {
     ) -> Result<ChannelSummary, PhoneError> {
         let name = name.trim().to_string();
         if name.is_empty() {
-            return Err(channel("Give the channel a name."));
+            return Err(channel("Enter a name for your channel."));
         }
         let (manifest, seat, label, public, relay, seats) = self.with_circle(&circle, |c, _| {
             Ok((
@@ -1268,7 +1268,7 @@ impl Phone {
             .collect();
         if !features.contains(&"channels") || !features.contains(&"gate") {
             return Err(channel(&format!(
-                "{host} does not carry channels yet. Point this circle at a relay that does, from its relay address."
+                "{host} does not support channels. Open the circle’s conversation settings and change Relay address to a server that supports channels."
             )));
         }
         let mut meta = ChannelMeta {
@@ -1367,7 +1367,7 @@ impl Phone {
     /// does not read is `PhoneError::BadCode`.
     pub fn channel_preview(&self, url: String) -> Result<ChannelPreview, PhoneError> {
         let link = Link::parse(&url).ok_or_else(|| PhoneError::BadCode {
-            message: "That link does not read.".into(),
+            message: "This channel link is invalid. Check that you copied the whole link.".into(),
         })?;
         let f = self.fetch_channel(&link)?;
         Ok(ChannelPreview {
@@ -1490,7 +1490,7 @@ impl Phone {
         }
         let name = name.trim().to_string();
         if name.is_empty() {
-            return Err(channel("Give a name, so the owner knows who is asking."));
+            return Err(channel("Enter a name the owner will recognize."));
         }
         let request = ch
             .member()

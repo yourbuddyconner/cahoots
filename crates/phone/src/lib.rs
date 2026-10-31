@@ -47,7 +47,7 @@ pub const PHONE_KEY: &str = "cahoots:phone";
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum PhoneError {
     /// The key needs Face ID or the passcode, and did not get it.
-    #[error("This needs Face ID or your passcode.")]
+    #[error("Use Face ID or your passcode to continue.")]
     Locked,
     #[error("{message}")]
     Network { message: String },
@@ -369,7 +369,7 @@ fn not_found(what: &str) -> PhoneError {
 /// closed. Joining it again cannot work: the old setup is already on the relay.
 fn ceremony_lost() -> PhoneError {
     PhoneError::NotFound {
-        message: "This ceremony was lost when the app closed. Everyone starts over with a new code.".into(),
+        message: "Setup couldn’t be restored after Cahoots closed. Ask everyone to start a new ceremony and scan the new code.".into(),
     }
 }
 
@@ -552,7 +552,7 @@ impl Phone {
         let name = name.trim();
         if name.is_empty() {
             return Err(PhoneError::Ceremony {
-                message: "Give the circle a name.".into(),
+                message: "Enter a name for your circle.".into(),
             });
         }
         if name.len() > MAX_NAME {
@@ -636,7 +636,7 @@ impl Phone {
     pub fn join_scan(&self, text: String) -> Result<Option<JoinOffer>, PhoneError> {
         if text.trim_start().starts_with(OFFER_PREFIX) {
             let params = Channel::from_offer(&text).map(|o| o.params).map_err(|_| PhoneError::BadCode {
-                message: "That host's code does not read.".into(),
+                message: "The host’s code could not be read. Scan it again or check the pasted code.".into(),
             })?;
             return Ok(Some(JoinOffer {
                 params_code: text.trim().to_string(),
@@ -647,7 +647,7 @@ impl Phone {
         }
         let code = if text.trim_start().starts_with("cahoots-") {
             ceremony::parse_tagged(&text).ok_or_else(|| PhoneError::BadCode {
-                message: "That is not a code to join a circle from.".into(),
+                message: "This code cannot be used to join a circle. Scan the host’s step 1 code.".into(),
             })?
         } else {
             let bytes = URL_SAFE_NO_PAD
@@ -659,7 +659,7 @@ impl Phone {
             match st.join_receiver.add(&bytes)? {
                 None => return Ok(None),
                 Some(data) => ceremony::parse_packed(&data).ok_or_else(|| PhoneError::BadCode {
-                    message: "That Cahoots code does not read.".into(),
+                    message: "This Cahoots code could not be read. Scan it again or check the pasted code.".into(),
                 })?,
             }
         };
@@ -821,7 +821,7 @@ impl Phone {
         use qrcode::{Color, EcLevel, QrCode};
         let code = QrCode::with_error_correction_level(text.as_bytes(), EcLevel::L).map_err(
             |_| PhoneError::BadCode {
-                message: "That is too much to fit in one code.".into(),
+                message: "This is too large for a single code. Try a shorter message.".into(),
             },
         )?;
         Ok(QrMatrix {
@@ -921,7 +921,7 @@ impl Phone {
     pub fn circle_members(&self, circle: String) -> Result<Vec<Member>, PhoneError> {
         self.with_circle(&circle, |c, _| {
             let unreadable = || PhoneError::Storage {
-                message: "This circle's member list does not read.".into(),
+                message: "The member list saved for this circle is damaged or cannot be read.".into(),
             };
             let sealed = cahoots_core::manifest::SealedManifest::decode(&c.record.manifest)
                 .map_err(|_| unreadable())?;
@@ -955,7 +955,7 @@ impl Phone {
     pub fn seat_face_seed(&self, circle: String, seat: u8) -> Result<Vec<u8>, PhoneError> {
         self.with_circle(&circle, |c, _| {
             let unreadable = || PhoneError::Storage {
-                message: "This circle's member list does not read.".into(),
+                message: "The member list saved for this circle is damaged or cannot be read.".into(),
             };
             let sealed = cahoots_core::manifest::SealedManifest::decode(&c.record.manifest)
                 .map_err(|_| unreadable())?;
@@ -1023,7 +1023,7 @@ fn check_seat(params: &CircleParams, seat: u8) -> Result<(), PhoneError> {
 
 fn hello(c: &Circle, other: u8) -> Result<HelloWords, PhoneError> {
     let none = || PhoneError::NotFound {
-        message: "There are no hello words with that seat.".into(),
+        message: "Hello words are not available for this seat.".into(),
     };
     let key = c
         .record

@@ -36,7 +36,7 @@ final class ChannelModel: ObservableObject {
             if isOwner, summary?.dead != true {
                 rounds += 1
                 if rounds % 5 == 1, await ChannelRequestsView.allowPermitted(core: core, id: id) > 0 {
-                    status = "Let in a request the policy permits."
+                    status = "Automatically approved a request covered by the link."
                 }
             }
         } catch PhoneError.Network(let m) where m == UrlSessionHttp.unreachable {
@@ -129,9 +129,9 @@ struct ChannelView: View {
                     labelLine
                     if model.messages.isEmpty {
                         VStack(alignment: .leading, spacing: Space.m) {
-                            Text("Nothing posted yet.").serifTitle(.title)
-                            Text(model.isOwner ? "Write the first post. Everyone with the link reads it."
-                                               : "Posts show up here as they arrive.")
+                            Text("No posts yet").serifTitle(.title)
+                            Text(model.isOwner ? "Write the first post for the people who have access to this channel."
+                                               : "New posts will appear here.")
                                 .foregroundStyle(Color.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -195,12 +195,12 @@ struct ChannelView: View {
             AskToPostSheet(model: model) { asking = false }
                 .presentationDetents([.medium])
         }
-        .confirmationDialog("Retire this link? Everyone reading by it stops at the next keys. People you let in keep reading.",
+        .confirmationDialog("Disable this link? People using only this link will lose access to future messages. Approved members keep their access. Messages already received stay on their devices.",
                             isPresented: $confirmRetire, titleVisibility: .visible) {
-            Button("Retire the link", role: .destructive) {
+            Button("Disable the link", role: .destructive) {
                 Task {
                     if let link = await model.attempt({ try $0.channelRetireLink(id: $1) }) {
-                        sharing = SharedLink(link: link, note: "The link is retired. \(ChannelCopy.newLink)")
+                        sharing = SharedLink(link: link, note: "The old link is disabled. \(ChannelCopy.newLink)")
                     }
                 }
             }
@@ -260,7 +260,7 @@ struct ChannelView: View {
         } else if summary?.closed == true {
             StateNote(text: ChannelCopy.closed, problem: true)
         } else if let summary {
-            StateNote(text: summary.mayAskToPost ? "You can read this channel. Ask the owner to let you post."
+            StateNote(text: summary.mayAskToPost ? "You can read this channel. Request permission from the owner to post."
                                                  : ChannelCopy.readOnly,
                       problem: false)
             if summary.mayAskToPost {
@@ -275,13 +275,13 @@ struct ChannelView: View {
             if model.isOwner {
                 Button { Task { await share(note: nil) } } label: { Label("Share the link", systemImage: "square.and.arrow.up") }
                 if summary?.closed != true {
-                    Button { confirmRetire = true } label: { Label("Retire the link", systemImage: "link") }
+                    Button { confirmRetire = true } label: { Label("Disable the link", systemImage: "link") }
                 }
                 Button {
                     Task {
-                        if await model.attempt({ try $0.channelNewKeys(id: $1) }) != nil { notice = "New keys started." }
+                        if await model.attempt({ try $0.channelNewKeys(id: $1) }) != nil { notice = "Future messages will use new encryption keys." }
                     }
-                } label: { Label("Start new keys", systemImage: "key") }
+                } label: { Label("Renew encryption keys", systemImage: "key") }
                 Button { app.path.append(.channelMembers(model.id)) } label: { Label("Members", systemImage: "person.2") }
                 Button { app.path.append(.channelRequests(model.id)) } label: { Label("Requests", systemImage: "tray") }
             }
@@ -452,7 +452,7 @@ struct ChannelShareSheet: View {
                     if shared.link.isEmpty {
                         ScreenHeader(title: "\(name) is ready.", detail: ChannelCopy.noLink, style: .title)
                     } else {
-                        ScreenHeader(title: shared.note == nil ? "Share the link." : "A new link.",
+                        ScreenHeader(title: shared.note == nil ? "Share this channel" : "Your new channel link",
                                      detail: ChannelCopy.linkLimit, style: .title)
                     }
                     if let note = shared.note { StatusLine(text: note, problem: false) }
@@ -528,7 +528,7 @@ private struct AskToPostSheet: View {
                     Text("Your name")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(Color.muted)
-                    TextField("How the owner knows you", text: $name)
+                    TextField("A name the owner will recognize", text: $name)
                         .textInputAutocapitalization(.words)
                         .submitLabel(.send)
                         .paperField()

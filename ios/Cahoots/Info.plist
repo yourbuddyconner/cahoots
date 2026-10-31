@@ -34,9 +34,9 @@
 	</dict>
 #endif
 	<key>NSCameraUsageDescription</key>
-	<string>The camera only reads codes. Nothing is recorded.</string>
+	<string>Cahoots uses the camera to scan circle setup codes. It does not save photos or video.</string>
 	<key>NSFaceIDUsageDescription</key>
-	<string>Face ID confirms it is you before your seat key signs.</string>
+	<string>Use Face ID to authorize this phone to join and confirm your circle.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

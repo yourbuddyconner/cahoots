@@ -2,30 +2,36 @@ import SwiftUI
 
 /// The words the channel screens share, as the web app has them (web/app/channels.js).
 enum ChannelCopy {
-    static let label = "End-to-end encrypted; the relay keeps ciphertext only"
-    static let linkLimit = "Anyone you forward this link to can read until you retire it."
-    static let dead = "This link no longer works. Ask for a new one."
-    static let waiting = "Waiting for the owner to let you post."
-    static let closed = "Only people the owner lets in can read this channel."
-    static let newLink = "Everyone who should keep reading needs this new link."
-    static let readOnly = "You can read this channel. Only the owner posts."
-    static let noLink = "This channel has no link. Only people you let in can read it."
+    static let label = "End-to-end encrypted. The relay cannot read your messages"
+    static let linkLimit = "Anyone with this link can read the channel and forward the link to others. Disable it to stop access through that link."
+    static let dead = "You no longer have access through this link. Ask the owner for a new link or an invitation."
+    static let waiting = "Your request to post is waiting for the owner’s approval."
+    static let closed = "This channel is private. Only people approved by the owner can read it."
+    static let newLink = "Share the new link with anyone who should keep reading through a link. Approved members keep their access."
+    static let readOnly = "You can read this channel. Posting is limited to the owner."
+    static let noLink = "This is a private channel with no shared link. Only people you approve can read it."
 
     /// The policies a channel starts with: the preset number, its name, the one thing that sets
     /// it apart, and the whole policy as a sentence. Announcements with approvals (preset 1) is
     /// left out: it needs approvals from the other seats, which this version cannot collect.
     static let presets: [(number: UInt8, name: String, detail: String, policy: String)] = [
-        (0, "Announcements", "Only you post.", "Anyone with the link reads. Only you post."),
-        (2, "Group chat", "Anyone with the link can post.", "Anyone with the link reads, and can ask to post."),
-        (3, "Members post", "People you let in post.", "Anyone with the link reads. Only people you let in post."),
-        (4, "Closed", "Only people you let in can read.", "Only people you let in read and post. There is no link."),
+        (0, "Announcements", "Anyone with the link can read. Only you can post.", "Anyone with the link can read. Only you can post."),
+        (2, "Group chat", "Anyone with the link can read and request permission to post.", "Anyone with the link can read and request permission to post."),
+        (3, "Members post", "Anyone with the link can read. You choose who can post.", "Anyone with the link can read. You choose who can post."),
+        (4, "Closed", "You choose who can read and post. There is no shared link.", "You choose who can read and post. There is no shared link."),
     ]
 
     /// A policy line ("anyone with the link reads, only the owner posts") as a sentence.
     static func sentence(_ line: String) -> String {
-        guard let first = line.first else { return "" }
-        let s = first.uppercased() + line.dropFirst()
-        return s.hasSuffix(".") ? s : s + "."
+        let clarified = line
+            .replacingOccurrences(of: "anyone with the link can read and post", with: "anyone with the link can read and request permission to post")
+            .replacingOccurrences(of: "members the owner lets in", with: "approved members")
+        return clarified.split(separator: ";").map { clause in
+            let text = clause.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let first = text.first else { return "" }
+            let sentence = first.uppercased() + text.dropFirst()
+            return sentence.hasSuffix(".") ? sentence : sentence + "."
+        }.joined(separator: " ")
     }
 
     /// The first eight characters of an id or a key, enough to tell two apart.
@@ -69,7 +75,7 @@ struct ChannelsSection: View {
                     .buttonStyle(RowButtonStyle())
                     Hairline().padding(.leading, Space.l)
                 }
-                Text("A channel posts to everyone who has its link. Your circle owns it, and this phone holds its keys.")
+                Text("Channels let your circle share messages with a wider audience. You choose who can read and post.")
                     .font(.footnote)
                     .foregroundStyle(Color.muted)
                     .padding(.horizontal, Space.l)
@@ -95,7 +101,7 @@ struct ChannelRow: View {
     private var meta: String {
         if channel.dead { return ChannelCopy.dead }
         var s = ChannelCopy.sentence(channel.policyLine)
-        if channel.waiting { s += " Waiting for the owner to let you post." }
+        if channel.waiting { s += " Your request to post is waiting for approval." }
         if channel.role == .owner, let owner { s += " Owned by \(owner)." }
         return s
     }
@@ -168,7 +174,7 @@ struct StartChannelSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.xxl) {
-                    Text("Give the channel a name and say who may read and post. \(circle.name) owns it, and this phone holds its keys.")
+                    Text("Choose a name and who can read and post. This channel belongs to \(circle.name). You manage it from this phone.")
                         .font(.body)
                         .foregroundStyle(Color.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -188,7 +194,7 @@ struct StartChannelSheet: View {
                             .accessibilityIdentifier("channel name")
                     }
 
-                    PaperSection(title: "Who reads and posts", footer: policy + " The relay keeps encrypted messages only.") {
+                    PaperSection(title: "Who can read and post", footer: policy + " Messages are end-to-end encrypted.") {
                         ForEach(Array(ChannelCopy.presets.enumerated()), id: \.element.number) { i, p in
                             if i > 0 { Hairline() }
                             // Choosing a row puts the keyboard away, so the rows are not left under the bar.

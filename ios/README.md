@@ -187,3 +187,9 @@ On 2026-10-30, Xcode 15.4, iOS 17.5, on a Mac with Apple silicon.
 
 The first runs failed on the test's own typing (the relay address field kept part of the old
 address) and on a label the screen rightly stops showing once step one ends. Neither was the app.
+
+## First-use guide
+
+The app shows a four-page guide on first use. It explains circles and seats, hello words, channel access, and local storage. Completing or skipping it records `cahoots.welcomeSeen` on that phone or browser. The guide can be reopened from **How Cahoots works** in iOS Settings or the browser home screen’s More options menu. Incoming routes are kept while it is shown.
+
+The iOS guide uses small decorative cahoot animations and respects Reduce Motion. Pages return to the top when advancing, including at larger text sizes. The full user guide is [Getting started with Cahoots](../docs/getting-started.md).

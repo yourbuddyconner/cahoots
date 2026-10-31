@@ -69,7 +69,9 @@ final class ChannelLinkTests: XCTestCase {
 
     func testAPolicyLineReadsAsASentence() {
         XCTAssertEqual(ChannelCopy.sentence("anyone with the link can read and post"),
-                       "Anyone with the link can read and post.")
+                       "Anyone with the link can read and request permission to post.")
+        XCTAssertEqual(ChannelCopy.sentence("anyone with the link can read; members the owner lets in can post"),
+                       "Anyone with the link can read. Approved members can post.")
         XCTAssertEqual(ChannelRequestsView.words("read,post"), "read and post")
         XCTAssertEqual(ChannelRequestsView.words("read"), "read")
     }

@@ -65,7 +65,7 @@ Messages are base64url text shown as a QR and as copyable text. Reads take a sca
 
 ## Hello words
 
-**Hello words** on a circle's screen is for a phone or video call. Pick the person (the only other member is picked for you in a two-person cahoot). The screen shows two words you say and two words they say back, with a hello number. Both devices show the same four words for the same number. Tap **Next hello** on both devices to move on, which you do whenever a call feels wrong: the person who cannot say the new words is not the person from the ceremony. The menu lets you name the person on this device, which the chat then uses instead of a seat number, and set the hello number by hand if the two of you drift apart.
+**Hello words** is a check you can use on a phone or video call. Both people open each other’s seat in the same circle and match the hello number. Each reads their own pair aloud and checks the reply against the pair they expect, without revealing that answer. After a successful check, both select **Next hello** to prepare fresh words. This advances only the local device. If numbers differ, advance the lower number to catch up and don’t reuse an earlier number. The menu lets you save a local name for the person and adjust the hello number. A match checks access to the shared pair key; it does not protect against someone who can use the other person’s device or keys. See [Getting started](../docs/getting-started.md) for the user guide.
 
 The words come from the pair keys made during the sealed reveal step, so a circle made before that step has none and the screen says so. The hello number is saved with the cahoot. Nothing about hello words touches the pad or the network.
 
@@ -134,3 +134,9 @@ Camera scanning opens the camera with `getUserMedia`, draws each frame to a canv
 ### Ceremony UI regression checks
 
 Run `node web/e2e.mjs` for the full browser suite, or `node web/e2e.mjs --ceremony-only` for the three-member ceremony and compact-layout checks. Each run uses a fresh relay log. The suite checks both directions of the reveal handoff, buffered early signatures, matching check words, and complete QR/camera visibility on a 375 × 667 viewport. It also rasterizes a displayed reveal frame and decodes it with the real WASM QR decoder. These checks do not replace a physical phone-camera test.
+
+## First-use guide
+
+The app shows a four-page guide on first use. It explains circles and seats, hello words, channel access, and local storage. Completing or skipping it records `cahoots.welcomeSeen` on that phone or browser. The guide can be reopened from **How Cahoots works** in iOS Settings or the browser home screen’s More options menu. Incoming routes are kept while it is shown.
+
+The iOS guide uses small decorative cahoot animations and respects Reduce Motion. Pages return to the top when advancing, including at larger text sizes. The full user guide is [Getting started with Cahoots](../docs/getting-started.md).

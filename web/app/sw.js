@@ -1,8 +1,8 @@
 // Network-first service worker with a cache fallback, so a load with a connection always
 // gets the current app, and the app still opens with no connection. Bump VERSION on release.
-const VERSION = 'cahoots-v25';
+const VERSION = 'cahoots-v26';
 const ASSETS = [
-  './', './index.html', './styles.css', './app.js', './channels.js', './manifest.json', './icon.svg',
+  './', './index.html', './styles.css', './app.js', './channels.js', './welcome.js', './manifest.json', './icon.svg',
   './pkg/cahoots_wasm.js', './pkg/cahoots_wasm_bg.wasm',
 ];
 self.addEventListener('install', (e) => {

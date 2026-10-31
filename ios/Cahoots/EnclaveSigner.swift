@@ -51,7 +51,7 @@ final class EnclaveSigner: Signer {
                     nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
                     [.privateKeyUsage, .userPresence], &error
                 ) else {
-                    throw PhoneError.Signer(message: "This phone could not set up a key.")
+                    throw PhoneError.Signer(message: "Cahoots couldn’t create a key on this phone. Try again.")
                 }
                 data = try SecureEnclave.P256.Signing.PrivateKey(accessControl: access).dataRepresentation
             } else {
@@ -72,12 +72,12 @@ final class EnclaveSigner: Signer {
 
     func sign(label: String, message: Data) throws -> Data {
         guard let stored = try load(label) else {
-            throw PhoneError.Signer(message: "This phone has no key for that seat.")
+            throw PhoneError.Signer(message: "This phone no longer has the key for that seat.")
         }
         do {
             if usesEnclave {
                 let context = LAContext()
-                context.localizedReason = "Sign as your seat in the circle"
+                context.localizedReason = "Confirm this phone’s membership in the circle"
                 let key = try SecureEnclave.P256.Signing.PrivateKey(
                     dataRepresentation: stored, authenticationContext: context)
                 return try key.signature(for: message).rawRepresentation
@@ -118,7 +118,7 @@ final class EnclaveSigner: Signer {
         case errSecInteractionNotAllowed:
             throw PhoneError.Locked
         default:
-            throw PhoneError.Signer(message: "The keychain could not be read (\(status)).")
+            throw PhoneError.Signer(message: "Cahoots couldn’t read this phone’s keychain (\(status)).")
         }
     }
 
@@ -133,7 +133,7 @@ final class EnclaveSigner: Signer {
         case errSecInteractionNotAllowed:
             throw PhoneError.Locked
         default:
-            throw PhoneError.Signer(message: "The keychain could not keep the key (\(status)).")
+            throw PhoneError.Signer(message: "Cahoots couldn’t save the key on this phone (\(status)).")
         }
     }
 

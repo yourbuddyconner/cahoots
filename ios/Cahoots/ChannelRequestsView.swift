@@ -23,13 +23,13 @@ struct ChannelRequestsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xl) {
-                ScreenHeader(title: "Who wants to post.",
-                             detail: "Each person typed their own name. Allow gives them a grant to post. You can revoke it from Members.",
+                ScreenHeader(title: "Access requests",
+                             detail: "Choose whether each person can read only or read and post. Names are entered by the person requesting access. You can remove their access later in Members.",
                              style: .title)
                 PaperSection {
                     if let requests {
                         if requests.isEmpty {
-                            Text("No requests are waiting.")
+                            Text("No pending requests.")
                                 .font(.subheadline).foregroundStyle(Color.muted)
                                 .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
                         }
@@ -41,9 +41,9 @@ struct ChannelRequestsView: View {
                         ProgressView().frame(maxWidth: .infinity, minHeight: 52)
                     }
                 }
-                PaperSection(footer: "Requests that came with the live link are let in while this channel is open here.") {
+                PaperSection(footer: "While this channel is open on this phone, automatically approve requests that ask only for access included in the current link. Requests for extra permissions still need your approval.") {
                     Toggle(isOn: $autoAllow) {
-                        Text("Allow automatically what the policy already permits")
+                        Text("Auto-approve requests covered by the link")
                             .foregroundStyle(Color.ink)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -88,22 +88,22 @@ struct ChannelRequestsView: View {
             HStack(spacing: Space.s) {
                 if Self.asksToPost(r.actions) {
                     Button { Task { await allow(r, "read,post") } } label: {
-                        Working(busy: working == r.id + "read,post", title: "Allow to post")
+                        Working(busy: working == r.id + "read,post", title: "Allow posting")
                     }
                     .buttonStyle(.filled)
                 } else {
                     Button { Task { await allow(r, "read") } } label: {
-                        Working(busy: working == r.id + "read", title: "Allow to read")
+                        Working(busy: working == r.id + "read", title: "Allow reading")
                     }
                     .buttonStyle(.filled)
                 }
-                Button("Refuse") { Task { await refuse(r) } }
+                Button("Decline") { Task { await refuse(r) } }
                     .buttonStyle(.outlined)
             }
             .disabled(working != nil)
             if Self.asksToPost(r.actions) {
                 Button { Task { await allow(r, "read") } } label: {
-                    if working == r.id + "read" { ProgressView() } else { Text("Let \(r.name) read, but not post") }
+                    if working == r.id + "read" { ProgressView() } else { Text("Allow \(r.name) to read only") }
                 }
                 .buttonStyle(.text)
                 .disabled(working != nil)
@@ -130,7 +130,7 @@ struct ChannelRequestsView: View {
             if autoAllow, !list.isEmpty {
                 let n = await Self.allowPermitted(core: core, id: id)
                 if n > 0 {
-                    notice = n == 1 ? "Let in a request the policy permits." : "Let in \(n) requests the policy permits."
+                    notice = n == 1 ? "Automatically approved a request covered by the link." : "Automatically approved \(n) requests covered by the link."
                     requests = (try? await core.run { [id] in try $0.channelRequests(id: id) }) ?? list
                     return
                 }

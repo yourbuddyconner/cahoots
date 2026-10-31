@@ -23,7 +23,7 @@ struct CeremonyView: View {
                     }
                 }
             }
-            .confirmationDialog("Leave the ceremony? Nothing is kept.", isPresented: $confirmLeave, titleVisibility: .visible) {
+            .confirmationDialog("Leave setup? This phone’s progress will be discarded. This setup cannot be resumed. Ask everyone to start a new ceremony.", isPresented: $confirmLeave, titleVisibility: .visible) {
                 Button("Leave the ceremony", role: .destructive) { Task { await leave() } }
             }
             .safeAreaInset(edge: .bottom) {
@@ -46,16 +46,16 @@ struct CeremonyView: View {
     @ViewBuilder
     private var content: some View {
         if let gone = model.gone {
-            EndedView(headline: "This ceremony is gone.", detail: gone) { await leave() }
+            EndedView(headline: "This setup session has ended", detail: gone) { await leave() }
         } else if let s = model.state {
             if s.seatLost {
                 EndedView(headline: "Seat \(s.mySeat + 1) was taken by someone else.",
                           detail: "Leave and join again with a free seat.", button: "Leave") { await leave() }
             } else if s.phase == .aborted {
-                EndedView(headline: "The ceremony stopped. A reveal did not match its commitment.",
+                EndedView(headline: "The code check failed. Setup has stopped.",
                           detail: s.throughRelay
-                          ? "Nothing was kept. Someone outside the room may have the code. Everyone starts over with a new code."
-                          : "Nothing was kept. Either someone's contribution changed after they committed, or a code was corrupted. Start again from the beginning.") { await leave() }
+                          ? "This circle was not saved. Someone outside the group may have the setup code. Ask everyone to start a new ceremony."
+                          : "The exchanged data didn’t match. This circle was not saved. Ask everyone to start a new ceremony.") { await leave() }
             } else if s.phase == .complete && (s.throughRelay || model.handedOff) {
                 WordsView(model: model, state: s)
             } else if s.throughRelay {
@@ -227,16 +227,16 @@ struct RelayCeremonyView: View {
     }
 
     private var detail: String? {
-        if state.needsContinue { return "Every seat is here and scanned. Continue when the room is ready." }
+        if state.needsContinue { return "You’ve scanned everyone’s code. Check that everyone is ready, then tap Continue." }
         switch state.phase {
         case .commit:
             if host { return "Then scan the code on each of their screens." }
             return model.joinCode != nil ? "The host scans it to let you in." : nil
         case .reveal:
             if model.joinCode != nil { return "The host scans it to let you in." }
-            return "This goes through the relay. Keep the app open."
+            return "The phones are exchanging encrypted setup data over the internet. Keep Cahoots open."
         default:
-            return "Each phone signs who is in the circle. Keep the app open."
+            return "The phones are checking the circle’s member list. Keep Cahoots open."
         }
     }
 
@@ -254,7 +254,7 @@ struct RelayCeremonyView: View {
         let seen = Set(state.unscanned.seats)
         let missing = Set(state.missing.seats)
         return PaperSection(title: "Seats",
-                            footer: seen.isEmpty ? nil : "A seat that is here but not scanned joined through the relay without showing you its code. Scan it, or start over if you do not know who it is.") {
+                            footer: seen.isEmpty ? nil : "Scan the code of each person in the room. If you don’t recognize a device that has joined, stop and start a new ceremony.") {
             ForEach(0..<Int(state.members), id: \.self) { i in
                 let seat = UInt8(i)
                 if i > 0 { Hairline() }
@@ -332,8 +332,8 @@ struct CodesCeremonyView: View {
     var body: some View {
         CeremonyStep(step: stepNumber, stepName: Self.names[state.phase] ?? "", headline: taskTitle, detail: taskDetail) {
             Picker("Show or scan", selection: $showing) {
-                Text(state.phase == .reveal ? "Show my reveal" : "Show my code").tag(true)
-                Text(state.phase == .reveal ? "Scan their reveals" : "Scan their codes").tag(false)
+                Text(state.phase == .reveal ? "Show my step 2 code" : "Show my code").tag(true)
+                Text(state.phase == .reveal ? "Scan step 2 codes" : "Scan their codes").tag(false)
             }
             .pickerStyle(.segmented)
             if showing {
@@ -348,7 +348,7 @@ struct CodesCeremonyView: View {
                         ProgressView(value: Double(min(state.framesRead, state.framesNeeded)),
                                      total: Double(state.framesNeeded))
                             .tint(Color.brand)
-                        Text("Hold steady on the animation. The bar fills as frames arrive.")
+                        Text("Keep the animated code in view until the progress bar fills.")
                             .font(.footnote).foregroundStyle(Color.muted)
                     }
                 }
@@ -370,7 +370,7 @@ struct CodesCeremonyView: View {
     private var noun: String {
         switch state.phase {
         case .commit: return "setup codes"
-        case .reveal: return "reveals"
+        case .reveal: return "step 2 codes"
         default: return "signatures"
         }
     }
@@ -385,7 +385,7 @@ struct CodesCeremonyView: View {
         if left.isEmpty { return state.phase == .reveal ? "Your turn to show" : "Ready for the next step" }
         switch state.phase {
         case .commit: return "Meet the other devices"
-        case .reveal: return "Collect their secret contributions"
+        case .reveal: return "Exchange step 2 codes"
         default: return "Confirm who is in the circle"
         }
     }
@@ -480,8 +480,8 @@ struct WordsView: View {
                 .buttonStyle(.text)
         }
         .sensoryFeedback(.success, trigger: keeping) { _, now in now }
-        .confirmationDialog("Throw this away and start again?", isPresented: $confirmDiffer, titleVisibility: .visible) {
-            Button("Throw it away", role: .destructive) {
+        .confirmationDialog("Discard this setup and start again?", isPresented: $confirmDiffer, titleVisibility: .visible) {
+            Button("Discard setup", role: .destructive) {
                 Task {
                     await model.discard()
                     app.leave()

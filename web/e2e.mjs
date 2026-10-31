@@ -43,10 +43,10 @@ for (let i = 0; ; i++) {
 
 const browser = await chromium.launch({ channel: "chrome" });
 const errors = [];
-async function person(name, viewport) {
+async function person(name, viewport, showWelcome = false) {
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, isMobile: viewport.width < 500, hasTouch: viewport.width < 500 });
   // Capture what the app copies, since headless clipboards are unreliable.
-  await ctx.addInitScript(() => { navigator.clipboard.writeText = (t) => { window.__clip = t; return Promise.resolve(); }; });
+  await ctx.addInitScript(({ skipWelcome }) => { if (skipWelcome) localStorage.setItem("cahoots.welcomeSeen", "1"); navigator.clipboard.writeText = (t) => { window.__clip = t; return Promise.resolve(); }; }, { skipWelcome: !showWelcome });
   await ctx.route("https://relay.cahoots.network/**", (r) => r.abort());
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`${name}: ${e.message}`));
@@ -73,6 +73,45 @@ const onFail = async (e) => {
 process.on("unhandledRejection", onFail);
 process.on("uncaughtException", onFail);
 const wordsOf = (p) => p.$$eval(".words div", (els) => els.map((e) => e.textContent.replace(/^\d+/, "").trim()).join(" "));
+// First-use guide: completion, skipping, reopening, and preserving the requested route.
+if (!process.argv.includes("--ceremony-only")) {
+  const W = await person("welcome", { width: 390, height: 844 }, true);
+  people.push(W);
+  await W.page.goto(`${base}#/new`);
+  for (let index = 0; index < 4; index++) {
+    await W.page.locator(`[data-welcome-page="${index}"]`).waitFor();
+    await W.snap(`guide-${index}`);
+    await W.page.getByRole("button", { name: index === 3 ? "Get started" : "Continue", exact: true }).click();
+  }
+  await W.page.getByRole("heading", { name: "Bring your people together.", exact: true }).waitFor();
+  if (!W.page.url().endsWith("#/new")) throw new Error("Onboarding lost the requested route");
+  await W.page.reload();
+  await W.page.waitForSelector(".screen:not(.welcome-screen)");
+  if (await W.page.locator(".welcome-screen").count()) throw new Error("Completed welcome returned");
+  await W.page.goto(base);
+  await W.menu();
+  await W.page.getByRole("button", { name: "How Cahoots works", exact: true }).click();
+  await W.page.locator('[data-welcome-page="0"]').waitFor();
+  await W.page.getByRole("button", { name: "Continue", exact: true }).click();
+  await W.page.getByRole("button", { name: "Back", exact: true }).click();
+  await W.page.locator('[data-welcome-page="0"]').waitFor();
+  await W.page.getByRole("button", { name: "Close guide", exact: true }).click();
+  await W.page.waitForSelector(".entry-screen");
+  const S = await person("welcome-skip", { width: 375, height: 667 }, true);
+  people.push(S);
+  await S.page.getByRole("button", { name: "Skip for now", exact: true }).click();
+  await S.page.reload();
+  await S.page.waitForSelector(".entry-screen");
+  if (await S.page.locator(".welcome-screen").count()) throw new Error("Skipped welcome returned");
+  await S.page.context().close();
+  await W.page.context().close();
+}
+if (process.argv.includes("--welcome-only")) {
+  if (errors.length) throw new Error(errors.join("\n"));
+  console.log("Welcome checks passed: completion, skip, persistence, reopening, and route preservation.");
+  await browser.close(); server.close(); station.kill();
+  process.exit(0);
+}
 if (!process.argv.includes("--ceremony-only")) {
 const L = await person("leader", { width: 390, height: 844 });
 const J = await person("joiner", { width: 1280, height: 900 });
@@ -88,7 +127,7 @@ await L.page.fill("input[type=text]", "e2e-test");
 await L.page.click("text=Codes only");
 await L.page.click("text=Continue");
 await L.snap("pick");
-await L.page.click("text=Make my contribution");
+await L.page.click("text=Join this circle");
 await L.page.waitForSelector("text=Step 1 of 4");
 await L.snap("commit");
 await L.menu(); await L.page.click("text=Copy as text"); const commitL = await L.clip(); await L.closeSheet();
@@ -104,10 +143,10 @@ await J.page.waitForSelector("text=Which seat are you?");
 await J.snap("pick");
 const seat1Disabled = await J.page.$eval('.seg button[data-v="0"]', (b) => b.disabled);
 if (!seat1Disabled) throw new Error("seat 1 should be marked taken for the joiner");
-await J.page.click("text=Make my contribution");
+await J.page.click("text=Join this circle");
 await J.page.waitForSelector("text=Step 2 of 4"); // the joiner already holds the leader's commitment, so it is in reveal
 await J.snap("reveal");
-if (!(await J.page.getByRole('button', { name: 'Scan the remaining reveals to continue', exact: true }).isDisabled())) throw new Error('Cannot confirm sharing before collecting the missing reveal');
+if (!(await J.page.getByRole('button', { name: 'Scan the remaining step 2 codes to continue', exact: true }).isDisabled())) throw new Error('Cannot confirm sharing before collecting the missing reveal');
 await J.menu(); await J.page.click("text=Copy as text"); const revealJ = await J.clip(); await J.closeSheet();
 if (!revealJ?.startsWith("cahoots-reveal:1:")) throw new Error(`joiner reveal text: ${revealJ}`);
 
@@ -116,13 +155,13 @@ if (!revealJ?.startsWith("cahoots-reveal:1:")) throw new Error(`joiner reveal te
 await L.menu(); await L.page.click("text=Paste a code"); await L.paste(revealJ);
 await L.page.waitForSelector("text=Step 2 of 4", { timeout: 3000 });
 await L.closeSheet();
-await L.page.waitForSelector('button:text-is("They have scanned my reveal"):enabled');
+await L.page.waitForSelector('button:text-is("They have scanned my step 2 code"):enabled');
 await L.page.waitForSelector('.half:visible .cap:has-text("seat 1 · step 2")');
 await L.snap("reveal-handoff");
-await L.page.click('button:text-is("They have scanned my reveal")');
+await L.page.click('button:text-is("They have scanned my step 2 code")');
 await L.page.waitForSelector("text=Step 3 of 4");
 await L.snap("sign");
-await L.menu(); await L.page.click(".sheet >> text=Copy my reveal"); const revealL = await L.clip(); await L.closeSheet();
+await L.menu(); await L.page.click(".sheet >> text=Copy my step 2 code"); const revealL = await L.clip(); await L.closeSheet();
 if (!revealL?.startsWith("cahoots-reveal:0:")) throw new Error(`leader reveal text: ${revealL}`);
 await L.menu(); await L.page.click(".sheet >> text=Copy as text"); const attestL = await L.clip(); await L.closeSheet();
 if (!attestL?.startsWith("cahoots-attest:0:")) throw new Error(`leader signature text: ${attestL}`);
@@ -130,14 +169,14 @@ if (!attestL?.startsWith("cahoots-attest:0:")) throw new Error(`leader signature
 // Joiner gets the leader's signature before its reveal: it is kept until the reveal arrives.
 await J.menu(); await J.page.click("text=Paste a code"); await J.paste(attestL);
 await J.page.waitForSelector("text=Seat 1 is already on step 3");
-if (!(await J.page.getByRole('button', { name: 'Scan the remaining reveals to continue', exact: true }).isDisabled())) throw new Error('An early signature must not bypass a missing reveal');
+if (!(await J.page.getByRole('button', { name: 'Scan the remaining step 2 codes to continue', exact: true }).isDisabled())) throw new Error('An early signature must not bypass a missing reveal');
 await J.closeSheet();
 await J.menu(); await J.page.click("text=Paste a code"); await J.paste(revealL);
 // Even with an early signature buffered, the joiner must confirm sharing its reveal.
-await J.page.waitForSelector('button:text-is("They have scanned my reveal"):enabled');
+await J.page.waitForSelector('button:text-is("They have scanned my step 2 code"):enabled');
 await J.closeSheet();
 await J.page.waitForSelector("text=Step 2 of 4");
-await J.page.click('button:text-is("They have scanned my reveal")');
+await J.page.click('button:text-is("They have scanned my step 2 code")');
 await J.page.waitForSelector('button:text-is("They have scanned it")');
 await J.snap("sign-done");
 await J.menu(); await J.page.click(".sheet >> text=Copy as text"); const attestJ = await J.clip(); await J.closeSheet();
@@ -177,7 +216,7 @@ await L.page.getByLabel('Message', { exact: true }).fill('Keep this draft while 
 for (const p of [L, J]) {
   await p.page.getByRole('link', { name: 'Network', exact: true }).click();
   await p.page.getByRole('heading', { name: 'Network', exact: true }).waitFor();
-  await p.page.getByRole('heading', { name: 'No peer data in this browser', exact: true }).waitFor();
+  await p.page.getByRole('heading', { name: 'Connections aren’t shown here yet', exact: true }).waitFor();
   await p.snap('network');
   await p.page.getByRole('link', { name: 'Conversation', exact: true }).click();
   await p.page.waitForSelector('.composer');
@@ -210,6 +249,11 @@ const [jMine, jTheirs] = await hello(J.page);
 if (lMine !== jTheirs || lTheirs !== jMine) throw new Error(`hello words disagree: leader ${lMine}/${lTheirs}, joiner ${jMine}/${jTheirs}`);
 if (lMine === lTheirs || lMine.split(" ").length !== 2) throw new Error(`hello words look wrong: ${lMine}`);
 console.log("hello words:", lMine, "/", lTheirs);
+L.page.once('dialog', dialog => dialog.dismiss());
+await L.page.click('button:text-is("Next hello")');
+if ((await hello(L.page))[0] !== lMine) throw new Error('Canceling next hello changed the words');
+L.page.once('dialog', dialog => dialog.accept());
+J.page.once('dialog', dialog => dialog.accept());
 await L.page.click('button:text-is("Next hello")'); await J.page.click('button:text-is("Next hello")');
 await L.page.waitForSelector('.bar .title small:has-text("#2")'); await J.page.waitForSelector('.bar .title small:has-text("#2")');
 const [lMine2, lTheirs2] = await hello(L.page);
@@ -320,7 +364,7 @@ await group[0].page.getByRole('button', { name: 'More', exact: true }).click();
 await group[0].page.locator('.seg button').filter({ hasText: 'Small' }).click();
 await group[0].page.getByRole('button', { name: 'Codes only', exact: true }).click();
 await group[0].page.getByRole('button', { name: 'Continue', exact: true }).click();
-await group[0].page.getByRole('button', { name: 'Make my contribution', exact: true }).click();
+await group[0].page.getByRole('button', { name: 'Join this circle', exact: true }).click();
 await group[0].page.waitForSelector('text=Step 1 of 4');
 const commits = [await copyStage(group[0])];
 for (let i = 1; i < 3; i++) {
@@ -330,7 +374,7 @@ for (let i = 1; i < 3; i++) {
   await p.paste(commits[0]);
   await p.page.waitForSelector('text=Which seat are you?');
   await p.page.locator(`.seg button[data-v="${i}"]`).click();
-  await p.page.getByRole('button', { name: 'Make my contribution', exact: true }).click();
+  await p.page.getByRole('button', { name: 'Join this circle', exact: true }).click();
   await p.page.waitForSelector('text=Step 1 of 4');
   commits.push(await copyStage(p));
 }
@@ -344,13 +388,13 @@ for (const p of group) {
   reveals.push(await copyStage(p));
 }
 await receive(group[0], reveals[1]);
-if (!(await group[0].page.getByRole('button', { name: 'Scan the remaining reveals to continue', exact: true }).isDisabled())) throw new Error('Three-member ceremony advanced with one reveal missing');
+if (!(await group[0].page.getByRole('button', { name: 'Scan the remaining step 2 codes to continue', exact: true }).isDisabled())) throw new Error('Three-member ceremony advanced with one reveal missing');
 await group[0].page.waitForSelector('text=Received 1 of 2 reveals');
 await receive(group[0], reveals[2]);
 for (let i = 1; i < 3; i++) for (let j = 0; j < 3; j++) if (i !== j) await receive(group[i], reveals[j]);
 for (const p of group) {
   await p.page.waitForSelector('text=Received 2 of 2 reveals');
-  await p.page.waitForSelector('button:text-is("Everyone has scanned my reveal"):enabled');
+  await p.page.waitForSelector('button:text-is("Everyone has scanned my step 2 code"):enabled');
   await p.page.waitForSelector('text=Step 2 of 4');
   const layout = await p.page.evaluate(() => {
     const action = document.querySelector('.actions button').getBoundingClientRect();
@@ -376,15 +420,15 @@ for (const p of group) {
   });
   if (!readable) throw new Error('Displayed reveal QR does not decode');
   await p.snap('reveal-handoff');
-  await p.page.getByRole('button', { name: 'Scan their reveals', exact: true }).click();
+  await p.page.getByRole('button', { name: 'Scan step 2 codes', exact: true }).click();
   const cameraFits = await p.page.evaluate(() => {
     const camera = document.querySelector('.half:last-child .cam').getBoundingClientRect();
     const action = document.querySelector('.actions').getBoundingClientRect();
     return camera.height >= 140 && camera.bottom <= action.top;
   });
   if (!cameraFits) throw new Error('Compact camera preview is obscured');
-  await p.page.getByRole('button', { name: 'Show my reveal', exact: true }).click();
-  await p.page.getByRole('button', { name: 'Everyone has scanned my reveal', exact: true }).click();
+  await p.page.getByRole('button', { name: 'Show my step 2 code', exact: true }).click();
+  await p.page.getByRole('button', { name: 'Everyone has scanned my step 2 code', exact: true }).click();
   await p.page.waitForSelector('text=Step 3 of 4');
   const signatureShown = await p.page.evaluate(() => {
     const qr = document.querySelector('.half .qr svg').getBoundingClientRect();
@@ -427,7 +471,7 @@ await H.page.getByRole('button', { name: 'Create a circle', exact: true }).click
 await H.page.fill('input[type=text]', 'through the relay');
 if (!(await H.page.locator('.seg button.on').filter({ hasText: 'Through the relay' }).count())) throw new Error('Through the relay should be the default');
 await H.page.getByRole('button', { name: 'Continue', exact: true }).click();
-await H.page.getByRole('button', { name: 'Make my contribution', exact: true }).click();
+await H.page.getByRole('button', { name: 'Join this circle', exact: true }).click();
 await H.page.waitForSelector('text=Show this code to everyone joining');
 await H.snap('relay-offer');
 const offerFits = await H.page.evaluate(() => { const qr = document.querySelector('.qr svg').getBoundingClientRect(); return qr.width >= 180 && qr.height >= 180 && qr.bottom <= innerHeight; });
@@ -457,7 +501,7 @@ await G.paste(offer);
 await G.page.waitForSelector('text=Which seat are you?');
 if (!(await G.page.$eval('.seg button[data-v="0"]', (b) => b.disabled))) throw new Error('seat 1 is the host\'s');
 await G.snap('relay-pick');
-await G.page.getByRole('button', { name: 'Make my contribution', exact: true }).click();
+await G.page.getByRole('button', { name: 'Join this circle', exact: true }).click();
 // The joiner shows its code to the host, and the host scans it (pasted here, as the offer was).
 await G.page.waitForSelector('.bar .title:has-text("Show this to the host")', { timeout: 15000 });
 await G.snap('relay-join-code');

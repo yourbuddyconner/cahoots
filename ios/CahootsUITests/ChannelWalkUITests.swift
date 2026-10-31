@@ -61,7 +61,7 @@ final class ChannelWalkUITests: XCTestCase {
         let reader = try wait(for: "reader.txt")
         XCTAssertTrue(app.staticTexts[reader].waitForExistence(timeout: 180))
         shot("owner-08-requests")
-        app.buttons["Allow to post"].firstMatch.tap()
+        app.buttons["Allow posting"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["\(reader) can read and post."].waitForExistence(timeout: 60))
         shot("owner-09-allowed")
         app.navigationBars.buttons.element(boundBy: 0).tap()
@@ -93,7 +93,7 @@ final class ChannelWalkUITests: XCTestCase {
         name.typeText("Bea")
         app.buttons["Ask to post"].firstMatch.tap()
         try write("reader.txt", "Bea")
-        XCTAssertTrue(app.staticTexts["Waiting for the owner to let you post."].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.staticTexts["Your request to post is waiting for the owner’s approval."].waitForExistence(timeout: 30))
         shot("reader-04-waiting")
 
         let field = element("message")
@@ -111,7 +111,7 @@ final class ChannelWalkUITests: XCTestCase {
     // MARK: - Steps
 
     private func launch(link: String? = nil) {
-        var args = ["-cahoots-data", data]
+        var args = ["-cahoots-data", data, "-cahoots.welcomeSeen", "YES"]
         if let link { args += ["-cahoots-link", link] }
         app.launchArguments = args
         app.launch()

@@ -39,6 +39,8 @@ struct CahootsApp: App {
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("cahoots.welcomeSeen") private var welcomeSeen = false
+    @State private var showingWelcome = false
 
     var body: some View {
         Group {
@@ -54,7 +56,7 @@ struct RootView: View {
                     Spacer()
                     Image(systemName: "lock").font(.largeTitle).foregroundStyle(Color.ink)
                         .accessibilityHidden(true)
-                    ScreenHeader(title: "Cahoots cannot open its records",
+                    ScreenHeader(title: "Couldn’t open your saved data",
                                  detail: error + " Unlock the phone and try again.", style: .title)
                     Spacer()
                     Button("Try again") { Task { await model.open() } }
@@ -66,13 +68,24 @@ struct RootView: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).paperBackground()
             }
         }
-        .task { await model.open() }
+        .task {
+            await model.open()
+            showingWelcome = model.core != nil && !welcomeSeen
+        }
+        .fullScreenCover(isPresented: $showingWelcome) {
+            if let core = model.core {
+                WelcomeView(core: core) {
+                    welcomeSeen = true
+                    showingWelcome = false
+                }
+            }
+        }
         // A channel link: tapped in another app, or a universal link to cahoots.network/app.
         .onOpenURL { model.openLink($0) }
         .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
             if let url = activity.webpageURL { model.openLink(url) }
         }
-        .alert("Ceremony lost", isPresented: Binding(get: { model.lostCeremony != nil },
+        .alert("Setup interrupted", isPresented: Binding(get: { model.lostCeremony != nil },
                                                      set: { if !$0 { model.lostCeremony = nil } })) {
             Button("OK") { model.lostCeremony = nil }
         } message: {

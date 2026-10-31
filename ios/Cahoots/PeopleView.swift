@@ -28,7 +28,7 @@ struct PeopleView: View {
                 VStack(alignment: .leading, spacing: Space.m) {
                     FaceRow(faces: members.compactMap { faces[$0.seat] }, size: 32)
                     ScreenHeader(title: app.circle(circle)?.name ?? "Your circle",
-                                 detail: "Give each seat a familiar name. Open someone’s hello words when you want to check who you’re talking to.", style: .title)
+                                 detail: "Each seat is a device in this circle. Tap the pencil to add a name, or open someone’s hello words to check them on a call.", style: .title)
                 }
                 if !loaded && error == nil {
                     ProgressView("Loading people…").frame(maxWidth: .infinity)
@@ -206,7 +206,7 @@ struct HelloView: View {
                 HStack(spacing: Space.m) {
                     FaceView(pixels: face, size: 44, label: "\(who)'s face")
                     ScreenHeader(title: "Check with \(who)",
-                                 detail: "Ask them to open your seat (seat \((app.circle(circle)?.mySeat ?? 0) + 1)) in this circle’s People.", style: .title2)
+                                 detail: "On their phone, ask them to open this circle, tap People, then choose your seat (seat \((app.circle(circle)?.mySeat ?? 0) + 1)).", style: .title2)
                 }
                 if let words {
                     VStack(alignment: .leading, spacing: Space.s) {
@@ -222,9 +222,9 @@ struct HelloView: View {
                     .background(Color.brand.opacity(0.06), in: RoundedRectangle(cornerRadius: Radius.control))
                     VStack(alignment: .leading, spacing: 0) {
                         Hairline()
-                        said("1", "You say aloud", words.mine, detail: "They check that these match on their screen.")
+                        said("1", "You say aloud", words.mine, detail: "They should match the reply shown on the other person’s screen.")
                         Hairline()
-                        said("2", "Listen for their reply", words.theirs, detail: "Let them say these. Don’t give away the answer.")
+                        said("2", "Listen for their reply", words.theirs, detail: "Ask them to read their own words. Check that you hear this pair, without telling them the answer.")
                         Hairline()
                     }
                     InstructionStep(number: 3, title: "Finished? Move on together",

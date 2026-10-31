@@ -155,7 +155,7 @@ struct ChatView: View {
             if let notice { StatusLine(text: notice, problem: false) }
             StatusLine(text: model.status)
             if summary?.hasRoot == false {
-                Text("This circle was made before root epochs. Run a new ceremony to chat.")
+                Text("This circle uses an older format that doesn’t support chat. Create a new circle together to start chatting.")
                     .font(.subheadline).foregroundStyle(Color.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
@@ -170,7 +170,7 @@ struct ChatView: View {
                 showSettings = false
                 if done == "people" { app.path.append(.people(model.circle)) }
                 if done == "relay" { showRelay = true }
-                if done == "rotated" { notice = "New epoch started." }
+                if done == "rotated" { notice = "Future messages will use new encryption keys." }
             }
             .presentationDetents([.medium, .large])
         }
@@ -261,7 +261,7 @@ private struct EpochDivider: View {
     var body: some View {
         HStack(spacing: Space.m) {
             Hairline()
-            Text("New epoch, new keys")
+            Text("Encryption keys renewed")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(Color.muted)
                 .fixedSize()
@@ -363,12 +363,12 @@ struct ConversationSettings: View {
                                 .font(.subheadline).foregroundStyle(Color.ink)
                         }
                     }
-                    PaperSection(footer: "An epoch is a set of message keys. Starting a new one changes the keys for future messages. Earlier messages keep their existing protection.") {
-                        Button("Start a new epoch") { confirmRotate = true }
+                    PaperSection(footer: "Renewing the encryption keys changes the keys used for future messages. It does not change the protection of messages already sent.") {
+                        Button("Renew encryption keys") { confirmRotate = true }
                             .buttonStyle(TextButtonStyle(full: true))
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    PaperSection(footer: "A sender's seat says which message chain a message came from. It is not proof of which member typed it.") {
+                    PaperSection(footer: "Sender names help you follow a conversation. They do not independently verify who typed a message.") {
                         Button {
                             done("relay")
                         } label: {
@@ -390,8 +390,8 @@ struct ConversationSettings: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { done("") } }
             }
-            .confirmationDialog("Start a new epoch?", isPresented: $confirmRotate, titleVisibility: .visible) {
-                Button("Start a new epoch") {
+            .confirmationDialog("Renew encryption keys?", isPresented: $confirmRotate, titleVisibility: .visible) {
+                Button("Renew encryption keys") {
                     Task { if await model.rotate() { done("rotated") } }
                 }
             }
@@ -413,7 +413,7 @@ struct RelaySheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.xl) {
-                    Text("Messages travel through a relay that every member can reach. It only ever sees encrypted messages. The app ships with relay.cahoots.network. Every member of this circle must use the same relay, so change it together.")
+                    Text("A relay is the server that delivers your encrypted messages. It cannot read them. Cahoots uses relay.cahoots.network by default. If you change this address, everyone in the circle must switch to the same address.")
                         .foregroundStyle(Color.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     VStack(alignment: .leading, spacing: Space.s) {

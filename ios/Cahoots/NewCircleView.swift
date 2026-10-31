@@ -21,7 +21,7 @@ struct NewCircleView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xxl) {
-                Text("Give your circle a name, then exchange codes with the people beside you.")
+                Text("Start with everyone in the same room. Name your circle, then follow the code exchange on each phone. This setup is called a ceremony.")
                     .font(.body)
                     .foregroundStyle(Color.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -42,13 +42,13 @@ struct NewCircleView: View {
                 }
 
                 PaperSection(title: "People in the room",
-                             footer: "Count every device that will hold the secret, including yours.") {
+                             footer: "Count everyone joining on a separate device, including you. Each device gets a numbered seat.") {
                     PeopleStepper(value: $members, range: 2...8)
                 }
 
                 PaperSection(title: "How to connect") {
                     OptionRow(title: "Through the relay",
-                              detail: "Recommended when everyone has internet. Each person scans your code, then you scan theirs.",
+                              detail: "Use an internet connection. Everyone scans your code, then you scan theirs. The relay handles the remaining steps.",
                               chosen: throughRelay) { throughRelay = true }
                     Hairline()
                     OptionRow(title: "Codes only",
@@ -93,7 +93,7 @@ struct NewCircleView: View {
     private func start() async {
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !n.isEmpty else {
-            error = "Give the circle a name."
+            error = "Enter a name for your circle."
             naming = true
             return
         }

@@ -16,7 +16,7 @@ struct JoinView: View {
                 if let offer {
                     pick(offer)
                 } else {
-                    Text("Scan the host's code. For a ceremony with codes only, scan anyone who has joined. Their code is a short animation.")
+                    Text("Scan the code on the phone of the person creating the circle. If you’re using Codes only, you can scan anyone’s step 1 code.")
                         .font(.body)
                         .foregroundStyle(Color.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -43,7 +43,7 @@ struct JoinView: View {
                 Button {
                     Task { await join(offer) }
                 } label: {
-                    Working(busy: joining, title: "Make my contribution")
+                    Working(busy: joining, title: "Join this circle")
                 }
                 .buttonStyle(.filled)
                 .disabled(joining)
@@ -55,7 +55,7 @@ struct JoinView: View {
     @ViewBuilder
     private func pick(_ offer: JoinOffer) -> some View {
         ScreenHeader(title: "Which seat are you?",
-                     detail: "Seat 1 is the host's. Pick a free one, and make sure nobody else picks the same.",
+                     detail: "A seat is your device’s place in the circle. The host uses seat 1. Choose another number and check that no one else is using it.",
                      style: .title)
         Text("\(spelled(Int(offer.members))) people, \(offer.throughRelay ? "through the relay" : "with codes only").")
             .font(.subheadline)

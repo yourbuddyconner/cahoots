@@ -35,5 +35,5 @@ struct OpenCeremonies {
         return lost
     }
 
-    static let lostMessage = "This ceremony was lost when the app closed. Everyone starts over with a new code."
+    static let lostMessage = "Setup couldn’t be restored after Cahoots closed. Ask everyone to start a new ceremony and scan the new code."
 }

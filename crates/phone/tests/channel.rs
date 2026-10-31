@@ -276,7 +276,7 @@ fn owner_and_members_through_a_station() {
     match c.phone.channel_join(elsewhere) {
         Err(PhoneError::Channel { message }) => assert_eq!(
             message,
-            "This link names a different relay than the one this channel uses."
+            "This link points to a different relay from the one saved for this channel. Ask the owner to confirm the correct link."
         ),
         other => panic!("{other:?}"),
     }
@@ -482,7 +482,7 @@ fn announcements_with_approvals_are_refused_before_anything_is_uploaded() {
     match a.phone.channel_start(circle_id, "News".into(), 1) {
         Err(PhoneError::Channel { message }) => assert_eq!(
             message,
-            "Announcements with approvals need more than one owner device to approve, which this version cannot collect yet."
+            "This channel type requires approvals from other circle members. This version cannot collect those approvals yet."
         ),
         other => panic!("{other:?}"),
     }
@@ -765,7 +765,7 @@ fn auto_allow_leaves_what_the_link_does_not_cover_and_posting_follows_the_grant(
     assert!(!cs.can_post && !cs.waiting, "{cs:?}");
     match c.phone.channel_send(id.clone(), "may I?".into()) {
         Err(PhoneError::Channel { message }) => {
-            assert_eq!(message, "The owner let you read this channel, not post.")
+            assert_eq!(message, "You have permission to read this channel, but not to post.")
         }
         other => panic!("{other:?}"),
     }

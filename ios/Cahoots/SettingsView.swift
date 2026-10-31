@@ -13,15 +13,26 @@ struct SettingsView: View {
     @State private var export: ExportText?
     @State private var removing: CircleSummary?
     @State private var error: String?
+    @State private var showingGuide = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xxl) {
+                Button { showingGuide = true } label: {
+                    HStack {
+                        Label("How Cahoots works", systemImage: "book")
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                    }
+                    .foregroundStyle(Color.brand)
+                    .frame(minHeight: 44)
+                }
+                .buttonStyle(RowButtonStyle())
                 phone
                 relaySection
                 PaperSection(title: "Checking for messages") {
-                    Text("While Cahoots is closed, iOS decides when it may check for new messages. The number on the icon is how many are unread.")
+                    Text("iOS controls when Cahoots checks for messages in the background. The app icon’s badge shows the unread count from the last successful check.")
                         .font(.subheadline).foregroundStyle(Color.muted)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.vertical, Space.m)
@@ -41,6 +52,9 @@ struct SettingsView: View {
         .paperBackground()
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
+        .sheet(isPresented: $showingGuide) {
+            WelcomeView(core: core, firstVisit: false) { showingGuide = false }
+        }
         .task {
             info = try? await core.run { $0.describe() }
             face = try? await core.run { $0.myFace() }
@@ -62,7 +76,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .confirmationDialog("Remove \(removing?.name ?? "this circle") from this phone? Other members keep theirs. This phone's seat key for it is deleted.",
+        .confirmationDialog("Remove \(removing?.name ?? "this circle") from this phone? Its messages and keys will be deleted from this phone. You cannot undo this. Other members keep their copies.",
                             isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
                             titleVisibility: .visible) {
             Button("Remove circle", role: .destructive) {
@@ -99,7 +113,7 @@ struct SettingsView: View {
             if !core.signer.usesEnclave {
                 StatusLine(text: "This simulator has no Secure Enclave. The key is in the keychain.")
             }
-            Text("This phone's seats do not move. Seat keys never leave this phone, and backups leave out every circle. A new phone means new circles.")
+            Text("Your circles and keys stay on this phone and are not included in backups. You can’t transfer them to a new phone. To use another phone, create a new circle together.")
                 .font(.footnote).foregroundStyle(Color.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -125,14 +139,14 @@ struct SettingsView: View {
             }
             StatusLine(text: relayNote, problem: false)
             StatusLine(text: relayError)
-            Text("A ceremony held through the relay uses the host's relay, and the circle keeps it. Change a circle's relay from its chat.")
+            Text("The host chooses the relay used during setup and for the circle’s chat. This setting applies to new circles you create. To change an existing circle’s relay, open its conversation settings.")
                 .font(.footnote).foregroundStyle(Color.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private var circles: some View {
-        PaperSection(title: "Circles", footer: "Export is a readable copy of the history. Nothing secret is in it.") {
+        PaperSection(title: "Circles", footer: "Exports contain readable messages. Anyone with the exported file can read them. Encryption keys are not included.") {
             ForEach(Array(app.circles.enumerated()), id: \.element.id) { i, c in
                 if i > 0 { Hairline() }
                 VStack(alignment: .leading, spacing: Space.xs) {

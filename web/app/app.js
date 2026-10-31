@@ -10,32 +10,33 @@ import init, {
   b64_encode, b64_decode, bucket_pad, bucket_unpad, chat_bucket_pad, chat_bucket_unpad, qr_svg, qr_decode_rgba,
 } from './pkg/cahoots_wasm.js';
 import { setupChannels, routeChannels, loadChannels } from './channels.js';
+import { showWelcome } from './welcome.js';
 
 const CLAIM = {
   TRNG: 'Secure against unlimited computing power, as long as no pad byte is reused.',
   CSPRNG: 'Computationally secure. No hardware randomness went into this pad.',
 };
 const ERRORS = {
-  reuse: 'Possible pad reuse: this range was already spent. Refused, nothing changed.',
-  tag: 'Integrity check failed. Refused, nothing spent.',
+  reuse: 'Possible pad reuse. This part of the shared secret has already been used. The message was not opened.',
+  tag: 'The message could not be verified. It was not opened, and none of the shared secret was used.',
   'wrong-circle': 'This message belongs to a different circle.',
-  'out-of-range': 'The message points outside the pad.',
-  exhausted: 'Your share of the pad is used up. Hold a new ceremony.',
+  'out-of-range': 'This message refers to a part of the shared secret that this circle does not have.',
+  exhausted: 'Your share of the one-time message secret is used up. Create a new circle together to send more messages this way.',
   base64url: 'That is not a Cahoots message.',
   replay: 'Already received.',
   'too-far-ahead': 'Too many messages were skipped before this one.',
   'not-synced': 'Still reading the relay. Try again in a moment.',
-  'unknown-epoch': 'This message is from an epoch whose keys this device no longer keeps.',
-  'pad-epoch': 'This message uses the old pad-keyed chat, which this app no longer reads.',
-  'no-root': 'This circle was made before root epochs. Run a new ceremony to chat.',
+  'unknown-epoch': 'This device no longer has the encryption keys needed to read this message.',
+  'pad-epoch': 'This message uses an older chat format that this app no longer supports.',
+  'no-root': 'This circle uses an older format that doesn’t support chat. Create a new circle together to start chatting.',
   version: 'Not a chat message.',
-  length: 'Malformed message.',
-  'wrong-phase': 'Not yet. Every commitment has to be in first.',
+  length: 'This message is incomplete or damaged.',
+  'wrong-phase': 'Scan everyone’s step 1 code before continuing.',
   'bad-tier': 'A member declared a device tier this app does not know. Ask them to update.',
   'bad-seed': 'This phone drew an unusable signing key. Try again.',
   aborted: 'This ceremony was stopped.',
   'not-an-offer': 'That is not a host\'s code.',
-  offer: 'That host\'s code does not read. Scan it again.',
+  offer: 'The host’s code could not be read. Scan it again.',
   'host-seat': 'Seat 1 is the host\'s. Pick another seat.',
   'not-a-join-code': 'That is not a joiner\'s code.',
   'other-ceremony': 'That code is for another ceremony.',
@@ -46,7 +47,7 @@ const friendly = (e) => {
   if (ERRORS[s]) return ERRORS[s];
   const m = s.match(/^(conflicting-commit|commit-mismatch|bad-index):(\d+)$/);
   if (m && m[1] === 'conflicting-commit') return `Two different people are using seat ${Number(m[2]) + 1}. One of them needs to leave and rejoin with another seat.`;
-  if (m && m[1] === 'commit-mismatch') return `Seat ${Number(m[2]) + 1}'s reveal does not match their commitment.`;
+  if (m && m[1] === 'commit-mismatch') return `Seat ${Number(m[2]) + 1}’s step 2 data does not match its setup code. Start a new ceremony together.`;
   if (m && m[1] === 'bad-index') return 'That code is for a different group size.';
   const m2 = s.match(/^(corrupted|bad-key|bad-attestation):(\d+)$/);
   if (m2 && m2[1] === 'corrupted') return 'That scan came through garbled. Scan it again.';
@@ -55,14 +56,14 @@ const friendly = (e) => {
   return s;
 };
 const CHAT_LABEL = 'End-to-end encrypted';
-const CHAT_CLAIM = 'The circle root from your ceremony seeds the keys and ChaCha20-Poly1305 encrypts. The relay sees ciphertext and traffic shape only.';
+const CHAT_CLAIM = 'Messages are encrypted before they leave your device. The relay delivers them without being able to read them. It can still see when messages are sent.';
 // The relay the app ships with. A circle can point at another one from the chat menu.
 const DEFAULT_RELAY = 'https://relay.cahoots.network';
 const POLL_WAIT_MS = 25000;
 const CEREMONY_POLL_MS = 2000; // a ceremony through the relay reads the relay every 2 seconds
-const LOST = 'This ceremony was lost when the app closed. Everyone starts over with a new code.';
+const LOST = 'Setup couldn’t be restored after Cahoots closed. Ask everyone to start a new ceremony and scan the new code.';
 /** A ceremony in memory is gone after a reload or a close. Joining it again cannot work. */
-const ceremonyLost = () => screen({ title: 'Ceremony lost', body: [h('div', {}, h('h1', {}, 'This ceremony is gone.'), h('p', { class: 'lead' }, LOST), h('p', { class: 'muted' }, 'Nothing was kept.'))], actions: [btn('Back to start', () => go('#/'), 'primary')] });
+const ceremonyLost = () => screen({ title: 'Ceremony lost', body: [h('div', {}, h('h1', {}, 'This setup session has ended'), h('p', { class: 'lead' }, LOST), h('p', { class: 'muted' }, 'Nothing was kept.'))], actions: [btn('Back to start', () => go('#/'), 'primary')] });
 const OFFER_PREFIX = 'cahoots:ceremony:v1:';
 const JOINED_PREFIX = 'cahoots:joined:v1:';
 const QR_PACKET = 300;   // payload bytes per animated frame: ~77 modules per side, readable by phone cameras
@@ -72,9 +73,9 @@ const SITE = 'https://cahoots.network';
 /** Seconds a phone needs to scan a reveal of this size, allowing for missed frames. */
 const scanSeconds = (padLen) => Math.round((Math.ceil(padLen / QR_PACKET) / QR_FPS) * 1.4);
 const SIZES = [
-  [16384, 'Small', '16 KiB · about 100 messages · a few seconds to scan'],
-  [65536, 'Medium', '64 KiB · a few hundred messages · about half a minute to scan'],
-  [262144, 'Large', '256 KiB · a couple thousand messages · about two minutes to scan'],
+  [16384, 'Small', '16 KiB of shared secret. Quickest to exchange with codes.'],
+  [65536, 'Medium', '64 KiB of shared secret. Allow about half a minute per scan with codes.'],
+  [262144, 'Large', '256 KiB of shared secret. Allow about two minutes per scan with codes.'],
 ];
 
 // ---------------------------------------------------------------- storage (IndexedDB)
@@ -235,11 +236,16 @@ function fileBtn(label, onText) {
   const f = h('input', { type: 'file', style: 'display:none', onchange: async (e) => { if (e.target.files[0]) onText(await e.target.files[0].text()); e.target.value = ''; } });
   return h('div', {}, f, btn(label, () => f.click()));
 }
-const aboutSheet = () => sheet(
+const openGuide = () => showWelcome({ h, screen, btn, link }, () => {
+  localStorage.setItem('cahoots.welcomeSeen', '1');
+  route();
+}, false);
+const aboutSheet = () => sheet(close => h('div', { class: 'stack' },
   h('h2', {}, 'A home for your circles'),
   h('p', { class: 'muted' }, 'Meet in person to create a circle, then come back here to chat, check someone on a call, or exchange a private note. No account is needed.'),
+  btn('How Cahoots works', () => { close(); openGuide(); }),
   h('p', { class: 'muted' }, 'Your circles, keys, and message history are saved in this browser. A relay delivers encrypted chat without receiving the keys. Clearing browser data can remove your circles.'),
-  h('a', { class: 'btn', href: SITE, target: '_blank', rel: 'noopener' }, 'Read more at cahoots.network'));
+  h('a', { class: 'btn', href: SITE, target: '_blank', rel: 'noopener' }, 'Read more at cahoots.network')));
 
 // ---------------------------------------------------------------- QR scanning (camera)
 let scanner = null;
@@ -323,7 +329,7 @@ function fountainReceiver(onDone, hint, onTagged = null) {
   let dec = new FountainDecoder();
   const bar = h('progress', { value: 0, max: 1 });
   const st = status();
-  st.textContent = onTagged ? '' : 'Hold steady on the animation. The bar fills as frames arrive.';
+  st.textContent = onTagged ? '' : 'Keep the animated code in view until the progress bar fills.';
   const feed = (text) => {
     if (onTagged && (text.startsWith('cahoots-') || text.startsWith(OFFER_PREFIX))) { onTagged(text); return; }
     try {
@@ -423,7 +429,7 @@ function circleTools(circle) {
     toolLink(`#/c/${id}/send`, '↗', 'Send a message', 'Encrypt a short note to share by code or text.'),
     toolLink(`#/c/${id}/read`, '↙', 'Read a message', 'Open a note from someone in this circle.'),
     toolLink(`#/c/${id}/history`, '≡', 'History', 'Notes sent and read on this device.'),
-    toolLink(`#/ch/new/${id}`, '◎', 'Start a channel', 'Post to anyone with a link. Let people in to post.'),
+    toolLink(`#/ch/new/${id}`, '◎', 'Start a channel', 'Share messages beyond your circle. Choose who can read and post.'),
   ];
 }
 
@@ -436,7 +442,7 @@ async function workspaceScreen(circle, settings, { view = 'conversation', title,
     ...circles.map(c => h('option', { value: c.id, selected: c.id === id }, c.name)));
   const pages = [ ['conversation', '', 'Conversation'], ['people', '/people', 'People'], ['network', '/network', 'Network'] ];
   const navigation = className => h('nav', { class: className, 'aria-label': 'Circle sections' }, ...pages.map(([key, path, name]) => h('a', { href: `#/c/${id}${path}`, 'aria-current': key === view ? 'page' : null }, name)));
-  const details = () => sheet(close => h('div', { class: 'stack' }, h('h2', {}, 'Circle details'), h('p', { class: 'muted' }, `${circle.name()} · ${circle.members()} people · your seat: ${circle.my_slice() + 1}`), budget(circle), h('p', { class: 'muted' }, 'This browser holds your circle’s secret. Chat history stays here. Browser erasure is best effort.'), copyBtn(id, 'Copy circle ID'), btn('Remove circle from this browser', async () => {
+  const details = () => sheet(close => h('div', { class: 'stack' }, h('h2', {}, 'Circle details'), h('p', { class: 'muted' }, `${circle.name()} · ${circle.members()} people · your seat: ${circle.my_slice() + 1}`), budget(circle), h('p', { class: 'muted' }, 'Your circle’s keys and history are saved in this browser. Clearing browser data can remove access. Deleting a circle may leave traces in browser storage.'), copyBtn(id, 'Copy circle ID'), btn('Remove circle from this browser', async () => {
     if (!confirm('Remove this circle from this browser? Other members keep theirs.')) return;
     live.delete(id); chatDrafts.delete(id); await deleteCircle(id); close(); go('#/');
   }, 'danger')));
@@ -463,19 +469,19 @@ async function screenNetwork(id) {
   await workspaceScreen(circle, settings, { view: 'network', title: 'Network', isCurrent: () => generation === routeGeneration, content: [
     h('header', { class: 'workspace-heading' }, h('div', {}, h('h1', {}, 'Network'), h('p', {}, 'Private connections between machines in this circle.')),
       h('a', { class: 'btn primary compact-button', href: `${SITE}/docs/#/adapters`, target: '_blank', rel: 'noopener' }, 'Set up WireGuard ↗')),
-    h('div', { class: 'network-notice' }, h('strong', {}, 'Desktop integration'), h('span', {}, 'The WireGuard CLI is available. This browser does not yet load its peer list or control tunnels.')),
+    h('div', { class: 'network-notice' }, h('strong', {}, 'Desktop integration'), h('span', {}, 'Use the desktop command-line tool to manage WireGuard connections. This browser cannot show or control those connections yet.')),
     h('div', { class: 'network-table-wrap' }, h('table', { class: 'network-table' }, h('thead', {}, h('tr', {}, ...['Machine', 'Address', 'Connection', 'Managed by'].map(name => h('th', { scope: 'col' }, name)))),
-      h('tbody', {}, h('tr', {}, h('td', { colspan: 4 }, h('div', { class: 'network-empty' }, h('span', { 'aria-hidden': 'true' }, '⌁'), h('h2', {}, 'No peer data in this browser'), h('p', {}, 'Use the desktop tool to announce machines and exchange tunnel keys. No machines or connection states are inferred from circle membership.'))))))),
+      h('tbody', {}, h('tr', {}, h('td', { colspan: 4 }, h('div', { class: 'network-empty' }, h('span', { 'aria-hidden': 'true' }, '⌁'), h('h2', {}, 'Connections aren’t shown here yet'), h('p', {}, 'Use the desktop tool to add machines and exchange connection keys. Joining this circle does not automatically connect a machine.'))))))),
     h('section', { class: 'network-setup' }, h('h2', {}, 'Start with the desktop tool'), h('ol', {},
-      h('li', {}, h('b', {}, 'Set up the circle provider.'), h('p', {}, 'The CLI needs its own provider configuration. A saved browser circle is not automatically connected to it.')),
+      h('li', {}, h('b', {}, 'Set up the circle provider.'), h('p', {}, 'Follow the integration guide to connect the desktop tool to your circle. Saving a circle in this browser does not configure the tool.')),
       h('li', {}, h('b', {}, 'Announce machines and exchange keys.'), h('p', {}, 'Use cahoots-wg on each machine. The integration guide covers the available commands.')),
-      h('li', {}, h('b', {}, 'Manage tunnels on those machines.'), h('p', {}, 'Browser-based device enrollment and live tunnel controls are still to be built.')))),
+      h('li', {}, h('b', {}, 'Manage tunnels on those machines.'), h('p', {}, 'Start and manage connections with the desktop tool. Browser controls are not available yet.')))),
   ] });
 }
 
 function screenNew() {
   const params = { n: 2, pad_len: 65536, name: '', agent_seat: false, via: 'relay' };
-  const VIA = { relay: 'Everyone scans one code from your screen. The rest goes through the relay.', codes: 'Everyone shows and scans codes. No network is needed.' };
+  const VIA = { relay: 'Everyone scans your code, then you scan theirs. The relay handles the remaining steps over the internet.', codes: 'Everyone shows and scans codes. No network is needed.' };
   const viaHint = h('span', { class: 'hint' }, VIA.relay);
   const name = input({ type: 'text', placeholder: 'e.g. sf-meetup', maxlength: '64', autocomplete: 'off', autocapitalize: 'off', oninput: (e) => { params.name = e.target.value; } });
   const sizeHint = h('span', { class: 'hint' }, SIZES[1][2]);
@@ -487,8 +493,8 @@ function screenNew() {
         h('h1', {}, 'Bring your people together.'),
         h('p', { class: 'lead' }, 'Give your circle a name, then exchange codes with the people beside you.'),
         field('Name', name),
-        field('People in the room', stepper(2, 8, params.n, (v) => { params.n = v; }), 'Count every device that will hold the secret, including yours.'),
-        h('div', { class: 'field' }, h('label', {}, 'How to hold the ceremony'), seg([['relay', 'Through the relay'], ['codes', 'Codes only']], params.via, (v) => { params.via = v; viaHint.textContent = VIA[v]; }), viaHint),
+        field('People in the room', stepper(2, 8, params.n, (v) => { params.n = v; }), 'Count everyone joining on a separate device, including you. Each device gets a numbered seat.'),
+        h('div', { class: 'field' }, h('label', {}, 'How to connect'), seg([['relay', 'Through the relay'], ['codes', 'Codes only']], params.via, (v) => { params.via = v; viaHint.textContent = VIA[v]; }), viaHint),
         h('div', { class: 'field' }, h('label', {}, 'Secret size'), seg(SIZES.map(([v, l]) => [v, l]), params.pad_len, (v) => { params.pad_len = v; sizeHint.textContent = SIZES.find((s) => s[0] === v)[2]; }), sizeHint),
         h('details', { class: 'more' }, h('summary', {}, 'Advanced'),
           h('label', { class: 'toggle' }, h('span', {}, h('b', {}, 'Invite a hosted software member'), h('br'), h('span', { class: 'muted' }, 'A program in a secure enclave gets a seat and a copy of the secret. Leave off for a people-only circle.')), h('input', { type: 'checkbox', onchange: (e) => { params.agent_seat = e.target.checked; } }))),
@@ -496,7 +502,7 @@ function screenNew() {
     ],
     actions: [btn('Continue', () => {
       const n = params.name.trim();
-      if (!n) { err.textContent = 'Give the circle a name.'; name.focus(); return; }
+      if (!n) { err.textContent = 'Enter a name for your circle.'; name.focus(); return; }
       pendingOffer = null; pendingCommits = [];
       go(`#/ceremony/${paramsHash({ ...params, name: n })}/pick`);
     }, 'primary')],
@@ -519,7 +525,7 @@ function screenJoin() {
     try {
       if (!t) throw 'That is not a Cahoots code.';
       if (t.kind === 'reveal' || t.kind === 'attest') throw `That is a step-${t.kind === 'reveal' ? 2 : 3} animation. Join from someone still on step 1, or from the host.`;
-      if (t.kind === 'commit' && !t.params) throw 'That code has no setup in it. Scan the host instead.';
+      if (t.kind === 'commit' && !t.params) throw 'This code doesn’t include the setup information. Scan the host’s step 1 code instead.';
       const params = paramsFromBytes(t.kind === 'params' ? t.bytes : t.params);
       if (t.kind === 'commit') pendingCommits = [{ index: t.index, bytes: new Uint8Array(t.bytes) }];
       pendingOffer = null;
@@ -547,7 +553,7 @@ function screenPick(params) {
   let src = 'csprng', extra = null;
   const err = status();
   const srcLine = h('span', { class: 'hint' }, 'Randomness: this device. The circle is labelled CSPRNG.');
-  const seats = seg(Array.from({ length: params.n }, (_, i) => [i, i === 0 ? '1 · leader' : String(i + 1), taken.has(i)]), idx, (v) => { idx = Number(v); });
+  const seats = seg(Array.from({ length: params.n }, (_, i) => [i, i === 0 ? '1 · host' : String(i + 1), taken.has(i)]), idx, (v) => { idx = Number(v); });
   const hardwareSheet = () => sheet((close) => {
     const file = h('input', { type: 'file', style: 'display:none', onchange: async (e) => {
       if (!e.target.files[0]) return;
@@ -573,7 +579,7 @@ function screenPick(params) {
         params.agent_seat ? notice('This circle invites a hosted software member. It will hold a copy of the secret in a secure enclave.') : null,
         srcLine, err),
     ],
-    actions: [btn('Make my contribution', async () => {
+    actions: [btn('Join this circle', async () => {
       try {
         if (extra && extra.length !== params.pad_len) throw `The hardware file must be exactly ${params.pad_len} bytes, got ${extra.length}.`;
         const contribution = new Uint8Array(params.pad_len);
@@ -610,15 +616,15 @@ function screenPick(params) {
 /** For a member still behind: our reveal (step 2) or our signature (step 3), as an animation and as text. */
 function showRevealSheet(me, reveal) {
   const t = enc.reveal(me, reveal);
-  sheet(h('h2', {}, 'Someone still on step 2? Show them this.'), animatedQr(packReveal(reveal), `seat ${me + 1} · step 2`), copyBtn(t, 'Copy my reveal'), downloadBtn(`reveal-${me + 1}.txt`, t));
+  sheet(h('h2', {}, 'Someone still on step 2? Show them this.'), animatedQr(packReveal(reveal), `seat ${me + 1} · step 2`), copyBtn(t, 'Copy my step 2 code'), downloadBtn(`reveal-${me + 1}.txt`, t));
 }
 function showSignSheet(me, sig, reveal) {
   const t = enc.attest(me, sig);
   sheet((close) => h('div', { class: 'stack' },
     h('h2', {}, 'Someone still on step 3? Show them this.'), animatedQr(packAttest(me, sig), `seat ${me + 1} · step 3`), copyBtn(t), downloadBtn(`sign-${me + 1}.txt`, t),
-    link('They need my reveal instead', () => { close(); showRevealSheet(me, reveal); })));
+    link('They need my step 2 code instead', () => { close(); showRevealSheet(me, reveal); })));
 }
-const leave = () => { if (confirm('Leave the ceremony? Nothing is kept.')) { ceremony = null; go('#/'); } };
+const leave = () => { if (confirm('Leave setup? This device’s progress will be discarded. This setup cannot be resumed. Ask everyone to start a new ceremony.')) { ceremony = null; go('#/'); } };
 const STEPS = { commit: 'Step 1 of 4 · Meet the group', reveal: 'Step 2 of 4 · Exchange secrets', attest: 'Step 3 of 4 · Confirm members' };
 
 /** Commit, reveal and sign: one stage with Show and Scan modes, member chips that update in place. */
@@ -640,7 +646,7 @@ function screenRun(params) {
   const corePhase = c.phase();
   if (corePhase === 'aborted') {
     ceremony = null;
-    screen({ title: 'Ceremony stopped', body: [h('div', {}, h('h1', {}, 'A reveal did not match its commitment.'), h('p', { class: 'lead' }, 'Nothing was kept. Either someone\'s contribution changed after they committed, or a code was corrupted. Start again from the beginning.'))], actions: [btn('Back to start', () => go('#/'), 'primary')] });
+    screen({ title: 'Ceremony stopped', body: [h('div', {}, h('h1', {}, 'The code check failed. Setup has stopped.'), h('p', { class: 'lead' }, 'The exchanged data didn’t match. This circle was not saved. Ask everyone to start a new ceremony.'))], actions: [btn('Back to start', () => go('#/'), 'primary')] });
     return;
   }
   // Receiving everyone else's reveal says nothing about who has scanned ours.
@@ -659,7 +665,7 @@ function screenRun(params) {
   const taskDetail = h('span');
   const waiting = h('div', { class: 'next ceremony-next' }, taskTitle, taskDetail);
   const received = h('p', { class: 'ceremony-progress', role: 'status', 'aria-live': 'polite' });
-  const revealDone = btn(params.n > 2 ? 'Everyone has scanned my reveal' : 'They have scanned my reveal', () => {
+  const revealDone = btn(params.n > 2 ? 'Everyone has scanned my step 2 code' : 'They have scanned my step 2 code', () => {
     if (!['attest', 'complete'].includes(c.phase())) return;
     ceremony.revealShared = true;
     rerender();
@@ -670,10 +676,10 @@ function screenRun(params) {
     chips.replaceChildren(...Array.from({ length: params.n }, (_, i) =>
       h('span', { class: `chip${i === me ? ' me' : missing.has(i) ? '' : ' on'}` }, i === me ? `you · ${i + 1}` : `${i + 1}${missing.has(i) ? '' : ' ✓'}`)));
     const left = [...missing].filter((i) => i !== me);
-    const noun = phase === 'commit' ? 'setup codes' : phase === 'reveal' ? 'reveals' : 'signatures';
+    const noun = phase === 'commit' ? 'setup codes' : phase === 'reveal' ? 'step 2 codes' : 'signatures';
     received.textContent = `Received ${params.n - 1 - left.length} of ${params.n - 1} ${noun}`;
     revealDone.disabled = !revealHandoff;
-    revealDone.textContent = revealHandoff ? (params.n > 2 ? 'Everyone has scanned my reveal' : 'They have scanned my reveal') : 'Scan the remaining reveals to continue';
+    revealDone.textContent = revealHandoff ? (params.n > 2 ? 'Everyone has scanned my step 2 code' : 'They have scanned my step 2 code') : 'Scan the remaining step 2 codes to continue';
     if (!left.length) {
       taskTitle.textContent = phase === 'reveal' ? 'Your turn to show' : 'Ready for the next step';
       taskDetail.textContent = phase === 'reveal'
@@ -682,7 +688,7 @@ function screenRun(params) {
       return;
     }
     const who = left.map(seatName).join(', ');
-    taskTitle.textContent = phase === 'commit' ? 'Meet the other devices' : phase === 'reveal' ? 'Collect their secret contributions' : 'Confirm who’s in the circle';
+    taskTitle.textContent = phase === 'commit' ? 'Meet the other devices' : phase === 'reveal' ? 'Exchange step 2 codes' : 'Confirm who’s in the circle';
     taskDetail.textContent = phase === 'commit'
       ? `Scan the setup codes from ${who}. They also need to scan yours. You can take turns in any order.`
       : phase === 'reveal'
@@ -695,14 +701,14 @@ function screenRun(params) {
     try {
       if (!t || t.kind === 'params') return;
       if (t.index === me) { st.textContent = `That is seat ${me + 1}'s, which is yours. If someone else chose seat ${me + 1} too, one of you must leave and rejoin with another seat.`; return; }
-      if (t.kind === 'commit') { c.add_commitment(t.index, t.bytes); got(t.index, 'commitment'); }
-      else if (t.kind === 'reveal') { c.add_reveal(t.index, t.bytes); got(t.index, 'reveal'); }
+      if (t.kind === 'commit') { c.add_commitment(t.index, t.bytes); got(t.index, 'setup code'); }
+      else if (t.kind === 'reveal') { c.add_reveal(t.index, t.bytes); got(t.index, 'step 2 code'); }
       else if (t.kind === 'attest') {
         if (c.phase() !== 'attest') {
           // Someone a step ahead. Keep the signature; it is checked once every reveal is in.
           ceremony.attests = ceremony.attests.filter((p) => p.index !== t.index).concat({ index: t.index, bytes: new Uint8Array(t.bytes) });
           buzz();
-          st.textContent = `Seat ${t.index + 1} is already on step 3. Their signature is saved.${c.missing_reveals().includes(t.index) ? ' You still need their step-2 reveal. Ask them to select “Someone still needs my reveal”.' : ' Keep collecting the reveals listed above.'}`;
+          st.textContent = `Seat ${t.index + 1} is already on step 3. Their signature is saved.${c.missing_reveals().includes(t.index) ? ' You still need their step 2 code. Ask them to select “Someone still needs my step 2 code”.' : ' Keep scanning the step 2 codes listed above.'}`;
           return;
         }
         c.add_attestation(t.index, t.bytes); got(t.index, 'signature');
@@ -730,13 +736,13 @@ function screenRun(params) {
     const sig = c.attestation();
     text = enc.attest(me, sig);
     fileName = `sign-${me + 1}.txt`;
-    show = h('div', { class: 'stack' }, animatedQr(packAttest(me, sig), `seat ${me + 1} · step 3`), link('Someone still needs my reveal', () => showRevealSheet(me, reveal)));
+    show = h('div', { class: 'stack' }, animatedQr(packAttest(me, sig), `seat ${me + 1} · step 3`), link('Someone still needs my step 2 code', () => showRevealSheet(me, reveal)));
   }
   const revealText = phase === 'attest' ? enc.reveal(me, reveal) : null;
   const desktop = matchMedia('(min-width: 960px)').matches;
   const showWrap = h('div', { class: 'half', style: desktop || ceremony.mode === 'show' ? '' : 'display:none' }, h('p', { class: 'eyebrow' }, 'Show'), show);
   const scanWrap = h('div', { class: 'half', style: desktop || ceremony.mode === 'scan' ? '' : 'display:none' }, h('p', { class: 'eyebrow' }, 'Scan'), desktop || ceremony.mode === 'scan' ? scanStage() : null);
-  const modeSeg = seg([['show', phase === 'reveal' ? 'Show my reveal' : 'Show my code'], ['scan', phase === 'reveal' ? 'Scan their reveals' : 'Scan their codes']], ceremony.mode, (v) => {
+  const modeSeg = seg([['show', phase === 'reveal' ? 'Show my step 2 code' : 'Show my code'], ['scan', phase === 'reveal' ? 'Scan step 2 codes' : 'Scan their codes']], ceremony.mode, (v) => {
     ceremony.mode = v;
     showWrap.style.display = v === 'show' ? '' : 'none';
     scanWrap.style.display = v === 'scan' ? '' : 'none';
@@ -749,7 +755,7 @@ function screenRun(params) {
     menu: () => sheet(
       h('h2', {}, 'Share yours another way'),
       copyBtn(text), downloadBtn(fileName, text),
-      revealText ? [h('h2', {}, 'Your reveal, for anyone still on step 2'), copyBtn(revealText, 'Copy my reveal'), downloadBtn(`reveal-${me + 1}.txt`, revealText)] : null,
+      revealText ? [h('h2', {}, 'Your step 2 code, for anyone who still needs it'), copyBtn(revealText, 'Copy my step 2 code'), downloadBtn(`reveal-${me + 1}.txt`, revealText)] : null,
       h('h2', {}, 'Receive theirs another way'),
       btn('Paste a code', () => pasteSheet(`cahoots-${phase}:…`, feedText)),
       fileBtn('Load a file', feedText),
@@ -776,7 +782,7 @@ function screenRelay(params) {
   const received = h('p', { class: 'ceremony-progress', role: 'status', 'aria-live': 'polite' });
   const step = h('p', { class: 'next' });
   const stop = () => { cer.run++; };
-  const leaveRelay = () => { if (confirm('Leave the ceremony? Nothing is kept.')) { stop(); ceremony = null; go('#/'); } };
+  const leaveRelay = () => { if (confirm('Leave setup? This device’s progress will be discarded. This setup cannot be resumed. Ask everyone to start a new ceremony.')) { stop(); ceremony = null; go('#/'); } };
   const host = me === 0;
   // What decides the layout. A change in it draws the screen again.
   const shape = () => `${c.phase()}|${c.needs_continue()}|${!!c.join_code()}`;
@@ -868,7 +874,7 @@ function screenRelay(params) {
     const phase = c.phase();
     if (phase === 'aborted') {
       stop(); ceremony = null;
-      screen({ title: 'Ceremony stopped', body: [h('div', {}, h('h1', {}, 'A reveal did not match its commitment.'), h('p', { class: 'lead' }, 'Nothing was kept. Someone outside the room may have the code. Everyone starts over with a new code.'))], actions: [btn('Back to start', () => go('#/'), 'primary')] });
+      screen({ title: 'Ceremony stopped', body: [h('div', {}, h('h1', {}, 'The code check failed. Setup has stopped.'), h('p', { class: 'lead' }, 'This circle was not saved. Someone outside the group may have the setup code. Ask everyone to start a new ceremony.'))], actions: [btn('Back to start', () => go('#/'), 'primary')] });
       return;
     }
     // Every signature is in, and ours is on the relay for the others.
@@ -894,11 +900,11 @@ function screenSignDone(params) {
     back: leave,
     menu: () => sheet(
       h('h2', {}, 'Share your signature another way'), copyBtn(text), downloadBtn(`sign-${me + 1}.txt`, text),
-      h('h2', {}, 'Your reveal, for anyone still on step 2'), copyBtn(revealText, 'Copy my reveal'), downloadBtn(`reveal-${me + 1}.txt`, revealText)),
+      h('h2', {}, 'Your step 2 code, for anyone who still needs it'), copyBtn(revealText, 'Copy my step 2 code'), downloadBtn(`reveal-${me + 1}.txt`, revealText)),
     body: [
       next(`You have every signature. Before comparing words, make sure ${others} ${params.n > 2 ? 'have' : 'has'} scanned yours too. Keep this code on screen until they confirm.`),
       animatedQr(packAttest(me, sig), `seat ${me + 1} · step 3`),
-      link('Someone still needs my reveal', () => showRevealSheet(me, reveal)),
+      link('Someone still needs my step 2 code', () => showRevealSheet(me, reveal)),
     ],
     actions: [btn(params.n > 2 ? 'Everyone has scanned it' : 'They have scanned it', () => screenWords(), 'primary')],
   });
@@ -920,7 +926,7 @@ function screenWords() {
     title: 'Step 4 of 4 · Compare words', sub: params.name,
     menu: relay ? null : showSign,
     body: [
-      next('Read all six words aloud together. Check your own screen: every word must match, in the same order. If one differs, everyone starts again.'),
+      next('One person reads aloud while everyone checks their own screen. Confirm only when all six words match on every device, in the same order. If any differ, start a new ceremony together.'),
       h('div', { class: 'panel' },
         h('div', { class: 'cap' }, h('span', {}, params.name), h('span', {}, `${label} · ${id.slice(0, 8)}`)),
         h('div', { class: 'words' }, ...words.map((w, i) => h('div', {}, h('small', {}, String(i + 1)), w)))),
@@ -931,7 +937,7 @@ function screenWords() {
         // The circle chats through the relay its ceremony used.
         if (ceremonyRelay && ceremonyRelay !== DEFAULT_RELAY) await saveSettings({ ...(await loadSettings(id)), id, relay: ceremonyRelay });
         toast('Your circle is ready.', 'ok'); go(`#/c/${id}`); }, 'primary'),
-      btn('They differ · start over', () => { if (confirm('Throw this away and start again?')) go('#/'); }, 'danger'),
+      btn('They differ · start over', () => { if (confirm('Discard this setup and start again?')) go('#/'); }, 'danger'),
       relay ? null : link('Someone still needs my signature', showSign),
     ],
   });
@@ -987,7 +993,7 @@ async function screenSend(id) {
     menu: () => sheet(
       h('h2', {}, 'Message options'),
       field('Kind', seg(TYPES.map((t, i) => [i, t]), type, (v) => { type = Number(v); }), 'Text is the normal kind. The others are for programs that read the feed.'),
-      h('label', { class: 'toggle' }, h('span', {}, h('b', {}, 'Hide the length'), h('br'), h('span', { class: 'muted' }, 'Pads to 32, 64, 128, or 256 bytes so the size gives nothing away.')), h('input', { type: 'checkbox', checked: padOn, onchange: (e) => { padOn = e.target.checked; } }))),
+      h('label', { class: 'toggle' }, h('span', {}, h('b', {}, 'Hide the length'), h('br'), h('span', { class: 'muted' }, 'Rounds the message size up to a fixed bucket. This hides the exact length, but not the approximate size.')), h('input', { type: 'checkbox', checked: padOn, onchange: (e) => { padOn = e.target.checked; } }))),
     body: [
       h('div', {},
         h('h1', {}, 'Write it.'),
@@ -1072,7 +1078,7 @@ async function screenHello(id, peerStr) {
   const others = [...Array(circle.members()).keys()].filter((s) => s !== me);
   const tooOld = () => screen({
     title: 'Hello words', sub: circle.name(), back: `#/c/${id}`,
-    body: [h('div', { class: 'empty' }, h('h1', {}, 'This circle is from before hello words.'), h('p', { class: 'lead' }, 'The words come from keys made during the ceremony. Run a new ceremony and they will be there.'))],
+    body: [h('div', { class: 'empty' }, h('h1', {}, 'Hello words aren’t available for this circle'), h('p', { class: 'lead' }, 'This circle was created with an older version. Create a new circle together to use hello words.'))],
     actions: [btn('Back', () => go(`#/c/${id}`), 'primary')],
   });
   if (!others.some((s) => circle.has_pair_key(s))) return tooOld();
@@ -1083,7 +1089,7 @@ async function screenHello(id, peerStr) {
       body: [
         next('Who are you talking to?'),
         h('div', { class: 'rows' }, ...others.map((s) => h('a', { class: 'row-item', href: `#/c/${id}/hello/${s}` },
-          h('div', {}, h('b', {}, nameOf(settings, s)), h('span', {}, circle.has_pair_key(s) ? `hello #${circle.pair_counter(s) + 1}` : 'no key with this seat')),
+          h('div', {}, h('b', {}, nameOf(settings, s)), h('span', {}, circle.has_pair_key(s) ? `hello #${circle.pair_counter(s) + 1}` : 'Hello words unavailable')),
           h('span', { class: 'arrow' }, '›')))),
       ],
     });
@@ -1102,8 +1108,8 @@ async function screenHello(id, peerStr) {
         const numIn = input({ type: 'number', value: String(n), min: '1', max: '4294967295', inputmode: 'numeric' });
         return h('div', { class: 'stack' },
           h('h2', {}, 'How hello words work'),
-          h('p', { class: 'muted' }, `Only your two devices can make these words: they come from a key that you and ${who()} made together during the ceremony. A voice clone cannot say them. Each hello number has its own words, and every word is said once.`),
-          h('p', { class: 'muted' }, 'If you are on different numbers, set the same one here on both devices.'),
+          h('p', { class: 'muted' }, `These words come from a key shared by your two devices during setup. Use a fresh hello number for each check. A match checks access to that key, so also make sure you chose the right person’s seat.`),
+          h('p', { class: 'muted' }, 'If the numbers differ, move the lower number forward to match the higher one. Don’t reuse a number from an earlier conversation.'),
           field('Their name on this device', nameIn),
           field('Hello number', numIn),
           btn('Save', async () => {
@@ -1117,16 +1123,16 @@ async function screenHello(id, peerStr) {
           }, 'primary'));
       }),
       body: [
-        next(`Say yours. If ${who()} answers with theirs, it is really them.`),
+        next(`Ask ${who()} to open your seat (seat ${me + 1}) in this circle’s Hello words. Check that both screens show hello ${n}, then take turns reading your own pair.`),
         h('div', { class: 'panel' },
           h('div', { class: 'cap' }, h('span', {}, `${circle.name()} · hello #${n}`), h('span', {}, `seat ${me + 1} ↔ seat ${peer + 1}`)),
           h('div', { class: 'hello' },
-            h('div', { class: 'who' }, 'You say'), h('div', { class: 'pair' }, w.mine()),
-            h('div', { class: 'who' }, `${who()} says back`), h('div', { class: 'pair' }, w.theirs()))),
-        h('p', { class: 'muted center' }, 'Something feel off? Both of you tap Next hello. If they cannot say the new words, that is not them.'),
+            h('div', { class: 'who' }, 'You say aloud'), h('div', { class: 'pair' }, w.mine()),
+            h('div', { class: 'who' }, `Listen for their reply. Don’t read this pair to them.`), h('div', { class: 'pair' }, w.theirs()))),
+        h('p', { class: 'muted center' }, 'If both pairs match, each of you taps Next hello to prepare fresh words for next time. If they don’t match, check the circle, seat, and number. Stop the check if they still differ.'),
       ],
       actions: [
-        btn('Next hello', async () => { circle.next_hello(peer); await saveCircle(circle); buzz(); toast(`Now on hello #${circle.pair_counter(peer) + 1}. Make sure ${who()} moves too.`); render(); }, 'primary'),
+        btn('Next hello', async () => { if (!confirm('Move to the next hello? This changes only this device. Ask the other person to advance too, unless you are catching up to their number.')) return; circle.next_hello(peer); await saveCircle(circle); buzz(); toast(`Ready for hello ${circle.pair_counter(peer) + 1}. Ask ${who()} to move to this number too.`); render(); }, 'primary'),
       ],
     });
   };
@@ -1170,7 +1176,7 @@ async function screenChat(id) {
     const relayIn = input({ type: 'url', value: settings.relay, placeholder: 'https://relay.example.com', autocapitalize: 'off', autocomplete: 'off' });
     return h('div', { class: 'stack' },
       h('h2', {}, 'Relay'),
-      h('p', { class: 'muted' }, `Messages travel through a relay that every member can reach. It only ever sees encrypted messages. The app ships with ${DEFAULT_RELAY.replace('https://', '')}. Every member of this circle must use the same relay, so change it together.`),
+      h('p', { class: 'muted' }, `A relay is the server that delivers your encrypted messages. It cannot read them. Cahoots uses ${DEFAULT_RELAY.replace('https://', '')} by default. If you change this address, everyone in the circle must switch to the same address.`),
       field('Relay address', relayIn),
       btn('Save and connect', async () => { settings.relay = relayIn.value.trim() || DEFAULT_RELAY; await saveSettings({ ...settings, id }); close(); chatRun++; screenChat(id); }, 'primary'),
       settings.relay !== DEFAULT_RELAY ? btn('Use the default relay', async () => { settings.relay = DEFAULT_RELAY; await saveSettings({ ...settings, id }); close(); chatRun++; screenChat(id); }) : null);
@@ -1270,7 +1276,7 @@ async function screenChat(id) {
     st,
     !relayBase() ? null
       : circle.has_root() ? h('div', { class: 'dashboard-composer composer' }, inp, sendBtn)
-      : h('p', { class: 'muted' }, 'This circle was made before root epochs. Run a new ceremony to chat.'));
+      : h('p', { class: 'muted' }, 'This circle uses an older format that doesn’t support chat. Create a new circle together to start chatting.'));
   const aside = h('aside', { class: 'dashboard-aside' }, h('header', {}, h('h2', {}, 'People'), h('span', {}, String(circle.members()))),
     h('div', { class: 'dashboard-members' }, ...Array.from({ length: circle.members() }, (_, seat) => h('a', { href: `#/c/${id}/people` }, circleMark(id.slice(seat * 2) || id, String(seat + 1)), h('div', {}, h('b', {}, seat === me ? 'You' : nameOf(settings, seat)), h('span', {}, `Seat ${seat + 1}${seat === me ? ' · this device' : ''}`))))),
     h('a', { class: 'manage-people', href: `#/c/${id}/people` }, 'Manage names ↗'),
@@ -1278,9 +1284,9 @@ async function screenChat(id) {
   const workspace = await workspaceScreen(circle, settings, { content: [conversation], aside, isCurrent: () => run === chatRun,
     menu: () => sheet((close) => h('div', { class: 'stack' }, h('h2', {}, 'Conversation settings'), h('p', { class: 'eyebrow' }, CHAT_LABEL), h('p', { class: 'muted' }, CHAT_CLAIM),
       h('p', { class: 'wallet-fine' }, `Current keys: ${epoch()}`),
-      h('p', { class: 'muted' }, 'A sender label identifies a message chain, not proof of which member typed it.'),
-      circle.has_root() ? h('p', { class: 'muted' }, 'Starting a new epoch moves everyone to new keys from here on. It does not protect older messages.') : null,
-      circle.has_root() ? btn('Start a new epoch', async () => { try { circle.rotate_epoch(); await saveCircle(circle); toast('New epoch started', 'ok'); close(); } catch (e) { st.textContent = friendly(e); } }) : null,
+      h('p', { class: 'muted' }, 'Sender names help you follow a conversation. They do not independently verify who typed a message.'),
+      circle.has_root() ? h('p', { class: 'muted' }, 'Renewing the encryption keys changes the keys used for future messages. It does not change the protection of messages already sent.') : null,
+      circle.has_root() ? btn('Renew encryption keys', async () => { try { circle.rotate_epoch(); await saveCircle(circle); toast('Encryption keys renewed', 'ok'); close(); } catch (e) { st.textContent = friendly(e); } }) : null,
       btn('Relay address', () => { close(); relaySheet(); }))),
   });
   if (!workspace) return;
@@ -1291,6 +1297,13 @@ async function screenChat(id) {
 // ---------------------------------------------------------------- router
 async function route() {
   routeGeneration++;
+  if (localStorage.getItem('cahoots.welcomeSeen') !== '1') {
+    showWelcome({ h, screen, btn, link }, () => {
+      localStorage.setItem('cahoots.welcomeSeen', '1');
+      route();
+    });
+    return;
+  }
   const parts = location.hash.replace(/^#\/?/, '').split('/');
   try {
     if (parts[0] === 'new') screenNew();

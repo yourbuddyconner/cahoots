@@ -13,21 +13,25 @@ import {
 let U; // the shared helpers from app.js
 export function setupChannels(ui) { U = ui; }
 
-const LABEL = 'End-to-end encrypted; the relay keeps ciphertext only';
-const LINK_LIMIT = 'Anyone you forward this link to can read until you retire it.';
-const DEAD = 'This link no longer works. Ask for a new one.';
-const WAITING = 'Waiting for the owner to let you post.';
-const CLOSED = 'Only people the owner lets in can read this channel.';
-const NEW_LINK = 'Everyone who should keep reading needs this new link.';
-const OTHER_RELAY = 'This link names a different relay than the one this channel uses.';
-const NEEDS_APPROVALS = 'This circle has more than one member; changing the policy needs their approval, which this version cannot collect yet.';
+const LABEL = 'End-to-end encrypted. The relay cannot read your messages';
+const LINK_LIMIT = 'Anyone with this link can read the channel and forward the link to others. Disable it to stop access through that link.';
+const DEAD = 'You no longer have access through this link. Ask the owner for a new link or an invitation.';
+const WAITING = 'Your request to post is waiting for the owner’s approval.';
+const CLOSED = 'This channel is private. Only people approved by the owner can read it.';
+const NEW_LINK = 'Share the new link with anyone who should keep reading through a link. Approved members keep their access.';
+const OTHER_RELAY = 'This link points to a different relay from the one saved for this channel. Ask the owner to confirm the correct link.';
+const NEEDS_APPROVALS = 'Changing access rules requires approval from other members of this circle. This version cannot collect those approvals yet.';
+const policySentence = line => line
+  .replace('anyone with the link can read and post', 'anyone with the link can read and request permission to post')
+  .replaceAll('members the owner lets in', 'approved members')
+  .split(';').map(clause => { const text = clause.trim(); return text ? text[0].toUpperCase() + text.slice(1).replace(/\.$/, '') + '.' : ''; }).join(' ');
 const POLL_WAIT_MS = 25000;
 const PRESETS = [
-  ['0', 'Announcements', 'Anyone with the link reads. Only you post.'],
-  ['1', 'Announcements with approvals', 'Anyone with the link reads. A post goes out when enough seats of your circle approve it.'],
-  ['2', 'Group chat', 'Anyone with the link reads and can ask to post.'],
-  ['3', 'Members post', 'Anyone with the link reads. People you let in post.'],
-  ['4', 'Closed', 'Only people you let in read and post.'],
+  ['0', 'Announcements', 'Anyone with the link can read. Only you can post.'],
+  ['1', 'Announcements with approvals', 'Anyone with the link can read. Posts need approval from the required number of circle members.'],
+  ['2', 'Group chat', 'Anyone with the link can read and request permission to post.'],
+  ['3', 'Members post', 'Anyone with the link can read. You choose who can post.'],
+  ['4', 'Closed', 'You choose who can read and post. There is no shared link.'],
 ];
 const CH_ERRORS = {
   'needs-approvals': NEEDS_APPROVALS,
@@ -35,20 +39,20 @@ const CH_ERRORS = {
   relay: 'That relay address cannot go in a link.',
   name: 'Give the channel a name of up to 64 bytes.',
   policy: 'This channel lets only the owner post.',
-  evidence: 'This request came with an old link, so it cannot be allowed.',
-  actions: 'A request is let in to read, or to read and post.',
+  evidence: 'This request uses an outdated link. Ask the person to open the current link and request access again.',
+  actions: 'Choose permission to read only or to read and post.',
   signature: 'This does not carry a valid signature.',
   'unknown-epoch': 'This message uses keys this device does not hold.',
   'no-proposal': 'Write the post and propose it first.',
   digest: 'That is not an approval code.',
-  link: 'That link does not read.',
+  link: 'This channel link is invalid. Check that you copied the whole link.',
 };
 const friendly = (e) => {
   if (e instanceof RelayError) return e.message;
   const s = String(e);
   if (CH_ERRORS[s]) return CH_ERRORS[s];
   if (s.startsWith('refused:revoked')) return 'Sent by a member who was removed.';
-  if (s.startsWith('refused:') || s.startsWith('grant:')) return 'Sent by someone without a grant to post.';
+  if (s.startsWith('refused:') || s.startsWith('grant:')) return 'The sender does not have permission to post in this channel.';
   return U.friendly(s);
 };
 
@@ -77,9 +81,9 @@ const relayKey = (relay) => hostOf(/:\/\//.test(relay) ? relay : relayBase(relay
 // ---------------------------------------------------------------- the relay
 export class RelayError extends Error {
   constructor(status, code, reason) {
-    const text = status === 401 ? 'The relay refused the read.'
+    const text = status === 401 ? 'The relay denied access to this channel.'
       : status === 403 ? `The relay refused it (${reason || code}).`
-      : status === 404 ? 'The relay does not hold this channel.'
+      : status === 404 ? 'This channel was not found on the relay. Check the link or ask the owner.'
       : status === 429 ? 'The relay is busy. Try again in a moment.'
       : `The relay answered ${status}${code ? ` (${code})` : ''}.`;
     super(text);
@@ -335,8 +339,8 @@ async function take(e, entry) {
       try { if (!(await fetchEpoch(e, c.epoch, c.deposits))) e.behind = true; } catch { e.retryEpoch = c.epoch; }
     }
     if (c.kind === 'policy') await refreshPolicy(e);
-    if (c.kind === 'revocation') return { ...base, dir: 'note', text: 'The owner removed a member and will start new keys.', type: 'control', ok: true };
-    if (c.kind === 'policy') return { ...base, dir: 'note', text: `The policy changed: ${e.rec.policyLine}.`, type: 'control', ok: true };
+    if (c.kind === 'revocation') return { ...base, dir: 'note', text: 'The owner removed a member. Future messages will use new encryption keys.', type: 'control', ok: true };
+    if (c.kind === 'policy') return { ...base, dir: 'note', text: `The policy changed: ${policySentence(e.rec.policyLine)}`, type: 'control', ok: true };
     return null;
   }
   const raw = r.text();
@@ -392,12 +396,12 @@ async function screenStart(circleId) {
   const err = status();
   const start = btn('Start', async () => {
     const n = name.value.trim();
-    if (!n) { err.textContent = 'Give the channel a name.'; name.focus(); return; }
+    if (!n) { err.textContent = 'Enter a name for your channel.'; name.focus(); return; }
     start.disabled = true;
     try {
       err.textContent = 'Checking the relay…';
       const info = await (await fetch(`${relayBase(host)}/v1/info`)).json();
-      if (!info.features?.includes('channels') || !info.features?.includes('gate')) throw `${host} does not carry channels yet. Point this circle at a relay that does, from its relay address.`;
+      if (!info.features?.includes('channels') || !info.features?.includes('gate')) throw `${host} does not support channels. Open the circle’s conversation settings and change Relay address to a server that supports channels.`;
       const owner = circle.channel_owner(n, Number(preset), 0);
       const id = owner.channel_id_hex();
       const closed = preset === '4';
@@ -420,9 +424,9 @@ async function screenStart(circleId) {
     title: 'Start a channel', sub: circle.name(), back: `#/c/${circleId}`,
     body: [h('div', { class: 'stack' },
       h('h1', {}, 'Start a channel.'),
-      h('p', { class: 'lead' }, 'Post to everyone who has the link. Your circle owns it; this device holds its keys.'),
+      h('p', { class: 'lead' }, 'Choose a name and who can read and post. This channel belongs to your circle. You manage it from this browser.'),
       field('Channel name', name),
-      h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Who reads and posts'),
+      h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Who can read and post'),
         seg(PRESETS.map(([v, l]) => [v, l]), preset, (v) => {
           preset = v; hint.textContent = PRESETS[Number(v)][2];
           sentence.textContent = v === '4' ? 'The relay keeps encrypted messages only. Only people you let in can read.' : 'The relay keeps encrypted messages only. Anyone with the link can read.';
@@ -453,9 +457,9 @@ function screenShare(e, { first = false, note = null } = {}) {
     body: [h('div', { class: 'stack' },
       h('h1', {}, first ? `${e.rec.name} is ready.` : note ? 'A new link.' : 'Share the link.'),
       note ? U.notice(note) : null,
-      url ? h('p', { class: 'lead' }, LINK_LIMIT) : h('p', { class: 'lead' }, 'This channel has no link. Only people you let in can read.'),
+      url ? h('p', { class: 'lead' }, LINK_LIMIT) : h('p', { class: 'lead' }, 'This is a private channel with no shared link. Only people you approve can read it.'),
       url ? h('div', { class: 'ch-link' }, url) : null,
-      h('p', { class: 'muted' }, `${e.rec.policyLine}.`))],
+      h('p', { class: 'muted' }, `${policySentence(e.rec.policyLine)}`))],
     actions: [...(url ? shareButtons(url) : []), btn('Open the channel', open, url ? '' : 'primary')],
   });
 }
@@ -504,7 +508,7 @@ async function screenJoin(host, id, secret) {
   }
   if (generation !== U.generation()) return;
   if (!secret) {
-    screen({ title: obj.name, sub: 'a channel', back: '#/', body: [h('div', { class: 'empty' }, h('h1', {}, obj.name), h('p', { class: 'lead' }, CLOSED), h('p', { class: 'muted' }, `${line[0].toUpperCase()}${line.slice(1)}.`), getApp())], actions: [btn('Home', () => U.go('#/'), 'primary')] });
+    screen({ title: obj.name, sub: 'a channel', back: '#/', body: [h('div', { class: 'empty' }, h('h1', {}, obj.name), h('p', { class: 'lead' }, CLOSED), h('p', { class: 'muted' }, `${policySentence(line)}`), getApp())], actions: [btn('Home', () => U.go('#/'), 'primary')] });
     return;
   }
   const member = ChannelMember.from_link(fragment);
@@ -517,7 +521,7 @@ async function screenJoin(host, id, secret) {
       h('p', { class: 'eyebrow' }, 'Channel'),
       h('h1', {}, obj.name),
       h('p', { class: 'muted' }, `Owned by circle ${obj.circle_id.slice(0, 8)} · on ${host}`),
-      h('p', { class: 'lead' }, `${line[0].toUpperCase()}${line.slice(1)}.`),
+      h('p', { class: 'lead' }, `${policySentence(line)}`),
       h('p', { class: 'muted' }, `${LABEL}.`),
       linkPosts ? field('Your name', you, 'Shown to the owner when you ask to post, and to members beside your posts.') : null,
       err, getApp())],
@@ -546,7 +550,7 @@ async function screenChannel(id) {
   const rec = e.rec;
   const st = status();
   const list = h('div', { class: 'chatlist' });
-  const empty = h('div', { class: 'chat-empty' }, h('h1', {}, 'Nothing posted yet.'), h('p', {}, e.owner ? 'Write the first post. Everyone with the link reads it.' : 'Posts show up here as they arrive.'));
+  const empty = h('div', { class: 'chat-empty' }, h('h1', {}, 'No posts yet'), h('p', {}, e.owner ? 'Write the first post for the people who have access to this channel.' : 'New posts will appear here.'));
   const bubble = (m) => {
     if (m.dir === 'rejected') return h('div', { class: 'bubble rejected' }, `refused · ${friendly(m.text)} · seq ${m.seq}`);
     if (m.dir === 'note') return h('div', { class: 'bubble note' }, m.text);
@@ -572,8 +576,8 @@ async function screenChannel(id) {
     banner.replaceChildren();
     if (rec.dead) banner.append(U.notice(DEAD, 'bad'));
     else if (!e.owner && !rec.grantChain && rec.requested) banner.append(U.notice(WAITING));
-    else if (!e.owner && rec.grantChain && !canPost()) banner.append(U.notice('The owner let you read this channel, not post.'));
-    else if (!e.owner && !rec.grantChain && !rec.wantsPost) banner.append(U.notice('You can read this channel. Only the owner posts.'));
+    else if (!e.owner && rec.grantChain && !canPost()) banner.append(U.notice('You have permission to read this channel, but not to post.'));
+    else if (!e.owner && !rec.grantChain && !rec.wantsPost) banner.append(U.notice('You can read this channel. Posting is limited to the owner.'));
     else if (proposing) banner.append(U.notice(approvalsNeeded(e) > 1 ? `This channel needs ${approvalsNeeded(e)} approvals to post.` : 'Each post carries your approval.'));
   };
 
@@ -597,15 +601,15 @@ async function screenChannel(id) {
   inp.onkeydown = (ev) => { if (ev.key === 'Enter') doSend(); };
 
   const ownerMenu = () => sheet((close) => h('div', { class: 'stack' },
-    h('h2', {}, rec.name), h('p', { class: 'muted' }, `${LABEL}; ${rec.policyLine}.`),
+    h('h2', {}, rec.name), h('p', { class: 'muted' }, `${policySentence(rec.policyLine)} ${LABEL}.`),
     U.btn('Share the link', async () => { close(); await shareFlow(e); }),
-    e.owner.gate_token_hash_hex() ? U.btn('Retire the link', async () => {
-      if (!confirm('Retire this link? Everyone reading by it stops at the next keys. People you let in keep reading.')) return;
+    e.owner.gate_token_hash_hex() ? U.btn('Disable the link', async () => {
+      if (!confirm('Disable this link? People using only this link will lose access to future messages. Approved members keep their access. Messages already received stay on their devices.')) return;
       close();
-      try { await retireLink(e); await startNewKeys(e); U.toast('The link is retired and new keys started.', 'ok'); } catch (x) { st.textContent = friendly(x); }
+      try { await retireLink(e); await startNewKeys(e); U.toast('The link is disabled. Future messages will use new encryption keys.', 'ok'); } catch (x) { st.textContent = friendly(x); }
     }) : null,
-    U.btn('Start new keys', async () => { close(); try { await startNewKeys(e); U.toast('New keys started.', 'ok'); } catch (x) { st.textContent = friendly(x); } }),
-    U.btn('Policy', () => { close(); policySheet(e); }),
+    U.btn('Renew encryption keys', async () => { close(); try { await startNewKeys(e); U.toast('Future messages will use new encryption keys.', 'ok'); } catch (x) { st.textContent = friendly(x); } }),
+    U.btn('Access rules', () => { close(); policySheet(e); }),
     U.btn('Members', () => { close(); U.go(`#/ch/${id}/members`); }),
     U.btn('Requests', () => { close(); U.go(`#/ch/${id}/requests`); }),
     U.btn('Approve a post', () => { close(); approveSheet(e); }),
@@ -613,7 +617,7 @@ async function screenChannel(id) {
   const memberMenu = async () => {
     const circle = await circleFor(e);
     sheet((close) => h('div', { class: 'stack' },
-      h('h2', {}, rec.name), h('p', { class: 'muted' }, `${LABEL}; ${rec.policyLine}.`),
+      h('h2', {}, rec.name), h('p', { class: 'muted' }, `${policySentence(rec.policyLine)} ${LABEL}.`),
       h('p', { class: 'muted' }, `On ${rec.relay}. Your key: ${short(rec.kid)}.`),
       circle ? U.btn('Approve a post', () => { close(); approveSheet(e, circle); }) : null,
       removeButton(e, close), getApp()));
@@ -621,7 +625,7 @@ async function screenChannel(id) {
 
   const el = screen({
     title: rec.name, sub: e.owner ? 'your channel' : `on ${rec.relay}`, back: '#/', menu: e.owner ? ownerMenu : memberMenu,
-    body: [h('p', { class: 'ch-label' }, `${LABEL}; ${rec.policyLine}`), banner, list, st],
+    body: [h('p', { class: 'ch-label' }, `${policySentence(rec.policyLine)} ${LABEL}.`), banner, list, st],
     actions: [h('div', { class: 'composer' }, inp, sendBtn)],
   });
   el.classList.add('chat-screen', 'channel-screen');
@@ -691,7 +695,7 @@ async function pollLoop(e, run, ui) {
       await askToJoin(e, ui);
     } else {
       try { await flushRetires(e); } catch { /* the next round tries again */ }
-      try { if (await autoAllow(e)) U.toast('Let in a request the policy permits.', 'ok'); } catch { /* the next round tries again */ }
+      try { if (await autoAllow(e)) U.toast('Automatically approved a request covered by the link.', 'ok'); } catch { /* the next round tries again */ }
     }
   }
 }
@@ -720,7 +724,7 @@ async function askToJoin(e, ui) {
       e.member.set_grant(chosen);
       rec.grantChain = chosen;
       await persist(e); ui.refresh();
-      U.toast(e.member.may_post() ? 'The owner let you post.' : 'The owner let you read, not post.', 'ok');
+      U.toast(e.member.may_post() ? 'Your request was approved. You can now post.' : 'You have permission to read, but not to post.', 'ok');
     } else if (rec.grantChain) e.member.set_grant(rec.grantChain);
   } catch (err) { if (err.status !== 401) ui.st.textContent = friendly(err); }
 }
@@ -735,7 +739,7 @@ async function shareFlow(e) {
   try {
     if (!e.owner.gate_token_hash_hex()) {
       if (e.rec.preset === 4) { screenShare(e); return; }
-      if (!confirm('This channel has no live link. Make a new one? Everyone you send it to can read.')) return;
+      if (!confirm('Create a new channel link? Anyone who has the new link will be able to read the channel.')) return;
       await issueLink(e);
       await startNewKeys(e);
     }
@@ -751,15 +755,15 @@ function policySheet(e) {
   q.hidden = preset !== '1';
   const hint = h('span', { class: 'hint' }, PRESETS[Number(preset)][2]);
   U.sheet((close) => h('div', { class: 'stack' },
-    h('h2', {}, 'Policy'), h('p', { class: 'muted' }, `Now: ${e.rec.policyLine}.`),
+    h('h2', {}, 'Access rules'), h('p', { class: 'muted' }, `Now: ${policySentence(e.rec.policyLine)}`),
     h('div', { class: 'ch-presets' }, seg(PRESETS.map(([v, l]) => [v, l]), preset, (v) => { preset = v; q.hidden = v !== '1'; hint.textContent = PRESETS[Number(v)][2]; })), hint, q, err,
-    btn('Save the policy', async () => {
+    btn('Save access rules', async () => {
       try {
         const body = e.owner.set_policy(Number(preset), preset === '1' ? quorum : 0);
         e.rec.preset = Number(preset); e.rec.quorum = preset === '1' ? quorum : 0;
         await publishPolicy(e, body);
         if (await registerGate(e)) await startNewKeys(e);
-        close(); U.toast('Policy saved.', 'ok'); screenChannel(e.rec.id);
+        close(); U.toast('Access rules saved.', 'ok'); screenChannel(e.rec.id);
       } catch (x) { err.textContent = friendly(x); }
     }, 'primary')));
 }
@@ -808,7 +812,7 @@ function approveSheet(e, circle = null) {
   const ta = h('textarea', { class: 'input', placeholder: 'Paste the code from the person posting' });
   const out = h('div', { class: 'stack' });
   U.sheet(() => h('div', { class: 'stack' },
-    h('h2', {}, 'Approve a post'), h('p', { class: 'muted' }, 'Your seat signs that it approves this one post.'), ta,
+    h('h2', {}, 'Approve a post'), h('p', { class: 'muted' }, 'This approves one specific post using your circle’s key. Verify the full post with the sender before approving. The code shows only its first line.'), ta,
     btn('Read the code', () => {
       try {
         const [digest, line, log] = ta.value.trim().split('.');
@@ -834,18 +838,18 @@ async function screenRequests(id) {
   if (!e || !e.owner) return U.go(`#/ch/${id}`);
   const settings = await loadChSettings(id);
   const st = status();
-  const listEl = h('div', { class: 'rows' }, h('p', { class: 'muted' }, 'Reading requests…'));
+  const listEl = h('div', { class: 'rows' }, h('p', { class: 'muted' }, 'Loading requests…'));
   const render = async () => {
     let reqs;
     try { reqs = await fetchRequests(e); } catch (x) { st.textContent = friendly(x); return; }
     if (generation !== U.generation()) return;
-    if (!reqs.length) { listEl.replaceChildren(h('p', { class: 'muted' }, 'No requests are waiting.')); return; }
+    if (!reqs.length) { listEl.replaceChildren(h('p', { class: 'muted' }, 'No pending requests.')); return; }
     listEl.replaceChildren(...reqs.map((r) => {
       const bytes = b64_decode(r.body);
       let s;
       try { s = JSON.parse(join_request_summary(bytes)); } catch { s = null; }
-      const refuse = btn('Refuse', async () => { await markHandled(e, r.id); render(); });
-      if (!s || s.channel_id !== id) return h('div', { class: 'request' }, h('div', {}, h('b', {}, 'A request that does not check out')), refuse);
+      const refuse = btn('Decline', async () => { await markHandled(e, r.id); render(); });
+      if (!s || s.channel_id !== id) return h('div', { class: 'request' }, h('div', {}, h('b', {}, 'This request could not be verified')), refuse);
       // The owner picks what to give: read, or read and post. Admit and govern are never given.
       const choice = (label, actions, kind) => {
         const b = btn(label, async () => {
@@ -857,17 +861,17 @@ async function screenRequests(id) {
         return b;
       };
       const asksToPost = s.actions.split(',').includes('post');
-      const allows = asksToPost ? [choice('Allow to post', 'read,post', 'primary'), choice('Allow to read', 'read', '')] : [choice('Allow to read', 'read', 'primary')];
+      const allows = asksToPost ? [choice('Allow posting', 'read,post', 'primary'), choice('Allow reading', 'read', '')] : [choice('Allow reading', 'read', 'primary')];
       return h('div', { class: 'request' }, h('div', {}, h('b', {}, s.name), h('span', {}, `asks to ${s.actions.replace(/,/g, ', ')} · key ${short(s.kid)}`)), h('div', { class: 'request-actions' }, ...allows, refuse));
     }));
   };
   screen({
     title: 'Requests', sub: e.rec.name, back: `#/ch/${id}`,
     body: [h('div', { class: 'stack' },
-      h('h1', {}, 'Who wants to post.'),
-      h('p', { class: 'lead' }, 'Each person typed their own name. Allow gives them a grant to post; you can revoke it from Members.'),
+      h('h1', {}, 'Access requests'),
+      h('p', { class: 'lead' }, 'Choose whether each person can read only or read and post. Names are entered by the person requesting access. You can remove their access later in Members.'),
       listEl,
-      h('label', { class: 'toggle' }, h('span', {}, h('b', {}, 'Allow automatically what the policy already permits'), h('br'), h('span', { class: 'muted' }, 'Requests that came with the live link are let in while this channel is open here.')),
+      h('label', { class: 'toggle' }, h('span', {}, h('b', {}, 'Auto-approve requests covered by the link'), h('br'), h('span', { class: 'muted' }, 'While this channel is open in this browser, automatically approve requests that ask only for access included in the current link. Requests for extra permissions still need your approval.')),
         h('input', { type: 'checkbox', checked: !!settings.autoAllow, onchange: async (ev) => { await saveChSettings({ ...settings, autoAllow: ev.target.checked }); } })),
       st)],
   });
@@ -882,7 +886,7 @@ async function screenMembers(id) {
   const members = JSON.parse(e.owner.members_json());
   const revoke = async (m, button) => {
     const holdsLink = !!e.owner.gate_token_hash_hex();
-    if (!confirm(`Revoke ${m.name}? ${holdsLink ? 'They hold the link, so it is replaced by a new one, and ' : ''}new keys start.${holdsLink ? ' Everyone who should keep reading needs the new link.' : ''}`)) return;
+    if (!confirm(`Remove ${m.name}? Their permission will end and future messages will use new encryption keys.${holdsLink ? ' The shared link will be replaced. Share the new link with anyone who still needs it.' : ''}`)) return;
     button.disabled = true;
     try {
       const [statement, control] = cbor_split(e.owner.revoke(m.grant_id, 'removed by the owner'));
@@ -892,19 +896,19 @@ async function screenMembers(id) {
       // Retire, a new link and its gate, then keys whose deposits include the new link's.
       if (holdsLink) { await retireLink(e); await issueLink(e); }
       await startNewKeys(e);
-      U.toast(`${m.name} is removed and new keys started.`, 'ok');
+      U.toast(`${m.name} has been removed. Future messages will use new encryption keys.`, 'ok');
       if (holdsLink) screenShare(e, { note: NEW_LINK }); else screenMembers(id);
     } catch (x) { st.textContent = friendly(x); button.disabled = false; }
   };
   screen({
     title: 'Members', sub: e.rec.name, back: `#/ch/${id}`,
     body: [h('div', { class: 'stack' },
-      h('h1', {}, 'People you let in.'),
-      h('p', { class: 'lead' }, 'Each holds a grant from your seat. Revoking one ends it and starts new keys.'),
+      h('h1', {}, 'Approved members'),
+      h('p', { class: 'lead' }, 'These people have permission to read or post. Removing a member ends their access to future messages. Messages they already received stay on their device.'),
       members.length ? h('div', { class: 'rows' }, ...members.map((m) => {
-        const b = btn('Revoke', () => revoke(m, b), 'danger');
+        const b = btn('Remove member', () => revoke(m, b), 'danger');
         return h('div', { class: 'member' }, h('div', {}, h('b', {}, m.name), h('span', {}, `${(e.rec.actions?.[m.grant_id] || 'read').replace(',', ', ')} · no expiry · key ${short(m.kid)}`)), b);
-      })) : h('p', { class: 'muted' }, 'No one else is a member yet.'),
+      })) : h('p', { class: 'muted' }, 'You haven’t approved any members yet.'),
       st)],
   });
 }

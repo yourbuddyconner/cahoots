@@ -27,7 +27,7 @@ pub(crate) fn chat_err(e: ChatError) -> PhoneError {
     PhoneError::Chat {
         message: match e {
             ChatError::NotSynced => "Still reading the relay. Try again in a moment.".into(),
-            ChatError::State => "This circle's chat state does not read.".into(),
+            ChatError::State => "The saved chat data for this circle is damaged or cannot be read.".into(),
             other => format!("The message could not be read ({other:?})."),
         },
     }
@@ -56,7 +56,7 @@ impl Circle {
     pub fn load(dir: &Path) -> Result<Circle, PhoneError> {
         let record = CircleRecord::load(dir)?;
         let unreadable = || PhoneError::Storage {
-            message: "This circle's record does not read.".into(),
+            message: "The saved data for this circle is damaged or cannot be read.".into(),
         };
         let params = CircleParams::decode(&record.params).map_err(|_| unreadable())?;
         let circle_id: [u8; 16] = record.circle_id[..].try_into().map_err(|_| unreadable())?;
@@ -194,10 +194,10 @@ impl Circle {
         while let Some(entry) = self.chat.outbox.first().cloned() {
             let body = http.post(self.messages_url(), entry.wire.to_vec())?;
             let v: serde_json::Value = serde_json::from_slice(&body)
-                .map_err(|_| network("The relay's answer does not read."))?;
+                .map_err(|_| network("The relay returned an unreadable response. Try again in a moment."))?;
             v["seq"]
                 .as_u64()
-                .ok_or_else(|| network("The relay did not say where it put the message."))?;
+                .ok_or_else(|| network("The relay did not confirm that the message was saved."))?;
             self.chat.outbox.retain(|e| e.id != entry.id);
             self.save_chat()?;
         }
@@ -308,7 +308,7 @@ pub(crate) fn random_id() -> Result<String, PhoneError> {
 
 pub(crate) fn parse_entries(body: &[u8]) -> Result<Vec<(u64, Vec<u8>)>, PhoneError> {
     let v: serde_json::Value =
-        serde_json::from_slice(body).map_err(|_| network("The relay's answer does not read."))?;
+        serde_json::from_slice(body).map_err(|_| network("The relay returned an unreadable response. Try again in a moment."))?;
     let mut out = Vec::new();
     for e in v["entries"].as_array().into_iter().flatten() {
         let seq = e["seq"]

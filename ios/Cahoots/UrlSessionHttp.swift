@@ -47,7 +47,7 @@ final class UrlSessionHttp: Http {
 
     private func urlRequest(_ url: String, method: String) throws -> URLRequest {
         guard let u = URL(string: url) else {
-            throw PhoneError.Network(message: "The relay address does not read.")
+            throw PhoneError.Network(message: "The relay address is invalid. Check the address and try again.")
         }
         var r = URLRequest(url: u)
         r.httpMethod = method
@@ -65,7 +65,7 @@ final class UrlSessionHttp: Http {
            let detail = json["detail"] as? String, !detail.isEmpty {
             return "The relay refused the \(method == "POST" ? "message" : "request"): \(detail)"
         }
-        return "The relay answered \(status)."
+        return "The relay returned an error (HTTP \(status))."
     }
 
     private final class Exchange: @unchecked Sendable {

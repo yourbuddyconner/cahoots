@@ -66,7 +66,7 @@ struct CameraScanner: UIViewRepresentable {
         func attach(to view: PreviewView) {
             view.preview.session = session
             guard AVCaptureDevice.default(for: .video) != nil else {
-                view.message.text = "No camera here. Paste a code instead."
+                view.message.text = "This device has no available camera. Paste a code instead."
                 return
             }
             switch AVCaptureDevice.authorizationStatus(for: .video) {

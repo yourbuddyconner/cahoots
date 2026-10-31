@@ -74,22 +74,22 @@ pub(crate) fn ceremony_err(e: CeremonyError) -> PhoneError {
             "Seat {} showed two different setup codes. Two people may have picked the same seat.",
             seat(i)
         ),
-        CeremonyError::BadKey(i) => format!("Seat {}'s setup code does not read. Scan it again.", seat(i)),
+        CeremonyError::BadKey(i) => format!("Seat {}’s setup code could not be read. Scan it again.", seat(i)),
         CeremonyError::BadSeed => "A key could not be made. Try again.".into(),
         CeremonyError::BadTier => "A code declares a device tier that does not exist.".into(),
         CeremonyError::Corrupted(i) => format!(
-            "Seat {}'s reveal could not be opened. Scan it again.",
+            "Seat {}’s step 2 code could not be read. Scan it again.",
             seat(i)
         ),
         CeremonyError::CommitMismatch(i) => format!(
-            "Seat {}'s reveal does not match its setup code. The ceremony stopped and nothing was kept.",
+            "Seat {}’s step 2 data does not match its setup code. Setup has stopped and the circle was not saved.",
             seat(i)
         ),
         CeremonyError::ConflictingReveal(i) => {
-            format!("Seat {} showed a second, different reveal. The first one is kept.", seat(i))
+            format!("Seat {} showed a different step 2 code. The first code has been kept.", seat(i))
         }
         CeremonyError::BadAttestation(i) => format!(
-            "Seat {}'s signature does not check out. Ask them to show it again.",
+            "Seat {}’s confirmation could not be verified. Ask them to show their step 3 code again.",
             seat(i)
         ),
         CeremonyError::Aborted => "The ceremony stopped. Nothing was kept.".into(),
@@ -622,7 +622,7 @@ impl Pending {
         let r = c
             .my_reveal(&mut fill)
             .map(<[u8]>::to_vec)
-            .ok_or_else(|| plain("Every setup code is needed before the reveal."))?;
+            .ok_or_else(|| plain("Scan everyone’s step 1 code before exchanging step 2 codes."))?;
         self.reveal = Some(r.clone());
         Ok(r)
     }
@@ -645,7 +645,7 @@ impl Pending {
         }
         let c = self.ceremony.as_ref().ok_or_else(|| plain("The ceremony is over."))?;
         if !matches!(c.phase(), Phase::Attest | Phase::Complete) {
-            return Err(plain("There is nothing to sign until every reveal is in."));
+            return Err(plain("Scan everyone’s step 2 code before confirming the member list."));
         }
         // Anyone still on step two needs our reveal, and the root needs it sealed.
         self.my_reveal()?;
@@ -672,7 +672,7 @@ impl Pending {
         }
         let a = c
             .my_attestation()
-            .ok_or_else(|| plain("The manifest is not ready to sign."))?;
+            .ok_or_else(|| plain("The member list is not ready to confirm. Finish exchanging codes first."))?;
         self.attestation = Some(a.clone());
         self.finish_if_complete()?;
         Ok(a)
@@ -718,13 +718,13 @@ impl Pending {
             return self.scan_join(text);
         }
         let code = if text.trim_start().starts_with("cahoots-") {
-            parse_tagged(text).ok_or_else(|| bad("That Cahoots code does not read."))?
+            parse_tagged(text).ok_or_else(|| bad("This Cahoots code could not be read. Scan it again or check the pasted code."))?
         } else {
             let bytes = unb64(text).ok_or_else(|| bad("That is not a Cahoots code."))?;
             match self.receiver.add(&bytes)? {
                 None => return Ok(()),
                 Some(data) => {
-                    parse_packed(&data).ok_or_else(|| bad("That Cahoots code does not read."))?
+                    parse_packed(&data).ok_or_else(|| bad("This Cahoots code could not be read. Scan it again or check the pasted code."))?
                 }
             }
         };
@@ -885,11 +885,11 @@ impl Pending {
         for wire in mb.unposted() {
             let body = http.post(url.clone(), wire.clone())?;
             let v: serde_json::Value = serde_json::from_slice(&body).map_err(|_| PhoneError::Network {
-                message: "The relay's answer does not read.".into(),
+                message: "The relay returned an unreadable response. Try again in a moment.".into(),
             })?;
             if v["seq"].as_u64().is_none() {
                 return Err(PhoneError::Network {
-                    message: "The relay did not say where it put the message.".into(),
+                    message: "The relay did not confirm that the message was saved.".into(),
                 });
             }
             mb.posted(&wire);
@@ -1014,7 +1014,7 @@ impl Pending {
         };
         gate.scan(mb.channel(), text).map_err(|e| match e {
             ChannelError::OtherChannel => bad("That code is for another ceremony."),
-            _ => bad("That joiner's code does not read."),
+            _ => bad("This joining code could not be read. Ask the person to show it again."),
         })?;
         self.feed_gate()
     }
@@ -1046,7 +1046,7 @@ fn pack_reveal(r: &[u8]) -> Vec<u8> {
 /// Read a join code: the setup line, or a setup code that carries the circle's parameters.
 /// Returns the parameters and the setup code to keep, if it was one.
 pub fn read_join(text: &str) -> Result<(CircleParams, Option<Code>), PhoneError> {
-    let code = parse_tagged(text).ok_or_else(|| bad("That is not a code to join a circle from."))?;
+    let code = parse_tagged(text).ok_or_else(|| bad("This code cannot be used to join a circle. Scan the host’s step 1 code."))?;
     join_from(code)
 }
 
@@ -1068,7 +1068,7 @@ pub fn join_from(code: Code) -> Result<(CircleParams, Option<Code>), PhoneError>
             }),
         ),
         Code::Commit { params: None, .. } => {
-            return Err(bad("That code has no setup in it. Scan the host instead."))
+            return Err(bad("This code doesn’t include the setup information. Scan the host’s step 1 code instead."))
         }
         Code::Reveal { .. } | Code::Attest { .. } => {
             return Err(bad(
@@ -1076,9 +1076,9 @@ pub fn join_from(code: Code) -> Result<(CircleParams, Option<Code>), PhoneError>
             ))
         }
     };
-    let params = CircleParams::decode(&params).map_err(|_| bad("That setup code does not read."))?;
+    let params = CircleParams::decode(&params).map_err(|_| bad("This setup code could not be read. Scan it again or check the pasted code."))?;
     if shown_by >= params.n || params.encode().len() > 255 {
-        return Err(bad("That setup code does not read."));
+        return Err(bad("This setup code could not be read. Scan it again or check the pasted code."));
     }
     Ok((params, keep))
 }

@@ -50,9 +50,9 @@ final class UrlSessionHttpTests: XCTestCase {
         XCTAssertEqual(UrlSessionHttp.refusal(status: 400, body: body, method: "GET"),
                        "The relay refused the request: unknown message version")
         XCTAssertEqual(UrlSessionHttp.refusal(status: 500, body: Data("oops".utf8), method: "POST"),
-                       "The relay answered 500.")
+                       "The relay returned an error (HTTP 500).")
         XCTAssertEqual(UrlSessionHttp.refusal(status: 502, body: nil, method: "GET"),
-                       "The relay answered 502.")
+                       "The relay returned an error (HTTP 502).")
     }
 
     func testRequestReturnsARefusalWithItsStatus() throws {

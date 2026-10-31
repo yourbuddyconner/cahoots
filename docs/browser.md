@@ -1,138 +1,131 @@
-# Use the browser app
+# Use Cahoots in your browser
 
-The [Cahoots app](https://cahoots.network/app/) runs on phones and laptops. It stores circles and message history in that browser on that device.
+The [Cahoots app](https://cahoots.network/app/) works on phones and laptops. Your circles, keys, and message history stay in the browser you use. You don’t need an account.
 
-First, [create a circle](ceremony-guide.md) with someone in person.
+New to Cahoots? Start with [Getting started](getting-started.md). The app also shows a short guide on first use. You can reopen it from the home screen’s **More options** menu by selecting **How Cahoots works**.
 
-## Create a circle
+## Create or join a circle
 
-Select **Create a circle**, give it a name, and count the people in the room. Then pick how to hold the ceremony.
+Gather the people who want to join. One person selects **Create a circle**, enters a name, and counts everyone joining on a separate device, including themselves. This person is the **host** and uses seat 1. Each other device needs a different seat number.
 
-- **Through the relay** is the default. Your screen shows one code. Each person joining selects **Join a circle**, scans it, and picks a seat. Their screen then shows a code of their own, and you scan each one with **Scan a joiner's code**. When everyone is scanned, select **Continue**. The rest of the ceremony goes through the relay, sealed with a key that never leaves your first code, so the relay cannot read it.
-- **Codes only** works with no network. Everyone shows and scans animated codes for each step until every device has every code.
+Choose how to connect:
 
-Either way, everyone reads the six words aloud at the end. If every word matches on every screen, select **They match**. If one differs, everyone starts again.
+- **Through the relay** uses an internet connection. Everyone scans the host’s code and chooses a seat. The host then scans each person’s code with **Scan a joiner’s code**. When everyone is scanned, the host selects **Continue**. The relay carries the remaining encrypted setup messages.
+- **Codes only** works without a network connection during setup. Everyone shows and scans animated codes at each step. Keep each animation in view until the progress bar fills. Before moving on, make sure the others have scanned your code too.
+
+This setup is called a **ceremony**. At the end, one person reads all six words aloud while everyone checks their own screen. Select **They match** only when every word matches on every device, in the same order. If any differ, start a new ceremony together.
+
+Keep the app open until setup finishes. A setup session that is lost after closing or reloading cannot be resumed. The group may need to start again.
 
 ## Find your way around
 
-The home screen lists the circles saved in this browser. Open one to enter its conversation directly.
+The home screen lists circles and channels saved in this browser. Open a circle to enter its conversation.
 
-On a desktop, the circle switcher and tool navigation stay on the left, with people beside the conversation. On a phone, use the **Conversation**, **People**, and **Network** navigation row. **Circle tools** opens short messages, history, and hello words without a separate app directory.
+On a desktop, the circle switcher and tools stay on the left. On a phone, use the **Conversation**, **People**, and **Network** tabs. **Circle tools** opens hello words, short messages, history, and channel creation.
 
-The **Network** page describes the WireGuard desktop integration and its setup. The browser does not yet load machine lists or manage tunnels.
+In **People**, select **Name this person** to give a seat a familiar name. Names appear in chat and hello words on your device only. Use **Edit name** to change a name, or clear it to restore the seat number. A name or decorative avatar does not verify someone’s identity.
 
-## Put names to seats
+## Chat with your circle
 
-Open **People** in a circle and select **Name this person**. Save a name you recognize. It will also appear in chat and hello words on this device.
+Open the circle’s **Conversation**, type a message, and select **Send**. Messages are encrypted on your device before the relay delivers them. The relay cannot read them, but it can see traffic and can stop delivery.
 
-Names are local labels. They are not shared with other members and do not verify anyone’s identity. You can change one with **Edit name**, or clear it to return to the seat number. Changing the circle’s relay keeps these names.
+Cahoots uses `relay.cahoots.network` by default. To use another relay, open the conversation menu and select **Relay address**. Every member must use the same address. See [Running a relay](relay.md) if you want to host one.
 
-## Send a short message
+If the relay cannot be reached, your circle still exists. Delivery needs a working connection. Check the relay address and try again later.
 
-1. Open a saved circle.
-2. Select **Send a message** from the sidebar, or from **Circle tools** on a phone, and enter your text.
-3. Pass the encrypted QR code or copyable text to another member.
-4. The recipient opens the same circle, selects **Read a message**, and scans or pastes it.
+**Renew encryption keys** changes the keys used for future messages. It does not change the protection of messages already sent. A set of keys is called an **epoch**. Chat renews them automatically after 1,000 of your own messages in an epoch; it does not currently renew them on a timer.
 
-This uses **pure-pad mode**: fresh secret bytes encrypt each message and are then consumed. It works without a relay. Passing a message over another service does not give that service the circle’s secret.
-
-A message can be read once by each receiving device. Reading it again is refused as reuse. The app keeps a local history of messages it has already read.
-
-## Use group chat
-
-Chat is a separate mode. It uses conventional encryption with keys seeded from the circle’s secret, so it can carry many messages without consuming one secret byte per text byte.
-
-1. Open a saved circle. Its **Conversation** view is the group chat.
-2. Type a message. It travels through the default relay, `relay.cahoots.network`.
-3. To use a relay a member [runs](relay.md), set **Relay address** from the menu, and have every member of the circle set the same one.
-
-If the status line says the relay cannot be reached, creating the circle still succeeded. Delivery is the missing step. Check the address in the menu or try again later.
-
-The relay receives encrypted messages. It does not receive the secret. It can still observe traffic and stop delivering messages.
-
-### Rotate chat keys
-
-An **epoch** is a period using one set of chat keys. Every member derives them from the circle root, so starting an epoch spends no secret bytes. Chat starts the first one when needed and rotates after 1,000 of your own messages in an epoch. A circle made before root epochs cannot chat. Run a new ceremony to chat in it.
-
-Use **Start a new epoch** in the chat menu to rotate sooner. Automatic rotation after a time interval is not implemented.
-
-## Channels
-
-A circle is closed: only the people at the ceremony are in it. A **channel** is how a circle reaches people who were not there. You start one from a circle and send its link. Anyone who opens the link reads the channel in their browser, without joining the circle, and can post if the channel allows it.
-
-A channel uses conventional encryption with keys your device draws. It does not use the circle's pad. Every screen of a channel says "End-to-end encrypted; the relay keeps ciphertext only", followed by who can read and post.
-
-A channel uses its circle's relay, and that relay must be [built for channels](relay.md#choose-what-the-relay-runs). The default relay is. If your circle's relay is not, **Start** says so.
-
-### Start a channel
-
-1. Open a saved circle and select **Start a channel** from the circle tools.
-2. Give it a name and pick who can read and post:
-   - **Announcements:** anyone with the link reads. Only you post.
-   - **Announcements with approvals:** anyone with the link reads. A post goes out when enough seats of your circle approve it.
-   - **Group chat:** anyone with the link reads and can ask to post.
-   - **Members post:** anyone with the link reads. People you let in post.
-   - **Closed:** only people you let in read and post.
-3. Select **Start**.
-
-The next screen shows the link, with **Share the link** (where the device can share) and **Copy the link**. It also says: "Anyone you forward this link to can read until you retire it." Nobody checks a link at the door, so it cannot count its readers or expire on its own.
-
-### Run your channel
-
-The channel's menu has the owner's controls:
-
-- **Share the link** shows the current link. If you retired it, this makes a new one.
-- **Retire the link** stops the link from working. Everyone reading by the link stops at the next keys. People you let in keep reading.
-- **Start new keys** starts new channel keys now. The app also does this when you retire a link or revoke someone.
-- **Policy** changes who can read and post. In a circle of more than one seat, the app refuses: changing the policy "needs their approval, which this version cannot collect yet".
-- **Members** lists the people you let in. **Revoke** removes one. When the channel has a live link, revoking also retires it and shows a new one, because the person you removed still has the old link. The new screen says: "Everyone who should keep reading needs this new link." A channel with no live link just starts new keys.
-- **Requests** lists people asking to post, each with the name they typed and what they asked for. **Allow to post** lets them read and post, **Allow to read** lets them read only, and **Refuse** drops the request. Turn on **Allow automatically what the policy already permits** to let in, while the channel is open on this device, everyone who came with the live link, when the link covers everything they asked for: in a group chat, reading and posting. Any other request waits for you. A request you allow to read only stays in the list, so you can let that person post later; until then their message box stays off.
-
-Requests wait for you. The app answers them only while the channel is open on your device.
-
-### Post with approvals
-
-In a channel made with **Announcements with approvals**, a post needs approvals from seats of your circle.
-
-1. Write the post and select **Propose**. The app adds your own approval and shows a code.
-2. Send the code to the other seats. Each one opens the channel on a device that holds the circle, selects **Approve a post** from the menu, pastes the code and selects **Read the code**. They check the first line it shows, select **Approve**, and send you the approval it gives them.
-3. Paste the approvals and select **Post**.
-
-Readers mark the post as an announcement only when it carries enough approvals. When a single approval is enough, **Propose** posts at once.
-
-### Open a channel from a link
-
-Open the link. The app shows the channel's name, the circle that owns it, and who can read and post. If people with the link may post, it asks for **Your name**. Select **Open**.
-
-You read at once. The app removes the secret from the address bar and the browser history. If the channel lets you post, the app asks the owner and shows "Waiting for the owner to let you post." until the owner allows it. Then the message box works.
-
-If the owner retires the link or revokes you, the channel says "This link no longer works. Ask for a new one." A new link from the owner opens the same channel again in this browser.
-
-A link without a secret shows "Only people the owner lets in can read this channel." This version has no way to ask to be let in from such a link.
-
-### What is stored in the browser
-
-Each channel is saved in this browser's IndexedDB, in the `channels` store: your key for the channel, its current keys, the link's secret, your grant and the policy. Posts you have read are in the `chmsgs` store, as plaintext. Clearing site data removes them. The relay keeps only ciphertext and cannot give you back a lost channel.
+A circle made with an older version may not support chat. Create a new circle together to use the current chat format.
 
 ## Check someone on a call
 
-Open **Hello words** in the circle and choose the person you are calling.
+From **Circle tools**, open **Hello words** and select the person you’re talking to. Ask them to open your seat in the same circle.
 
-The screen shows two words for you to say, two for them to say, and a hello number. Both devices must use the same number. If needed, set it from the menu.
+1. Match the hello number on both screens. If one number is lower, advance that device to catch up. Don’t reuse a number from an earlier conversation.
+2. Read the pair under **You say aloud**. The other person checks it against the reply shown on their screen.
+3. Ask them to read their own pair. Check that you hear the pair shown under **Listen for their reply**. Don’t read this answer to them.
+4. When both pairs match, each of you selects **Next hello** and confirms. This prepares fresh words for next time. It changes only the device on which it was selected.
 
-Compare the responses. On a later call, or if something feels wrong, both people select **Next hello** and compare the new words.
+If the words differ, check the circle, seats, and number. If they still differ, stop the check. The words check access to a key shared by your two devices. They do not protect against someone who can use the other person’s device or keys.
 
-Hello words verify access to the pair’s key, rather than the sound of someone’s voice. They do not protect against someone who has the other person’s unlocked device. They use a different kind of key from pure-pad messages; see [Security and limits](security.md).
+The hello-word menu lets you save a local name and adjust the hello number if needed. See [Security and limits](security.md) for more about what these checks can and cannot establish.
 
-## Understand local storage
+## Exchange a message without a relay
 
-A saved circle contains secret material. Chat history also contains plaintext on the device.
+**Send a message** in Circle tools encrypts a short note that you can pass along as a code or text. This is separate from chat and works without a relay.
 
-- Use the same browser and browser profile to return to your circles.
-- Clearing site data can remove circles and history.
-- The relay is not a backup of your keys and cannot restore a lost circle.
-- Browser storage does not provide reliable physical erasure. A compromised browser or operating system can expose secrets and history.
+1. Enter the note and select **Encrypt**.
+2. Let another circle member scan the code, or send them the encrypted text using another service.
+3. They open the same circle, select **Read a message**, and scan or paste it.
 
-Do not restore or copy a circle’s send state onto a second device and use both copies. Reusing pad ranges breaks the protocol’s security guarantees. Create a new circle when you need a fresh start.
+This mode uses a **one-time pad**: it consumes a fresh part of the circle’s shared secret for each message. When your share is used up, create a new circle together to send more messages this way. Chat uses a different encryption method and does not consume this pad for each message.
 
-For local builds, WebAssembly details, and exchange formats, see the [browser client README](../web/README.md).
+Each receiving device can open a one-time-pad message once. Later attempts are refused to prevent reuse. The app saves the readable message in local **History** so you can return to it.
+
+The optional length-hiding setting rounds message sizes up to fixed buckets. It hides the exact length, but not the approximate size.
+
+## Start a channel
+
+A circle contains the people who took part in its ceremony. A **channel** lets that circle share messages with people who weren’t there.
+
+From Circle tools, select **Start a channel**, enter a name, and choose who can read and post:
+
+- **Announcements:** anyone with the link can read; only the owner posts.
+- **Announcements with approvals:** posts need approval from the required number of circle members.
+- **Group chat:** anyone with the link can read and request permission to post.
+- **Members post:** anyone with the link can read; the owner chooses who can post.
+- **Closed:** only approved people can read or post. There is no shared link.
+
+Select **Start**, then use **Share the link** or **Copy the link**. Anyone who receives a shared link can forward it. A link grants reading access, not automatic posting permission.
+
+The channel uses its circle’s relay, which must support channels. If creation fails because the relay does not support them, change the circle’s **Relay address** in conversation settings. The default relay supports channels.
+
+## Manage channel access
+
+Use the channel’s menu:
+
+- **Requests** shows access requests and the names people entered. **Allow posting** permits reading and posting; **Allow reading** permits reading only; **Decline** dismisses a request. A request given reading access only stays listed so you can allow posting later.
+- **Auto-approve requests covered by the link** approves requests only when the current link already covers every permission requested. Requests for extra permissions still need your decision. Automatic approval runs only while the channel is open on your device.
+- **Members** lists people you have approved. **Remove member** ends their access to future messages and renews the encryption keys. If there is a shared link, it is replaced too. Share the new link with people who still need to read through a link. Other approved members keep their access.
+- **Disable the link** stops future access through the current link. Approved members keep their access. Use **Share the link** later if you want to create a new one.
+- **Renew encryption keys** changes the keys for future messages immediately.
+- **Access rules** changes who can read and post. Some changes require approval from other circle members. This version cannot collect those approvals yet and will explain when a change is unavailable.
+
+Requests are processed only while the channel is open on the owner’s device. Removing access cannot take back messages that someone already received or saved.
+
+## Open a channel link
+
+The app shows the channel’s name, owner, and access rules before you open it. If you can request posting permission, enter a name the owner will recognize. Select **Open** to read. Your name is shown to the owner with your request and beside your posts when available.
+
+The app saves the channel locally and replaces the shared link in the address bar with a channel address that does not contain the link’s secret. Reading does not require joining the owning circle.
+
+When posting permission is required, the app sends a request and shows a waiting message. Once the owner allows posting, the message box becomes available. Reading-only permission does not enable the message box.
+
+If your access ends, ask the owner for a current link or permission to rejoin. A new link can reopen the same channel in this browser. A link without a secret cannot request access to a Closed channel in this version.
+
+## Approve an announcement
+
+For **Announcements with approvals**:
+
+1. Write a post and select **Propose**. The app adds your approval and shows a code.
+2. Send the code to other members of the owning circle. Each opens the channel on a device holding that circle, selects **Approve a post**, pastes the code, and selects **Read the code**.
+3. The code shows only the first line. Verify the full post with the sender before approving it. Select **Approve**, then send the resulting approval back to the person posting.
+4. Paste the approvals and select **Post** when there are enough.
+
+Readers recognize an approved announcement only when it carries enough valid approvals. If just one approval is required, **Propose** can publish it immediately.
+
+## Network connections
+
+The **Network** page explains the WireGuard desktop integration. The browser cannot yet show machines or control their connections. Use the desktop command-line tool and follow the [integration guide](../crates/ADAPTERS.md). Saving a circle in the browser does not automatically configure that tool.
+
+## Keep your browser data
+
+Your circles and channels contain keys. Message history is stored here as readable text.
+
+Use the same browser and browser profile to return to them. Clearing site data can remove your access and history. The relay does not have your keys and cannot restore them. A channel reader can reopen the current channel link, but that does not restore local history or earlier posting permission.
+
+Removing a circle or channel removes it from the app on this device. Other people keep their copies. Browser storage may retain message history or traces after deletion; it does not guarantee physical erasure.
+
+Do not copy a circle’s saved state onto a second device and use both copies. This can reuse parts of the shared secret. Create a new circle together when you need another device.
+
+For local builds and file formats, see the [browser client README](../web/README.md).

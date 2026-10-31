@@ -146,7 +146,7 @@ final class RelayWalkUITests: XCTestCase {
     // MARK: - Steps
 
     private func launch(_ data: String) {
-        app.launchArguments = ["-cahoots-data", "\(data)-\(UUID().uuidString)"]
+        app.launchArguments = ["-cahoots-data", "\(data)-\(UUID().uuidString)", "-cahoots.welcomeSeen", "YES"]
         app.launch()
         XCTAssertTrue(app.buttons["Create a circle"].waitForExistence(timeout: 30))
     }

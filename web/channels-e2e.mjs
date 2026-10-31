@@ -55,9 +55,9 @@ const errors = [];
 // B's reads are refused once A revokes B; those refusals are the point of the last step.
 let refusalsExpected = false;
 let dropped = null; // a URL the test aborts once, to show the poll loop survives it
-async function person(name, viewport) {
+async function person(name, viewport, showWelcome = false) {
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, isMobile: viewport.width < 500, hasTouch: viewport.width < 500 });
-  await ctx.addInitScript(() => { navigator.clipboard.writeText = (t) => { window.__clip = t; return Promise.resolve(); }; });
+  await ctx.addInitScript(({ skipWelcome }) => { if (skipWelcome) localStorage.setItem("cahoots.welcomeSeen", "1"); navigator.clipboard.writeText = (t) => { window.__clip = t; return Promise.resolve(); }; }, { skipWelcome: !showWelcome });
   await ctx.route("https://relay.cahoots.network/**", (r) => r.abort());
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`${name}: ${e.message}`));
@@ -103,14 +103,14 @@ await viaStation(A); await viaStation(H);
 await A.page.getByRole("button", { name: "Create a circle", exact: true }).click();
 await A.page.fill("input[type=text]", "garden club");
 await A.page.getByRole("button", { name: "Continue", exact: true }).click();
-await A.page.getByRole("button", { name: "Make my contribution", exact: true }).click();
+await A.page.getByRole("button", { name: "Join this circle", exact: true }).click();
 await A.page.waitForSelector("text=Show this code to everyone joining");
 await A.menu(); await A.page.getByRole("button", { name: "Copy the code", exact: true }).click(); const offer = await A.clip(); await A.closeSheet();
 await H.page.getByRole("button", { name: "Join a circle", exact: true }).click();
 await H.page.getByRole("button", { name: "No camera? Paste a code", exact: true }).click();
 await H.paste(offer);
 await H.page.waitForSelector("text=Which seat are you?");
-await H.page.getByRole("button", { name: "Make my contribution", exact: true }).click();
+await H.page.getByRole("button", { name: "Join this circle", exact: true }).click();
 await H.page.waitForSelector('.bar .title:has-text("Show this to the host")', { timeout: 15000 });
 await H.menu(); await H.page.getByRole("button", { name: "Copy my join code", exact: true }).click(); const joined = await H.clip(); await H.closeSheet();
 await A.page.waitForSelector("text=Seat 2 committed but was not scanned here.", { timeout: 15000 });
@@ -138,15 +138,15 @@ await A.page.getByLabel("Channel name", { exact: true }).fill("Garden news");
 await A.page.locator(".seg button").filter({ hasText: /^Group chat$/ }).click();
 await A.snap("start");
 await A.page.getByRole("button", { name: "Start", exact: true }).click();
-await A.page.waitForSelector("text=Anyone you forward this link to can read until you retire it.", { timeout: 15000 });
+await A.page.waitForSelector("text=Anyone with this link can read the channel and forward the link to others. Disable it to stop access through that link.", { timeout: 15000 });
 await A.snap("share");
 await A.page.getByRole("button", { name: "Copy the link", exact: true }).click();
 const link = await A.clip();
 if (!/^https:\/\/cahoots\.network\/app\/#\/ch\/127\.0\.0\.1:\d+\/[0-9a-f]{32}\/[A-Za-z0-9_-]{43}$/.test(link || "")) throw new Error(`channel link: ${link}`);
 const channelId = link.split("/")[7];
 await A.page.getByRole("button", { name: "Open the channel", exact: true }).click();
-await A.page.waitForSelector("text=End-to-end encrypted; the relay keeps ciphertext only");
-await A.page.waitForSelector("text=anyone with the link can read and post");
+await A.page.waitForSelector("text=End-to-end encrypted. The relay cannot read your messages");
+await A.page.waitForSelector("text=anyone with the link can read and request permission to post");
 await A.page.getByLabel("Message", { exact: true }).fill("first post from A");
 await A.page.keyboard.press("Enter");
 await A.page.waitForSelector('.bubble.out:has-text("first post from A")');
@@ -160,13 +160,13 @@ const B = await person("reader", { width: 1280, height: 900 });
 people.push(B);
 await B.page.goto(base + link.slice(link.indexOf("#")));
 await B.page.waitForSelector("text=Garden news");
-await B.page.waitForSelector("text=anyone with the link can read and post");
+await B.page.waitForSelector("text=anyone with the link can read and request permission to post");
 await B.snap("join");
 await B.page.getByLabel("Your name", { exact: true }).fill("Bea");
 await B.page.getByRole("button", { name: "Open", exact: true }).click();
 await B.page.waitForSelector('.bubble.in:has-text("first post from A")', { timeout: 15000 });
 if ((await B.page.evaluate(() => location.hash)).split("/").length !== 3) throw new Error("the link's secret stayed in the address bar");
-await B.page.waitForSelector("text=Waiting for the owner to let you post.");
+await B.page.waitForSelector("text=Your request to post is waiting for the owner’s approval.");
 if (!(await B.page.getByLabel("Message", { exact: true }).isDisabled())) throw new Error("B can post before the owner allows it");
 await B.snap("reading");
 console.log("B reads by link and asked to post");
@@ -179,9 +179,9 @@ await A.snap("requests");
 // The owner picks what to give: read and post, or read. Nothing else is offered.
 const bea = A.page.locator(".request").filter({ hasText: "Bea" });
 if (await bea.getByRole("button", { name: "Allow", exact: true }).count()) throw new Error("a bare Allow would pass the request's own actions");
-await bea.getByRole("button", { name: "Allow to read", exact: true }).waitFor();
-await bea.getByRole("button", { name: "Allow to post", exact: true }).click();
-await A.page.waitForSelector("text=No requests are waiting.", { timeout: 15000 });
+await bea.getByRole("button", { name: "Allow reading", exact: true }).waitFor();
+await bea.getByRole("button", { name: "Allow posting", exact: true }).click();
+await A.page.waitForSelector("text=No pending requests.", { timeout: 15000 });
 await A.page.getByRole("button", { name: "Back", exact: true }).click();
 
 // 5. B posts; A reads it under B's name.
@@ -197,19 +197,19 @@ console.log("B posts and A reads it");
 // 6. A retires the link without revoking anyone: B, let in by A, keeps reading through its key deposit.
 refusalsExpected = true; // B's link token is refused from here on
 A.page.once("dialog", (d) => d.accept());
-await A.menu(); await A.page.getByRole("button", { name: "Retire the link", exact: true }).click();
-await A.page.waitForSelector("text=The link is retired and new keys started.", { timeout: 15000 });
+await A.menu(); await A.page.getByRole("button", { name: "Disable the link", exact: true }).click();
+await A.page.waitForSelector("text=The link is disabled. Future messages will use new encryption keys.", { timeout: 15000 });
 await A.page.getByLabel("Message", { exact: true }).fill("after the retire");
 await A.page.keyboard.press("Enter");
 await A.page.waitForSelector('.bubble.out:has-text("after the retire")');
 await B.page.waitForSelector('.bubble.in:has-text("after the retire")', { timeout: 40000 });
-if (await B.page.locator("text=This link no longer works").count()) throw new Error("an admitted member was cut off by retiring the link");
+if (await B.page.locator("text=You no longer have access through this link").count()) throw new Error("an admitted member was cut off by retiring the link");
 await B.snap("reads-after-retire");
 console.log("B, let in, reads after the link is retired");
 // A makes a new link, with no policy change.
 A.page.once("dialog", (d) => d.accept());
 await A.menu(); await A.page.getByRole("button", { name: "Share the link", exact: true }).click();
-await A.page.waitForSelector("text=Anyone you forward this link to can read until you retire it.", { timeout: 15000 });
+await A.page.waitForSelector("text=Anyone with this link can read the channel and forward the link to others. Disable it to stop access through that link.", { timeout: 15000 });
 await A.page.getByRole("button", { name: "Copy the link", exact: true }).click();
 const link2 = await A.clip();
 if (link2 === link || !link2?.includes(`/${channelId}/`)) throw new Error(`second link: ${link2}`);
@@ -220,8 +220,8 @@ await A.menu(); await A.page.getByRole("button", { name: "Members", exact: true 
 await A.page.waitForSelector('.member:has-text("Bea")');
 await A.snap("members");
 A.page.once("dialog", (d) => d.accept());
-await A.page.locator(".member").filter({ hasText: "Bea" }).getByRole("button", { name: "Revoke", exact: true }).click();
-await A.page.waitForSelector("text=Everyone who should keep reading needs this new link.", { timeout: 15000 });
+await A.page.locator(".member").filter({ hasText: "Bea" }).getByRole("button", { name: "Remove member", exact: true }).click();
+await A.page.waitForSelector("text=Share the new link with anyone who should keep reading through a link. Approved members keep their access.", { timeout: 15000 });
 await A.snap("new-link");
 await A.page.getByRole("button", { name: "Copy the link", exact: true }).click();
 const link3 = await A.clip();
@@ -233,13 +233,13 @@ await A.page.waitForSelector('.bubble.out:has-text("after the revocation")');
 await A.snap("after-revoke");
 
 // 8. B is shut out: the link no longer works, and A's next post never shows.
-await B.page.waitForSelector("text=This link no longer works. Ask for a new one.", { timeout: 40000 });
+await B.page.waitForSelector("text=You no longer have access through this link. Ask the owner for a new link or an invitation.", { timeout: 40000 });
 await B.page.waitForTimeout(3000);
 if (await B.page.locator('.bubble:has-text("after the revocation")').count()) throw new Error("B read a post made after the revocation");
 if (!(await B.page.getByLabel("Message", { exact: true }).isDisabled())) throw new Error("B can still post after the revocation");
 await B.snap("shut-out");
 await B.page.reload();
-await B.page.waitForSelector("text=This link no longer works. Ask for a new one.", { timeout: 15000 });
+await B.page.waitForSelector("text=You no longer have access through this link. Ask the owner for a new link or an invitation.", { timeout: 15000 });
 if (await B.page.locator('.bubble:has-text("after the revocation")').count()) throw new Error("B read the later post after a reload");
 console.log("B is shut out after the revocation");
 
@@ -248,7 +248,7 @@ const C = await person("newcomer", { width: 390, height: 844 });
 people.push(C);
 // A link without its secret opens nothing: it says who can read, and neither polls nor asks to join.
 await C.page.goto(`${base}#/ch/${link3.split("/")[6]}/${channelId}`);
-await C.page.waitForSelector("text=Only people the owner lets in can read this channel.");
+await C.page.waitForSelector("text=This channel is private. Only people approved by the owner can read it.");
 await C.snap("no-secret");
 // The first signer-grant fetch fails; the poll loop backs off and reads the entry again.
 let failedOnce = false;
@@ -261,7 +261,7 @@ await C.page.waitForSelector("text=Garden news");
 await C.page.getByLabel("Your name", { exact: true }).fill("Cy");
 await C.page.getByRole("button", { name: "Open", exact: true }).click();
 await C.page.waitForSelector('.bubble.in:has-text("after the revocation")', { timeout: 20000 });
-if (await C.page.locator("text=This link no longer works").count()) throw new Error("the new link reads as dead");
+if (await C.page.locator("text=You no longer have access through this link").count()) throw new Error("the new link reads as dead");
 if (!failedOnce) throw new Error("the failed fetch was never tried");
 await C.snap("reads-new-link");
 console.log("C reads through the new link");
@@ -272,8 +272,8 @@ const port = new URL(stationUrl).port;
 const elsewhere = link3.replace(`#/ch/127.0.0.1:${port}/`, `#/ch/localhost:${port}/`);
 if (elsewhere === link3) throw new Error("the other-relay link was not made");
 await B.page.goto(base + elsewhere.slice(elsewhere.indexOf("#")));
-await B.page.waitForSelector("text=This link names a different relay than the one this channel uses.", { timeout: 15000 });
-await B.page.waitForSelector("text=This link no longer works. Ask for a new one.");
+await B.page.waitForSelector("text=This link points to a different relay from the one saved for this channel. Ask the owner to confirm the correct link.", { timeout: 15000 });
+await B.page.waitForSelector("text=You no longer have access through this link. Ask the owner for a new link or an invitation.");
 if ((await B.page.evaluate(() => location.hash)).split("/").length !== 3) throw new Error("the other relay's link stayed in the address bar");
 await B.snap("other-relay");
 const relayOfB = await B.page.evaluate(async (id) => {
@@ -285,7 +285,7 @@ if (relayOfB !== `127.0.0.1:${port}`) throw new Error(`the other relay's link mo
 // 11. A dead channel comes back with a newer link: B is handed the new link and reads again.
 await B.page.goto(base + link3.slice(link3.indexOf("#")));
 await B.page.waitForSelector('.bubble.in:has-text("after the revocation")', { timeout: 20000 });
-if (await B.page.locator("text=This link no longer works").count()) throw new Error("a newer link did not revive the channel");
+if (await B.page.locator("text=You no longer have access through this link").count()) throw new Error("a newer link did not revive the channel");
 if ((await B.page.evaluate(() => location.hash)).split("/").length !== 3) throw new Error("the new link's secret stayed in the address bar");
 await B.snap("new-link-revives");
 const rejected = await A.page.$$(".bubble.rejected");

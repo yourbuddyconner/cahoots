@@ -15,13 +15,13 @@ struct ChannelMembersView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xl) {
-                ScreenHeader(title: "People you let in.",
-                             detail: "Each holds a grant from your seat. Revoking one ends it and starts new keys.",
+                ScreenHeader(title: "Approved members",
+                             detail: "These people have permission to read or post. Removing a member ends their access to future messages. Messages they already received stay on their device.",
                              style: .title)
                 PaperSection {
                     if let members {
                         if members.isEmpty {
-                            Text("No one else is a member yet.")
+                            Text("You haven’t approved any members yet.")
                                 .font(.subheadline).foregroundStyle(Color.muted)
                                 .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
                         }
@@ -43,10 +43,10 @@ struct ChannelMembersView: View {
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
-        .confirmationDialog("Revoke \(revoking?.name ?? "this member")? Anyone who holds the link gets a new one, and new keys start. \(ChannelCopy.newLink)",
+        .confirmationDialog("Remove \(revoking?.name ?? "this member")? Their permission will end. If the channel has a shared link, it will be replaced. Share the new link with anyone who still needs it.",
                             isPresented: Binding(get: { revoking != nil }, set: { if !$0 { revoking = nil } }),
                             titleVisibility: .visible) {
-            Button("Revoke", role: .destructive) {
+            Button("Remove member", role: .destructive) {
                 guard let m = revoking else { return }
                 Task { await revoke(m) }
             }
@@ -67,7 +67,7 @@ struct ChannelMembersView: View {
             .accessibilityElement(children: .combine)
             Spacer(minLength: Space.s)
             Button { revoking = m } label: {
-                if working == m.grantId { ProgressView() } else { Text("Revoke") }
+                if working == m.grantId { ProgressView() } else { Text("Remove") }
             }
             .buttonStyle(TextButtonStyle(full: false))
             .disabled(working != nil)
@@ -94,9 +94,9 @@ struct ChannelMembersView: View {
             await app.refresh()
             if link.isEmpty {
                 status = nil
-                notice = "\(m.name) is removed and new keys started."
+                notice = "\(m.name) has been removed. Future messages will use new encryption keys."
             } else {
-                sharing = SharedLink(link: link, note: "\(m.name) is removed and new keys started. \(ChannelCopy.newLink)")
+                sharing = SharedLink(link: link, note: "\(m.name) has been removed. Future messages will use new encryption keys. \(ChannelCopy.newLink)")
             }
         } catch {
             status = plain(error)

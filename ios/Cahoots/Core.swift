@@ -88,13 +88,13 @@ final class Once: @unchecked Sendable {
 func plain(_ error: Error) -> String {
     switch error {
     case PhoneError.Locked:
-        return "This needs Face ID or your passcode."
+        return "Use Face ID or your passcode to continue."
     case let PhoneError.Network(m), let PhoneError.Storage(m), let PhoneError.NotFound(m),
          let PhoneError.BadCode(m), let PhoneError.Ceremony(m), let PhoneError.Chat(m),
          let PhoneError.Signer(m), let PhoneError.Channel(m):
         return m
     default:
-        return "Something went wrong."
+        return "Cahoots couldn’t complete that action. Please try again."
     }
 }
 

@@ -864,7 +864,7 @@ fn a_lost_ceremony_says_to_start_over() {
     match a.phone.ceremony_tick("gone".into()) {
         Err(PhoneError::NotFound { message }) => assert_eq!(
             message,
-            "This ceremony was lost when the app closed. Everyone starts over with a new code."
+            "Setup couldn’t be restored after Cahoots closed. Ask everyone to start a new ceremony and scan the new code."
         ),
         other => panic!("{other:?}"),
     }
