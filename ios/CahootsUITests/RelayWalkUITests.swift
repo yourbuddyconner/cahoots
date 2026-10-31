@@ -28,8 +28,9 @@ final class RelayWalkUITests: XCTestCase {
 
     func testHost() throws {
         launch("walk-host")
-        // The relay for new circles: the local station.
+        // The name on this phone's cards, then the relay for new circles: the local station.
         app.buttons["Settings"].tap()
+        setName("Ada")
         let relay = element("default-relay")
         XCTAssertTrue(relay.waitForExistence(timeout: 10))
         // Tap at the end of the address so the deletes clear all of it.
@@ -108,6 +109,11 @@ final class RelayWalkUITests: XCTestCase {
     func testJoiner() throws {
         launch("walk-joiner")
         shot("joiner-0-empty")
+        app.buttons["Settings"].tap()
+        setName("Grace")
+        shot("joiner-0-settings")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["Join a circle"].waitForExistence(timeout: 10))
         let offer = try wait(for: "offer.txt")
         app.buttons["Join a circle"].tap()
         paste(offer)
@@ -133,22 +139,26 @@ final class RelayWalkUITests: XCTestCase {
         tour(side: "joiner")
     }
 
-    /// After the chat: the roster, hello words, the list of circles and settings, for the record.
+    /// After the chat: the other side's name in the chat header and People, hello words, the
+    /// list of circles and settings, for the record.
     private func tour(side: String) {
-        app.buttons["People in park"].tap()
+        let (mine, theirs) = side == "host" ? ("Ada", "Grace") : ("Grace", "Ada")
+        let header = app.buttons["People in park"]
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        XCTAssertTrue(wait(header, value: theirs), "the chat header says \(header.value ?? "nothing")")
+        header.tap()
         // The other phone's seat, whose message is in the chat: after the cards for the host.
         let seat = side == "host" ? cards + 1 : 0
         let other = element("hello-seat-\(seat)")
         XCTAssertTrue(other.waitForExistence(timeout: 10))
+        // Each side sees the name the other chose, and its own.
+        XCTAssertTrue(app.staticTexts[theirs].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts[mine].exists)
+        XCTAssertTrue(other.label.contains(theirs), other.label)
+        XCTAssertTrue(other.label.contains("phone"), other.label)
+        // A seat with a card is named by its owner, so it has no name to edit here.
+        XCTAssertFalse(element("edit-seat-\(seat)").exists)
         shot("\(side)-8-people")
-        element("edit-seat-\(seat)").tap()
-        let name = element("seat-name")
-        XCTAssertTrue(name.waitForExistence(timeout: 10))
-        name.tap()
-        name.typeText("Friend")
-        element("save-seat-name").tap()
-        XCTAssertTrue(app.staticTexts["Friend"].waitForExistence(timeout: 10))
-        shot("\(side)-8-named-people")
         other.tap()
         XCTAssertTrue(app.buttons["Next hello"].waitForExistence(timeout: 10))
         XCTAssertEqual(element("hello-number").label, "Hello 1")
@@ -162,19 +172,40 @@ final class RelayWalkUITests: XCTestCase {
         shot("\(side)-9-next-hello")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(app.staticTexts["Friend"].waitForExistence(timeout: 10))
-        // Names survive reopening the phone and remain scoped to this circle.
+        XCTAssertTrue(wait(header, value: theirs))
+        // The names survive reopening the phone.
         app.terminate()
         app.launch()
         XCTAssertTrue(app.buttons["Create a circle"].waitForExistence(timeout: 20))
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'park.'")).firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Friend"].waitForExistence(timeout: 10))
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        XCTAssertTrue(wait(header, value: theirs), "the chat header says \(header.value ?? "nothing")")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.buttons["Create a circle"].waitForExistence(timeout: 10))
         shot("\(side)-10-circles")
         app.buttons["Settings"].tap()
         XCTAssertTrue(element("default-relay").waitForExistence(timeout: 10))
+        XCTAssertEqual(element("my-name").value as? String, mine)
         shot("\(side)-11-settings")
+    }
+
+    /// Give this phone's cards a name in Settings.
+    private func setName(_ name: String) {
+        let field = element("my-name")
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.tap()
+        field.typeText(name)
+        app.buttons["save-name"].tap()
+        XCTAssertTrue(app.staticTexts["Name saved."].waitForExistence(timeout: 10))
+    }
+
+    /// Wait until `element`'s value contains `text`.
+    private func wait(_ element: XCUIElement, value text: String) -> Bool {
+        for _ in 0..<40 {
+            if (element.value as? String)?.contains(text) == true { return true }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        return false
     }
 
     // MARK: - Steps

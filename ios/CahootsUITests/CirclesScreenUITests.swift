@@ -18,8 +18,14 @@ final class WelcomeUITests: XCTestCase {
         let data = "welcome-\(UUID().uuidString)"
         app.launchArguments = ["-cahoots-data", data, "-cahoots.welcomeSeen", "NO"]
         app.launch()
-        for index in 0..<4 {
+        for index in 0..<5 {
             XCTAssertTrue(app.descendants(matching: .any)["welcome-page-\(index)"].waitForExistence(timeout: 20))
+            if index == 4 {
+                // The last page asks for the name on this phone's cards.
+                let name = app.descendants(matching: .any)["welcome-name"]
+                name.tap()
+                name.typeText("Ada")
+            }
             if let output = ProcessInfo.processInfo.environment["CAHOOTS_COPY_SHOTS"] {
                 try? app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: output).appendingPathComponent("welcome-\(index).png"))
             }
@@ -27,6 +33,9 @@ final class WelcomeUITests: XCTestCase {
             app.buttons["welcome-next"].tap()
         }
         XCTAssertTrue(app.buttons["Create a circle"].waitForExistence(timeout: 10))
+        app.buttons["Settings"].tap()
+        XCTAssertEqual(app.descendants(matching: .any)["my-name"].value as? String, "Ada")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
         app.terminate()
         app.launchArguments = ["-cahoots-data", data]
         app.launch()

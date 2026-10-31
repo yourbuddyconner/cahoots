@@ -1,12 +1,18 @@
 import SwiftUI
 
-/// This phone's key, where its secrets live, the relay for new circles, and each circle's
-/// export and removal.
+/// This phone's face and name, its key and where its secrets live, the relay for new circles,
+/// and each circle's export and removal.
 struct SettingsView: View {
     let core: Core
     @EnvironmentObject private var app: AppModel
     @State private var info: PhoneInfo?
     @State private var face: Data?
+    @State private var name = ""
+    @State private var nameNote: String?
+    @State private var nameError: String?
+    /// The card waits for a signature in at least one circle.
+    @State private var cardWaiting = false
+    @State private var working = false
     @State private var relay = ""
     @State private var relayNote: String?
     @State private var relayError: String?
@@ -73,7 +79,11 @@ struct SettingsView: View {
         .task {
             info = try? await core.run { $0.describe() }
             face = try? await core.run { $0.myFace() }
+            name = (try? await core.run { $0.myName() }) ?? ""
             relay = (try? await core.run { $0.defaultRelay() }) ?? ""
+            // A card left unsigned by a cancelled Face ID is shared again on coming back here.
+            await checkCard()
+            if cardWaiting { await share() }
         }
         .sheet(item: $export) { e in
             NavigationStack {
@@ -103,14 +113,20 @@ struct SettingsView: View {
         }
     }
 
-    /// The phone's own face, and where its keys live.
+    /// The phone's own face and name, and where its keys live.
     private var phone: some View {
         let layout = typeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: Space.l))
             : AnyLayout(HStackLayout(alignment: .top, spacing: Space.l))
         return VStack(alignment: .leading, spacing: Space.l) {
             layout {
-                FaceView(pixels: face, size: 96, label: "This phone's face")
+                VStack(alignment: .leading, spacing: Space.s) {
+                    FaceView(pixels: face, size: 96, label: "Your face")
+                    Button("Draw a new face") { Task { await redraw() } }
+                        .buttonStyle(TextButtonStyle(full: false))
+                        .disabled(working)
+                        .accessibilityIdentifier("redraw-face")
+                }
                 VStack(alignment: .leading, spacing: Space.s) {
                     Text("This phone").serifTitle(.title2)
                     if let info {
@@ -125,6 +141,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            nameField
             if !core.signer.usesEnclave {
                 StatusLine(text: "This simulator has no Secure Enclave. The key is in the keychain.")
             }
@@ -132,6 +149,100 @@ struct SettingsView: View {
                 .font(.footnote).foregroundStyle(Color.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var nameField: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            Text("Your name")
+                .font(.footnote.weight(.semibold)).foregroundStyle(Color.muted)
+                .accessibilityAddTraits(.isHeader)
+            HStack(spacing: Space.s) {
+                TextField(UIDevice.current.name, text: $name)
+                    .textContentType(.name)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
+                    .submitLabel(.done)
+                    .paperField()
+                    .accessibilityLabel("Your name")
+                    .accessibilityIdentifier("my-name")
+                    .onSubmit { Task { await saveName() } }
+                Button("Save") { Task { await saveName() } }
+                    .buttonStyle(CompactButtonStyle())
+                    .disabled(working || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("save-name")
+            }
+            Text("People in your circles see this name and this face.")
+                .font(.footnote).foregroundStyle(Color.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            StatusLine(text: nameNote, problem: false)
+            StatusLine(text: nameError)
+            if cardWaiting {
+                Button("Share again") { Task { await share() } }
+                    .buttonStyle(TextButtonStyle(full: false))
+                    .disabled(working)
+                    .accessibilityIdentifier("share-card")
+            }
+        }
+    }
+
+    private static let notShared = "Saved on this phone, but not shared yet. Tap Share again and confirm with Face ID."
+
+    private func saveName() async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        nameNote = nil
+        nameError = nil
+        do {
+            try await core.run { [name] in try $0.setMyName(name: name) }
+            nameNote = "Name saved."
+        } catch PhoneError.Locked {
+            nameError = Self.notShared
+        } catch {
+            nameError = plain(error)
+        }
+        name = (try? await core.run { $0.myName() }) ?? name
+        await checkCard()
+        await app.refresh()
+    }
+
+    private func redraw() async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        nameNote = nil
+        nameError = nil
+        do {
+            try await core.run { try $0.redrawFace() }
+        } catch PhoneError.Locked {
+            nameError = Self.notShared
+        } catch {
+            nameError = plain(error)
+        }
+        face = try? await core.run { $0.myFace() }
+        await checkCard()
+        await app.refresh()
+    }
+
+    /// Sign and publish the card wherever it waits.
+    private func share() async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        do {
+            try await core.run { try $0.shareMyCard() }
+            nameError = nil
+            nameNote = "Shared with your circles."
+        } catch PhoneError.Locked {
+            nameError = Self.notShared
+        } catch {
+            nameError = plain(error)
+        }
+        await checkCard()
+    }
+
+    private func checkCard() async {
+        cardWaiting = (try? await core.run { $0.cardWaiting() }) ?? false
     }
 
     private var relaySection: some View {

@@ -29,6 +29,7 @@ use cahoots_core::params::CircleParams;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 pub use crate::signer::Signer;
@@ -378,6 +379,9 @@ pub struct Phone {
     state: Mutex<State>,
     /// Whether the `Signer` keeps keys in the Secure Enclave. Swift says when it does not.
     enclave: std::sync::atomic::AtomicBool,
+    /// Set by the first refused signature of a card since the phone opened. Polls then stop
+    /// signing due cards, so Face ID is not asked on every poll, until `share_my_card`.
+    card_refused: std::sync::atomic::AtomicBool,
 }
 
 fn not_found(what: &str) -> PhoneError {
@@ -499,6 +503,9 @@ impl Phone {
             message: "The card is too long.".into(),
         })?;
         if let Some(e) = seat.error.take() {
+            if matches!(e, PhoneError::Locked) {
+                self.card_refused.store(true, Ordering::Relaxed);
+            }
             return Err(e);
         }
         c.publish_card(self.http.as_ref(), signed)
@@ -628,6 +635,7 @@ impl Phone {
             http,
             me: Mutex::new(me),
             enclave: std::sync::atomic::AtomicBool::new(true),
+            card_refused: std::sync::atomic::AtomicBool::new(false),
             state: Mutex::new(State {
                 ceremonies: HashMap::new(),
                 join_receiver: Receiver::new(ceremony::JOIN_MAX_LEN),
@@ -989,11 +997,12 @@ impl Phone {
     }
 
     /// Read the relay after the cursor, keep and return what others sent, then send what waits.
-    /// A card left due by a refused signature is signed and published again here.
+    /// A card left due is signed and published again here, unless a signature of a card was
+    /// refused since the phone opened: then it waits for `share_my_card`.
     pub fn poll(&self, circle: String) -> Result<Vec<ChatMessage>, PhoneError> {
         self.with_circle(&circle, |c, me| {
             let got = c.poll(me.http.as_ref())?;
-            if c.chat.card_due {
+            if c.chat.card_due && !me.card_refused.load(Ordering::Relaxed) {
                 let _ = me.publish_my_card(c);
             }
             Ok(got)
@@ -1170,6 +1179,20 @@ impl Phone {
         self.publish_everywhere(|_| true)
     }
 
+    /// Sign and publish the card in every circle where it is due, for when the person asks to
+    /// share it again after a refused Face ID. Polls sign due cards again from here on.
+    pub fn share_my_card(&self) -> Result<(), PhoneError> {
+        self.card_refused.store(false, Ordering::Relaxed);
+        self.publish_everywhere(|c| c.chat.card_due)
+    }
+
+    /// Whether this phone's card waits to be published in any circle.
+    pub fn card_waiting(&self) -> bool {
+        store::circle_ids(&self.dir)
+            .iter()
+            .any(|id| self.with_circle(id, |c, _| Ok(c.chat.card_due)).unwrap_or(false))
+    }
+
     /// Draw a new face for this phone and publish the card again in every circle that does
     /// not have a face of its own.
     pub fn redraw_face(&self) -> Result<(), PhoneError> {
@@ -1191,6 +1214,11 @@ impl Phone {
             c.settings.save(&c.dir)?;
             me.publish_my_card(c)
         })
+    }
+
+    /// Whether a circle has a face of its own rather than the phone's.
+    pub fn circle_has_own_face(&self, circle: String) -> Result<bool, PhoneError> {
+        self.with_circle(&circle, |c, _| Ok(c.settings.face_override.is_some()))
     }
 
     /// The `Signer` label of a circle's seat key.

@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The circle's roster and the private names kept on this phone.
+/// The circle's roster: the names and faces on the members' cards, and for a seat without a
+/// card, the name kept on this phone.
 struct PeopleView: View {
     let core: Core
     let circle: String
@@ -22,23 +23,43 @@ struct PeopleView: View {
         }
     }
 
+    /// The kind of device on a seat's card, in words, or nil without a card that says.
+    static func device(_ d: UInt8?) -> String? {
+        switch d {
+        case 0: return "on a phone"
+        case 1: return "on a badge"
+        case 2: return "in a browser"
+        case 3: return "on a laptop"
+        default: return nil
+        }
+    }
+
+    /// The tier, then the kind of device when the card says.
+    static func about(_ member: Member) -> String {
+        [tier(member.tier), device(member.device)].compactMap { $0 }.joined(separator: ", ")
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xl) {
                 VStack(alignment: .leading, spacing: Space.m) {
                     FaceRow(faces: members.compactMap { faces[$0.seat] }, size: 32)
                     ScreenHeader(title: app.circle(circle)?.name ?? "Your circle",
-                                 detail: "Each seat is a device in this circle. Tap the pencil to add a name, or open someone’s hello words to check them on a call.", style: .title)
+                                 detail: "Each seat is a device in this circle. Open someone’s hello words to check them on a call.", style: .title)
                 }
                 if !loaded && error == nil {
                     ProgressView("Loading people…").frame(maxWidth: .infinity)
                 }
                 if !members.isEmpty {
-                    PaperSection(title: "\(members.count) people", footer: "Names are saved only on this phone. Other members choose their own names for each seat.") {
+                    PaperSection(title: "\(members.count) people", footer: "Each person chooses their own name and face. For a seat without a name, tap the pencil to add one that only you see.") {
                         ForEach(Array(members.enumerated()), id: \.element.seat) { i, member in
                             if i > 0 { Hairline() }
+                            let named = app.hasCardName(circle: circle, seat: member.seat)
                             HStack(spacing: Space.s) {
-                                if member.mine {
+                                if member.mine && named {
+                                    NavigationLink(value: Route.settings) { row(member) }
+                                        .buttonStyle(RowButtonStyle())
+                                } else if member.mine {
                                     Button { editingSeat = member.seat } label: { row(member) }
                                         .buttonStyle(RowButtonStyle())
                                 } else {
@@ -46,16 +67,18 @@ struct PeopleView: View {
                                         .buttonStyle(RowButtonStyle())
                                         .accessibilityIdentifier("hello-seat-\(member.seat)")
                                 }
-                                Button { editingSeat = member.seat } label: {
-                                    Image(systemName: "pencil")
-                                        .font(.body)
-                                        .frame(width: 44, height: 44)
-                                        .contentShape(Rectangle())
+                                if !named {
+                                    Button { editingSeat = member.seat } label: {
+                                        Image(systemName: "pencil")
+                                            .font(.body)
+                                            .frame(width: 44, height: 44)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(Color.brand)
+                                    .accessibilityLabel("Edit name for seat \(member.seat + 1)")
+                                    .accessibilityIdentifier("edit-seat-\(member.seat)")
                                 }
-                                .buttonStyle(.plain)
-                                .foregroundStyle(Color.brand)
-                                .accessibilityLabel("Edit name for seat \(member.seat + 1)")
-                                .accessibilityIdentifier("edit-seat-\(member.seat)")
                             }
                         }
                     }
@@ -64,7 +87,7 @@ struct PeopleView: View {
                             ForEach(members, id: \.seat) { member in
                                 VStack(alignment: .leading, spacing: Space.xs) {
                                     Text(app.seatName(circle: circle, seat: member.seat)).font(.subheadline.weight(.semibold))
-                                    Text(Self.tier(member.tier)).font(.subheadline).foregroundStyle(Color.muted)
+                                    Text(Self.about(member)).font(.subheadline).foregroundStyle(Color.muted)
                                 }
                             }
                             Text("These are the protection levels each device reported when the circle was created. They have not been independently verified. Every member holds the circle’s secret.")
@@ -92,6 +115,7 @@ struct PeopleView: View {
         .task {
             do {
                 members = try await core.run { [circle] in try $0.circleMembers(circle: circle) }
+                app.noteMembers(members, circle: circle)
                 faces = try await core.run { [circle, members] in
                     $0.faces(circle: circle, members: UInt8(members.count))
                 }
@@ -101,14 +125,18 @@ struct PeopleView: View {
     }
 
     private func row(_ member: Member) -> some View {
-        HStack(spacing: Space.m) {
-            FaceView(pixels: faces[member.seat], size: 44, label: "Seat \(member.seat + 1)'s face")
+        let name = app.seatName(circle: circle, seat: member.seat)
+        return HStack(spacing: Space.m) {
+            FaceView(pixels: faces[member.seat], size: 44, label: "\(name)'s face")
             VStack(alignment: .leading, spacing: Space.xs) {
-                Text(app.seatName(circle: circle, seat: member.seat))
+                Text(name)
                     .font(.headline).foregroundStyle(Color.ink)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(member.mine ? "Seat \(member.seat + 1). You" : "Seat \(member.seat + 1). Hello words")
                     .font(.subheadline).foregroundStyle(Color.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(Self.about(member))
+                    .font(.footnote).foregroundStyle(Color.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)

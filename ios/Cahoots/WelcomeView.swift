@@ -1,12 +1,17 @@
 import SwiftUI
 
-/// A guide shown once at first launch and available later from Settings.
+/// A guide shown once at first launch and available later from Settings. The first time, it
+/// ends by asking for the name on this phone's cards, which can be skipped.
 struct WelcomeView: View {
     let core: Core
     var firstVisit = true
     let done: () -> Void
     @State private var page = 0
     @State private var faces: [Data] = []
+    @State private var name = ""
+    @State private var myFace: Data?
+    @State private var nameError: String?
+    @State private var saving = false
     @AccessibilityFocusState private var headingFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -14,7 +19,7 @@ struct WelcomeView: View {
         WelcomePage(title: "A little circle of your people",
                     detail: "Meet in person to create a private circle. Then keep talking, wherever you go. No account or phone number needed.",
                     first: ("Set up together", "One person creates the circle. Everyone exchanges codes and checks the same six words. We call this setup a ceremony."),
-                    second: ("Give everyone a name", "Each device gets a numbered seat. In People, add familiar names that only you see.")),
+                    second: ("Choose your name and face", "Each device gets a numbered seat. Everyone in the circle sees the name and face you choose.")),
         WelcomePage(title: "A familiar voice, a little more certainty",
                     detail: "Hello words help you check someone on a call using a secret shared by your two devices.",
                     first: ("Open each other’s seat", "In the same circle, open People and select the person you’re talking to. Make sure both phones show the same hello number."),
@@ -29,9 +34,15 @@ struct WelcomeView: View {
                     second: ("Know what leaves your phone", "A relay delivers encrypted messages without being able to read them. Exported history is readable, so share those files carefully.")),
     ]
 
+    /// The guide's pages, then the name question on the first visit.
+    private var pageCount: Int { firstVisit ? pages.count + 1 : pages.count }
+    private var onNamePage: Bool { page == pages.count }
+
     var body: some View {
         NavigationStack {
-            pageContent
+            Group {
+                if onNamePage { namePage } else { pageContent }
+            }
                 .paperBackground()
                 .navigationTitle(firstVisit ? "Welcome" : "Cahoots guide")
                 .navigationBarTitleDisplayMode(.inline)
@@ -68,6 +79,45 @@ struct WelcomeView: View {
         }
     }
 
+    private var namePage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.xl) {
+                VStack(alignment: .leading, spacing: Space.s) {
+                    FaceView(pixels: myFace, size: 96, label: "Your face")
+                    Button("Draw a new face") { Task { await redraw() } }
+                        .buttonStyle(TextButtonStyle(full: false))
+                        .accessibilityIdentifier("welcome-redraw-face")
+                }
+                ScreenHeader(title: "What should people call you?",
+                             detail: "People in your circles see this name and this face.", style: .largeTitle)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("welcome-page-\(page)")
+                    .accessibilityFocused($headingFocused)
+                VStack(alignment: .leading, spacing: Space.s) {
+                    TextField(UIDevice.current.name, text: $name)
+                        .textContentType(.name)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                        .paperField()
+                        .accessibilityLabel("Your name")
+                        .accessibilityIdentifier("welcome-name")
+                        .onSubmit { Task { await finish() } }
+                    Text("You can skip this and add it later in Settings.")
+                        .font(.footnote).foregroundStyle(Color.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    StatusLine(text: nameError)
+                }
+            }
+            .padding(Space.l)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .task {
+            await Task.yield()
+            headingFocused = true
+        }
+    }
+
     @ToolbarContentBuilder
     private var navigationActions: some ToolbarContent {
         ToolbarItem(placement: .cancellationAction) {
@@ -85,25 +135,54 @@ struct WelcomeView: View {
     private var pageActions: some View {
         VStack(spacing: Space.s) {
             HStack(spacing: Space.s) {
-                ForEach(0..<pages.count, id: \.self) { index in
+                ForEach(0..<pageCount, id: \.self) { index in
                     Capsule().fill(index == page ? Color.brand : Color.line)
                         .frame(width: index == page ? 24 : 8, height: 6)
                 }
                 Spacer()
-                Text("\(page + 1) of \(pages.count)").font(.footnote.monospacedDigit()).foregroundStyle(Color.muted)
+                Text("\(page + 1) of \(pageCount)").font(.footnote.monospacedDigit()).foregroundStyle(Color.muted)
             }
             .padding(.bottom, Space.s)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Page \(page + 1) of \(pages.count)")
-            Button(page == pages.count - 1 ? "Get started" : "Continue") {
-                if page == pages.count - 1 { done() } else { move(to: page + 1) }
+            .accessibilityLabel("Page \(page + 1) of \(pageCount)")
+            Button {
+                if page == pageCount - 1 { Task { await finish() } } else { move(to: page + 1) }
+            } label: {
+                Working(busy: saving, title: page == pageCount - 1 ? "Get started" : "Continue")
             }
             .buttonStyle(.filled)
+            .disabled(saving)
+            .accessibilityLabel(page == pageCount - 1 ? "Get started" : "Continue")
             .accessibilityIdentifier("welcome-next")
         }
     }
 
+    /// Save the name, if one was given, and close the guide.
+    private func finish() async {
+        let given = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard onNamePage, !given.isEmpty else { return done() }
+        saving = true
+        defer { saving = false }
+        do {
+            try await core.run { try $0.setMyName(name: given) }
+            done()
+        } catch {
+            nameError = plain(error)
+        }
+    }
+
+    private func redraw() async {
+        nameError = nil
+        do {
+            try await core.run { try $0.redrawFace() }
+        } catch {
+            nameError = plain(error)
+        }
+        myFace = try? await core.run { $0.myFace() }
+    }
+
     private func loadFaces() async {
+        myFace = try? await core.run { $0.myFace() }
         faces = (try? await core.run { phone -> [Data] in
             var result: [Data] = []
             for index in 0..<3 {

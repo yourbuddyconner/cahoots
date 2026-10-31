@@ -1485,7 +1485,10 @@ fn a_circle_face_changes_that_circle_only() {
     assert_ne!(one, two);
     let device_face = a.phone.my_face_seed();
 
+    assert!(!a.phone.circle_has_own_face(one.clone()).unwrap());
     a.phone.set_circle_face(one.clone(), true).unwrap();
+    assert!(a.phone.circle_has_own_face(one.clone()).unwrap());
+    assert!(!a.phone.circle_has_own_face(two.clone()).unwrap());
     assert_eq!(a.phone.my_face_seed(), device_face, "the device's face stays");
     for id in [&one, &two] {
         b.phone.poll(id.clone()).unwrap();
@@ -1505,6 +1508,7 @@ fn a_circle_face_changes_that_circle_only() {
 
     // Back to the device's face.
     a.phone.set_circle_face(one.clone(), false).unwrap();
+    assert!(!a.phone.circle_has_own_face(one.clone()).unwrap());
     b.phone.poll(one.clone()).unwrap();
     assert_eq!(member(&b, &one, 0).face_seed, a.phone.my_face_seed());
 }
@@ -1620,7 +1624,7 @@ fn cards_follow_a_circle_to_a_new_relay() {
 }
 
 #[test]
-fn a_refused_face_id_asks_once_and_the_next_poll_shares_the_name() {
+fn a_refused_face_id_asks_once_and_share_my_card_shares_the_name() {
     let r = relay();
     let (a, b) = named(&r, ["Ada", "Bea"]);
     let (one, _, _) = finish(&a, &b);
@@ -1641,11 +1645,23 @@ fn a_refused_face_id_asks_once_and_the_next_poll_shares_the_name() {
     }
     // A poll while still locked changes nothing.
     a.phone.poll(one.clone()).unwrap();
+    assert!(a.phone.card_waiting());
 
-    // Once the signer allows, each circle's next poll signs and posts the card.
+    // After the refusal the polls do not sign, even once the signer would allow it, so
+    // Face ID is not asked on every poll.
     a.signer.set_locked(false);
     for id in [&one, &two] {
         a.phone.poll(id.clone()).unwrap();
+        b.phone.poll(id.clone()).unwrap();
+        assert_eq!(member(&b, id, 0).name, "Ada");
+    }
+    assert_eq!(a.signer.sign_calls().len(), signs);
+
+    // Sharing again signs and posts the card in every circle where it waits.
+    a.phone.share_my_card().unwrap();
+    assert_eq!(a.signer.sign_calls().len(), signs + 2);
+    assert!(!a.phone.card_waiting());
+    for id in [&one, &two] {
         b.phone.poll(id.clone()).unwrap();
         assert_eq!(member(&b, id, 0).name, "Ada King");
     }
@@ -1655,4 +1671,26 @@ fn a_refused_face_id_asks_once_and_the_next_poll_shares_the_name() {
         a.phone.poll(id.clone()).unwrap();
     }
     assert_eq!(a.signer.sign_calls().len(), signs);
+}
+
+#[test]
+fn a_refused_share_stops_the_polls_until_share_my_card() {
+    let r = relay();
+    let (a, b) = named(&r, ["Ada", "Bea"]);
+    let (id, _, _) = finish(&a, &b);
+    assert!(!a.phone.card_waiting());
+    a.phone.share_my_card().unwrap();
+
+    a.signer.set_locked(true);
+    assert!(matches!(a.phone.set_my_name("Ada Two".into()), Err(PhoneError::Locked)));
+    assert!(matches!(a.phone.share_my_card(), Err(PhoneError::Locked)));
+    a.signer.set_locked(false);
+    let signs = a.signer.sign_calls().len();
+    a.phone.poll(id.clone()).unwrap();
+    assert_eq!(a.signer.sign_calls().len(), signs, "the poll does not sign");
+
+    a.phone.share_my_card().unwrap();
+    assert_eq!(a.signer.sign_calls().len(), signs + 1);
+    b.phone.poll(id.clone()).unwrap();
+    assert_eq!(member(&b, &id, 0).name, "Ada Two");
 }

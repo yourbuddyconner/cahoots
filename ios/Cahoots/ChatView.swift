@@ -12,6 +12,12 @@ final class ChatModel: ObservableObject {
     @Published var connected = false
     /// Each seat's face, drawn.
     @Published private(set) var faces: [UInt8: Data] = [:]
+    /// The circle's members as last read, with the names and faces on their cards.
+    @Published private(set) var members: [Member] = []
+    /// This circle shows a face of its own for this phone, not the phone's face.
+    @Published private(set) var ownFace = false
+    /// What became of the last change to this circle's face, when it needs saying.
+    @Published var faceNote: String?
 
     init(core: Core, circle: String) {
         self.core = core
@@ -38,15 +44,43 @@ final class ChatModel: ObservableObject {
         }
     }
 
-    func loadFaces(members: UInt8) async {
-        guard faces.isEmpty, members > 0 else { return }
-        faces = (try? await core.run { [circle] in $0.faces(circle: circle, members: members) }) ?? [:]
+    /// Read the members and their faces again: a card read by the last poll may change them.
+    func loadMembers() async {
+        guard let read = try? await core.run({ [circle] phone in
+            let members = try phone.circleMembers(circle: circle)
+            let faces = Dictionary(uniqueKeysWithValues: members.map {
+                ($0.seat, phone.facePixels(seed: $0.faceSeed))
+            })
+            return (members, faces)
+        }) else { return }
+        if read.0 != members { members = read.0 }
+        if read.1 != faces { faces = read.1 }
+    }
+
+    func loadOwnFace() async {
+        ownFace = (try? await core.run { [circle] in try $0.circleHasOwnFace(circle: circle) }) ?? false
+    }
+
+    /// Give this circle a face of its own, freshly drawn, or go back to the phone's face.
+    func setOwnFace(_ fresh: Bool) async {
+        faceNote = nil
+        do {
+            try await core.run { [circle] in try $0.setCircleFace(circle: circle, fresh: fresh) }
+        } catch PhoneError.Locked {
+            faceNote = "Saved on this phone, but not shared yet. Open Settings and tap Share again."
+        } catch {
+            faceNote = plain(error)
+        }
+        await loadOwnFace()
+        await loadMembers()
     }
 
     func run() async {
         await load()
+        await loadOwnFace()
         while !Task.isCancelled {
             await poll()
+            await loadMembers()
             try? await Task.sleep(for: .seconds(3))
         }
     }
@@ -114,7 +148,7 @@ struct ChatView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if model.messages.isEmpty {
-                        ChatEmpty(faces: (0..<(summary?.members ?? 0)).compactMap { model.faces[$0] })
+                        ChatEmpty(faces: model.members.compactMap { model.faces[$0.seat] })
                     }
                     ForEach(Array(model.messages.enumerated()), id: \.element.id) { i, m in
                         let prev = i > 0 ? model.messages[i - 1] : nil
@@ -154,7 +188,7 @@ struct ChatView: View {
                             .font(.system(.headline, design: .serif))
                             .foregroundStyle(Color.ink)
                         HStack(spacing: Space.xs) {
-                            Text("\(summary?.members ?? 0) people")
+                            Text(others ?? "\(summary?.members ?? 0) people").lineLimit(1)
                             Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
                         }
                         .font(.caption).foregroundStyle(Color.muted)
@@ -164,6 +198,7 @@ struct ChatView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("People in \(summary?.name ?? "this circle")")
+                .accessibilityValue(others ?? "\(summary?.members ?? 0) people")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showSettings = true } label: { Image(systemName: "ellipsis") }
@@ -181,8 +216,8 @@ struct ChatView: View {
                 composer
             }
         }
-        .task(id: summary?.members) { await model.loadFaces(members: summary?.members ?? 0) }
         .task { await model.run() }
+        .onChange(of: model.members) { _, members in app.noteMembers(members, circle: model.circle) }
         .onDisappear { Task { await app.refresh() } }
         .sheet(isPresented: $showSettings) {
             ConversationSettings(model: model, epoch: model.messages.last?.epoch) { done in
@@ -203,6 +238,11 @@ struct ChatView: View {
                 }
             }
         }
+    }
+
+    /// The names of the other members, for the header, once any of them has a name.
+    private var others: String? {
+        app.others(circle: model.circle, seats: model.members.filter { !$0.mine }.map(\.seat))
     }
 
     static func sameRun(_ a: ChatMessage, _ b: ChatMessage) -> Bool {
@@ -376,7 +416,7 @@ struct ConversationSettings: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.xxl) {
-                    PaperSection(footer: "Add names on this phone or check a member’s hello words.") {
+                    PaperSection(footer: "See who is in this circle and check a member’s hello words.") {
                         Button { done("people") } label: {
                             HStack(spacing: Space.m) {
                                 Label("People and names", systemImage: "person.2")
@@ -387,6 +427,22 @@ struct ConversationSettings: View {
                             .frame(minHeight: 52)
                         }
                         .buttonStyle(RowButtonStyle())
+                    }
+                    PaperSection(footer: "Show a face drawn only for this circle. Your other circles keep your face from Settings.") {
+                        HStack(spacing: Space.m) {
+                            FaceView(pixels: model.members.first(where: \.mine).flatMap { model.faces[$0.seat] },
+                                     size: 32)
+                            Toggle(isOn: Binding(get: { model.ownFace },
+                                                 set: { on in Task { await model.setOwnFace(on) } })) {
+                                Text("New face for this circle")
+                                    .foregroundStyle(Color.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .tint(Color.brand)
+                            .accessibilityIdentifier("circle-face")
+                        }
+                        .padding(.vertical, Space.m)
+                        StatusLine(text: model.faceNote)
                     }
                     VStack(alignment: .leading, spacing: Space.s) {
                         Text("End-to-end encrypted").serifTitle(.title2)

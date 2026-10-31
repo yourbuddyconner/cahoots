@@ -35,6 +35,8 @@ final class AppModel: ObservableObject {
     /// Each circle's faces, drawn, in seat order, by circle id.
     @Published var faces: [String: [Data]] = [:]
     @Published private(set) var seatNames: [String: [String: String]] = [:]
+    /// The name on each seat's card, by circle id and seat. A seat without a card has none.
+    @Published private(set) var cardNames: [String: [UInt8: String]] = [:]
     @Published var path: [Route] = [] {
         didSet {
             // A link held while a ceremony was open goes once the ceremony leaves the screen.
@@ -108,7 +110,20 @@ final class AppModel: ObservableObject {
                 (c.id, (0..<c.members).compactMap { phone.seatFace(circle: c.id, seat: $0) })
             })
         }) ?? faces
+        if let members = try? await core.run({ phone in
+            list.map { c in (c.id, (try? phone.circleMembers(circle: c.id)) ?? []) }
+        }) {
+            for (id, m) in members { noteMembers(m, circle: id) }
+        }
         return true
+    }
+
+    /// Keep the names on the cards of a circle's members, as just read.
+    func noteMembers(_ members: [Member], circle: String) {
+        let names = Dictionary(uniqueKeysWithValues: members.compactMap { m in
+            m.name.isEmpty ? nil : (m.seat, m.name)
+        })
+        if cardNames[circle] != names { cardNames[circle] = names }
     }
 
     func circle(_ id: String) -> CircleSummary? {
@@ -214,8 +229,27 @@ final class AppModel: ObservableObject {
         return "https://cahoots.network/app/#\(fragment)"
     }
 
+    /// A seat's name: the one on its card, else the one kept on this phone, else "Seat N".
     func seatName(circle: String, seat: UInt8) -> String {
-        seatNames[circle]?[String(seat)] ?? "Seat \(seat + 1)"
+        cardNames[circle]?[seat] ?? seatNames[circle]?[String(seat)] ?? "Seat \(seat + 1)"
+    }
+
+    /// The names of `seats`, once any of them has a name: "Grace", "Grace and Ada",
+    /// "Grace, Ada and Bea", "Grace, Ada and 2 more". Nil while every one is still "Seat N".
+    func others(circle: String, seats: [UInt8]) -> String? {
+        let names = seats.map { seatName(circle: circle, seat: $0) }
+        guard zip(seats, names).contains(where: { $1 != "Seat \($0 + 1)" }) else { return nil }
+        switch names.count {
+        case 1: return names[0]
+        case 2: return "\(names[0]) and \(names[1])"
+        case 3: return "\(names[0]), \(names[1]) and \(names[2])"
+        default: return "\(names[0]), \(names[1]) and \(names.count - 2) more"
+        }
+    }
+
+    /// Whether the seat's name comes from its card, chosen by its owner.
+    func hasCardName(circle: String, seat: UInt8) -> Bool {
+        cardNames[circle]?[seat] != nil
     }
 
     func setSeatName(_ name: String, circle: String, seat: UInt8) throws {

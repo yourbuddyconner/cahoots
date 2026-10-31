@@ -14,7 +14,8 @@ struct CirclesView: View {
                     LazyVStack(spacing: 0) {
                         ForEach(model.circles, id: \.id) { c in
                             NavigationLink(value: Route.chat(c.id)) {
-                                CircleRow(circle: c, faces: model.faces[c.id] ?? [])
+                                CircleRow(circle: c, faces: model.faces[c.id] ?? [],
+                                          others: model.others(circle: c.id, seats: (0..<c.members).filter { $0 != c.mySeat }))
                             }
                             .buttonStyle(RowButtonStyle())
                             Hairline().padding(.leading, Space.l)
@@ -98,10 +99,13 @@ private struct EmptyCircles: View {
 struct CircleRow: View {
     let circle: CircleSummary
     let faces: [Data]
+    /// The other members' names, once any has one.
+    var others: String?
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private var meta: String {
-        var s = "\(spelled(Int(circle.members))) people. You are seat \(circle.mySeat + 1)."
+        var s = others.map { "With \($0)." } ?? "\(spelled(Int(circle.members))) people."
+        s += " You are seat \(circle.mySeat + 1)."
         if !circle.hasRoot { s += " Needs a new ceremony to chat." }
         return s
     }
