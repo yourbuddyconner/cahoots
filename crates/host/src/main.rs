@@ -7,7 +7,7 @@
 //! cahoots-host recv --state /tmp/dev3 --message <base64url>
 //! cahoots-host status --state /tmp/dev0
 //! cahoots-host pile --cards 3 --state /tmp/pile [--serial /dev/cu.usbmodem...] [--name sf] [--pad-len 16384]
-//! cahoots-host bridge (--serial <port> | --sim <socket>) (--offer <text> | --offer-file <path>) [--badges N]
+//! cahoots-host bridge (--serial <port> | --sim <socket>) (--offer-image <png or jpeg> | --offer <text> | --offer-file <path>) [--badges N]
 //! cahoots-host badge --state /tmp/b0 --listen - --next /tmp/b1.sock --name sf --pad-len 16384 [--seed 1] [--chip soft]
 //! cahoots-host agent (--serial <port> | --sim <socket>) --circle <name>... [--socket <path>] [--known-hosts <path>]
 //! cahoots-host git-sign -Y sign -n git -f <key file> <file>
@@ -29,8 +29,9 @@
 //! `--serial`, the top card is a real board on that port and `--cards` counts it.
 //!
 //! `bridge` puts a pile of cards on `--serial`, bottom card on the cable, into a ceremony
-//! a phone hosts through the relay. `--offer` is the host's code (`--offer-file` reads it from
-//! a file). The host's code says how many cards are in the pile, and the bridge stops if the
+//! a phone hosts through the relay. `--offer-image` reads the host's code from a photo or a
+//! screenshot of the host's screen. `--offer` takes the code as text, and `--offer-file` reads
+//! the text from a file. The host's code says how many cards are in the pile, and the bridge stops if the
 //! pile has more or fewer. `--badges` overrides that count. It is only needed when the pile
 //! differs from the host's count on purpose, which it never should. The bridge prints a code
 //! for each card for the host's phone to scan. See [`cahoots_host::bridge`].
@@ -150,17 +151,27 @@ fn connect_ring(listen: &str, next: &str) -> std::io::Result<(SocketLink, Socket
 /// `cahoots-host bridge`: carry a pile on a serial port into a phone's ceremony.
 fn run_bridge(args: &Args) -> Result<(), String> {
     use cahoots_host::bridge::Bridge;
-    let text = match (args.get("--offer"), args.get("--offer-file")) {
-        (Some(t), None) => t.to_string(),
-        (None, Some(path)) => std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?,
-        _ => return Err("give the host's code with --offer <text> or --offer-file <path>".into()),
+    let text = match (args.get("--offer-image"), args.get("--offer"), args.get("--offer-file")) {
+        (Some(path), None, None) => {
+            cahoots_host::offer_image::read_offer_image(std::path::Path::new(path))?
+        }
+        (None, Some(t), None) => t.to_string(),
+        (None, None, Some(path)) => {
+            std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?
+        }
+        _ => {
+            return Err(
+                "give the host's code with one of --offer-image <png or jpeg>, --offer <text> or --offer-file <path>"
+                    .into(),
+            )
+        }
     };
     let offer = cahoots_core::channel::Channel::from_offer(&text)
         .map_err(|e| match e {
             cahoots_core::channel::ChannelError::NewerOffer => {
                 "the host's code is from a newer version of the app. Update the bridge and start again".to_string()
             }
-            _ => "the host's code could not be read. Copy it again from the host's phone".to_string(),
+            _ => "the host's code could not be read. Take the picture or copy the text again".to_string(),
         })?;
     let badges = match args.get("--badges") {
         Some(b) => b.parse().map_err(|_| "--badges: a number of cards")?,

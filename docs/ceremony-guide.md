@@ -24,9 +24,9 @@ With **Through the relay**, steps 2 to 4 below happen on their own. The host's s
 
 Badges can join a ceremony that a phone hosts through the relay. A laptop carries their part between the pile and the relay. The laptop holds no seat and never sees the secret.
 
-1. On the host's phone, create the circle **Through the relay**. Count the badges in **People in the room**, and set **Cards in the pile** to the number of badges.
+1. On the host's phone, create the circle **Through the relay**. Count the badges in **People in the room**, and set **Cards in the pile** to the number of badges. A circle with badges keeps a **Small** secret.
 2. Stack the badges on the laptop, with the bottom badge on USB.
-3. Copy the host's code to the laptop and run `cahoots-host bridge --serial <port> --offer <code>`. If the code is in a file, use `--offer-file <file>` instead.
+3. Get the host's code onto the laptop as a picture. Photograph the host's screen with the laptop's camera, or take a screenshot on the host's phone and AirDrop it to the laptop. Then run `cahoots-host bridge --serial <port> --offer-image <picture>`. The picture can be a PNG or a JPEG. If you have the code as text, use `--offer <code>` or `--offer-file <file>` instead. If the pile has more or fewer badges than the host set, the laptop says so and stops.
 4. The laptop prints a code for each badge. Scan each one with the host's phone. Phones that join show their own codes, as usual.
 5. When the host's screen says "Everyone is scanned", select **Continue** on the host's phone.
 

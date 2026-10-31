@@ -31,8 +31,12 @@ serde_json = { workspace = true }
 cahoots-relay = { path = "../relay" }
 rand_core = { version = "0.6", features = ["getrandom"] }
 qrcode = { version = "0.14.1", default-features = false }
+# `bridge --offer-image`: the host's code read from a photo or a screenshot.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+rqrr = "0.11"
 
 [dev-dependencies]
+qrcode = { version = "0.14.1", default-features = false, features = ["image"] }
 cahoots-phone = { path = "../phone" }
 cahoots-relay = { path = "../relay" }
 hex = { workspace = true }

@@ -29,6 +29,7 @@ mod font;
 pub mod gitsign;
 pub mod grants;
 pub mod link;
+pub mod offer_image;
 pub mod pile;
 pub mod roster;
 pub mod sign;
