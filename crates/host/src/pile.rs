@@ -14,6 +14,7 @@ use cahoots_hal::pile::{Pile, PileError};
 use cahoots_hal::{Entropy, HealthError, Link};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 pub type BoxLink = Box<dyn Link + Send>;
@@ -120,6 +121,34 @@ pub fn run_card(card: Card) -> Result<Device, DeviceError> {
     Device::from_result(&dir, params, seat, &result)
 }
 
+/// Run one card in its own thread.
+fn spawn(card: Card) -> JoinHandle<Result<Device, DeviceError>> {
+    std::thread::spawn(move || run_card(card))
+}
+
+/// Run a simulated card on links the caller made: `down` to the card or bridge below, `up`
+/// to the card above ([`Absent`] for the top). It never presses B, so a card below or a
+/// bridge starts the count, and it gives up after [`PILE_TIMEOUT`] without one. It proposes
+/// a 16 KiB pad, used only if it turns out to be the bottom.
+pub fn spawn_card(
+    down: BoxLink,
+    up: BoxLink,
+    name: &str,
+    dir: PathBuf,
+    seed: Option<u64>,
+) -> JoinHandle<Result<Device, DeviceError>> {
+    spawn(Card {
+        down,
+        up,
+        name: name.to_string(),
+        pad_len: 16 * 1024,
+        press: false,
+        dir,
+        seed,
+        timeout: true,
+    })
+}
+
 /// Build and run a pile of `cards` cards under `state`. With `serial`, the top card is the
 /// board on that port and `cards` counts it; the laptop simulates the other `cards - 1`.
 /// Returns the simulated devices, bottom first.
@@ -165,7 +194,7 @@ pub fn run_pile(
             seed: seed.map(|s| s.wrapping_add(i as u64)),
             timeout: serial.is_none(),
         };
-        handles.push(std::thread::spawn(move || run_card(card)));
+        handles.push(spawn(card));
     }
     handles
         .into_iter()

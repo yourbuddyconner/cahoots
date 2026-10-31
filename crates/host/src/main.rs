@@ -7,6 +7,7 @@
 //! cahoots-host recv --state /tmp/dev3 --message <base64url>
 //! cahoots-host status --state /tmp/dev0
 //! cahoots-host pile --cards 3 --state /tmp/pile [--serial /dev/cu.usbmodem...] [--name sf] [--pad-len 16384]
+//! cahoots-host bridge --serial <port> (--offer <text> | --offer-file <path>) [--badges N]
 //! cahoots-host badge --state /tmp/b0 --listen - --next /tmp/b1.sock --name sf --pad-len 16384 [--seed 1] [--chip soft]
 //! cahoots-host agent (--serial <port> | --sim <socket>) --circle <name>... [--socket <path>] [--known-hosts <path>]
 //! cahoots-host git-sign -Y sign -n git -f <key file> <file>
@@ -26,6 +27,11 @@
 //!
 //! `pile` runs a stack of cards on this machine, bottom first, over Unix sockets. With
 //! `--serial`, the top card is a real board on that port and `--cards` counts it.
+//!
+//! `bridge` puts a pile of cards on `--serial`, bottom card on the cable, into a ceremony
+//! a phone hosts through the relay. `--offer` is the host's code (`--offer-file` reads it from
+//! a file), and `--badges` the cards in the pile, by default the number the code was made for.
+//! It prints a code for each card for the host's phone to scan. See [`cahoots_host::bridge`].
 //!
 //! `badge` runs one card through the badge crate on a [`HostBoard`]: boot, then a pile pass
 //! while it has no circle, then the idle menu. `--listen` is the down link and `--next` the
@@ -138,11 +144,55 @@ fn connect_ring(listen: &str, next: &str) -> std::io::Result<(SocketLink, Socket
     Ok((SocketLink::new(prev)?, SocketLink::new(tx)?))
 }
 
+/// `cahoots-host bridge`: carry a pile on a serial port into a phone's ceremony.
+fn run_bridge(args: &Args) -> Result<(), String> {
+    use cahoots_host::bridge::Bridge;
+    let text = match (args.get("--offer"), args.get("--offer-file")) {
+        (Some(t), None) => t.to_string(),
+        (None, Some(path)) => std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?,
+        _ => return Err("give the host's code with --offer <text> or --offer-file <path>".into()),
+    };
+    let offer = cahoots_core::channel::Channel::from_offer(&text)
+        .map_err(|e| match e {
+            cahoots_core::channel::ChannelError::OlderOffer | cahoots_core::channel::ChannelError::NewerOffer => {
+                "the host's code is from another version of the app. Update both and start again".to_string()
+            }
+            _ => "the host's code could not be read. Copy it again from the host's phone".to_string(),
+        })?;
+    let badges = match args.get("--badges") {
+        Some(b) => b.parse().map_err(|_| "--badges: a number of cards")?,
+        None => offer.badges,
+    };
+    let port = args.get("--serial").ok_or("name the bottom card's port with --serial <port>")?;
+    let mut relay = cahoots_relay::HttpRelay::new(&offer.relay);
+    let mut bridge = Bridge::new(offer, badges).map_err(|e| e.to_string())?;
+    let mut link = cahoots_host::link::SerialLink::open(port, "pile").map_err(|e| format!("{port}: {e}"))?;
+    println!("Waiting for the cards. Each card's code appears here for the host's phone to scan.");
+    bridge
+        .run(&mut link, &mut relay, &mut |seat, code| {
+            println!();
+            match qrcode::QrCode::new(code.as_bytes()) {
+                Ok(qr) => println!(
+                    "{}",
+                    qr.render::<qrcode::render::unicode::Dense1x2>()
+                        .quiet_zone(true)
+                        .build()
+                ),
+                Err(e) => eprintln!("the code for seat {} could not be drawn: {e}", u16::from(seat) + 1),
+            }
+            println!("Card in seat {}. Scan this code with the host's phone.", u16::from(seat) + 1);
+            println!("{code}");
+        })
+        .map_err(|e| e.to_string())?;
+    println!("every seat has signed. The badges are keeping their circles.");
+    Ok(())
+}
+
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let Some(cmd) = argv.first().cloned() else {
         eprintln!(
-            "usage: cahoots-host <ceremony|pile|badge|logs|send|recv|status|agent|git-sign|roster|attest|card|grant> ..."
+            "usage: cahoots-host <ceremony|pile|bridge|badge|logs|send|recv|status|agent|git-sign|roster|attest|card|grant> ..."
         );
         std::process::exit(2);
     };
@@ -241,6 +291,7 @@ fn main() {
                 })
                 .map_err(|e| e.to_string())
         }
+        "bridge" => run_bridge(&args),
         "badge" => {
             let state = PathBuf::from(args.req("--state"));
             let pad_len: u32 = args.req("--pad-len").parse().expect("--pad-len");

@@ -28,11 +28,16 @@ sha2 = { workspace = true, features = ["std"] }
 sha1 = "0.10"
 hmac = "0.12"
 serde_json = { workspace = true }
+cahoots-relay = { path = "../relay" }
+rand_core = { version = "0.6", features = ["getrandom"] }
+qrcode = { version = "0.14.1", default-features = false }
 
 [dev-dependencies]
+cahoots-phone = { path = "../phone" }
+cahoots-relay = { path = "../relay" }
+hex = { workspace = true }
 tempfile = "3"
 cahoots-chat = { workspace = true }
 ssh-key = { version = "0.6", default-features = false, features = ["std", "ecdsa", "p256", "ed25519", "rand_core", "getrandom"] }
 ssh-encoding = { version = "0.2", default-features = false, features = ["alloc"] }
-rand_core = { version = "0.6", features = ["getrandom"] }
 signature = "2"

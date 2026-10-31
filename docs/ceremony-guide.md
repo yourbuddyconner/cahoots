@@ -20,6 +20,18 @@ Both ways make the same kind of circle, and both end with the six words. Either 
 
 With **Through the relay**, steps 2 to 4 below happen on their own. The host's screen fills in as people join. Joiners wait. Then everyone goes to step 5.
 
+## With badges in a pile
+
+Badges can join a ceremony that a phone hosts through the relay. A laptop carries their part between the pile and the relay. The laptop holds no seat and never sees the secret.
+
+1. On the host's phone, create the circle **Through the relay**. Count the badges in **People in the room**, and set **Cards in the pile** to the number of badges.
+2. Stack the badges on the laptop, with the bottom badge on USB.
+3. Copy the host's code to the laptop and run `cahoots-host bridge --serial <port> --offer <code>`. If the code is in a file, use `--offer-file <file>` instead.
+4. The laptop prints a code for each badge. Scan each one with the host's phone. Phones that join show their own codes, as usual.
+5. When the host's screen says "Everyone is scanned", select **Continue** on the host's phone.
+
+The badges show the six words with everyone else. When the laptop says every seat has signed, the badges keep the circle.
+
 ## 1. Set up the group
 
 One person selects **Create a circle** and chooses:
