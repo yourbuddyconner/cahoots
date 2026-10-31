@@ -382,7 +382,9 @@ progress::-webkit-progress-bar { background: var(--bg-3); } progress::-webkit-pr
 .request, .member { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); }
 .request b, .member b { display: block; font-size: 17px; }
 .request span, .member span { color: var(--fg-3); font-size: 13px; }
-.request-actions { display: flex; gap: 8px; }
+.request-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* A request offers up to three choices: they go under the name, not beside it. */
+.request { grid-template-columns: minmax(0, 1fr); }
 .request .btn, .member .btn { width: auto; min-height: 42px; }
 .ch-start .seg, .ch-presets .seg { grid-auto-flow: row; grid-auto-columns: auto; }
 .ch-get-app { margin: 0; }

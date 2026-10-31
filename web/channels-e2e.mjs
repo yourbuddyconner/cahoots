@@ -176,7 +176,11 @@ await A.menu(); await A.page.getByRole("button", { name: "Requests", exact: true
 await A.page.waitForSelector('.request:has-text("Bea")', { timeout: 15000 });
 await A.page.waitForSelector('.request:has-text("read, post")');
 await A.snap("requests");
-await A.page.locator(".request").filter({ hasText: "Bea" }).getByRole("button", { name: "Allow", exact: true }).click();
+// The owner picks what to give: read and post, or read. Nothing else is offered.
+const bea = A.page.locator(".request").filter({ hasText: "Bea" });
+if (await bea.getByRole("button", { name: "Allow", exact: true }).count()) throw new Error("a bare Allow would pass the request's own actions");
+await bea.getByRole("button", { name: "Allow to read", exact: true }).waitFor();
+await bea.getByRole("button", { name: "Allow to post", exact: true }).click();
 await A.page.waitForSelector("text=No requests are waiting.", { timeout: 15000 });
 await A.page.getByRole("button", { name: "Back", exact: true }).click();
 
@@ -262,7 +266,23 @@ if (!failedOnce) throw new Error("the failed fetch was never tried");
 await C.snap("reads-new-link");
 console.log("C reads through the new link");
 
-// 10. A dead channel comes back with a newer link: B is handed the new link and reads again.
+// 10. The same channel's link naming another relay is refused and changes nothing: the channel's
+// keys, cursor and grant belong to the relay it was read on.
+const port = new URL(stationUrl).port;
+const elsewhere = link3.replace(`#/ch/127.0.0.1:${port}/`, `#/ch/localhost:${port}/`);
+if (elsewhere === link3) throw new Error("the other-relay link was not made");
+await B.page.goto(base + elsewhere.slice(elsewhere.indexOf("#")));
+await B.page.waitForSelector("text=This link names a different relay than the one this channel uses.", { timeout: 15000 });
+await B.page.waitForSelector("text=This link no longer works. Ask for a new one.");
+if ((await B.page.evaluate(() => location.hash)).split("/").length !== 3) throw new Error("the other relay's link stayed in the address bar");
+await B.snap("other-relay");
+const relayOfB = await B.page.evaluate(async (id) => {
+  const db = await new Promise((r, j) => { const q = indexedDB.open("cahoots"); q.onsuccess = () => r(q.result); q.onerror = j; });
+  return new Promise((r) => { const q = db.transaction("channels").objectStore("channels").get(id); q.onsuccess = () => r(q.result?.relay); });
+}, channelId);
+if (relayOfB !== `127.0.0.1:${port}`) throw new Error(`the other relay's link moved the channel: ${relayOfB}`);
+
+// 11. A dead channel comes back with a newer link: B is handed the new link and reads again.
 await B.page.goto(base + link3.slice(link3.indexOf("#")));
 await B.page.waitForSelector('.bubble.in:has-text("after the revocation")', { timeout: 20000 });
 if (await B.page.locator("text=This link no longer works").count()) throw new Error("a newer link did not revive the channel");
@@ -275,4 +295,4 @@ for (const p of people) await p.ctx.unrouteAll({ behavior: "ignoreErrors" });
 await browser.close();
 stop();
 if (errors.length) { console.error("page errors:\n" + errors.join("\n")); process.exit(1); }
-console.log("channels e2e ok: start, share, read by link, request, allow, post, retire (members keep reading), new link, revoke with a new link, shut out, a newcomer reads, a newer link revives. Screenshots in", out);
+console.log("channels e2e ok: start, share, read by link, request, allow to post, post, retire (members keep reading), new link, revoke with a new link, shut out, a newcomer reads, another relay's link refused, a newer link revives. Screenshots in", out);

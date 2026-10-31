@@ -7,7 +7,7 @@
 // #/ch/<channel id>/requests, and the link #/ch/<relay host>/<channel id>/<secret>.
 import {
   ChannelOwner, ChannelMember, verify_channel_object, policy_summary, cbor_split, join_request_summary,
-  b64_encode, b64_decode, chat_bucket_pad, chat_bucket_unpad,
+  deposit_meta, b64_encode, b64_decode, chat_bucket_pad, chat_bucket_unpad,
 } from './pkg/cahoots_wasm.js';
 
 let U; // the shared helpers from app.js
@@ -19,6 +19,7 @@ const DEAD = 'This link no longer works. Ask for a new one.';
 const WAITING = 'Waiting for the owner to let you post.';
 const CLOSED = 'Only people the owner lets in can read this channel.';
 const NEW_LINK = 'Everyone who should keep reading needs this new link.';
+const OTHER_RELAY = 'This link names a different relay than the one this channel uses.';
 const NEEDS_APPROVALS = 'This circle has more than one member; changing the policy needs their approval, which this version cannot collect yet.';
 const POLL_WAIT_MS = 25000;
 const PRESETS = [
@@ -35,6 +36,7 @@ const CH_ERRORS = {
   name: 'Give the channel a name of up to 64 bytes.',
   policy: 'This channel lets only the owner post.',
   evidence: 'This request came with an old link, so it cannot be allowed.',
+  actions: 'A request is let in to read, or to read and post.',
   signature: 'This does not carry a valid signature.',
   'unknown-epoch': 'This message uses keys this device does not hold.',
   'no-proposal': 'Write the post and propose it first.',
@@ -69,6 +71,8 @@ export function cborArray(items) {
 /** The relay's address from a link's host: plain http for this machine, https for the rest. */
 const relayBase = (host) => `${/^(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?$/.test(host) ? 'http' : 'https'}://${host}`;
 const hostOf = (url) => { try { return new URL(url).host; } catch { return ''; } };
+/** A relay address or a link's host as compared: the host lowercased, with its port. */
+const relayKey = (relay) => hostOf(/:\/\//.test(relay) ? relay : relayBase(relay)).toLowerCase();
 
 // ---------------------------------------------------------------- the relay
 export class RelayError extends Error {
@@ -169,15 +173,25 @@ async function registerGate(e) {
   await persist(e);
   return true;
 }
-/** Retire the live link: the relay refuses its token, and later epochs have no deposit for it. */
+/** Retire the live link: the relay refuses its token, and later epochs have no deposit for it.
+ * The secret is forgotten at once; the signed statement stays in the owner's state until the relay
+ * confirms, and a DELETE that fails here is sent again on each open of the channel. */
 async function retireLink(e) {
-  const hash = e.owner.gate_token_hash_hex();
-  if (!hash) return false;
-  const statement = e.owner.retire_link();
+  if (!e.owner.gate_token_hash_hex()) return false;
+  e.owner.retire_link();
   e.rec.gateHash = null;
   await persist(e);
-  await chDelete(e.rec.relay, `/v1/channels/${e.rec.id}/gates/${hash}`, statement);
+  await flushRetires(e);
   return true;
+}
+/** Send each retire the relay has not confirmed; a 204, or a 404 (the token is gone), clears it. */
+async function flushRetires(e) {
+  for (const p of JSON.parse(e.owner.pending_retire_json())) {
+    try { await chDelete(e.rec.relay, `/v1/channels/${e.rec.id}/gates/${p.hash}`, b64_decode(p.statement)); }
+    catch (err) { if (err.status !== 404) throw err; }
+    e.owner.retire_confirmed(p.hash);
+    await persist(e);
+  }
 }
 /** Post the policy `set_policy` made, the reissued channel object, and the policy change control. */
 async function publishPolicy(e, body) {
@@ -190,8 +204,10 @@ async function publishPolicy(e, body) {
   await chPost(host, '/v1/channels', e.owner.channel_object());
   await postMessage(host, id, control);
 }
-/** Admit one join request with `actions`; a `post` the policy does not allow falls back to read. */
+/** Admit one join request with `actions`, 'read' or 'read,post' (never admit or govern); a `post`
+ * the policy does not allow falls back to read. */
 async function admitRequest(e, bytes, actions) {
+  if (actions !== 'read' && actions !== 'read,post') throw 'actions';
   let parts;
   try { parts = cbor_split(e.owner.admit(bytes, actions)); }
   catch (err) {
@@ -214,15 +230,19 @@ async function fetchRequests(e) {
   return (j.requests || []).filter((r) => !handled.has(r.id));
 }
 const markHandled = async (e, rid) => { e.rec.handled = [...(e.rec.handled || []), rid]; await putChannel(e.rec); };
-/** With the toggle on, grant what the policy already permits: a request whose evidence checks. */
+/** With the toggle on, grant what the policy already permits: the actions the live link proves
+ * (`permitted`), never what the request asks for. A request that yields nothing waits for the owner. */
 async function autoAllow(e) {
   const settings = await loadChSettings(e.rec.id);
   if (!settings.autoAllow) return 0;
   let n = 0;
   for (const r of await fetchRequests(e)) {
     const bytes = b64_decode(r.body);
-    try { const s = JSON.parse(join_request_summary(bytes)); await admitRequest(e, bytes, s.actions); await markHandled(e, r.id); n++; }
-    catch (err) { if (['malformed', 'signature', 'evidence'].includes(String(err))) await markHandled(e, r.id); }
+    try {
+      const actions = e.owner.permitted(bytes);
+      if (!actions) continue;
+      await admitRequest(e, bytes, actions); await markHandled(e, r.id); n++;
+    } catch (err) { if (['malformed', 'signature', 'evidence', 'wrong-channel'].includes(String(err))) await markHandled(e, r.id); }
   }
   return n;
 }
@@ -235,10 +255,29 @@ async function chainsFor(e, kid, fresh) {
   e.chains.set(kid, list);
   return list;
 }
+/** Install one signed deposit once its signer's grant chain (fetched by the deposit's kid) verifies
+ * and carries govern. With `ids`, the deposits a rotation names, any other deposit is passed over. */
+async function installDeposit(e, b64, byLink, ids) {
+  const bytes = b64_decode(b64);
+  let meta;
+  try { meta = JSON.parse(deposit_meta(bytes)); } catch { return false; }
+  if (ids && !ids.includes(meta.id)) return false;
+  for (const fresh of [false, true]) {
+    for (const chain of await chainsFor(e, meta.kid, fresh)) {
+      try {
+        if (byLink) e.member.install_from_link_deposit(bytes, chain, e.rec.manifest);
+        else e.member.install_from_key_deposit(bytes, chain, e.rec.manifest);
+        return true;
+      } catch { /* not ours, or not from a key that governs: try the next */ }
+    }
+  }
+  return false;
+}
 /** Fetch and open this member's deposit for an epoch: the link's first, then one sealed to its
  * key. A refused link token (the link was just retired) falls back to a proof by a member with a
- * grant; the key deposit is always tried before giving up. */
-async function fetchEpoch(e, epochHex) {
+ * grant; the key deposit is always tried before giving up. A deposit whose signer does not check
+ * out is passed over for the next. */
+async function fetchEpoch(e, epochHex, ids = null) {
   const { relay: host, id } = e.rec;
   const deposits = async (to) => {
     const path = `/v1/channels/${id}/deposits?to=${to}&epoch=${epochHex}`;
@@ -255,9 +294,9 @@ async function fetchEpoch(e, epochHex) {
   };
   const linkId = e.member.link_id_hex();
   if (linkId) {
-    for (const d of await deposits(linkId)) { try { e.member.install_from_link_deposit(b64_decode(d)); return true; } catch { /* not ours */ } }
+    for (const d of await deposits(linkId)) if (await installDeposit(e, d, true, ids)) return true;
   }
-  for (const d of await deposits(e.member.my_kid_hex())) { try { e.member.install_from_key_deposit(b64_decode(d)); return true; } catch { /* not ours */ } }
+  for (const d of await deposits(e.member.my_kid_hex())) if (await installDeposit(e, d, false, ids)) return true;
   return false;
 }
 const isGrantError = (s) => /^(grant:|refused:|signature|no-admit|wrong-channel|no-grant)/.test(s);
@@ -291,7 +330,7 @@ async function take(e, entry) {
     const c = JSON.parse(r.control_json());
     if (c.kind === 'rotation' && !e.owner) {
       // The control is already read; a failed fetch is retried after the sync, never by reading it again.
-      try { if (!(await fetchEpoch(e, c.epoch))) e.behind = true; } catch { e.retryEpoch = c.epoch; }
+      try { if (!(await fetchEpoch(e, c.epoch, c.deposits))) e.behind = true; } catch { e.retryEpoch = c.epoch; }
     }
     if (c.kind === 'policy') await refreshPolicy(e);
     if (c.kind === 'revocation') return { ...base, dir: 'note', text: 'The owner removed a member and will start new keys.', type: 'control', ok: true };
@@ -306,11 +345,16 @@ function nameFor(e, kid) {
   if (e.owner) { const m = JSON.parse(e.owner.members_json()).find((x) => x.kid === kid); return m ? m.name : short(kid); }
   return (e.rec.ownerKids || []).includes(kid) ? 'owner' : short(kid);
 }
+/** Take the policy the relay now holds, once it checks out: the channel object verifies against the
+ * owner circle's manifest this browser keeps, names this channel, and names the policy by its hash. */
 async function refreshPolicy(e) {
   try {
     const j = await (await fetch(`${relayBase(e.rec.relay)}/v1/channels/${e.rec.id}`)).json();
-    if (!j.policy) return;
+    if (!j.policy || !j.channel) return;
     const policy = b64_decode(j.policy);
+    const obj = JSON.parse(verify_channel_object(b64_decode(j.channel), e.rec.manifest));
+    if (obj.channel_id !== e.rec.id) return;
+    if (hexOf(new Uint8Array(await crypto.subtle.digest('SHA-256', policy))) !== obj.policy_id) return;
     e.member.set_policy(policy);
     e.rec.policy = policy;
     e.rec.policyLine = policy_summary(policy);
@@ -421,6 +465,8 @@ async function screenJoin(host, id, secret) {
   const existing = await getChannel(id);
   if (existing && (existing.role === 'owner' || !secret)) { location.replace(`#/ch/${id}`); return; }
   if (existing) {
+    // The channel's keys, cursor and grant belong to the relay it was read on.
+    if (relayKey(host) !== relayKey(existing.relay)) { U.toast(OTHER_RELAY, 'bad'); location.replace(`#/ch/${id}`); return; }
     // A newer link for a channel this browser already reads: take its secret, keep the key and grant.
     const e = await openChannel(id);
     const probe = ChannelMember.from_link(fragment);
@@ -574,6 +620,7 @@ async function screenChannel(id) {
   });
   el.classList.add('chat-screen', 'channel-screen');
   refresh();
+  if (e.owner) flushRetires(e).catch(() => { /* sent again on the next round */ });
   if (!rec.dead) poll(e, run, { append, refresh, st });
 }
 const majority = (n) => (n <= 1 ? 1 : Math.floor(n / 2) + 1);
@@ -636,6 +683,7 @@ async function pollLoop(e, run, ui) {
       if (e.behind || !current || (e.maxEpoch || 0) > current) { await markDead(e); ui.refresh(); return; }
       await askToJoin(e, ui);
     } else {
+      try { await flushRetires(e); } catch { /* the next round tries again */ }
       try { if (await autoAllow(e)) U.toast('Let in a request the policy permits.', 'ok'); } catch { /* the next round tries again */ }
     }
   }
@@ -784,12 +832,18 @@ async function screenRequests(id) {
       try { s = JSON.parse(join_request_summary(bytes)); } catch { s = null; }
       const refuse = btn('Refuse', async () => { await markHandled(e, r.id); render(); });
       if (!s || s.channel_id !== id) return h('div', { class: 'request' }, h('div', {}, h('b', {}, 'A request that does not check out')), refuse);
-      const allow = btn('Allow', async () => {
-        allow.disabled = true;
-        try { const given = await admitRequest(e, bytes, s.actions); await markHandled(e, r.id); U.toast(`${s.name} can ${given.replace(',', ' and ')}.`, 'ok'); render(); }
-        catch (x) { st.textContent = friendly(x); allow.disabled = false; }
-      }, 'primary');
-      return h('div', { class: 'request' }, h('div', {}, h('b', {}, s.name), h('span', {}, `asks to ${s.actions.replace(',', ', ')} · key ${short(s.kid)}`)), h('div', { class: 'request-actions' }, allow, refuse));
+      // The owner picks what to give: read, or read and post. Admit and govern are never given.
+      const choice = (label, actions, kind) => {
+        const b = btn(label, async () => {
+          b.disabled = true;
+          try { const given = await admitRequest(e, bytes, actions); await markHandled(e, r.id); U.toast(`${s.name} can ${given.replace(',', ' and ')}.`, 'ok'); render(); }
+          catch (x) { st.textContent = friendly(x); b.disabled = false; }
+        }, kind);
+        return b;
+      };
+      const asksToPost = s.actions.split(',').includes('post');
+      const allows = asksToPost ? [choice('Allow to post', 'read,post', 'primary'), choice('Allow to read', 'read', '')] : [choice('Allow to read', 'read', 'primary')];
+      return h('div', { class: 'request' }, h('div', {}, h('b', {}, s.name), h('span', {}, `asks to ${s.actions.replace(/,/g, ', ')} · key ${short(s.kid)}`)), h('div', { class: 'request-actions' }, ...allows, refuse));
     }));
   };
   screen({
