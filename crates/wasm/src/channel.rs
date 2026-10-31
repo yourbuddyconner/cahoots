@@ -676,6 +676,39 @@ impl ChannelMember {
             .unwrap_or_default()
     }
 
+    /// Take a newer link to the same channel (after the owner retired the old one): its relay
+    /// and secret replace the ones held; the member key, grant and epochs stay.
+    /// Errors: `link`, `wrong-channel`.
+    pub fn set_link(&mut self, url: &str) -> Result<(), String> {
+        let link = Link::parse(url).ok_or_else(|| s("link"))?;
+        let mut st = self.inner.borrow_mut();
+        if link.channel_id != st.channel_id {
+            return Err(s("wrong-channel"));
+        }
+        if let Some(mut old) = st.secret.take() {
+            old.0.zeroize();
+        }
+        st.secret = link.secret;
+        st.relay = link.relay;
+        Ok(())
+    }
+
+    /// Whether the held policy lets someone who is not an owner seat ask to post: its post rule
+    /// takes link or key evidence. `false` without a policy, or when only the owner posts.
+    pub fn may_ask_to_post(&self) -> bool {
+        let st = self.inner.borrow();
+        st.policy
+            .as_deref()
+            .and_then(|signed| read_policy(signed).ok())
+            .is_some_and(|p| {
+                p.rule(Action::Post).is_some_and(|r| {
+                    r.evidence
+                        .iter()
+                        .any(|e| e.kind == kind::LINK || e.kind == kind::KEY)
+                })
+            })
+    }
+
     /// The link's id (`SHA-256("cahoots/link/id/v1" || secret)`), hex: the `to` of its link
     /// deposits; `""` when the link had no secret.
     pub fn link_id_hex(&self) -> String {
@@ -1487,7 +1520,10 @@ impl ChannelOwner {
             let shown = self.secret.as_ref().is_some_and(|sec| {
                 rule.evidence
                     .iter()
-                    .any(|e| e.kind == kind::LINK && e.r#ref[..] == sec.id())
+                    // An empty ref is the owner's current link; a named one must be it.
+                    .any(|e| {
+                        e.kind == kind::LINK && (e.r#ref.is_empty() || e.r#ref[..] == sec.id())
+                    })
                     && token[..] == sec.gate_token(&self.channel_id)
             });
             if !shown {

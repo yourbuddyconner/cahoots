@@ -17,6 +17,8 @@ const LABEL = 'End-to-end encrypted; the relay keeps ciphertext only';
 const LINK_LIMIT = 'Anyone you forward this link to can read until you retire it.';
 const DEAD = 'This link no longer works. Ask for a new one.';
 const WAITING = 'Waiting for the owner to let you post.';
+const CLOSED = 'Only people the owner lets in can read this channel.';
+const NEW_LINK = 'Everyone who should keep reading needs this new link.';
 const NEEDS_APPROVALS = 'This circle has more than one member; changing the policy needs their approval, which this version cannot collect yet.';
 const POLL_WAIT_MS = 25000;
 const PRESETS = [
@@ -220,7 +222,7 @@ async function autoAllow(e) {
   for (const r of await fetchRequests(e)) {
     const bytes = b64_decode(r.body);
     try { const s = JSON.parse(join_request_summary(bytes)); await admitRequest(e, bytes, s.actions); await markHandled(e, r.id); n++; }
-    catch (err) { if (String(err) === 'malformed' || String(err) === 'signature') await markHandled(e, r.id); }
+    catch (err) { if (['malformed', 'signature', 'evidence'].includes(String(err))) await markHandled(e, r.id); }
   }
   return n;
 }
@@ -233,21 +235,29 @@ async function chainsFor(e, kid, fresh) {
   e.chains.set(kid, list);
   return list;
 }
-/** Fetch and open this member's deposit for an epoch: the link's first, then one sealed to its key. */
+/** Fetch and open this member's deposit for an epoch: the link's first, then one sealed to its
+ * key. A refused link token (the link was just retired) falls back to a proof by a member with a
+ * grant; the key deposit is always tried before giving up. */
 async function fetchEpoch(e, epochHex) {
   const { relay: host, id } = e.rec;
-  const auth = readAuth(e);
-  if (!auth) return false;
-  try {
-    const linkId = e.member.link_id_hex();
-    const tos = [linkId ? ['link', linkId] : null, ['key', e.member.my_kid_hex()]].filter(Boolean);
-    for (const [kind, to] of tos) {
-      const j = await chGet(host, `/v1/channels/${id}/deposits?to=${to}&epoch=${epochHex}`, auth);
-      for (const d of j.deposits || []) {
-        try { if (kind === 'link') e.member.install_from_link_deposit(b64_decode(d)); else e.member.install_from_key_deposit(b64_decode(d)); return true; } catch { /* not ours */ }
-      }
+  const deposits = async (to) => {
+    const path = `/v1/channels/${id}/deposits?to=${to}&epoch=${epochHex}`;
+    const auth = readAuth(e);
+    if (!auth) return [];
+    try { return (await chGet(host, path, auth)).deposits || []; }
+    catch (err) {
+      if (err.status !== 401) throw err;
+      if (!auth.gate || !e.rec.grantChain) return [];
+      e.useProof = true;
+      try { return (await chGet(host, path, { member: e.member })).deposits || []; }
+      catch (err2) { if (err2.status !== 401) throw err2; return []; }
     }
-  } catch (err) { if (err.status !== 401) throw err; }
+  };
+  const linkId = e.member.link_id_hex();
+  if (linkId) {
+    for (const d of await deposits(linkId)) { try { e.member.install_from_link_deposit(b64_decode(d)); return true; } catch { /* not ours */ } }
+  }
+  for (const d of await deposits(e.member.my_kid_hex())) { try { e.member.install_from_key_deposit(b64_decode(d)); return true; } catch { /* not ours */ } }
   return false;
 }
 const isGrantError = (s) => /^(grant:|refused:|signature|no-admit|wrong-channel|no-grant)/.test(s);
@@ -279,7 +289,10 @@ async function take(e, entry) {
   if (type === 1) {
     e.rec.ownerKids = [...new Set([...(e.rec.ownerKids || []), kid])];
     const c = JSON.parse(r.control_json());
-    if (c.kind === 'rotation' && !e.owner && !(await fetchEpoch(e, c.epoch))) e.behind = true;
+    if (c.kind === 'rotation' && !e.owner) {
+      // The control is already read; a failed fetch is retried after the sync, never by reading it again.
+      try { if (!(await fetchEpoch(e, c.epoch))) e.behind = true; } catch { e.retryEpoch = c.epoch; }
+    }
     if (c.kind === 'policy') await refreshPolicy(e);
     if (c.kind === 'revocation') return { ...base, dir: 'note', text: 'The owner removed a member and will start new keys.', type: 'control', ok: true };
     if (c.kind === 'policy') return { ...base, dir: 'note', text: `The policy changed: ${e.rec.policyLine}.`, type: 'control', ok: true };
@@ -384,25 +397,44 @@ function shareButtons(url) {
     btn('Copy the link', async () => { await navigator.clipboard.writeText(url); U.toast('Copied'); }, navigator.share ? '' : 'primary'),
   ];
 }
-function screenShare(e, { first = false } = {}) {
+function screenShare(e, { first = false, note = null } = {}) {
   const { h, btn, screen } = U;
   const url = linkFor(e);
+  // The share screen can sit on the channel's own address, where a hash change would not fire.
+  const open = () => { if (location.hash === `#/ch/${e.rec.id}`) { chRun++; screenChannel(e.rec.id); } else U.go(`#/ch/${e.rec.id}`); };
   screen({
-    title: first ? 'Channel started' : 'Share the link', sub: e.rec.name, back: `#/ch/${e.rec.id}`,
+    title: first ? 'Channel started' : note ? 'A new link' : 'Share the link', sub: e.rec.name, back: open,
     body: [h('div', { class: 'stack' },
-      h('h1', {}, first ? `${e.rec.name} is ready.` : 'Share the link.'),
+      h('h1', {}, first ? `${e.rec.name} is ready.` : note ? 'A new link.' : 'Share the link.'),
+      note ? U.notice(note) : null,
       url ? h('p', { class: 'lead' }, LINK_LIMIT) : h('p', { class: 'lead' }, 'This channel has no link. Only people you let in can read.'),
       url ? h('div', { class: 'ch-link' }, url) : null,
       h('p', { class: 'muted' }, `${e.rec.policyLine}.`))],
-    actions: [...(url ? shareButtons(url) : []), btn('Open the channel', () => U.go(`#/ch/${e.rec.id}`), url ? '' : 'primary')],
+    actions: [...(url ? shareButtons(url) : []), btn('Open the channel', open, url ? '' : 'primary')],
   });
 }
 
 async function screenJoin(host, id, secret) {
   const { h, field, input, btn, status, screen } = U;
   const generation = U.generation();
+  const fragment = `#/ch/${host}/${id}${secret ? `/${secret}` : ''}`;
   const existing = await getChannel(id);
-  if (existing) { location.replace(`#/ch/${id}`); return; }
+  if (existing && (existing.role === 'owner' || !secret)) { location.replace(`#/ch/${id}`); return; }
+  if (existing) {
+    // A newer link for a channel this browser already reads: take its secret, keep the key and grant.
+    const e = await openChannel(id);
+    const probe = ChannelMember.from_link(fragment);
+    const newer = probe.gate_token_hex() !== e.member.gate_token_hex();
+    probe.free();
+    if (newer || e.rec.dead) {
+      try { e.member.set_link(fragment); } catch (x) { U.toast(friendly(x), 'bad'); location.replace(`#/ch/${id}`); return; }
+      Object.assign(e.rec, { relay: host, dead: false });
+      Object.assign(e, { useProof: false, behind: false, maxEpoch: 0, retryEpoch: null });
+      await persist(e);
+    }
+    location.replace(`#/ch/${id}`);
+    return;
+  }
   const err = status();
   screen({ title: 'Channel', body: [h('div', { class: 'empty' }, h('p', { class: 'muted' }, `Reading ${host}…`), err)] });
   let obj, policy, manifest, line;
@@ -423,7 +455,13 @@ async function screenJoin(host, id, secret) {
     return;
   }
   if (generation !== U.generation()) return;
-  const linkPosts = /anyone with the link can (read and )?post/.test(line);
+  if (!secret) {
+    screen({ title: obj.name, sub: 'a channel', back: '#/', body: [h('div', { class: 'empty' }, h('h1', {}, obj.name), h('p', { class: 'lead' }, CLOSED), h('p', { class: 'muted' }, `${line[0].toUpperCase()}${line.slice(1)}.`), getApp())], actions: [btn('Home', () => U.go('#/'), 'primary')] });
+    return;
+  }
+  const member = ChannelMember.from_link(fragment);
+  member.set_policy(policy);
+  const linkPosts = member.may_ask_to_post();
   const you = input({ type: 'text', maxlength: '64', autocomplete: 'off', placeholder: 'How the owner will know you' });
   screen({
     title: obj.name, sub: 'a channel', back: '#/',
@@ -439,9 +477,7 @@ async function screenJoin(host, id, secret) {
       try {
         const myName = you.value.trim();
         if (linkPosts && !myName) { err.textContent = 'Give a name, so the owner knows who is asking.'; you.focus(); return; }
-        const member = ChannelMember.from_link(`#/ch/${host}/${id}${secret ? `/${secret}` : ''}`);
-        member.set_policy(policy);
-        const rec = { id, role: 'member', circle: obj.circle_id, relay: host, name: obj.name, policy, policyLine: line, grantChain: null, manifest, seq: null, kid: member.my_kid_hex(), myName, wantsPost: linkPosts || !secret, requested: false, dead: false };
+        const rec = { id, role: 'member', circle: obj.circle_id, relay: host, name: obj.name, policy, policyLine: line, grantChain: null, manifest, seq: null, kid: member.my_kid_hex(), myName, wantsPost: linkPosts, requested: false, dead: false };
         const e = { rec, member, chains: new Map() };
         live.set(id, e);
         await persist(e);
@@ -553,14 +589,15 @@ async function circleFor(e) {
 }
 
 async function poll(e, run, ui) {
+  try { await pollLoop(e, run, ui); }
+  catch (err) { if (run === chRun) ui.st.textContent = friendly(err); }
+}
+async function pollLoop(e, run, ui) {
   const { rec } = e;
   let synced = false;
   while (run === chRun) {
     const auth = readAuth(e);
-    if (!auth) { // a closed channel: nothing to read until the owner lets us in
-      if (!(await askToJoin(e, ui))) return;
-      await sleep(5000); continue;
-    }
+    if (!auth) { ui.st.textContent = CLOSED; return; } // no link and no grant: nothing to read
     const q = `${rec.seq == null ? '' : `after=${rec.seq}&`}wait=${synced ? POLL_WAIT_MS : 0}`;
     let data;
     try { data = await chGet(rec.relay, `/v1/channels/${rec.id}/messages?${q}`, auth); ui.st.textContent = 'Connected to relay'; }
@@ -575,34 +612,44 @@ async function poll(e, run, ui) {
     }
     if (run !== chRun) return;
     const entries = data.entries || [];
+    let failed = false;
     for (const entry of entries) {
-      const m = await take(e, entry);
+      if (run !== chRun) return; // a newer screen owns this channel now
+      let m;
+      try { m = await take(e, entry); }
+      catch (err) {
+        // A fetch inside failed before the entry was read: back off and read it again.
+        if (run === chRun) ui.st.textContent = `Cannot reach ${rec.relay}. Retrying.`;
+        failed = true; break;
+      }
       rec.seq = entry.seq;
       if (m) { await saveMsg(m); if (run === chRun) ui.append(m); }
     }
     if (entries.length) await persist(e);
+    if (failed) { await sleep(3000); continue; }
     if (!entries.length) synced = true;
     if (!synced || run !== chRun) continue;
     if (!e.owner) {
+      if (e.retryEpoch) { try { if (!(await fetchEpoch(e, e.retryEpoch))) e.behind = true; e.retryEpoch = null; } catch { await sleep(3000); continue; } }
       // Review focus 1: a link with no deposit at the channel's current keys reads nothing new.
       const current = epochNumber(e.member.current_epoch_hex());
       if (e.behind || !current || (e.maxEpoch || 0) > current) { await markDead(e); ui.refresh(); return; }
-      if (!(await askToJoin(e, ui))) return;
+      await askToJoin(e, ui);
     } else {
       try { if (await autoAllow(e)) U.toast('Let in a request the policy permits.', 'ok'); } catch { /* the next round tries again */ }
     }
   }
 }
-/** Post a join request once, then look for the grant on each round. False when polling should stop. */
+/** Post a join request once, then look for the grant on each round. */
 async function askToJoin(e, ui) {
   const { rec } = e;
-  if (rec.grantChain || !rec.wantsPost) return true;
+  if (rec.grantChain || !rec.wantsPost) return;
   try {
     if (!rec.requested) {
-      const actions = /anyone with the link can (read and )?post|members the owner lets in can post/.test(rec.policyLine) ? 'read,post' : 'read';
+      const actions = e.member.may_ask_to_post() ? 'read,post' : 'read';
       await chPost(rec.relay, `/v1/channels/${rec.id}/requests`, e.member.join_request(rec.myName || 'Someone', actions));
       rec.requested = true; await persist(e); ui.refresh();
-      return true;
+      return;
     }
     const auth = readAuth(e) || { member: e.member };
     const j = await chGet(rec.relay, `/v1/channels/${rec.id}/grants?kid=${rec.kid}`, auth);
@@ -614,20 +661,21 @@ async function askToJoin(e, ui) {
       U.toast('The owner let you post.', 'ok');
     }
   } catch (err) { if (err.status !== 401) ui.st.textContent = friendly(err); }
-  return true;
 }
 
+/** Make a new link (the policy's link evidence is the current link, so no policy change), register
+ * its gate token, and start keys that carry a deposit for it. */
+async function issueLink(e) {
+  e.owner.link_url(e.rec.relay);
+  await registerGate(e);
+}
 async function shareFlow(e) {
   try {
     if (!e.owner.gate_token_hash_hex()) {
+      if (e.rec.preset === 4) { screenShare(e); return; }
       if (!confirm('This channel has no live link. Make a new one? Everyone you send it to can read.')) return;
-      let named = true;
-      try { const body = e.owner.set_policy(e.rec.preset === 4 ? 2 : e.rec.preset, e.rec.quorum || 1); await publishPolicy(e, body); if (e.rec.preset === 4) e.rec.preset = 2; }
-      catch (x) { if (String(x) !== 'needs-approvals') throw x; named = false; }
-      e.owner.link_url(e.rec.relay);
-      await registerGate(e);
+      await issueLink(e);
       await startNewKeys(e);
-      if (!named) U.toast('People with the new link can read. Letting them post needs a policy change this circle cannot make yet.');
     }
     screenShare(e);
   } catch (x) { U.toast(friendly(x), 'bad'); }
@@ -655,7 +703,7 @@ function policySheet(e) {
 }
 
 /** An announcement that needs approvals: propose it, show its code, collect approvals, post. */
-function proposeSheet(e, text, onSent, append) {
+async function proposeSheet(e, text, onSent, append) {
   const { h, btn, status } = U;
   const err = status();
   const pt = chat_bucket_pad(U.utf8.encode(text));
@@ -670,6 +718,7 @@ function proposeSheet(e, text, onSent, append) {
   const ta = h('textarea', { class: 'input', placeholder: 'Paste approvals here, one per line' });
   const count = h('p', { class: 'muted' }, `1 of ${need} approvals`);
   const approvals = () => [mine, ...ta.value.split(/\s+/).filter(Boolean).map((x) => b64_decode(x))];
+  await persist(e); // the spent counter is recorded before anything leaves
   const send = async (close) => {
     try {
       const wire = e.member.send_proposed(cborArray(approvals()));
@@ -677,10 +726,9 @@ function proposeSheet(e, text, onSent, append) {
       const res = await postMessage(e.rec.relay, e.rec.id, b64_decode(wire));
       const m = { channel: e.rec.id, dir: 'out', kid: e.rec.kid, name: 'you', text, type: 'announcement', ts: Date.now(), seq: res?.seq ?? null, ok: true };
       await saveMsg(m); append(m); onSent(); close?.();
-    } catch (x) { err.textContent = `Not sent: ${friendly(x)}`; }
+    } catch (x) { err.textContent = `Not sent: ${friendly(x)}`; if (!close) U.toast(err.textContent, 'bad'); }
   };
-  persist(e);
-  if (need <= 1) { send(); return; }
+  if (need <= 1) { await send(); return; }
   U.sheet((close) => {
     const post = btn('Post', () => send(close), 'primary');
     post.disabled = true;
@@ -765,17 +813,18 @@ async function screenMembers(id) {
   const members = JSON.parse(e.owner.members_json());
   const revoke = async (m, button) => {
     const holdsLink = !!e.owner.gate_token_hash_hex();
-    if (!confirm(`Revoke ${m.name}? ${holdsLink ? 'They hold the link, so it is retired too, and ' : ''}new keys start. ${holdsLink ? 'Others reading by link will need a new one.' : ''}`)) return;
+    if (!confirm(`Revoke ${m.name}? ${holdsLink ? 'They hold the link, so it is replaced by a new one, and ' : ''}new keys start.${holdsLink ? ' Everyone who should keep reading needs the new link.' : ''}`)) return;
     button.disabled = true;
     try {
       const [statement, control] = cbor_split(e.owner.revoke(m.grant_id, 'removed by the owner'));
       await persist(e);
       await chPost(e.rec.relay, `/v1/channels/${id}/revocations`, b64_decode(statement));
       await postMessage(e.rec.relay, id, b64_decode(control));
-      if (holdsLink) await retireLink(e);
+      // Retire, a new link and its gate, then keys whose deposits include the new link's.
+      if (holdsLink) { await retireLink(e); await issueLink(e); }
       await startNewKeys(e);
       U.toast(`${m.name} is removed and new keys started.`, 'ok');
-      screenMembers(id);
+      if (holdsLink) screenShare(e, { note: NEW_LINK }); else screenMembers(id);
     } catch (x) { st.textContent = friendly(x); button.disabled = false; }
   };
   screen({

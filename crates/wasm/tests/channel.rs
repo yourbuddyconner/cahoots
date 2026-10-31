@@ -701,3 +701,59 @@ fn the_link_id_and_a_request_summary_for_the_app() {
         "signature"
     );
 }
+
+#[test]
+fn a_new_link_after_retire_admits_under_the_same_policy() {
+    let (mut owner, old_link) = group_chat();
+    let policy_before = owner.policy();
+    let old = ChannelMember::from_link(&old_link).unwrap();
+    owner.retire_link().unwrap();
+    let new_link = owner.link_url("relay.example").unwrap();
+    assert_ne!(new_link, old_link);
+    assert_eq!(owner.policy(), policy_before, "no policy change");
+    let probe = ChannelMember::from_link(&new_link).unwrap();
+    assert_ne!(probe.gate_token_hex(), old.gate_token_hex());
+    // The gate statement names the new token.
+    let payload = cose::payload1(&owner.gate_registration().unwrap()).unwrap();
+    let mut d = Decoder::new(&payload);
+    d.map().unwrap();
+    d.u8().unwrap();
+    d.bytes().unwrap();
+    d.u8().unwrap();
+    assert_eq!(hex::encode(d.bytes().unwrap()), probe.gate_token_hex());
+    owner.rotate().unwrap();
+    let fresh = joined(&owner, &new_link);
+    assert!(fresh.current_epoch_hex().is_some());
+    // The new link's token is evidence; the old one's is not.
+    let req = fresh.join_request("Cy", "read,post").unwrap();
+    assert_eq!(split(&owner.admit(&req, "read,post").unwrap()).len(), 3);
+    let stale = old.join_request("Old", "read,post").unwrap();
+    assert_eq!(owner.admit(&stale, "read,post").unwrap_err(), "evidence");
+    // A member holding the old link takes the new one and keeps its key.
+    let mut moved = ChannelMember::from_link(&old_link).unwrap();
+    let kid = moved.my_kid_hex();
+    moved.set_link(&new_link).unwrap();
+    assert_eq!(moved.my_kid_hex(), kid);
+    assert_eq!(moved.gate_token_hex(), fresh.gate_token_hex());
+    let other = circle().channel_owner("Else", GROUP_CHAT, 1).unwrap();
+    let elsewhere = format!(
+        "https://cahoots.network/app/#/ch/relay.example/{}/{}",
+        other.channel_id_hex(),
+        new_link.rsplit('/').next().unwrap()
+    );
+    assert_eq!(moved.set_link(&elsewhere).unwrap_err(), "wrong-channel");
+    assert_eq!(moved.set_link("nonsense").unwrap_err(), "link");
+}
+
+#[test]
+fn who_may_ask_to_post_follows_the_post_rule() {
+    let c = circle();
+    for (preset, may) in [(0u8, false), (1, false), (2, true), (3, true), (4, false)] {
+        let mut owner = c.channel_owner("P", preset, 1).unwrap();
+        let link = owner.link_url("relay.example").unwrap();
+        let mut m = ChannelMember::from_link(&link).unwrap();
+        assert!(!m.may_ask_to_post(), "no policy held yet");
+        m.set_policy(&owner.policy()).unwrap();
+        assert_eq!(m.may_ask_to_post(), may, "preset {preset}");
+    }
+}

@@ -40,7 +40,9 @@ const M: ChannelError = ChannelError::Malformed;
 /// Evidence kinds. Kinds 0 and 1 are built in this version; 2 to 4 are defined so the format
 /// does not change when they arrive.
 pub mod kind {
-    /// `ref` is a link id, bstr 32.
+    /// `ref` is empty: the owner's current link, the one whose gate token the relay holds.
+    /// Retiring a link and issuing another needs no policy change. A 32-byte link id is still
+    /// read, for a policy that names one link.
     pub const LINK: u8 = 0;
     /// `ref` is one explicit key, bstr 33; or empty, for any key the owner admits by hand.
     pub const KEY: u8 = 1;
@@ -121,14 +123,16 @@ pub fn id(signed: &[u8]) -> [u8; 32] {
 }
 
 impl Policy {
-    /// A preset's policy. Every action has a rule; evidence is the link where the preset admits
-    /// by link; `govern` needs a majority of `seats` (1 when there is one seat); assurance is
-    /// present (2) throughout.
+    /// A preset's policy. Every action has a rule; evidence is the owner's current link (an
+    /// empty link ref) where the preset admits by link; `govern` needs a majority of `seats`
+    /// (1 when there is one seat); assurance is present (2) throughout.
+    ///
+    /// `_link_id` is ignored and kept so callers compile: the policy names no particular link.
     pub fn preset(
         preset: Preset,
         circle_id: CircleId,
         channel_id: ChannelId,
-        link_id: [u8; 32],
+        _link_id: [u8; 32],
         seats: u8,
         log: u64,
         nonce: [u8; 16],
@@ -136,7 +140,7 @@ impl Policy {
         let link = || {
             vec![Evidence {
                 kind: kind::LINK,
-                r#ref: link_id.to_vec(),
+                r#ref: Vec::new(),
                 scope: String::new(),
             }]
         };
@@ -327,7 +331,8 @@ fn decode_evidence(d: &mut Decoder<'_>) -> Result<Evidence, ChannelError> {
     };
     m.finish()?;
     let ref_ok = match ev.kind {
-        kind::LINK | kind::CIRCLE | kind::ACCOUNT => ev.r#ref.len() == 32,
+        kind::CIRCLE | kind::ACCOUNT => ev.r#ref.len() == 32,
+        kind::LINK => ev.r#ref.is_empty() || ev.r#ref.len() == 32,
         kind::KEY => ev.r#ref.is_empty() || ev.r#ref.len() == 33,
         kind::DOCUMENT => true,
         _ => return Err(M),

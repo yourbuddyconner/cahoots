@@ -125,7 +125,8 @@ fn policy_round_trips_with_every_evidence_kind_and_an_issuer() {
 #[test]
 fn presets_have_the_documented_rules() {
     let make = |preset, seats| Policy::preset(preset, CIRCLE, channel(), LINK, seats, 4, [5; 16]);
-    let link = vec![evidence(0, &LINK, "")];
+    // Link evidence names no link: the owner's current one, whose gate token the relay holds.
+    let link = vec![evidence(0, &[], "")];
     let all = [Action::Read, Action::Post, Action::Admit, Action::Govern];
 
     for preset in [
@@ -235,9 +236,15 @@ fn policy_refuses_rules_out_of_action_order_or_repeated_and_unknown_kinds() {
     any_key.rules[0].evidence = vec![evidence(1, &[], "")];
     assert_eq!(Policy::decode(&any_key.encode()), Ok(any_key));
 
-    let mut short_link = base.clone();
-    short_link.rules[0].evidence = vec![evidence(0, &[0; 31], "")];
-    assert_eq!(refused(&short_link), Err(ChannelError::Malformed));
+    // A link evidence names one link id (32 bytes) or none (empty, the current link).
+    for len in [1usize, 31, 33] {
+        let mut odd_link = base.clone();
+        odd_link.rules[0].evidence = vec![evidence(0, &vec![0; len], "")];
+        assert_eq!(refused(&odd_link), Err(ChannelError::Malformed), "{len}");
+    }
+    let mut current_link = base.clone();
+    current_link.rules[0].evidence = vec![evidence(0, &[], "")];
+    assert_eq!(Policy::decode(&current_link.encode()), Ok(current_link));
 
     let mut high_assurance = base.clone();
     high_assurance.rules[1].assurance = 4;
