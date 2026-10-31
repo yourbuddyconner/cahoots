@@ -50,6 +50,12 @@ try {
     await tooltip.waitFor({ state:'visible' });
     const bounds = await tooltip.boundingBox();
     assert.ok(bounds.x >= 8 && bounds.x + bounds.width <= width - 8, 'Definition fits the viewport');
+    const barBounds = await progress.boundingBox();
+    const navBounds = await page.locator('.top').boundingBox();
+    const articleBounds = await page.locator('.post').boundingBox();
+    assert.ok(barBounds.y >= navBounds.y + navBounds.height - 1, 'Reading bar stays below the navigation');
+    assert.ok(Math.abs(barBounds.x - articleBounds.x) < 1 && Math.abs(barBounds.width - articleBounds.width) < 1,
+      'Reading bar follows the article column');
     if (width > 500) {
       await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height + 5);
       await tooltip.hover();

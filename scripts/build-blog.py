@@ -292,7 +292,6 @@ def post_page(p, others):
 {BRAND_SUB_CSS}
 <body class="blog-body">
 <a class="skip" href="#main">Skip to content</a>
-<div class="reading-progress" role="progressbar" aria-label="Article reading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><span></span></div>
 {TOP}
 <main class="blog-wrap post-wrap" id="main">
   <div class="post-layout">
@@ -305,6 +304,7 @@ def post_page(p, others):
       {about}
       {'<p class="reading-help">New terms have <strong>bold, dotted underlines</strong>. Hover, tap, or use Tab to read a definition.</p>' if p['term_count'] else ''}
       <div class="post">
+<div class="reading-progress" role="progressbar" aria-label="Article reading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><span></span></div>
 {p['body']}
       </div>
       {share}

@@ -10,6 +10,7 @@
     if (!progress) return;
     const bounds = article.getBoundingClientRect();
     const header = document.querySelector('.top')?.getBoundingClientRect().height || 0;
+    progress.style.setProperty('--reading-offset', `${header}px`);
     const start = bounds.top + scrollY - header;
     const end = bounds.bottom + scrollY - innerHeight;
     const fraction = end <= start ? (scrollY >= start ? 1 : 0) : Math.max(0, Math.min(1, (scrollY - start) / (end - start)));
