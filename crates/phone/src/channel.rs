@@ -41,6 +41,7 @@ use std::path::PathBuf;
 const DEAD: &str = "This link no longer works. Ask for a new one.";
 const WAITING: &str = "Waiting for the owner to let you post.";
 const READ_ONLY: &str = "You can read this channel. Only the owner posts.";
+const READ_GRANT: &str = "The owner let you read this channel, not post.";
 const CLOSED: &str = "Only people the owner lets in can read this channel.";
 const NO_LINK: &str = "This channel has no link. Only people you let in can read.";
 const NEEDS_SEATS: &str = "Announcements with approvals need more than one owner device to approve, which this version cannot collect yet.";
@@ -361,7 +362,12 @@ impl Ch {
     }
 
     fn can_post(&self) -> bool {
-        !self.meta.dead && (self.is_owner() || self.meta.grant_chain.is_some())
+        !self.meta.dead && (self.is_owner() || self.granted_post())
+    }
+
+    /// The member's own grant carries `post`. A grant to read only does not open the composer.
+    fn granted_post(&self) -> bool {
+        self.meta.grant_chain.is_some() && self.member().grant_allows(Action::Post)
     }
 
     fn read_auth(&self) -> Auth {
@@ -394,7 +400,7 @@ impl Ch {
             relay: self.host(),
             dead: self.meta.dead,
             can_post: self.can_post(),
-            waiting: !owner && self.meta.grant_chain.is_none() && self.meta.requested,
+            waiting: !owner && !self.granted_post() && self.meta.requested,
             unread: self.meta.unread,
             may_ask_to_post: self.member().may_ask_to_post(),
             closed: self.closed(),
@@ -1042,7 +1048,9 @@ impl Phone {
 
     /// After asking to post: take the grant once the owner has issued it.
     fn look_for_grant(&self, ch: &mut Ch) {
-        if ch.meta.grant_chain.is_some() || !ch.meta.requested {
+        // Until the owner lets this member post: a read-only grant is an answer, but the owner
+        // may still allow posting from the same request.
+        if ch.granted_post() || !(ch.meta.requested || ch.meta.wants_post) {
             return;
         }
         let auth = match ch.read_auth() {
@@ -1060,9 +1068,23 @@ impl Phone {
         else {
             return;
         };
-        if let Some(chain) = list.last() {
-            if ch.member_mut().set_grant(chain).is_ok() {
-                ch.meta.grant_chain = Some(chain.clone().into());
+        // The newest grant that lets this member post, else the newest one (to read).
+        let posting = list.iter().rev().find(|chain| {
+            ch.member_mut().set_grant(chain).is_ok() && ch.member().grant_allows(Action::Post)
+        });
+        let old = ch.meta.grant_chain.clone().map(|c| c.to_vec());
+        match posting.or(list.last()).cloned() {
+            // A grant the owner gave since the ask: the owner has answered it.
+            Some(chain)
+                if Some(&chain) != old.as_ref() && ch.member_mut().set_grant(&chain).is_ok() =>
+            {
+                ch.meta.grant_chain = Some(chain.into());
+                ch.meta.requested = false;
+            }
+            _ => {
+                if let Some(old) = old {
+                    let _ = ch.member_mut().set_grant(&old);
+                }
             }
         }
     }
@@ -1405,6 +1427,8 @@ impl Phone {
         if !ch.can_post() {
             return Err(channel(if ch.meta.dead {
                 DEAD
+            } else if ch.meta.grant_chain.is_some() && !ch.meta.requested {
+                READ_GRANT
             } else if ch.meta.requested {
                 WAITING
             } else {
@@ -1455,7 +1479,7 @@ impl Phone {
     pub fn channel_ask_to_post(&self, id: String, name: String) -> Result<(), PhoneError> {
         let _guard = self.lock();
         let mut ch = self.open_channel(&id)?;
-        if ch.is_owner() || ch.meta.grant_chain.is_some() {
+        if ch.is_owner() || ch.granted_post() {
             return Ok(());
         }
         if ch.meta.dead {
@@ -1534,13 +1558,55 @@ impl Phone {
         let mut ch = self.open_channel(&id)?;
         ch.owner()?;
         let requests = self.fetch_requests(&mut ch)?;
-        let (_, bytes, _) = requests
+        let (_, bytes, j) = requests
             .into_iter()
             .find(|(rid, _, _)| *rid == request_id)
             .ok_or_else(|| crate::not_found("request"))?;
-        self.admit_request(&mut ch, &bytes, &actions)?;
-        ch.meta.handled.push(request_id);
+        let given = self.admit_request(&mut ch, &bytes, &actions)?;
+        // A request given less than it asked stays in the list, so the owner can let the
+        // person post later (or refuse to set it aside).
+        if j.wanted
+            .split(',')
+            .all(|w| given.split(',').any(|g| g == w.trim()))
+        {
+            ch.meta.handled.push(request_id);
+        }
         ch.meta.save(&ch.dir)
+    }
+
+    /// The owner's "Allow automatically" pass: each waiting request whose every asked-for
+    /// action the live link grants (`channel_permitted` covers it) is let in for those; any
+    /// other request stays in the list for the owner. A request that does not check out is
+    /// set aside. How many were let in.
+    pub fn channel_auto_allow(&self, id: String) -> Result<u32, PhoneError> {
+        let _guard = self.lock();
+        let mut ch = self.open_channel(&id)?;
+        ch.owner()?;
+        let mut n = 0;
+        for (rid, bytes, j) in self.fetch_requests(&mut ch)? {
+            let Ok(permitted) = ch.owner()?.permitted(&bytes) else {
+                continue;
+            };
+            let wanted: Vec<&str> = j.wanted.split(',').map(str::trim).collect();
+            let covered = !permitted.is_empty()
+                && wanted
+                    .iter()
+                    .all(|w| permitted.iter().any(|a| a.name() == *w));
+            if !covered {
+                continue;
+            }
+            let actions = permitted
+                .iter()
+                .map(|a| a.name())
+                .collect::<Vec<_>>()
+                .join(",");
+            if self.admit_request(&mut ch, &bytes, &actions).is_ok() {
+                ch.meta.handled.push(rid);
+                ch.meta.save(&ch.dir)?;
+                n += 1;
+            }
+        }
+        Ok(n)
     }
 
     /// Set a request aside without letting it in.

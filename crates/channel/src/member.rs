@@ -608,6 +608,18 @@ impl ChannelMember {
         Ok(())
     }
 
+    /// Whether this member's own grant (the leaf of the chain kept with `set_grant`) carries
+    /// `action`, read without checking signatures: what the apps show, not what the relay
+    /// checks. `false` without a grant.
+    pub fn grant_allows(&self, action: Action) -> bool {
+        self.grant
+            .last()
+            .and_then(|leaf| cose::payload1(leaf).ok())
+            .and_then(|p| cahoots_objects::cwt::Claims::decode(&p).ok())
+            .and_then(|c| grant::from_claims(&c).ok())
+            .is_some_and(|g| g.actions.contains(&action))
+    }
+
     /// This member's grant chain, root first; empty before `set_grant`.
     pub fn grant(&self) -> &[Vec<u8>] {
         &self.grant

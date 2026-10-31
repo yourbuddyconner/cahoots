@@ -67,27 +67,13 @@ struct ChannelRequestsView: View {
         }
     }
 
-    /// With the toggle on: let each request in for what the live link proves
-    /// (`channelPermitted`), never for what it asks. A request that yields nothing (members post,
-    /// an old link) stays in the list for the owner. How many were let in.
-    static func allowPermitted(core: Core, id: String, requests: [ChannelRequest]? = nil) async -> Int {
+    /// With the toggle on: let in each request whose every asked-for action the live link
+    /// grants (`channelAutoAllow`). Any other request (asking to post in members post, an old
+    /// link) stays in the list for the owner. How many were let in.
+    static func allowPermitted(core: Core, id: String) async -> Int {
         guard UserDefaults.standard.bool(forKey: autoAllowKey(id)) else { return 0 }
-        let list: [ChannelRequest]
-        if let requests {
-            list = requests
-        } else {
-            guard let read = try? await core.run({ try $0.channelRequests(id: id) }) else { return 0 }
-            list = read
-        }
-        var n = 0
-        for r in list {
-            guard let actions = try? await core.run({ try $0.channelPermitted(id: id, requestId: r.id) }),
-                  !actions.isEmpty else { continue }
-            if (try? await core.run({ try $0.channelAllow(id: id, requestId: r.id, actions: actions) })) != nil {
-                n += 1
-            }
-        }
-        return n
+        let n = try? await core.run { try $0.channelAutoAllow(id: id) }
+        return Int(n ?? 0)
     }
 
     private func row(_ r: ChannelRequest) -> some View {
@@ -138,7 +124,7 @@ struct ChannelRequestsView: View {
             let list = try await core.run { [id] in try $0.channelRequests(id: id) }
             status = nil
             if autoAllow, !list.isEmpty {
-                let n = await Self.allowPermitted(core: core, id: id, requests: list)
+                let n = await Self.allowPermitted(core: core, id: id)
                 if n > 0 {
                     notice = n == 1 ? "Let in a request the policy permits." : "Let in \(n) requests the policy permits."
                     requests = (try? await core.run { [id] in try $0.channelRequests(id: id) }) ?? list

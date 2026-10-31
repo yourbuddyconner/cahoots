@@ -230,8 +230,8 @@ async function fetchRequests(e) {
   return (j.requests || []).filter((r) => !handled.has(r.id));
 }
 const markHandled = async (e, rid) => { e.rec.handled = [...(e.rec.handled || []), rid]; await putChannel(e.rec); };
-/** With the toggle on, grant what the policy already permits: the actions the live link proves
- * (`permitted`), never what the request asks for. A request that yields nothing waits for the owner. */
+/** With the toggle on, let in a request only when the live link grants every action it asks for
+ * (`permitted` covers it). Any other request stays in the list for the owner to decide. */
 async function autoAllow(e) {
   const settings = await loadChSettings(e.rec.id);
   if (!settings.autoAllow) return 0;
@@ -240,7 +240,9 @@ async function autoAllow(e) {
     const bytes = b64_decode(r.body);
     try {
       const actions = e.owner.permitted(bytes);
-      if (!actions) continue;
+      const granted = actions ? actions.split(',') : [];
+      const asked = JSON.parse(join_request_summary(bytes)).actions.split(',').map((a) => a.trim());
+      if (!granted.length || !asked.every((a) => granted.includes(a))) continue;
       await admitRequest(e, bytes, actions); await markHandled(e, r.id); n++;
     } catch (err) { if (['malformed', 'signature', 'evidence', 'wrong-channel'].includes(String(err))) await markHandled(e, r.id); }
   }
@@ -561,12 +563,14 @@ async function screenChannel(id) {
   const inp = input({ type: 'text', placeholder: proposing ? 'An announcement' : 'Message', maxlength: '4000', autocomplete: 'off', enterkeyhint: 'send', 'aria-label': 'Message' });
   const sendBtn = btn(proposing ? 'Propose' : 'Send', () => doSend(), 'primary');
   const banner = h('div', { class: 'ch-banner' });
-  const canPost = () => !rec.dead && (e.owner || !!rec.grantChain);
+  // Posting follows the grant: one to read only leaves the composer off.
+  const canPost = () => !rec.dead && (e.owner || (!!rec.grantChain && e.member.may_post()));
   const refresh = () => {
     inp.disabled = sendBtn.disabled = !canPost();
     banner.replaceChildren();
     if (rec.dead) banner.append(U.notice(DEAD, 'bad'));
     else if (!e.owner && !rec.grantChain && rec.requested) banner.append(U.notice(WAITING));
+    else if (!e.owner && rec.grantChain && !canPost()) banner.append(U.notice('The owner let you read this channel, not post.'));
     else if (!e.owner && !rec.grantChain && !rec.wantsPost) banner.append(U.notice('You can read this channel. Only the owner posts.'));
     else if (proposing) banner.append(U.notice(approvalsNeeded(e) > 1 ? `This channel needs ${approvalsNeeded(e)} approvals to post.` : 'Each post carries your approval.'));
   };
@@ -691,7 +695,9 @@ async function pollLoop(e, run, ui) {
 /** Post a join request once, then look for the grant on each round. */
 async function askToJoin(e, ui) {
   const { rec } = e;
-  if (rec.grantChain || !rec.wantsPost) return;
+  // Until the owner lets this member post: a grant to read is an answer, but the owner may still
+  // allow posting from the same request.
+  if ((rec.grantChain && e.member.may_post()) || !rec.wantsPost) return;
   try {
     if (!rec.requested) {
       const actions = e.member.may_ask_to_post() ? 'read,post' : 'read';
@@ -701,13 +707,18 @@ async function askToJoin(e, ui) {
     }
     const auth = readAuth(e) || { member: e.member };
     const j = await chGet(rec.relay, `/v1/channels/${rec.id}/grants?kid=${rec.kid}`, auth);
-    if (j.grants?.length) {
-      const chain = b64_decode(j.grants[j.grants.length - 1]);
-      e.member.set_grant(chain);
-      rec.grantChain = chain;
+    // The newest grant that lets this member post, else the newest one (to read).
+    const chains = (j.grants || []).map((g) => b64_decode(g));
+    let chosen = null;
+    for (const chain of [...chains].reverse()) { e.member.set_grant(chain); if (e.member.may_post()) { chosen = chain; break; } }
+    chosen = chosen || chains[chains.length - 1] || null;
+    const same = (x, y) => !!x && !!y && x.length === y.length && x.every((b, i) => b === y[i]);
+    if (chosen && !same(chosen, rec.grantChain)) {
+      e.member.set_grant(chosen);
+      rec.grantChain = chosen;
       await persist(e); ui.refresh();
-      U.toast('The owner let you post.', 'ok');
-    }
+      U.toast(e.member.may_post() ? 'The owner let you post.' : 'The owner let you read, not post.', 'ok');
+    } else if (rec.grantChain) e.member.set_grant(rec.grantChain);
   } catch (err) { if (err.status !== 401) ui.st.textContent = friendly(err); }
 }
 
@@ -836,7 +847,8 @@ async function screenRequests(id) {
       const choice = (label, actions, kind) => {
         const b = btn(label, async () => {
           b.disabled = true;
-          try { const given = await admitRequest(e, bytes, actions); await markHandled(e, r.id); U.toast(`${s.name} can ${given.replace(',', ' and ')}.`, 'ok'); render(); }
+          // A request given less than it asked stays listed, so posting can be allowed later.
+          try { const given = await admitRequest(e, bytes, actions); if (s.actions.split(',').every((a) => given.split(',').includes(a.trim()))) await markHandled(e, r.id); U.toast(`${s.name} can ${given.replace(',', ' and ')}.`, 'ok'); render(); }
           catch (x) { st.textContent = friendly(x); b.disabled = false; }
         }, kind);
         return b;

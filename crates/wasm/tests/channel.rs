@@ -905,3 +905,17 @@ fn a_retired_link_waits_for_the_relay_to_confirm() {
     assert_eq!(back.pending_retire_json(), "[]");
     assert_eq!(back.retire_confirmed("zz").unwrap_err(), "hash");
 }
+
+#[test]
+fn may_post_follows_the_grants_actions() {
+    let (mut owner, link) = group_chat();
+    let mut m = ChannelMember::from_link(&link).unwrap();
+    assert!(!m.may_post());
+    let req = m.join_request("Cee", "read,post").unwrap();
+    let read = split(&owner.admit(&req, "read").unwrap())[0].clone();
+    m.set_grant(&read).unwrap();
+    assert!(!m.may_post());
+    let post = split(&owner.admit(&req, "read,post").unwrap())[0].clone();
+    m.set_grant(&post).unwrap();
+    assert!(m.may_post());
+}

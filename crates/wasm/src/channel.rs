@@ -251,6 +251,12 @@ impl ChannelMember {
         self.with_mut(|m| m.set_link(url))
     }
 
+    /// Whether this member's own grant carries `post`: the composer is on only then. `false`
+    /// without a grant, and for a grant to read only.
+    pub fn may_post(&self) -> bool {
+        self.with(|m| m.grant_allows(cahoots_channel::Action::Post))
+    }
+
     /// Whether the held policy lets someone who is not an owner seat ask to post: its post rule
     /// takes link or key evidence. `false` without a policy, or when only the owner posts.
     pub fn may_ask_to_post(&self) -> bool {

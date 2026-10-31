@@ -726,3 +726,91 @@ fn only_what_the_link_proves_is_let_in_without_the_owner() {
         );
     }
 }
+
+#[test]
+fn auto_allow_leaves_what_the_link_does_not_cover_and_posting_follows_the_grant() {
+    let st = station();
+    let (a, b) = (device(), device());
+    let circle_id = circle(&a, &b, &st.base);
+    // Members post: the link grants read; posting is the owner's choice.
+    let id = a
+        .phone
+        .channel_start(circle_id, "Garden".into(), 3)
+        .unwrap()
+        .id;
+    let link = a.phone.channel_link(id.clone()).unwrap();
+    let c = device();
+    c.phone.channel_join(link).unwrap();
+    c.phone
+        .channel_ask_to_post(id.clone(), "Cee".into())
+        .unwrap();
+
+    // The link covers read, not post: auto-allow leaves the request for the owner.
+    assert_eq!(a.phone.channel_auto_allow(id.clone()).unwrap(), 0);
+    let reqs = a.phone.channel_requests(id.clone()).unwrap();
+    assert_eq!(reqs.len(), 1);
+    assert_eq!(
+        a.phone
+            .channel_permitted(id.clone(), reqs[0].id.clone())
+            .unwrap(),
+        "read"
+    );
+
+    // The owner lets Cee read only: a grant, but no composer.
+    a.phone
+        .channel_allow(id.clone(), reqs[0].id.clone(), "read".into())
+        .unwrap();
+    c.phone.channel_poll(id.clone()).unwrap();
+    let cs = c.phone.channel(id.clone()).unwrap();
+    assert!(!cs.can_post && !cs.waiting, "{cs:?}");
+    match c.phone.channel_send(id.clone(), "may I?".into()) {
+        Err(PhoneError::Channel { message }) => {
+            assert_eq!(message, "The owner let you read this channel, not post.")
+        }
+        other => panic!("{other:?}"),
+    }
+
+    // The request stays with the owner, who may let Cee post later; auto-allow still leaves it.
+    assert_eq!(a.phone.channel_auto_allow(id.clone()).unwrap(), 0);
+    let reqs = a.phone.channel_requests(id.clone()).unwrap();
+    assert_eq!(reqs.len(), 1);
+    assert_eq!(
+        a.phone.channel_members(id.clone()).unwrap()[0].actions,
+        "read"
+    );
+    a.phone
+        .channel_allow(id.clone(), reqs[0].id.clone(), "read,post".into())
+        .unwrap();
+    c.phone.channel_poll(id.clone()).unwrap();
+    let cs = c.phone.channel(id.clone()).unwrap();
+    assert!(cs.can_post && !cs.waiting, "{cs:?}");
+    assert!(a.phone.channel_requests(id.clone()).unwrap().is_empty());
+    assert_eq!(
+        a.phone.channel_members(id.clone()).unwrap()[0].actions,
+        "read,post"
+    );
+    c.phone.channel_send(id.clone(), "hello".into()).unwrap();
+    assert_eq!(texts(&a.phone.channel_poll(id.clone()).unwrap()), ["hello"]);
+}
+
+#[test]
+fn auto_allow_lets_in_what_the_link_covers() {
+    let st = station();
+    let (a, b) = (device(), device());
+    let circle_id = circle(&a, &b, &st.base);
+    let id = a
+        .phone
+        .channel_start(circle_id, "Garden".into(), 2)
+        .unwrap()
+        .id;
+    let link = a.phone.channel_link(id.clone()).unwrap();
+    let c = device();
+    c.phone.channel_join(link).unwrap();
+    c.phone
+        .channel_ask_to_post(id.clone(), "Cee".into())
+        .unwrap();
+    assert_eq!(a.phone.channel_auto_allow(id.clone()).unwrap(), 1);
+    assert!(a.phone.channel_requests(id.clone()).unwrap().is_empty());
+    c.phone.channel_poll(id.clone()).unwrap();
+    assert!(c.phone.channel(id.clone()).unwrap().can_post);
+}
