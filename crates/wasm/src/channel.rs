@@ -279,17 +279,33 @@ impl ChannelMember {
         self.with(|m| m.current_epoch().map(|id| hex(&id.encode())))
     }
 
-    /// Open a link deposit with the link's secret and install its epoch. An epoch already held
-    /// is left as it is. Errors: `no-link`, `wrong-channel`, `tag`, `malformed`, `reuse`.
-    pub fn install_from_link_deposit(&mut self, deposit: &[u8]) -> Result<(), String> {
-        self.with_mut(|m| m.install_from_link_deposit(deposit))
+    /// Open a signed link deposit with the link's secret and install its epoch, once its
+    /// signer checks out. `signer_chain` is the grant chain the relay lists for the deposit's
+    /// signer (`deposit_meta`'s `kid`), `manifest` the owner circle's encoded
+    /// `SealedManifest`: the chain must verify, carry `govern`, and name the key that signed.
+    /// An epoch already held is left as it is. Errors: `manifest`, `malformed`, `no-grant`,
+    /// `grant:<reason>`, `no-admit`, `refused:<reason>`, `signature`, `no-link`,
+    /// `wrong-channel`, `tag`, `reuse`.
+    pub fn install_from_link_deposit(
+        &mut self,
+        deposit: &[u8],
+        signer_chain: &[u8],
+        manifest: &[u8],
+    ) -> Result<(), String> {
+        self.with_mut(|m| m.install_from_link_deposit(deposit, signer_chain, manifest))
     }
 
-    /// Open a key deposit with this member's X-Wing secret key and install its epoch. An epoch
-    /// already held is left as it is. Errors: `not-mine` (sealed to another key id),
-    /// `wrong-channel`, `hpke`, `malformed`, `reuse`.
-    pub fn install_from_key_deposit(&mut self, deposit: &[u8]) -> Result<(), String> {
-        self.with_mut(|m| m.install_from_key_deposit(deposit))
+    /// Open a signed key deposit with this member's X-Wing secret key and install its epoch,
+    /// once its signer checks out, as for `install_from_link_deposit`. An epoch already held
+    /// is left as it is. Errors: as `install_from_link_deposit` but `no-link` and `tag`;
+    /// `not-mine` (sealed to another key id), `hpke`.
+    pub fn install_from_key_deposit(
+        &mut self,
+        deposit: &[u8],
+        signer_chain: &[u8],
+        manifest: &[u8],
+    ) -> Result<(), String> {
+        self.with_mut(|m| m.install_from_key_deposit(deposit, signer_chain, manifest))
     }
 
     /// A join request for the owner: the COSE_Sign1, kid this member's key id, external AAD
@@ -404,6 +420,20 @@ impl ChannelMember {
     pub fn import(state: &[u8]) -> Result<ChannelMember, String> {
         CoreMember::import(state).map(ChannelMember::own)
     }
+}
+
+/// A signed deposit's id (the SHA-256 of the unsigned deposit, as a rotation names it) and
+/// its signer's key id, read without checking the signature:
+/// `{"id":"<hex 32>","kid":"<hex 32>"}`. Fetch the signer's chain by `kid`; the install checks
+/// it. Errors: `malformed`, `signature`, `wrong-channel`, `not-canonical`.
+#[wasm_bindgen]
+pub fn deposit_meta(signed: &[u8]) -> Result<String, String> {
+    let (kid, d) = cahoots_channel::deposit::peek_signed(signed).map_err(core_member::code)?;
+    Ok(format!(
+        "{{\"id\":\"{}\",\"kid\":\"{}\"}}",
+        hex(&d.id()),
+        hex(&kid)
+    ))
 }
 
 /// What a join request asks for, for the owner's Requests screen, after its signature checks:
@@ -572,11 +602,40 @@ impl ChannelOwner {
     }
 
     /// The seat-signed `cahoots/gate-retire/v1` statement for the current link (the body of
-    /// `DELETE …/gates/{hash}`), and forget its secret: later rotations make no link deposit.
-    /// Error: `no-link`.
+    /// `DELETE …/gates/{hash}`), and forget its secret at once: no later admission can use it
+    /// and later rotations make no link deposit. The statement stays in `pending_retire_json`
+    /// until `retire_confirmed`. Error: `no-link`.
     pub fn retire_link(&mut self) -> Result<Vec<u8>, String> {
         let key = self.key()?;
         self.inner.borrow_mut().retire_link(&key)
+    }
+
+    /// Retired links the relay has not confirmed removing, oldest first:
+    /// `[{"hash":"<hex 32>","statement":"<base64url>"}]`. Send each as
+    /// `DELETE …/gates/{hash}` with the statement as the body; on 204 (or 404, already gone)
+    /// call `retire_confirmed(hash)`.
+    pub fn pending_retire_json(&self) -> String {
+        let o = self.inner.borrow();
+        let items: Vec<String> = o
+            .pending_retire()
+            .iter()
+            .map(|(h, st)| {
+                format!(
+                    "{{\"hash\":\"{}\",\"statement\":\"{}\"}}",
+                    hex(h),
+                    b64_encode(st)
+                )
+            })
+            .collect();
+        format!("[{}]", items.join(","))
+    }
+
+    /// The relay removed the gate token whose hash is `hash_hex`: stop sending its retire.
+    /// Error: `hash`.
+    pub fn retire_confirmed(&mut self, hash_hex: &str) -> Result<(), String> {
+        let hash: [u8; 32] = unhex_n(hash_hex, "hash")?;
+        self.inner.borrow_mut().retire_confirmed(&hash);
+        Ok(())
     }
 
     /// The owner member's grant chain: a CBOR array of one signed root grant for read, post,
@@ -599,7 +658,7 @@ impl ChannelOwner {
         self.inner.borrow_mut().rotate()
     }
 
-    /// The deposits made for the current epoch, a CBOR array of encoded deposits, each the
+    /// The deposits made for the current epoch, a CBOR array of signed deposits, each the
     /// body of one `POST …/deposits`: one for the live link, then one per admitted member.
     pub fn deposits(&self) -> Vec<u8> {
         let o = self.inner.borrow();
@@ -615,16 +674,29 @@ impl ChannelOwner {
         self.inner.borrow().deposit_for_key(&kid, xwing_pk)
     }
 
+    /// The actions a join request may be granted automatically, as `"read,post"`: those asked
+    /// for whose rule takes link evidence the request's gate token proves against the live
+    /// link. `""` when nothing is (closed, members post, an old link): auto-allow skips it.
+    /// Errors: `malformed`, `signature`, `wrong-channel`, `actions`.
+    pub fn permitted(&self, request: &[u8]) -> Result<String, String> {
+        let actions = self.inner.borrow().permitted(request)?;
+        Ok(actions
+            .iter()
+            .map(|a| a.name())
+            .collect::<Vec<_>>()
+            .join(","))
+    }
+
     /// Admit a join request (as `ChannelMember::join_request` makes it), granting `actions`
-    /// ("read,post"), which must be among those requested. For each granted action whose rule
-    /// names a link, the request's gate token must be the live link's.
+    /// ("read,post"), which must be among those requested. Each granted action needs a rule
+    /// with evidence (else `policy`: `admit` and `govern` always, `post` in an announcements
+    /// channel), and the request must show one of it: the live link's gate token for link
+    /// evidence; key evidence is the owner choosing (else `evidence`).
     ///
     /// Issues a root grant (depth 0, no budget, `not_after = u64::MAX`), seals the current
-    /// epoch to the member's X-Wing key, keeps the member for later rotations, and returns the
-    /// CBOR array `[grant chain, key deposit, join control wire]`: post the chain to
-    /// `…/grants`, the deposit to `…/deposits`, the control to `…/messages`.
-    /// A request for `post` is refused with `policy` when the post rule has no evidence (only
-    /// the owner's seats post, as in an announcements channel).
+    /// epoch to the member's X-Wing key (a signed deposit), keeps the member for later
+    /// rotations, and returns the CBOR array `[grant chain, key deposit, join control wire]`:
+    /// post the chain to `…/grants`, the deposit to `…/deposits`, the control to `…/messages`.
     /// Errors: `malformed`, `signature`, `wrong-channel`, `actions`, `name`, `policy`,
     /// `evidence`, `unknown-epoch`, `hpke`.
     pub fn admit(&mut self, request: &[u8], actions: &str) -> Result<Vec<u8>, String> {
@@ -721,7 +793,8 @@ impl ChannelOwner {
     ///
     /// `{0: 1, 1: seat, 2: seat seed, 3: manifest, 4: seats, 5: channel object, 6: policy,
     ///   7: link secret or nil, 8: epoch number, 9: epoch key or nil, 10: [deposit...],
-    ///   11: [[grant_id, kid, xwing_pk, name tstr]...], 12: self grant, 13: member state}`
+    ///   11: [[grant_id, kid, xwing_pk, name tstr]...], 12: self grant, 13: member state,
+    ///   14: [[token hash, retire statement]...]}`
     pub fn export(&self) -> Vec<u8> {
         self.inner.borrow().export().to_vec()
     }

@@ -88,7 +88,8 @@ fn group_chat() -> (ChannelOwner, String) {
 fn joined(owner: &ChannelOwner, link: &str) -> ChannelMember {
     let mut m = ChannelMember::from_link(link).unwrap();
     for d in split(&owner.deposits()) {
-        m.install_from_link_deposit(&d).unwrap();
+        m.install_from_link_deposit(&d, &owner.self_grant(), &owner.manifest())
+            .unwrap();
     }
     m
 }
@@ -113,7 +114,9 @@ fn owner_creates_member_joins_by_link_and_they_talk() {
     assert!(member.current_epoch_hex().is_none());
     let deposits = split(&owner.deposits());
     assert_eq!(deposits.len(), 1, "one link deposit and no members yet");
-    member.install_from_link_deposit(&deposits[0]).unwrap();
+    member
+        .install_from_link_deposit(&deposits[0], &owner.self_grant(), &owner.manifest())
+        .unwrap();
     assert_eq!(
         member.current_epoch_hex(),
         owner.member().current_epoch_hex()
@@ -122,7 +125,9 @@ fn owner_creates_member_joins_by_link_and_they_talk() {
     // The member reads the owner's rotation control under the self-grant.
     let rotation = owner.rotate().unwrap();
     for d in split(&owner.deposits()) {
-        member.install_from_link_deposit(&d).unwrap();
+        member
+            .install_from_link_deposit(&d, &owner.self_grant(), &owner.manifest())
+            .unwrap();
     }
     let got = member
         .receive(&b64_encode(&rotation), &owner.self_grant(), &manifest)
@@ -138,7 +143,9 @@ fn owner_creates_member_joins_by_link_and_they_talk() {
     let parts = split(&owner.admit(&request, "read,post").unwrap());
     assert_eq!(parts.len(), 3);
     let chain = parts[0].clone();
-    member.install_from_key_deposit(&parts[1]).unwrap();
+    member
+        .install_from_key_deposit(&parts[1], &owner.self_grant(), &owner.manifest())
+        .unwrap();
     let join = owner
         .member()
         .receive(&b64_encode(&parts[2]), &[], &manifest)
@@ -274,10 +281,15 @@ fn a_rotation_after_revoke_leaves_the_revoked_member_out() {
     assert_eq!(deposits.len(), 1);
     let before = a.current_epoch_hex();
     for d in &deposits {
-        assert!(a.install_from_key_deposit(d).is_err());
-        assert!(a.install_from_link_deposit(d).is_err());
+        assert!(a
+            .install_from_key_deposit(d, &owner.self_grant(), &owner.manifest())
+            .is_err());
+        assert!(a
+            .install_from_link_deposit(d, &owner.self_grant(), &owner.manifest())
+            .is_err());
     }
-    b.install_from_key_deposit(&deposits[0]).unwrap();
+    b.install_from_key_deposit(&deposits[0], &owner.self_grant(), &owner.manifest())
+        .unwrap();
     assert_eq!(b.current_epoch_hex(), owner.member().current_epoch_hex());
     assert_ne!(a.current_epoch_hex(), b.current_epoch_hex());
     assert_eq!(a.current_epoch_hex(), before);
@@ -512,9 +524,9 @@ fn owner_and_member_state_survive_export_and_import() {
     // The admitted member is still tracked, so it gets a key deposit beside the link deposit.
     let deposits = split(&owner.deposits());
     assert_eq!(deposits.len(), 2);
-    assert!(deposits
-        .iter()
-        .any(|d| member.install_from_key_deposit(d).is_ok()));
+    assert!(deposits.iter().any(|d| member
+        .install_from_key_deposit(d, &owner.self_grant(), &owner.manifest())
+        .is_ok()));
     assert_eq!(member.current_epoch_hex().unwrap(), second);
 
     assert!(ChannelOwner::import(&saved[..saved.len() - 1]).is_err());
@@ -756,4 +768,129 @@ fn who_may_ask_to_post_follows_the_post_rule() {
         m.set_policy(&owner.policy()).unwrap();
         assert_eq!(m.may_ask_to_post(), may, "preset {preset}");
     }
+}
+
+/// A join request made by hand for `key`, with `token` as its evidence: what
+/// `ChannelMember::join_request` makes, for a key the test holds.
+fn request_for(
+    key: &cahoots_core::seat::SeatKey,
+    channel: &[u8],
+    xwing_pk: &[u8],
+    token: &[u8],
+) -> Vec<u8> {
+    let mut e = minicbor::Encoder::new(Vec::new());
+    e.map(6).unwrap();
+    e.u8(0).unwrap().bytes(channel).unwrap();
+    e.u8(1).unwrap().bytes(&key.public().0).unwrap();
+    e.u8(2).unwrap().bytes(xwing_pk).unwrap();
+    e.u8(3).unwrap().str("read,post").unwrap();
+    e.u8(4).unwrap().str("Mallory").unwrap();
+    e.u8(5).unwrap().bytes(token).unwrap();
+    let kid: [u8; 32] = Sha256::digest(key.public().0).into();
+    cose::sign1(
+        key,
+        &kid,
+        &e.into_writer(),
+        cahoots_wasm::channel::JOIN_DOMAIN,
+        false,
+    )
+}
+
+#[test]
+fn deposits_signed_by_a_key_without_govern_are_refused() {
+    use cahoots_channel::deposit::peek_signed;
+    let (mut owner, link) = group_chat();
+    let manifest = owner.manifest();
+    let mut m = ChannelMember::from_link(&link).unwrap();
+    let real = m.join_request("Cee", "read,post").unwrap();
+    let xwing_pk = cahoots_channel::member::JoinRequest::parse(&real)
+        .unwrap()
+        .xwing_pk;
+
+    // Mallory joins by the link and is let in to post: a real grant, without govern.
+    let mallory = cahoots_core::seat::SeatKey::from_seed(&[0x4d; 32]).unwrap();
+    let channel = hex::decode(owner.channel_id_hex()).unwrap();
+    let token = hex::decode(m.gate_token_hex()).unwrap();
+    let req = request_for(&mallory, &channel, &xwing_pk, &token);
+    let mallory_chain = split(&owner.admit(&req, "read,post").unwrap())[0].clone();
+
+    // A link deposit sealed with the right secret, and a key deposit sealed to the member, each
+    // signed again by Mallory.
+    let (_, link_dep) = peek_signed(&split(&owner.deposits())[0]).unwrap();
+    let kid = m.my_kid_hex();
+    let (_, key_dep) = peek_signed(&owner.deposit_for_key(&kid, &xwing_pk).unwrap()).unwrap();
+    let forged_link = link_dep.sign(&mallory);
+    let forged_key = key_dep.sign(&mallory);
+    assert_eq!(
+        m.install_from_link_deposit(&forged_link, &mallory_chain, &manifest)
+            .unwrap_err(),
+        "refused:action"
+    );
+    assert_eq!(
+        m.install_from_key_deposit(&forged_key, &mallory_chain, &manifest)
+            .unwrap_err(),
+        "refused:action"
+    );
+    // Shown with the owner's chain instead, the kid is not the chain's key.
+    assert_eq!(
+        m.install_from_link_deposit(&forged_link, &owner.self_grant(), &manifest)
+            .unwrap_err(),
+        "signature"
+    );
+    assert!(m.current_epoch_hex().is_none());
+
+    // deposit_meta names the signer to fetch the chain by, and the id a rotation names.
+    let good = split(&owner.deposits())[0].clone();
+    let meta = cahoots_wasm::channel::deposit_meta(&good).unwrap();
+    assert_eq!(
+        meta,
+        format!(
+            "{{\"id\":\"{}\",\"kid\":\"{}\"}}",
+            hex::encode(link_dep.id()),
+            owner.member().my_kid_hex()
+        )
+    );
+    m.install_from_link_deposit(&good, &owner.self_grant(), &manifest)
+        .unwrap();
+    assert_eq!(m.current_epoch_hex(), owner.member().current_epoch_hex());
+}
+
+#[test]
+fn permitted_is_what_the_link_proves_and_the_owner_picks_the_rest() {
+    let (mut owner, link) = group_chat();
+    let m = ChannelMember::from_link(&link).unwrap();
+    let req = m.join_request("Cee", "read,post,admit,govern").unwrap();
+    assert_eq!(owner.permitted(&req).unwrap(), "read,post");
+    assert_eq!(owner.admit(&req, "govern").unwrap_err(), "policy");
+    assert_eq!(owner.admit(&req, "read,admit").unwrap_err(), "policy");
+    assert_eq!(split(&owner.admit(&req, "read,post").unwrap()).len(), 3);
+
+    for preset in [3u8, 4] {
+        let mut o = circle().channel_owner("Inner", preset, 1).unwrap();
+        let link = o.link_url("relay.example").unwrap();
+        o.rotate().unwrap();
+        let r = ChannelMember::from_link(&link)
+            .unwrap()
+            .join_request("Dee", "read,post")
+            .unwrap();
+        assert_eq!(o.permitted(&r).unwrap(), "", "preset {preset}");
+    }
+}
+
+#[test]
+fn a_retired_link_waits_for_the_relay_to_confirm() {
+    let (mut owner, _) = group_chat();
+    let hash = owner.gate_token_hash_hex().unwrap();
+    let statement = owner.retire_link().unwrap();
+    assert!(owner.gate_token_hash_hex().is_none());
+    let pending = format!(
+        "[{{\"hash\":\"{hash}\",\"statement\":\"{}\"}}]",
+        b64_encode(&statement)
+    );
+    assert_eq!(owner.pending_retire_json(), pending);
+    let mut back = ChannelOwner::import(&owner.export()).unwrap();
+    assert_eq!(back.pending_retire_json(), pending);
+    back.retire_confirmed(&hash).unwrap();
+    assert_eq!(back.pending_retire_json(), "[]");
+    assert_eq!(back.retire_confirmed("zz").unwrap_err(), "hash");
 }
