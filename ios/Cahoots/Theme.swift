@@ -187,6 +187,28 @@ struct Working: View {
 
 // MARK: - Sections and rows
 
+/// A short, numbered instruction that stays readable at larger text sizes.
+struct InstructionStep: View {
+    let number: Int
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+            Text("\(number)")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(Color.brand)
+                .frame(minWidth: 20)
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text(title).font(.headline).foregroundStyle(Color.ink)
+                Text(detail).font(.subheadline).foregroundStyle(Color.muted)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// A titled group of rows split by hairlines, on paper: the app's grouped list.
 struct PaperSection<Content: View>: View {
     var title: String?

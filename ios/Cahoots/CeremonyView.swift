@@ -458,8 +458,8 @@ struct WordsView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        CeremonyStep(step: 4, stepName: "Compare words", headline: "Read the six words aloud together",
-                     detail: "Check your own screen. Every word must match, in the same order. If one differs, everyone starts again.") {
+        CeremonyStep(step: 4, stepName: "Compare words", headline: "Compare all six words",
+                     detail: "One person reads aloud while everyone checks their own screen. Confirm only when all six words match on every phone, in the same order. If any differ, everyone starts again.") {
             words
             StatusLine(text: model.status)
         }

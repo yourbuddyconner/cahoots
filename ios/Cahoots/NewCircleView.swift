@@ -9,12 +9,13 @@ struct NewCircleView: View {
     @State private var size = Self.sizes[1].bytes
     @State private var error: String?
     @State private var starting = false
+    @State private var advanced = false
     @FocusState private var naming: Bool
 
-    static let sizes: [(bytes: UInt32, label: String, hint: String)] = [
-        (16384, "Small", "About 100 messages. A few seconds to scan."),
-        (65536, "Medium", "A few hundred messages. About half a minute to scan."),
-        (262144, "Large", "A couple thousand messages. About two minutes to scan."),
+    static let sizes: [(bytes: UInt32, label: String)] = [
+        (16384, "Small"),
+        (65536, "Medium"),
+        (262144, "Large"),
     ]
 
     var body: some View {
@@ -30,10 +31,11 @@ struct NewCircleView: View {
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(Color.muted)
                     TextField("park, book club, family", text: $name)
-                        .textInputAutocapitalization(.never)
+                        .textInputAutocapitalization(.words)
                         .autocorrectionDisabled()
                         .submitLabel(.done)
                         .focused($naming)
+                        .onSubmit { naming = false }
                         .paperField()
                         .accessibilityLabel("Name")
                         .accessibilityIdentifier("circle-name")
@@ -44,9 +46,9 @@ struct NewCircleView: View {
                     PeopleStepper(value: $members, range: 2...8)
                 }
 
-                PaperSection(title: "How to hold the ceremony") {
+                PaperSection(title: "How to connect") {
                     OptionRow(title: "Through the relay",
-                              detail: "Everyone scans one code from your screen. The rest goes through the relay.",
+                              detail: "Recommended when everyone has internet. Each person scans your code, then you scan theirs.",
                               chosen: throughRelay) { throughRelay = true }
                     Hairline()
                     OptionRow(title: "Codes only",
@@ -54,12 +56,16 @@ struct NewCircleView: View {
                               chosen: !throughRelay) { throughRelay = false }
                 }
 
-                PaperSection(title: "Secret size") {
-                    ForEach(Array(Self.sizes.enumerated()), id: \.offset) { i, s in
-                        if i > 0 { Hairline() }
-                        OptionRow(title: s.label, detail: s.hint, chosen: size == s.bytes) { size = s.bytes }
+                DisclosureGroup("Advanced options", isExpanded: $advanced) {
+                    PaperSection(title: "Shared secret size", footer: "Larger secrets take longer to exchange with codes only.") {
+                        ForEach(Array(Self.sizes.enumerated()), id: \.offset) { i, s in
+                            if i > 0 { Hairline() }
+                            OptionRow(title: s.label, chosen: size == s.bytes) { size = s.bytes }
+                        }
                     }
+                    .padding(.top, Space.m)
                 }
+                .foregroundStyle(Color.ink)
             }
             .padding(.horizontal, Space.l)
             .padding(.top, Space.s)
@@ -79,7 +85,7 @@ struct NewCircleView: View {
                 Working(busy: starting, title: "Start the ceremony")
             }
             .buttonStyle(.filled)
-            .disabled(starting)
+            .disabled(starting || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .accessibilityIdentifier("start-ceremony")
         }
     }

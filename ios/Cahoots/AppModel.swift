@@ -20,6 +20,7 @@ final class AppModel: ObservableObject {
     @Published var circles: [CircleSummary] = []
     /// Each circle's faces, drawn, in seat order, by circle id.
     @Published var faces: [String: [Data]] = [:]
+    @Published private(set) var seatNames: [String: [String: String]] = [:]
     @Published var path: [Route] = []
     /// Shown once at launch when a ceremony was open when the app closed.
     @Published var lostCeremony: String?
@@ -61,6 +62,9 @@ final class AppModel: ObservableObject {
         guard let core, UIApplication.shared.isProtectedDataAvailable else { return false }
         guard let list = try? await core.run({ $0.circles() }) else { return false }
         circles = list
+        seatNames = Dictionary(uniqueKeysWithValues: list.map {
+            ($0.id, (try? core.store.seatNames(circle: $0.id)) ?? [:])
+        })
         faces = (try? await core.run { phone in
             Dictionary(uniqueKeysWithValues: list.map { c in
                 (c.id, (0..<c.members).compactMap { phone.seatFace(circle: c.id, seat: $0) })
@@ -71,6 +75,16 @@ final class AppModel: ObservableObject {
 
     func circle(_ id: String) -> CircleSummary? {
         circles.first { $0.id == id }
+    }
+
+    func seatName(circle: String, seat: UInt8) -> String {
+        seatNames[circle]?[String(seat)] ?? "Seat \(seat + 1)"
+    }
+
+    func setSeatName(_ name: String, circle: String, seat: UInt8) throws {
+        guard let core else { throw PhoneError.Storage(message: "Your circles are still opening. Try again.") }
+        try core.store.setSeatName(name, circle: circle, seat: seat)
+        seatNames[circle] = try core.store.seatNames(circle: circle)
     }
 
     /// Read every circle's relay, then show the unread count on the icon. Each circle gets at

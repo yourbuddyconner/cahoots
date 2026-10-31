@@ -50,6 +50,21 @@ struct PhoneStore {
         return ids.filter { !$0.hasPrefix(".") }.count
     }
 
+    /// Private labels live beside the circle, inherit its protection, and leave with it.
+    func seatNames(circle: String) throws -> [String: String] {
+        let url = circles.appendingPathComponent(circle).appendingPathComponent("seat-names.json")
+        guard FileManager.default.fileExists(atPath: url.path) else { return [:] }
+        return try JSONDecoder().decode([String: String].self, from: Data(contentsOf: url))
+    }
+
+    func setSeatName(_ name: String, circle: String, seat: UInt8) throws {
+        var names = try seatNames(circle: circle)
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        names[String(seat)] = trimmed.isEmpty ? nil : trimmed
+        let url = circles.appendingPathComponent(circle).appendingPathComponent("seat-names.json")
+        try JSONEncoder().encode(names).write(to: url, options: [.atomic, .completeFileProtection])
+    }
+
     /// Give the files that hold nothing secret protection until first unlock. The phone crate
     /// rewrites them on every poll, and a rewritten file takes the folder's complete protection,
     /// so call this after each poll.
