@@ -399,6 +399,8 @@ pub struct Pending {
     mailbox: Option<Mailbox>,
     /// The relay this ceremony uses, and the circle chats through once kept.
     pub relay: String,
+    /// Seats 2 to `badges + 1` are cards in a pile.
+    pub badges: u8,
     /// The last relay sequence number read from the channel.
     cursor: Option<u64>,
     /// The host's scans of each joiner's code. `Some` on the host of a relay ceremony.
@@ -427,6 +429,7 @@ impl Pending {
         seat_label: String,
         channel: Option<Channel>,
         relay: String,
+        badges: u8,
     ) -> Result<Self, PhoneError> {
         let public = signer.make_key(seat_label.clone())?;
         let seat_public = SeatPublic::parse(&public).map_err(|_| PhoneError::Signer {
@@ -468,6 +471,7 @@ impl Pending {
             relay,
             cursor: None,
             proceeded: false,
+            badges,
         };
         // The host's commitment is fixed now, so the offer that binds it is made now, before
         // anything is posted, and never changes.
@@ -476,7 +480,7 @@ impl Pending {
                 let host = commitment_hash(&p.my_commitment().expect("not finished"));
                 let text = mb
                     .channel()
-                    .offer(&p.params, &p.relay, &host, 0)
+                    .offer(&p.params, &p.relay, &host, badges)
                     .map_err(|_| plain("The relay address is too long to fit in the code."))?;
                 p.offer = Some(text);
             }

@@ -263,10 +263,10 @@ final class AppModel: ObservableObject {
         UNUserNotificationCenter.current().requestAuthorization(options: [.badge]) { _, _ in }
     }
 
-    func startCeremony(name: String, members: UInt8, padLen: UInt32, throughRelay: Bool) async throws {
+    func startCeremony(name: String, members: UInt8, badges: UInt8, padLen: UInt32, throughRelay: Bool) async throws {
         guard let core else { return }
         let id = try await core.run {
-            try $0.startCeremony(name: name, members: members, padLen: padLen, throughRelay: throughRelay)
+            try $0.startCeremony(name: name, members: members, badges: badges, padLen: padLen, throughRelay: throughRelay)
         }
         ceremonies.record(id)
         path = [.ceremony(id)]

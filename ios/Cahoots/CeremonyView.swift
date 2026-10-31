@@ -259,6 +259,7 @@ struct RelayCeremonyView: View {
                 let seat = UInt8(i)
                 if i > 0 { Hairline() }
                 SeatRow(number: i + 1,
+                        card: i >= 1 && i <= Int(state.badges),
                         state: i == 0 ? .you : ok.contains(seat) ? .scanned
                             : (seen.contains(seat) || (!missing.contains(seat) && !commit)) ? .here : .waiting)
             }
@@ -270,6 +271,7 @@ struct RelayCeremonyView: View {
 struct SeatRow: View {
     enum Where { case you, waiting, here, scanned }
     let number: Int
+    var card = false
     let state: Where
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -305,7 +307,7 @@ struct SeatRow: View {
     private var words: String {
         switch state {
         case .you: return "You, the host"
-        case .waiting: return "Waiting"
+        case .waiting: return card ? "card, through the bridge" : "Waiting"
         case .here: return "Here, not scanned"
         case .scanned: return "Scanned"
         }

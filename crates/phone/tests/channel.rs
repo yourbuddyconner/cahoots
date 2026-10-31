@@ -177,7 +177,7 @@ fn show(from: &Phone, from_id: &str, to: &Phone, to_id: &str) {
 fn circle(a: &Device, b: &Device, relay: &str) -> String {
     let ida = a
         .phone
-        .start_ceremony("park".into(), 2, PAD, false)
+        .start_ceremony("park".into(), 2, 0, PAD, false)
         .unwrap();
     let code = a.phone.ceremony_frames(ida.clone()).unwrap()[0].clone();
     let idb = b.phone.join_ceremony(code, 1).unwrap();

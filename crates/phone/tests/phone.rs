@@ -136,7 +136,7 @@ fn show_unsigned(from: &Phone, from_id: &str, to: &Phone, to_id: &str) -> Ceremo
 /// A starts, B joins from A's code, and they show each other codes until both are done.
 /// Returns the two ceremony ids.
 fn ceremony(a: &Device, b: &Device) -> (String, String) {
-    let ida = a.phone.start_ceremony("park".into(), 2, PAD, false).unwrap();
+    let ida = a.phone.start_ceremony("park".into(), 2, 0, PAD, false).unwrap();
     let params_code = a.phone.ceremony_frames(ida.clone()).unwrap()[0].clone();
     assert!(params_code.starts_with("cahoots-params:0:"), "{params_code}");
     let idb = b.phone.join_ceremony(params_code, 1).unwrap();
@@ -373,7 +373,7 @@ fn the_seat_key_is_signed_by_the_callback() {
 fn signing_while_locked_fails_cleanly() {
     let r = relay();
     let (a, b) = (device(&r), device(&r));
-    let ida = a.phone.start_ceremony("park".into(), 2, PAD, false).unwrap();
+    let ida = a.phone.start_ceremony("park".into(), 2, 0, PAD, false).unwrap();
     let code = a.phone.ceremony_frames(ida.clone()).unwrap()[0].clone();
     let idb = b.phone.join_ceremony(code, 1).unwrap();
     a.signer.set_locked(true);
@@ -443,7 +443,7 @@ fn qr_codes_round_trip_through_the_camera_path() {
 fn three_phones_pick_their_seats_and_chat() {
     let r = relay();
     let ds = [device(&r), device(&r), device(&r)];
-    let ida = ds[0].phone.start_ceremony("trio".into(), 3, PAD, false).unwrap();
+    let ida = ds[0].phone.start_ceremony("trio".into(), 3, 0, PAD, false).unwrap();
     // B joins from A's setup line. C reads A's step-one animation, as a phone joining a
     // browser host does, and both pick their seats.
     let frames = ds[0].phone.ceremony_frames(ida.clone()).unwrap();
@@ -504,7 +504,7 @@ fn three_phones_pick_their_seats_and_chat() {
 fn two_phones_on_one_seat_are_told() {
     let r = relay();
     let (a, b, c) = (device(&r), device(&r), device(&r));
-    let ida = a.phone.start_ceremony("park".into(), 3, PAD, false).unwrap();
+    let ida = a.phone.start_ceremony("park".into(), 3, 0, PAD, false).unwrap();
     let code = a.phone.ceremony_frames(ida.clone()).unwrap()[0].clone();
     // B and C both pick seat 2.
     let idb = b.phone.join_ceremony(code.clone(), 1).unwrap();
@@ -527,7 +527,7 @@ fn two_phones_on_one_seat_are_told() {
 fn join_picks_a_seat_the_circle_has() {
     let r = relay();
     let (a, b) = (device(&r), device(&r));
-    let ida = a.phone.start_ceremony("park".into(), 3, PAD, false).unwrap();
+    let ida = a.phone.start_ceremony("park".into(), 3, 0, PAD, false).unwrap();
     let frames = a.phone.ceremony_frames(ida).unwrap();
     let line = frames[0].clone();
     assert_eq!(b.phone.ceremony_members(line.clone()).unwrap(), 3);
@@ -554,10 +554,10 @@ fn join_picks_a_seat_the_circle_has() {
     assert!(b.phone.join_scan("cahoots-reveal:1:AAAA".into()).is_err());
     // A name too long for the step-one code is refused in plain words.
     assert!(matches!(
-        a.phone.start_ceremony("x".repeat(201), 2, PAD, false),
+        a.phone.start_ceremony("x".repeat(201), 2, 0, PAD, false),
         Err(PhoneError::Ceremony { .. })
     ));
-    a.phone.start_ceremony("x".repeat(200), 2, PAD, false).unwrap();
+    a.phone.start_ceremony("x".repeat(200), 2, 0, PAD, false).unwrap();
 }
 
 fn frame(oti: [u8; 12], body: &[u8]) -> String {
@@ -571,7 +571,7 @@ fn frame(oti: [u8; 12], body: &[u8]) -> String {
 fn a_hostile_code_is_ignored() {
     let r = relay();
     let (a, b) = (device(&r), device(&r));
-    let ida = a.phone.start_ceremony("park".into(), 2, PAD, false).unwrap();
+    let ida = a.phone.start_ceremony("park".into(), 2, 0, PAD, false).unwrap();
     let frames = a.phone.ceremony_frames(ida.clone()).unwrap();
     let idb = b.phone.join_ceremony(frames[0].clone(), 1).unwrap();
     let good: [u8; 12] = URL_SAFE_NO_PAD.decode(&frames[1]).unwrap()[4..16]
@@ -686,7 +686,7 @@ fn two_phones_hold_a_ceremony_through_the_relay() {
     // Only the host sets the relay. The joiner takes it from the host's code.
     a.phone.set_default_relay(RELAY.into()).unwrap();
     assert!(a.phone.set_default_relay("relay.test".into()).is_err());
-    let ida = a.phone.start_ceremony("park".into(), 2, PAD, true).unwrap();
+    let ida = a.phone.start_ceremony("park".into(), 2, 0, PAD, true).unwrap();
     let offer = a.phone.offer_code(ida.clone()).unwrap();
     assert!(offer.starts_with("cahoots:ceremony:v2:"), "{offer}");
     // The offer fits one small code.
@@ -779,7 +779,7 @@ fn a_relay_ceremony_survives_a_failed_post() {
     for d in [&a, &b] {
         d.phone.set_default_relay(RELAY.into()).unwrap();
     }
-    let ida = a.phone.start_ceremony("park".into(), 2, PAD, true).unwrap();
+    let ida = a.phone.start_ceremony("park".into(), 2, 0, PAD, true).unwrap();
     let idb = b.phone.join_offer(a.phone.offer_code(ida.clone()).unwrap(), 1).unwrap();
     a.http.fail_posts.store(1, std::sync::atomic::Ordering::SeqCst);
     assert!(matches!(
@@ -800,7 +800,7 @@ fn a_relay_ceremony_survives_a_failed_post() {
     let channel = cahoots_core::channel::Channel::from_offer(&id).unwrap().channel;
     assert_eq!(r.lock().unwrap().poll(&channel.id, None, 0).unwrap().len(), 6);
     // A codes-only ceremony has no offer.
-    let idc = a.phone.start_ceremony("codes".into(), 2, PAD, false).unwrap();
+    let idc = a.phone.start_ceremony("codes".into(), 2, 0, PAD, false).unwrap();
     assert!(a.phone.offer_code(idc.clone()).is_err());
     assert!(a.phone.ceremony_tick(idc).is_err());
 }
@@ -810,7 +810,7 @@ fn the_device_that_lost_a_seat_posts_nothing_more() {
     let r = relay();
     let (a, b, c) = (device(&r), device(&r), device(&r));
     a.phone.set_default_relay(RELAY.into()).unwrap();
-    let ida = a.phone.start_ceremony("park".into(), 3, PAD, true).unwrap();
+    let ida = a.phone.start_ceremony("park".into(), 3, 0, PAD, true).unwrap();
     let offer = a.phone.offer_code(ida.clone()).unwrap();
     let channel = cahoots_core::channel::Channel::from_offer(&offer).unwrap().channel;
     // B and C both pick seat 2. B's setup reaches the relay first.
@@ -875,7 +875,7 @@ fn two_phones_finish_only_after_the_host_scans() {
     let r = relay();
     let (a, b) = (device(&r), device(&r));
     a.phone.set_default_relay(RELAY.into()).unwrap();
-    let ida = a.phone.start_ceremony("park".into(), 2, PAD, true).unwrap();
+    let ida = a.phone.start_ceremony("park".into(), 2, 0, PAD, true).unwrap();
     let idb = b.phone.join_offer(a.phone.offer_code(ida.clone()).unwrap(), 1).unwrap();
     assert!(a.phone.ceremony_state(ida.clone()).unwrap().my_join_code.is_none(), "the host shows the offer");
     for _ in 0..4 {
@@ -924,7 +924,7 @@ fn a_joiner_checks_the_host_against_the_offer() {
     let r = relay();
     let (a, b) = (device(&r), device(&r));
     a.phone.set_default_relay(RELAY.into()).unwrap();
-    let ida = a.phone.start_ceremony("park".into(), 2, PAD, true).unwrap();
+    let ida = a.phone.start_ceremony("park".into(), 2, 0, PAD, true).unwrap();
     // The offer is ready before the host has ticked, and it binds the host's commitment.
     let offer = a.phone.offer_code(ida.clone()).unwrap();
     let parsed = Channel::from_offer(&offer).unwrap();
@@ -1055,4 +1055,54 @@ fn faces_are_stable_and_differ_between_seats() {
         a.phone.face_pixels(b"seat".to_vec()),
         cahoots_core::faces::pixels(b"seat").iter().flatten().map(|&p| u8::from(p)).collect::<Vec<_>>()
     );
+}
+
+fn message(e: PhoneError) -> String {
+    match e {
+        PhoneError::Ceremony { message } | PhoneError::BadCode { message } => message,
+        other => panic!("unexpected error {other:?}"),
+    }
+}
+
+#[test]
+fn a_host_with_two_badges_makes_an_offer_that_says_so() {
+    let r = relay();
+    let a = device(&r);
+    let id = a.phone.start_ceremony("pile".into(), 4, 2, 16384, true).unwrap();
+    let code = a.phone.offer_code(id.clone()).unwrap();
+    assert_eq!(cahoots_core::channel::Channel::from_offer(&code).unwrap().badges, 2);
+    assert_eq!(a.phone.ceremony_state(id).unwrap().badges, 2);
+    assert_eq!(a.phone.join_scan(code).unwrap().unwrap().badges, 2);
+}
+
+#[test]
+fn a_joiner_cannot_take_a_badge_seat() {
+    let r = relay();
+    let a = device(&r);
+    let b = device(&r);
+    let id = a.phone.start_ceremony("pile".into(), 4, 2, 16384, true).unwrap();
+    let code = a.phone.offer_code(id).unwrap();
+    let e = b.phone.join_offer(code.clone(), 1).unwrap_err();
+    assert!(message(e).contains("cards in the pile"));
+    b.phone.join_offer(code, 3).unwrap();
+}
+
+#[test]
+fn too_many_badges_is_refused_before_a_code_exists() {
+    let r = relay();
+    let a = device(&r);
+    let e = a.phone.start_ceremony("x".into(), 3, 3, 16384, true).unwrap_err();
+    assert!(message(e).contains("at most 2 cards"));
+    let e = a.phone.start_ceremony("x".into(), 3, 1, 16384, false).unwrap_err();
+    assert!(message(e).contains("Turn the relay on"));
+}
+
+#[test]
+fn an_old_offer_is_explained() {
+    let r = relay();
+    let a = device(&r);
+    let e = a.phone.join_scan("cahoots:ceremony:v1:AAAA".into()).unwrap_err();
+    assert!(message(e).contains("older version"));
+    let e = a.phone.join_offer("cahoots:ceremony:v1:AAAA".into(), 1).unwrap_err();
+    assert!(message(e).contains("older version"));
 }

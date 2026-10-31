@@ -63,10 +63,26 @@ struct JoinView: View {
         PaperSection(title: "Your seat") {
             ForEach(1..<Int(offer.members), id: \.self) { i in
                 if i > 1 { Hairline() }
-                OptionRow(title: "Seat \(i + 1)", chosen: seat == UInt8(i)) { seat = UInt8(i) }
+                if i <= Int(offer.badges) {
+                    cardRow(i + 1)
+                } else {
+                    OptionRow(title: "Seat \(i + 1)", chosen: seat == UInt8(i)) { seat = UInt8(i) }
+                }
             }
         }
         .sensoryFeedback(.selection, trigger: seat)
+    }
+
+    /// A seat a card in the pile takes. It cannot be chosen.
+    private func cardRow(_ number: Int) -> some View {
+        HStack {
+            Text("Seat \(number), a card").font(.body).foregroundStyle(Color.muted)
+            Spacer()
+        }
+        .padding(.vertical, Space.m)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isStaticText)
     }
 
     private func read(_ text: String, pasted: Bool) async {
@@ -74,7 +90,7 @@ struct JoinView: View {
             if let o = try await core.run({ try $0.joinScan(text: text) }) {
                 withAnimation(.snappy) {
                     offer = o
-                    seat = 1
+                    seat = o.badges + 1
                     error = nil
                     reading = false
                 }

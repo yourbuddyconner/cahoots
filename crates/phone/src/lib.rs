@@ -23,7 +23,7 @@ use base64::Engine;
 use crate::chat::{Circle, DEFAULT_RELAY};
 use crate::store::{ChatRecord, CircleRecord, NewCircle, PhoneRecord, SettingsRecord};
 use cahoots_core::ceremony::Phase;
-use cahoots_core::channel::{Channel, OFFER_PREFIX};
+use cahoots_core::channel::Channel;
 use cahoots_core::pairwise;
 use cahoots_core::params::CircleParams;
 use sha2::{Digest, Sha256};
@@ -269,6 +269,9 @@ pub struct CeremonyState {
     /// scanned. It is never used. Say "Seat 1 on the relay is not the host whose code you
     /// scanned."
     pub host_mismatch: bool,
+    /// Seats 2 to `badges + 1` are cards in a pile, joined through the bridge. 0 when there
+    /// are none.
+    pub badges: u8,
 }
 
 /// A circle to join, read from a host's code.
@@ -281,6 +284,8 @@ pub struct JoinOffer {
     pub name: String,
     /// The host's code for a ceremony held through the relay.
     pub through_relay: bool,
+    /// Seats 2 to `badges + 1` are cards in a pile. A joiner cannot take them.
+    pub badges: u8,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -441,6 +446,7 @@ impl Phone {
         seat: u8,
         channel: Option<Channel>,
         relay: Option<String>,
+        badges: u8,
     ) -> Result<(String, Pending), PhoneError> {
         let id = chat::random_id()?;
         let label = format!("cahoots:seat:{id}");
@@ -448,7 +454,7 @@ impl Phone {
             Some(r) => r,
             None => self.lock().relay.clone(),
         };
-        let p = Pending::new(params, seat, self.signer.as_ref(), label, channel, relay)?;
+        let p = Pending::new(params, seat, self.signer.as_ref(), label, channel, relay, badges)?;
         Ok((id, p))
     }
 
@@ -471,6 +477,7 @@ impl Phone {
             needs_continue: p.needs_continue(),
             my_join_code: p.my_join_code(),
             host_mismatch: p.host_mismatch(),
+            badges: p.badges,
         }
     }
 }
@@ -546,6 +553,7 @@ impl Phone {
         &self,
         name: String,
         members: u8,
+        badges: u8,
         pad_len: u32,
         through_relay: bool,
     ) -> Result<String, PhoneError> {
@@ -560,9 +568,22 @@ impl Phone {
                 message: format!("A circle's name can be at most {MAX_NAME} bytes long. Try a shorter one."),
             });
         }
+        if badges > 0 && badges >= members {
+            return Err(PhoneError::Ceremony {
+                message: format!(
+                    "A circle of {members} can have at most {} cards.",
+                    members.saturating_sub(1)
+                ),
+            });
+        }
+        if badges > 0 && !through_relay {
+            return Err(PhoneError::Ceremony {
+                message: "Cards in a pile join through the relay. Turn the relay on.".into(),
+            });
+        }
         let params = CircleParams::new(members, pad_len, name, false).map_err(params_err)?;
         let channel = through_relay.then(|| Channel::new(&mut rand_core::OsRng));
-        let (id, p) = self.begin(params, 0, channel, None)?;
+        let (id, p) = self.begin(params, 0, channel, None, badges)?;
         self.lock().ceremonies.insert(id.clone(), p);
         Ok(id)
     }
@@ -580,15 +601,13 @@ impl Phone {
     /// phone's default is. Of two devices on one seat, the one whose setup reached the relay
     /// second is told (`seat_lost`) and posts nothing more.
     pub fn join_offer(&self, text: String, seat: u8) -> Result<String, PhoneError> {
-        let offer = Channel::from_offer(&text).map_err(|_| PhoneError::BadCode {
-            message: "That is not a host's code to join through the relay.".into(),
-        })?;
+        let offer = Channel::from_offer(&text).map_err(|e| offer_err(e, "That is not a host's code to join through the relay."))?;
         let relay = chat::check_relay(&offer.relay).map_err(|_| PhoneError::BadCode {
             message: "The host's code names a relay address that does not read.".into(),
         })?;
-        check_seat(&offer.params, seat)?;
+        check_seat(&offer.params, offer.badges, seat)?;
         let (id, mut p) =
-            self.begin(offer.params.clone(), seat, Some(offer.channel.clone()), Some(relay))?;
+            self.begin(offer.params.clone(), seat, Some(offer.channel.clone()), Some(relay), offer.badges)?;
         p.joined(&text, &offer);
         self.lock().ceremonies.insert(id.clone(), p);
         Ok(id)
@@ -634,15 +653,16 @@ impl Phone {
     /// a frame of a host's step-one animation (the browser app shows only the animation).
     /// `Some` once a whole code is in; hand its `params_code` to `join_ceremony`.
     pub fn join_scan(&self, text: String) -> Result<Option<JoinOffer>, PhoneError> {
-        if text.trim_start().starts_with(OFFER_PREFIX) {
-            let params = Channel::from_offer(&text).map(|o| o.params).map_err(|_| PhoneError::BadCode {
-                message: "The host’s code could not be read. Scan it again or check the pasted code.".into(),
+        if text.trim_start().starts_with("cahoots:ceremony:v") {
+            let offer = Channel::from_offer(&text).map_err(|e| {
+                offer_err(e, "The host’s code could not be read. Scan it again or check the pasted code.")
             })?;
             return Ok(Some(JoinOffer {
                 params_code: text.trim().to_string(),
-                members: params.n,
-                name: params.name,
+                members: offer.params.n,
+                name: offer.params.name,
                 through_relay: true,
+                badges: offer.badges,
             }));
         }
         let code = if text.trim_start().starts_with("cahoots-") {
@@ -677,6 +697,7 @@ impl Phone {
             members: params.n,
             name: params.name,
             through_relay: false,
+            badges: 0,
         }))
     }
 
@@ -696,7 +717,7 @@ impl Phone {
     pub fn join_ceremony(&self, params_code: String, seat: u8) -> Result<String, PhoneError> {
         let (params, kept) = ceremony::read_join(&params_code)?;
         let refuse = |message: String| Err(PhoneError::Ceremony { message });
-        check_seat(&params, seat)?;
+        check_seat(&params, 0, seat)?;
         if let Some(ceremony::Code::Commit { seat: theirs, .. }) = &kept {
             if *theirs == seat {
                 return refuse(format!(
@@ -705,7 +726,7 @@ impl Phone {
                 ));
             }
         }
-        let (id, mut p) = self.begin(params, seat, None, None)?;
+        let (id, mut p) = self.begin(params, seat, None, None, 0)?;
         if let Some(code) = kept {
             p.apply_kept(code)?;
         }
@@ -1007,7 +1028,7 @@ fn face_seed(public: &[u8]) -> Vec<u8> {
 }
 
 /// A joiner's seat: not the host's, and one the circle has.
-fn check_seat(params: &CircleParams, seat: u8) -> Result<(), PhoneError> {
+fn check_seat(params: &CircleParams, badges: u8, seat: u8) -> Result<(), PhoneError> {
     let refuse = |message: String| Err(PhoneError::Ceremony { message });
     if seat == 0 {
         return refuse("Seat 1 is the host's. Pick another seat.".into());
@@ -1018,7 +1039,24 @@ fn check_seat(params: &CircleParams, seat: u8) -> Result<(), PhoneError> {
             params.n, params.n
         ));
     }
+    if seat <= badges {
+        return refuse(format!(
+            "Seats 2 to {} are cards in the pile. Pick a seat above them.",
+            u16::from(badges) + 1
+        ));
+    }
     Ok(())
+}
+
+/// An offer that did not read: say so when it is from another version.
+fn offer_err(e: cahoots_core::channel::ChannelError, other: &str) -> PhoneError {
+    use cahoots_core::channel::ChannelError;
+    let message = match e {
+        ChannelError::OlderOffer => "This code is from an older version of Cahoots. Ask the host to update.",
+        ChannelError::NewerOffer => "This code is from a newer version of Cahoots. Update the app.",
+        _ => other,
+    };
+    PhoneError::BadCode { message: message.into() }
 }
 
 fn hello(c: &Circle, other: u8) -> Result<HelloWords, PhoneError> {

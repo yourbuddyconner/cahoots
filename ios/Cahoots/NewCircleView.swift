@@ -5,6 +5,7 @@ struct NewCircleView: View {
     @EnvironmentObject private var model: AppModel
     @State private var name = ""
     @State private var members = 2
+    @State private var badges = 0
     @State private var throughRelay = true
     @State private var size = Self.sizes[1].bytes
     @State private var error: String?
@@ -45,6 +46,14 @@ struct NewCircleView: View {
                              footer: "Count everyone joining on a separate device, including you. Each device gets a numbered seat.") {
                     PeopleStepper(value: $members, range: 2...8)
                 }
+                .onChange(of: members) { _, m in badges = min(badges, m - 1) }
+
+                if throughRelay {
+                    PaperSection(title: "Cards in the pile",
+                                 footer: "Badges stacked on a laptop running the bridge. They take the seats right after yours.") {
+                        PeopleStepper(value: $badges, range: 0...(members - 1), noun: "card", label: "Cards in the pile")
+                    }
+                }
 
                 PaperSection(title: "How to connect") {
                     OptionRow(title: "Through the relay",
@@ -53,7 +62,7 @@ struct NewCircleView: View {
                     Hairline()
                     OptionRow(title: "Codes only",
                               detail: "Everyone shows and scans codes. No network is needed.",
-                              chosen: !throughRelay) { throughRelay = false }
+                              chosen: !throughRelay) { throughRelay = false; badges = 0 }
                 }
 
                 DisclosureGroup("Advanced options", isExpanded: $advanced) {
@@ -100,7 +109,7 @@ struct NewCircleView: View {
         starting = true
         defer { starting = false }
         do {
-            try await model.startCeremony(name: n, members: UInt8(members), padLen: size, throughRelay: throughRelay)
+            try await model.startCeremony(name: n, members: UInt8(members), badges: UInt8(throughRelay ? badges : 0), padLen: size, throughRelay: throughRelay)
         } catch {
             self.error = plain(error)
         }
@@ -111,10 +120,12 @@ struct NewCircleView: View {
 struct PeopleStepper: View {
     @Binding var value: Int
     let range: ClosedRange<Int>
+    var noun = "person"
+    var label = "People in the room"
 
     var body: some View {
         HStack(spacing: Space.m) {
-            Text("\(value) people")
+            Text("\(value) \(value == 1 ? noun : noun == "person" ? "people" : noun + "s")")
                 .font(.body.monospacedDigit())
                 .foregroundStyle(Color.ink)
                 .contentTransition(.numericText(value: Double(value)))
@@ -125,7 +136,7 @@ struct PeopleStepper: View {
         .padding(.vertical, Space.s)
         .sensoryFeedback(.selection, trigger: value)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("People in the room")
+        .accessibilityLabel(label)
         .accessibilityValue("\(value)")
         .accessibilityAdjustableAction { direction in
             switch direction {
@@ -134,7 +145,7 @@ struct PeopleStepper: View {
             @unknown default: break
             }
         }
-        .accessibilityIdentifier("people")
+        .accessibilityIdentifier(noun == "person" ? "people" : "cards")
     }
 
     private func step(_ symbol: String, by delta: Int) -> some View {

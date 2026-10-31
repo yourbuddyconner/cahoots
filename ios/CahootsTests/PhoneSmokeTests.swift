@@ -24,7 +24,7 @@ final class PhoneSmokeTests: XCTestCase {
         XCTAssertTrue(phone.circles().isEmpty)
         let info = phone.describe()
         XCTAssertEqual(info.fingerprint.split(separator: " ").count, 4)
-        let id = try phone.startCeremony(name: "park", members: 2, padLen: 16384, throughRelay: false)
+        let id = try phone.startCeremony(name: "park", members: 2, badges: 0, padLen: 16384, throughRelay: false)
         defer {
             phone.ceremonyDiscard(id: id)
             signer.deleteKey(label: "cahoots:seat:\(id)")
@@ -41,7 +41,7 @@ final class PhoneSmokeTests: XCTestCase {
 
     func testAHostThroughTheRelayHasAnOfferCode() throws {
         let phone = try open()
-        let id = try phone.startCeremony(name: "park", members: 3, padLen: 16384, throughRelay: true)
+        let id = try phone.startCeremony(name: "park", members: 3, badges: 0, padLen: 16384, throughRelay: true)
         defer { phone.ceremonyDiscard(id: id) }
         let offer = try phone.offerCode(id: id)
         XCTAssertTrue(offer.hasPrefix("cahoots:ceremony:v2:"), offer)
