@@ -523,12 +523,39 @@ fn chat(circle: [u8; 16]) -> Vec<u8> {
     m
 }
 
-// Posts without grants and reads without credentials: the ungated relay. See tests/gate.rs.
-#[cfg(not(feature = "gate"))]
+/// With `gate`, store a root grant to post in `channel` for `member_key(i)`.
+#[cfg(feature = "gate")]
+async fn grant_post(c: &Client, base: &str, channel: &ChannelId, i: u64) {
+    use cahoots_channel::grant::{issue_root, sign_root};
+    use cahoots_channel::Action;
+    let claims = issue_root(
+        &CIRCLE,
+        channel,
+        0,
+        &member_key(i).public(),
+        &[Action::Read, Action::Post],
+        0,
+        1_000,
+        0,
+        [i as u8 + 1; 16],
+    );
+    let link = sign_root(&claims, &seat_key(0), 0);
+    let mut e = minicbor::Encoder::new(Vec::new());
+    e.array(1).unwrap().bytes(&link).unwrap();
+    let (s, v) = send(
+        c.post(format!("{}/grants", ch(base, channel)))
+            .body(e.into_writer()),
+    )
+    .await;
+    assert_eq!(s, 201, "{v}");
+}
+
 #[tokio::test]
 async fn circle_routes_refuse_a_channel_id_and_the_feed_leaves_channels_out() {
     let (base, _dir, c) = with_channels(no_address_limits(), &[NONCE]).await;
     let channel = channel_id_for(&CIRCLE, &NONCE);
+    #[cfg(feature = "gate")]
+    grant_post(&c, &base, &channel, 0).await;
     let as_circle = format!("{base}/v1/circles/{}", hex::encode(channel));
 
     // A chat body naming the channel's id as its circle: refused, and nothing is stored.

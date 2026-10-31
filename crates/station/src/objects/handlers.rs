@@ -428,11 +428,14 @@ pub async fn get_grants(
 pub async fn get_grant(
     AxState(st): AxState<State>,
     Path((channel, cti)): Path<(String, String)>,
+    #[cfg(feature = "gate")] creds: crate::gate::Credentials,
 ) -> Response {
     finish((|| {
         let channel = channel_path(&channel)?;
         let cti: [u8; 16] = hex_id(&cti, "grant_id")?;
         let mut log = st.log.lock().unwrap();
+        #[cfg(feature = "gate")]
+        crate::gate::check_read(&st, &mut log, &channel, &creds, crate::gate::Need::Read)?;
         let row = store::grant(log.conn(), &channel, &cti)
             .map_err(db)?
             .ok_or_else(|| err(StatusCode::NOT_FOUND, "grant", "no such grant"))?;

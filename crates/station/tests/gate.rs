@@ -308,6 +308,12 @@ fn chat() -> Vec<u8> {
 #[tokio::test]
 async fn read_needs_a_gate_token_or_a_proof() {
     let st = setup(Preset::GroupChat).await;
+    assert_eq!(
+        st.post_grant(&[&root_grant(0, &[Action::Read], 0, 100, 1)])
+            .await
+            .0,
+        201
+    );
     let kid = hex::encode([0u8; 32]);
     let gated = [
         "/messages".to_string(),
@@ -315,6 +321,7 @@ async fn read_needs_a_gate_token_or_a_proof() {
         "/head".to_string(),
         "/deposits".to_string(),
         format!("/grants?kid={kid}"),
+        format!("/grants/{}", hex::encode([1u8; 16])),
         "/requests".to_string(),
     ];
     for p in &gated {
@@ -332,7 +339,7 @@ async fn read_needs_a_gate_token_or_a_proof() {
         assert_eq!(s, 401, "{p}");
     }
     st.add_gate(&token).await;
-    for p in &gated[..5] {
+    for p in &gated[..6] {
         let (s, v) = send(
             st.c.get(format!("{}{p}", st.ch()))
                 .header("Cahoots-Gate", hex::encode(token)),
@@ -361,7 +368,36 @@ async fn read_needs_a_gate_token_or_a_proof() {
     .await;
     assert_eq!(s, 201);
 
-    // A token for this channel does not open another; an unknown channel is 404.
+    // A token for this channel does not open another stored channel.
+    let other_object = ChannelObject {
+        circle_id: CIRCLE,
+        channel_id: channel_id_for(&CIRCLE, &[10; 16]),
+        name: "other".into(),
+        created_log: 5,
+        policy_id: [0x11; 32],
+        nonce: [10; 16],
+    };
+    let (s, _) = send(
+        st.c.post(format!("{}/v1/channels", st.base))
+            .body(other_object.sign(&seat_key(0), 0)),
+    )
+    .await;
+    assert_eq!(s, 201);
+    let other = format!(
+        "{}/v1/channels/{}",
+        st.base,
+        hex::encode(other_object.channel_id)
+    );
+    for p in &gated {
+        let (s, v) = send(
+            st.c.get(format!("{other}{p}"))
+                .header("Cahoots-Gate", hex::encode(token)),
+        )
+        .await;
+        assert_eq!((s, v["error"].as_str()), (401, Some("gate")), "{p}");
+    }
+
+    // An unknown channel is 404.
     let unknown = format!("{}/v1/channels/{}", st.base, hex::encode([0x42u8; 16]));
     for p in &gated {
         let (s, v) = send(
@@ -680,7 +716,7 @@ async fn announcement_short_of_quorum_is_403_quorum() {
 }
 
 #[tokio::test]
-async fn control_needs_a_root_grant_or_govern() {
+async fn control_needs_govern() {
     let st = setup(Preset::GroupChat).await;
     let root = root_grant(0, &[Action::Read, Action::Post, Action::Admit], 0, 100, 1);
     let parent = verify_chain(&[&root], &manifest(), &channel_id()).unwrap();
@@ -702,10 +738,63 @@ async fn control_needs_a_root_grant_or_govern() {
         .post_message(message_by(&member_key(1), 0, MessageType::Control, &[]))
         .await;
     assert_eq!(reason(&r), (403, Some("grant"), Some("action")));
-    let (s, v) = st
+    // A root grant without govern may post text but not control.
+    let r = st
         .post_message(message_by(&member_key(0), 0, MessageType::Control, &[]))
         .await;
+    assert_eq!(reason(&r), (403, Some("grant"), Some("action")));
+    assert_eq!(st.post_message(text_by(&member_key(0), 0)).await.0, 201);
+    // An admin seat's own grant carries all four actions.
+    let all = [Action::Read, Action::Post, Action::Admit, Action::Govern];
+    assert_eq!(
+        st.post_grant(&[&root_grant(2, &all, 0, 100, 3)]).await.0,
+        201
+    );
+    let (s, v) = st
+        .post_message(message_by(&member_key(2), 0, MessageType::Control, &[]))
+        .await;
     assert_eq!(s, 201, "{v}");
+}
+
+#[tokio::test]
+async fn a_replayed_message_is_409_and_spends_no_budget() {
+    let st = setup(Preset::GroupChat).await;
+    assert_eq!(
+        st.post_grant(&[&root_grant(0, &[Action::Read, Action::Post], 2, 100, 1)])
+            .await
+            .0,
+        201
+    );
+    let key = member_key(0);
+    let wire = text_by(&key, 0);
+    assert_eq!(st.post_message(wire.clone()).await.0, 201);
+    let (s, v) = st.post_message(wire.clone()).await;
+    assert_eq!((s, v["error"].as_str()), (409, Some("replay")));
+    // The same kid, epoch and counter with another body is a replay too.
+    let (s, _) = st
+        .post_message(message_by(&key, 0, MessageType::Announcement, &[]))
+        .await;
+    assert_eq!(s, 409);
+    // The budget of 2 still has one post left.
+    assert_eq!(st.post_message(text_by(&key, 1)).await.0, 201);
+    let r = st.post_message(text_by(&key, 2)).await;
+    assert_eq!(reason(&r), (403, Some("grant"), Some("budget")));
+    // The set is rebuilt when the station opens again.
+    let base = start_at(&st.dir.path().join("station.db")).await;
+    let url = format!("{base}/v1/channels/{}/messages", hex::encode(channel_id()));
+    let (s, v) = send(st.c.post(url).body(wire)).await;
+    assert_eq!((s, v["error"].as_str()), (409, Some("replay")));
+}
+
+#[tokio::test]
+async fn nonces_are_capped() {
+    let st = setup(Preset::GroupChat).await;
+    for i in 0..10_000 {
+        let (s, _) = send(st.c.get(format!("{}/v1/nonce", st.base))).await;
+        assert_eq!(s, 200, "nonce {i}");
+    }
+    let (s, v) = send(st.c.get(format!("{}/v1/nonce", st.base))).await;
+    assert_eq!((s, v["error"].as_str()), (429, Some("rate")));
 }
 
 #[tokio::test]

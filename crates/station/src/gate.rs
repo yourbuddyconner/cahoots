@@ -19,8 +19,9 @@
 //!
 //! **Posts.** One of the stored chains for the message's `kid` must verify, the message's
 //! signature must verify under its leaf's key, and the leaf must allow `post` (text and
-//! announcements) or `govern` (control; a single root link, as an admin seat's own grant is,
-//! may post control with `post`) at the channel head, under its budget, with no link revoked.
+//! announcements) or `govern` (control; an admin seat's own grant carries all four actions) at
+//! the channel head, under its budget, with no link revoked. A message whose
+//! `(kid, epoch_id, counter)` the stream already holds is `409 {"error":"replay"}`.
 //! An announcement's approvals must meet the current policy's post rule. Refusals are
 //! `403 {"error":"grant","reason": "missing"|"chain"|"signature"|"revoked"|"expired"|"budget"|
 //! "action"|"quorum"}`.
@@ -48,7 +49,7 @@ use cahoots_core::manifest::Manifest;
 use rusqlite::Connection;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -66,34 +67,58 @@ type Checked = Result<(), Response>;
 /// A channel id and a member key id.
 type ChannelKid = ([u8; 16], [u8; 32]);
 
-/// The gate's memory: unused nonces, and each key's post count per channel.
+/// What makes a message unique in a channel's stream: its channel, `kid`, epoch id and counter.
+type MessageKey = ([u8; 16], [u8; 32], [u8; 20], u32);
+
+/// The most nonces held at once; `GET /v1/nonce` answers 429 beyond it.
+pub const MAX_NONCES: usize = 10_000;
+
+/// The gate's memory: unused nonces, each key's post count per channel, and the messages each
+/// channel's stream holds.
 pub struct Gate {
     nonces: Mutex<HashMap<[u8; 16], Instant>>,
     posts: Mutex<HashMap<ChannelKid, u32>>,
+    seen: Mutex<HashSet<MessageKey>>,
+}
+
+fn message_key(channel: &[u8; 16], h: &message::Header) -> MessageKey {
+    (*channel, h.kid, h.epoch_id.encode(), h.counter)
 }
 
 impl Gate {
-    /// Count every version 3 entry in the log by its stream and header kid.
+    /// Count every version 3 entry in the log by its stream and header kid, and note its
+    /// `(kid, epoch_id, counter)`.
     pub(crate) fn from_log(log: &Log) -> Gate {
         let mut posts = HashMap::new();
+        let mut seen = HashSet::new();
         for e in log.all_after(None, usize::MAX) {
             if let Ok(h) = message::Header::parse(&e.message) {
                 *posts.entry((e.circle_id, h.kid)).or_insert(0u32) += 1;
+                seen.insert(message_key(&e.circle_id, &h));
             }
         }
         Gate {
             nonces: Mutex::new(HashMap::new()),
             posts: Mutex::new(posts),
+            seen: Mutex::new(seen),
         }
     }
 
-    fn new_nonce(&self) -> [u8; 16] {
+    /// A fresh nonce, or `None` when [`MAX_NONCES`] live nonces are held.
+    fn new_nonce(&self) -> Option<[u8; 16]> {
         let mut n = [0u8; 16];
         getrandom::getrandom(&mut n).expect("the OS random source is available");
         let mut nonces = self.nonces.lock().unwrap();
         nonces.retain(|_, at| at.elapsed() < NONCE_TTL);
+        if nonces.len() >= MAX_NONCES {
+            return None;
+        }
         nonces.insert(n, Instant::now());
-        n
+        Some(n)
+    }
+
+    fn holds(&self, channel: &[u8; 16], h: &message::Header) -> bool {
+        self.seen.lock().unwrap().contains(&message_key(channel, h))
     }
 
     /// Spend a nonce: `true` when the relay gave it out under [`NONCE_TTL`] ago and it was unused.
@@ -110,10 +135,15 @@ impl Gate {
         posts.get(&(*channel, *kid)).copied().unwrap_or(0)
     }
 
-    /// Count one stored post. Call it with the log lock held, after the append.
-    pub(crate) fn counted(&self, channel: &[u8; 16], kid: &[u8; 32]) {
-        let mut posts = self.posts.lock().unwrap();
-        *posts.entry((*channel, *kid)).or_insert(0) += 1;
+    /// Count one stored post and note it. Call it with the log lock held, after the append.
+    pub(crate) fn counted(&self, channel: &[u8; 16], h: &message::Header) {
+        *self
+            .posts
+            .lock()
+            .unwrap()
+            .entry((*channel, h.kid))
+            .or_insert(0) += 1;
+        self.seen.lock().unwrap().insert(message_key(channel, h));
     }
 }
 
@@ -123,7 +153,10 @@ pub fn routes(router: Router<State>) -> Router<State> {
 }
 
 async fn nonce(axum::extract::State(st): axum::extract::State<State>) -> Response {
-    Json(json!({ "nonce": hex::encode(st.gate.new_nonce()) })).into_response()
+    match st.gate.new_nonce() {
+        Some(n) => Json(json!({ "nonce": hex::encode(n) })).into_response(),
+        None => crate::limits::rate_limited("too many open nonces; try again in a few seconds"),
+    }
 }
 
 /// What a read request presents: its headers, and the request line a proof signs.
@@ -219,11 +252,11 @@ fn open_chain(
     chain: &[u8],
     manifest: &Manifest,
     channel: &[u8; 16],
-) -> Result<(usize, ChannelGrant, Vec<[u8; 16]>), &'static str> {
+) -> Result<(ChannelGrant, Vec<[u8; 16]>), &'static str> {
     let links = bytes_array(chain).map_err(|_| "chain")?;
     let leaf = verify_chain(&links, manifest, channel).map_err(|_| "chain")?;
     let ids = chain_ids(&links).map_err(|_| "chain")?;
-    Ok((links.len(), leaf, ids))
+    Ok((leaf, ids))
 }
 
 /// Check a read of `channel`. Takes the nonce of a proof whether or not the proof holds.
@@ -265,7 +298,7 @@ pub(crate) fn check_read(
         Need::Admit => &[Action::Read, Action::Admit],
     };
     for chain in chains(conn, channel, &kid)? {
-        let Ok((_, leaf, ids)) = open_chain(&chain, &manifest, channel) else {
+        let Ok((leaf, ids)) = open_chain(&chain, &manifest, channel) else {
             continue;
         };
         let allowed = actions.iter().all(|&action| {
@@ -303,6 +336,14 @@ fn proof_nonce(proof: &[u8]) -> Option<[u8; 16]> {
 pub(crate) fn check_post(st: &State, log: &mut Log, channel: &[u8; 16], wire: &[u8]) -> Checked {
     let (body, _, header) = message::split(wire)
         .map_err(|e| err(StatusCode::BAD_REQUEST, "malformed", format!("{e:?}")))?;
+    // A message the stream already holds, sent again: refused before it can spend a budget.
+    if st.gate.holds(channel, &header) {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "replay",
+            "this channel already holds a message with this kid, epoch and counter",
+        ));
+    }
     let at = head(log, channel);
     let posts_used = st.gate.posts_used(channel, &header.kid);
     let conn = log.conn();
@@ -320,7 +361,7 @@ pub(crate) fn check_post(st: &State, log: &mut Log, channel: &[u8; 16], wire: &[
     let mut last = "chain";
     for chain in &stored {
         let one = || -> Result<(), &'static str> {
-            let (links, leaf, ids) = open_chain(chain, &manifest, channel)?;
+            let (leaf, ids) = open_chain(chain, &manifest, channel)?;
             let (_, _, approvals) =
                 message::verify_signature(wire, &leaf.grantee).map_err(|_| "signature")?;
             let eval = |action| {
@@ -336,12 +377,7 @@ pub(crate) fn check_post(st: &State, log: &mut Log, channel: &[u8; 16], wire: &[
             };
             match header.msg_type {
                 MessageType::Text => eval(Action::Post),
-                MessageType::Control => match eval(Action::Govern) {
-                    // A single root link is an admin seat's own grant or a root grant from a
-                    // seat: it may post control with `post`.
-                    Err("action") if links == 1 => eval(Action::Post),
-                    r => r,
-                },
+                MessageType::Control => eval(Action::Govern),
                 MessageType::Announcement => {
                     eval(Action::Post)?;
                     let (quorum, assurance) = post_rule

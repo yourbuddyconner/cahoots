@@ -108,11 +108,12 @@ async fn post_message(
             return rate_limited("too many posts to this channel; try again in a few seconds");
         }
         let result = log.append(sub, now_ms());
-        // Counted under the same lock as the append, so the budget check above sees it.
+        // Counted under the same lock as the append, so the budget and replay checks above
+        // see it.
         #[cfg(feature = "gate")]
         if result.is_ok() {
             if let Ok(h) = cahoots_channel::message::Header::parse(&body) {
-                st.gate.counted(&channel, &h.kid);
+                st.gate.counted(&channel, &h);
             }
         }
         result
