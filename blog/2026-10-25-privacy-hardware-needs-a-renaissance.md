@@ -49,7 +49,7 @@ There are good tools here. I use Signal and Tailscale. Signal’s [safety number
 
 When you sit down with a friend to compare codes, you already know who you're looking at. The software doesn't. Checking the codes together gives you a way to connect the friend you recognize, and the device they're holding, to the keys your software will use afterward.
 
-I'd like to extend that pattern beyond checking public keys for a conversation in one app. A group could establish a shared secret and agree on its members together, then carry that foundation into other tools. Each tool would still have its own job and its own limits, but the group wouldn't have to establish the relationship from scratch every time.
+What if you could take that trust with you into the next app? You and your friends could meet once, agree on who's in the group, and create a secret held only on your devices. Then, whether you wanted to chat, exchange files, or give each other access to a machine, you could start with the group you already formed. You'd still decide what each tool could access, but you wouldn't have to find and verify everyone all over again.
 
 > The people you'd hand a house key to, you have already met. That should count for more.
 
