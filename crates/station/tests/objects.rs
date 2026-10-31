@@ -1,6 +1,8 @@
 //! The `objects` feature: manifests, channel objects, policies, grants, revocations, deposits,
 //! join requests and gate tokens.
 #![cfg(feature = "objects")]
+// With `gate`, the tests of ungated reads are left out, and their helpers go unused.
+#![cfg_attr(feature = "gate", allow(unused_imports, dead_code))]
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -386,6 +388,8 @@ fn policy_body(signed: &[u8]) -> Vec<u8> {
     e.into_writer()
 }
 
+// Reads without credentials: the ungated relay. See tests/gate.rs.
+#[cfg(not(feature = "gate"))]
 #[tokio::test]
 async fn grants_post_then_get() {
     let (base, _dir, c) = with_channel().await;
@@ -501,6 +505,8 @@ async fn revocations_post_then_get() {
     assert_eq!((s, v["error"].as_str()), (403, Some("signature")));
 }
 
+// Reads without credentials: the ungated relay. See tests/gate.rs.
+#[cfg(not(feature = "gate"))]
 #[tokio::test]
 async fn deposits_post_then_get() {
     let (base, _dir, c) = with_channel().await;
@@ -560,6 +566,8 @@ async fn deposits_post_then_get() {
     assert_eq!((s, v["error"].as_str()), (400, Some("channel_id")));
 }
 
+// Reads without credentials: the ungated relay. See tests/gate.rs.
+#[cfg(not(feature = "gate"))]
 #[tokio::test]
 async fn requests_post_then_get() {
     let (base, _dir, c) = with_channel().await;

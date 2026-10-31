@@ -66,8 +66,8 @@ fn parse_channel(hex_id: &str) -> Result<[u8; 16], Box<Response>> {
 }
 
 /// `POST /v1/channels/{channel}/messages`: the body must be a version 3
-/// message for the channel and the channel must be held; then the size cap, the channel's rate
-/// bucket, and the append.
+/// message for the channel and the channel must be held; then the size cap, with `gate` the
+/// grant checks ([`crate::gate::check_post`]), the channel's rate bucket, and the append.
 async fn post_message(
     AxState(st): AxState<State>,
     Path(channel): Path<String>,
@@ -98,12 +98,24 @@ async fn post_message(
         if let Some(full) = st.full(&log) {
             return full;
         }
-        // Only a post that would be stored spends the channel's tokens, so junk and a full
-        // relay cannot use them up.
+        #[cfg(feature = "gate")]
+        if let Err(refused) = crate::gate::check_post(&st, &mut log, &channel, &body) {
+            return refused;
+        }
+        // Only a post that would be stored spends the channel's tokens, so junk, a full relay
+        // and a refused grant cannot use them up.
         if !st.limiter.take_channel_post(&channel) {
             return rate_limited("too many posts to this channel; try again in a few seconds");
         }
-        log.append(sub, now_ms())
+        let result = log.append(sub, now_ms());
+        // Counted under the same lock as the append, so the budget check above sees it.
+        #[cfg(feature = "gate")]
+        if result.is_ok() {
+            if let Ok(h) = cahoots_channel::message::Header::parse(&body) {
+                st.gate.counted(&channel, &h.kid);
+            }
+        }
+        result
     };
     st.appended(result)
 }
@@ -113,21 +125,42 @@ async fn get_messages(
     AxState(st): AxState<State>,
     Path(channel): Path<String>,
     Query(q): Query<PollQuery>,
+    #[cfg(feature = "gate")] creds: crate::gate::Credentials,
 ) -> Response {
     let channel = match parse_channel(&channel) {
         Ok(c) => c,
         Err(r) => return *r,
     };
+    #[cfg(feature = "gate")]
+    {
+        let mut log = st.log.lock().unwrap();
+        if let Err(refused) =
+            crate::gate::check_read(&st, &mut log, &channel, &creds, crate::gate::Need::Read)
+        {
+            return refused;
+        }
+    }
     poll_stream(&st, &channel, &q, |e| ChannelEntryRecord::from(e)).await
 }
 
-async fn channel_head(AxState(st): AxState<State>, Path(channel): Path<String>) -> Response {
+async fn channel_head(
+    AxState(st): AxState<State>,
+    Path(channel): Path<String>,
+    #[cfg(feature = "gate")] creds: crate::gate::Credentials,
+) -> Response {
     let channel = match parse_channel(&channel) {
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let h = st.log.lock().unwrap().stream_head(&channel);
-    head_json(h)
+    #[allow(unused_mut)]
+    let mut log = st.log.lock().unwrap();
+    #[cfg(feature = "gate")]
+    if let Err(refused) =
+        crate::gate::check_read(&st, &mut log, &channel, &creds, crate::gate::Need::Read)
+    {
+        return refused;
+    }
+    head_json(log.stream_head(&channel))
 }
 
 /// `GET /v1/channels`: every channel the relay holds, with its entry count and last `seq`

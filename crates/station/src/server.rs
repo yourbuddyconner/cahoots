@@ -29,6 +29,9 @@ pub struct State {
     pub(crate) limiter: Limiter,
     /// Refuse posts once the database is this large. `None` for no cap.
     max_log_bytes: Option<u64>,
+    /// Nonces for read proofs and each key's post count.
+    #[cfg(feature = "gate")]
+    pub(crate) gate: Arc<crate::gate::Gate>,
 }
 
 impl State {
@@ -41,8 +44,11 @@ impl State {
         limits: Limits,
         max_log_bytes: Option<u64>,
     ) -> Result<Self, LogError> {
+        let log = Log::open(path)?;
         Ok(State {
-            log: Arc::new(Mutex::new(Log::open(path)?)),
+            #[cfg(feature = "gate")]
+            gate: Arc::new(crate::gate::Gate::from_log(&log)),
+            log: Arc::new(Mutex::new(log)),
             notify: Arc::new(Notify::new()),
             limiter: Limiter::new(limits),
             max_log_bytes,
@@ -76,6 +82,8 @@ pub fn app(state: State) -> Router {
     let router = crate::objects::routes(router);
     #[cfg(feature = "channels")]
     let router = crate::channels::routes(router);
+    #[cfg(feature = "gate")]
+    let router = crate::gate::routes(router);
     router
         .route("/healthz", get(|| async { "ok" }))
         .route("/v1/info", get(info))
@@ -95,7 +103,7 @@ pub fn app(state: State) -> Router {
             tower_http::cors::CorsLayer::new()
                 .allow_origin(tower_http::cors::Any)
                 .allow_methods(cors_methods())
-                .allow_headers([http::header::CONTENT_TYPE]),
+                .allow_headers(cors_headers()),
         )
 }
 
@@ -106,6 +114,22 @@ fn cors_methods() -> Vec<http::Method> {
     #[cfg(feature = "objects")]
     methods.extend([http::Method::PUT, http::Method::DELETE]);
     methods
+}
+
+/// The request headers browsers may send: the gate adds a reader's credentials.
+fn cors_headers() -> Vec<http::HeaderName> {
+    #[allow(unused_mut)]
+    let mut headers = vec![http::header::CONTENT_TYPE];
+    #[cfg(feature = "gate")]
+    headers.extend(
+        [
+            crate::gate::GATE_HEADER,
+            crate::gate::PROOF_HEADER,
+            crate::gate::KID_HEADER,
+        ]
+        .map(http::HeaderName::from_static),
+    );
+    headers
 }
 
 pub(crate) fn now_ms() -> u64 {

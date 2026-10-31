@@ -3,8 +3,8 @@
 mod common;
 
 use cahoots_channel::grant::{
-    evaluate, from_claims, issue_delegated, issue_root, sign_delegated, sign_root, verify_chain,
-    ChannelGrant, EvalRequest, Refusal,
+    chain_ids, evaluate, from_claims, issue_delegated, issue_root, sign_delegated, sign_root,
+    verify_chain, ChannelGrant, EvalRequest, Refusal,
 };
 use cahoots_channel::{Action, ChannelError, ChannelId};
 use cahoots_core::cose;
@@ -422,4 +422,20 @@ fn read_only_grant_cannot_post() {
         ),
         Err(Refusal::Action)
     );
+}
+
+#[test]
+fn chain_ids_lists_every_cti_root_first() {
+    let root_signed = root(&[Action::Read, Action::Post, Action::Admit], 0, 100, 1);
+    let child = delegate(&root_signed, &[Action::Read], 0, 50);
+    assert_eq!(
+        chain_ids(&[&root_signed, &child]).unwrap(),
+        vec![[1u8; 16], [2u8; 16]]
+    );
+    assert_eq!(chain_ids(&[&root_signed]).unwrap(), vec![[1u8; 16]]);
+    assert_eq!(chain_ids(&[]).unwrap(), Vec::<[u8; 16]>::new());
+    assert!(matches!(
+        chain_ids(&[&root_signed, &[1, 2, 3]]),
+        Err(ChannelError::Cose(_))
+    ));
 }

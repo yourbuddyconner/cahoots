@@ -611,6 +611,7 @@ dependencies = [
  "cahoots-core",
  "cahoots-objects",
  "clap",
+ "getrandom 0.2.17",
  "hex",
  "http",
  "minicbor",

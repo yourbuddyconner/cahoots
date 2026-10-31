@@ -81,7 +81,7 @@ fn channel_path(s: &str) -> Result<[u8; 16], Response> {
     hex_id(s, "channel_id")
 }
 
-fn channel_error(e: ChannelError) -> Response {
+pub(crate) fn channel_error(e: ChannelError) -> Response {
     match e {
         ChannelError::Cose(CoseError::Signature)
         | ChannelError::Signature
@@ -121,7 +121,10 @@ fn begin_write<'a>(st: &'a State, body: &[u8]) -> Result<MutexGuard<'a, Log>, Re
 }
 
 /// The stored manifest for `circle`, decoded. It was verified when it was stored.
-fn stored_manifest(conn: &Connection, circle: &[u8; 16]) -> Result<(Vec<u8>, Manifest), Response> {
+pub(crate) fn stored_manifest(
+    conn: &Connection,
+    circle: &[u8; 16],
+) -> Result<(Vec<u8>, Manifest), Response> {
     let bytes = store::manifest(conn, circle).map_err(db)?.ok_or_else(|| {
         err(
             StatusCode::NOT_FOUND,
@@ -135,7 +138,10 @@ fn stored_manifest(conn: &Connection, circle: &[u8; 16]) -> Result<(Vec<u8>, Man
     Ok((bytes, manifest))
 }
 
-fn stored_channel(conn: &Connection, channel: &[u8; 16]) -> Result<ChannelRow, Response> {
+pub(crate) fn stored_channel(
+    conn: &Connection,
+    channel: &[u8; 16],
+) -> Result<ChannelRow, Response> {
     store::channel(conn, channel)
         .map_err(db)?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "channel", "no such channel"))
@@ -171,7 +177,7 @@ fn read_bytes_array<'b>(d: &mut minicbor::Decoder<'b>) -> Option<Vec<&'b [u8]>> 
 }
 
 /// A whole body that is the canonical CBOR array of byte strings.
-fn bytes_array(body: &[u8]) -> Result<Vec<&[u8]>, Response> {
+pub(crate) fn bytes_array(body: &[u8]) -> Result<Vec<&[u8]>, Response> {
     let mut d = minicbor::Decoder::new(body);
     let items = read_bytes_array(&mut d).ok_or_else(|| malformed("expected an array of bstr"))?;
     if cbor_bytes_array(&items) != body {
@@ -338,6 +344,8 @@ fn post_policy_inner(st: &State, channel: &str, body: &[u8]) -> Answer {
     }
     let (_, manifest) = stored_manifest(conn, &row.circle)?;
     let (_, verified) = Policy::verify(signed, &manifest).map_err(channel_error)?;
+    #[cfg(feature = "gate")]
+    crate::gate::check_policy(conn, &channel, signed, &approvals, &manifest)?;
     let row = PolicyRow {
         id: policy::id(signed),
         body: signed.to_vec(),
@@ -386,6 +394,8 @@ fn post_grant_inner(st: &State, channel: &str, body: &[u8]) -> Answer {
         not_after: claims.log_not_after,
     };
     let mut log = begin_write(st, body)?;
+    #[cfg(feature = "gate")]
+    crate::gate::check_grant(log.conn(), &channel, &links)?;
     match store::put_grant(log.conn(), &row).map_err(db)? {
         Put::Exists => Err(conflict("exists", "another chain is stored under this cti")),
         _ => Ok(created(json!({ "grant_id": hex::encode(row.cti) }))),
@@ -401,11 +411,14 @@ pub async fn get_grants(
     AxState(st): AxState<State>,
     Path(channel): Path<String>,
     Query(q): Query<KidQuery>,
+    #[cfg(feature = "gate")] creds: crate::gate::Credentials,
 ) -> Response {
     finish((|| {
         let channel = channel_path(&channel)?;
         let kid: [u8; 32] = hex_id(q.kid.as_deref().unwrap_or(""), "malformed")?;
         let mut log = st.log.lock().unwrap();
+        #[cfg(feature = "gate")]
+        crate::gate::check_read(&st, &mut log, &channel, &creds, crate::gate::Need::Read)?;
         let rows = store::grants_for_kid(log.conn(), &channel, &kid).map_err(db)?;
         let grants: Vec<String> = rows.iter().map(|r| b64(&r.chain)).collect();
         Ok(Json(json!({ "grants": grants })).into_response())
@@ -508,12 +521,15 @@ pub async fn get_deposits(
     AxState(st): AxState<State>,
     Path(channel): Path<String>,
     Query(q): Query<DepositQuery>,
+    #[cfg(feature = "gate")] creds: crate::gate::Credentials,
 ) -> Response {
     finish((|| {
         let channel = channel_path(&channel)?;
         let to: Option<[u8; 32]> = q.to.as_deref().map(|s| hex_id(s, "to")).transpose()?;
         let epoch: Option<[u8; 20]> = q.epoch.as_deref().map(|s| hex_id(s, "epoch")).transpose()?;
         let mut log = st.log.lock().unwrap();
+        #[cfg(feature = "gate")]
+        crate::gate::check_read(&st, &mut log, &channel, &creds, crate::gate::Need::Read)?;
         let list: Vec<String> = store::deposits(log.conn(), &channel, to.as_ref(), epoch.as_ref())
             .map_err(db)?
             .iter()
@@ -555,10 +571,13 @@ pub async fn get_requests(
     AxState(st): AxState<State>,
     Path(channel): Path<String>,
     Query(q): Query<AfterQuery>,
+    #[cfg(feature = "gate")] creds: crate::gate::Credentials,
 ) -> Response {
     finish((|| {
         let channel = channel_path(&channel)?;
         let mut log = st.log.lock().unwrap();
+        #[cfg(feature = "gate")]
+        crate::gate::check_read(&st, &mut log, &channel, &creds, crate::gate::Need::Admit)?;
         let list: Vec<Value> = store::requests_after(log.conn(), &channel, q.after, PAGE_LIMIT)
             .map_err(db)?
             .into_iter()

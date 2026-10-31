@@ -254,6 +254,19 @@ pub fn verify_chain(
     Ok(prev)
 }
 
+/// The `cti` of every link of a chain, root first, read without checking signatures: call it
+/// on a chain [`verify_chain`] accepted, and pass the ids to [`evaluate`] so that a revoked
+/// parent ends its children.
+pub fn chain_ids(chain: &[&[u8]]) -> Result<Vec<[u8; 16]>, ChannelError> {
+    chain
+        .iter()
+        .map(|link| {
+            let payload = cose::payload1(link).map_err(ChannelError::Cose)?;
+            Ok(Claims::decode(&payload).map_err(ChannelError::Object)?.cti)
+        })
+        .collect()
+}
+
 fn open(bytes: &[u8], key: &SeatPublic) -> Result<ChannelGrant, ChannelError> {
     let payload = cose::verify1(key, bytes, None, DOMAIN).map_err(ChannelError::Cose)?;
     let claims = Claims::decode(&payload).map_err(ChannelError::Object)?;

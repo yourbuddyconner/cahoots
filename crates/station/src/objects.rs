@@ -1,7 +1,7 @@
 //! The `objects` feature: manifests, channel objects, policies, grants, revocations, deposits,
 //! join requests and gate tokens, stored in the log's database beside the entries.
 
-mod handlers;
+pub(crate) mod handlers;
 pub mod store;
 
 pub use handlers::{GATE_DOMAIN, GATE_RETIRE_DOMAIN, REVOKE_DOMAIN};

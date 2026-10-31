@@ -1,6 +1,8 @@
 //! The `channels` feature: version 3 messages chained in each channel's stream, per-channel
 //! heads and long-poll, and the per-channel post limit.
 #![cfg(feature = "channels")]
+// With `gate`, the tests of the ungated relay are left out, and their helpers go unused.
+#![cfg_attr(feature = "gate", allow(unused_imports, dead_code))]
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -146,6 +148,8 @@ fn ch(base: &str, channel: &ChannelId) -> String {
     format!("{base}/v1/channels/{}", hex::encode(channel))
 }
 
+// Posts without grants and reads without credentials: the ungated relay. See tests/gate.rs.
+#[cfg(not(feature = "gate"))]
 #[tokio::test]
 async fn post_poll_and_head_per_channel() {
     let (base, _dir, c) = with_channels(no_address_limits(), &[NONCE, OTHER_NONCE]).await;
@@ -366,6 +370,8 @@ async fn refusals() {
     assert_eq!(v["seq"], Value::Null);
 }
 
+// Posts without grants and reads without credentials: the ungated relay. See tests/gate.rs.
+#[cfg(not(feature = "gate"))]
 #[tokio::test]
 async fn the_default_channel_limit_refuses_the_301st_post() {
     let limits = no_address_limits();
@@ -416,6 +422,8 @@ async fn the_default_channel_limit_refuses_the_301st_post() {
     assert_eq!(s, 201);
 }
 
+// Posts without grants and reads without credentials: the ungated relay. See tests/gate.rs.
+#[cfg(not(feature = "gate"))]
 #[tokio::test]
 async fn a_small_channel_limit_and_none() {
     let limits = Limits {
@@ -515,6 +523,8 @@ fn chat(circle: [u8; 16]) -> Vec<u8> {
     m
 }
 
+// Posts without grants and reads without credentials: the ungated relay. See tests/gate.rs.
+#[cfg(not(feature = "gate"))]
 #[tokio::test]
 async fn circle_routes_refuse_a_channel_id_and_the_feed_leaves_channels_out() {
     let (base, _dir, c) = with_channels(no_address_limits(), &[NONCE]).await;
