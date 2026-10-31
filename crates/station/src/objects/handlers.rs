@@ -16,7 +16,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use cahoots_channel::deposit::Deposit;
+use cahoots_channel::deposit::{peek_signed, Deposit};
 use cahoots_channel::{policy, ChannelError, ChannelObject, Policy};
 use cahoots_core::cose::{self, CoseError};
 use cahoots_core::manifest::{Manifest, SealedManifest};
@@ -502,14 +502,18 @@ pub async fn post_deposit(
     finish(post_deposit_inner(&st, &channel, &body))
 }
 
+/// The body is a signed deposit (`Deposit::sign`): stored and served as sent, indexed by the
+/// deposit it carries. With `gate`, the signer must hold `govern` (see `gate::check_deposit`).
 fn post_deposit_inner(st: &State, channel: &str, body: &[u8]) -> Answer {
     let channel = channel_path(channel)?;
-    let d = Deposit::decode(body).map_err(channel_error)?;
+    let (_kid, d): ([u8; 32], Deposit) = peek_signed(body).map_err(channel_error)?;
     if d.channel_id != channel {
         return Err(channel_error(ChannelError::WrongChannel));
     }
     let id = d.id();
     let mut log = begin_write(st, body)?;
+    #[cfg(feature = "gate")]
+    crate::gate::check_deposit(&mut log, &channel, &_kid, body)?;
     store::put_deposit(log.conn(), &id, &channel, &d.epoch_id.encode(), &d.to, body).map_err(db)?;
     Ok(created(json!({ "deposit_id": hex::encode(id) })))
 }

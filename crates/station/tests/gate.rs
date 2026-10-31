@@ -787,9 +787,11 @@ async fn a_replayed_message_is_409_and_spends_no_budget() {
 }
 
 #[tokio::test]
-async fn nonces_are_capped() {
+async fn nonces_are_capped_per_client() {
+    // One client address holds at most 100 unused nonces; the relay-wide ceiling of 10 000
+    // and expiry are in the unit tests of `gate.rs`.
     let st = setup(Preset::GroupChat).await;
-    for i in 0..10_000 {
+    for i in 0..cahoots_station::gate::NONCES_PER_CLIENT {
         let (s, _) = send(st.c.get(format!("{}/v1/nonce", st.base))).await;
         assert_eq!(s, 200, "nonce {i}");
     }
@@ -884,4 +886,80 @@ async fn a_retired_gate_token_is_refused() {
     assert_eq!(s, 204);
     let (s, v) = send(read()).await;
     assert_eq!((s, v["error"].as_str()), (401, Some("gate")));
+}
+
+#[tokio::test]
+async fn a_deposit_needs_a_signer_whose_grant_carries_govern() {
+    use cahoots_channel::deposit::seal_for_link;
+    use cahoots_channel::link::LinkSecret;
+    let st = setup(Preset::GroupChat).await;
+    let all = [Action::Read, Action::Post, Action::Admit, Action::Govern];
+    assert_eq!(
+        st.post_grant(&[&root_grant(1, &all, 0, 1000, 1)]).await.0,
+        201
+    );
+    assert_eq!(
+        st.post_grant(&[&root_grant(2, &[Action::Read, Action::Post], 0, 1000, 2)])
+            .await
+            .0,
+        201
+    );
+    let secret = LinkSecret([5; 32]);
+    let epoch = EpochId {
+        channel_id: channel_id(),
+        epoch: 1,
+    };
+    // Sealed with the right secret, so it would open for a link holder.
+    let d = seal_for_link(&[6; 32], &secret, &epoch);
+    let post = |body: Vec<u8>| send(st.c.post(format!("{}/deposits", st.ch())).body(body));
+
+    // Signed by a key whose grant does not carry govern, by a key with no grant, unsigned.
+    let refused = |v: (u16, Value)| assert_eq!(reason(&v), (403, Some("grant"), Some("action")));
+    refused(post(d.sign(&member_key(2))).await);
+    refused(post(d.sign(&member_key(3))).await);
+    assert_eq!(post(d.encode()).await.0, 400);
+    // A signature by the governing key under another key's kid.
+    let mut forged = d.sign(&member_key(1));
+    let at = forged
+        .windows(32)
+        .position(|w| w == kid_of(&member_key(1).public()))
+        .unwrap();
+    forged[at..at + 32].copy_from_slice(&kid_of(&member_key(2).public()));
+    refused(post(forged).await);
+
+    // The governing key's deposit is stored, as signed.
+    let good = d.sign(&member_key(1));
+    let (s, v) = post(good.clone()).await;
+    assert_eq!(s, 201, "{v}");
+    assert_eq!(v["deposit_id"], hex::encode(d.id()));
+    let token = [0x77u8; 32];
+    st.add_gate(&token).await;
+    let (s, v) = send(
+        st.c.get(format!("{}/deposits", st.ch()))
+            .header("Cahoots-Gate", hex::encode(token)),
+    )
+    .await;
+    assert_eq!(s, 200);
+    use base64::Engine;
+    assert_eq!(
+        v["deposits"],
+        serde_json::json!([base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&good)])
+    );
+
+    // Once the govern grant is revoked, its key deposits no more.
+    let revoke = cbor_array(&[
+        &[1u8; 16],
+        &seat_statement(0, b"cahoots/revoke/v1", &[1u8; 16], Some("gone")),
+    ]);
+    let (s, _) = send(st.c.post(format!("{}/revocations", st.ch())).body(revoke)).await;
+    assert_eq!(s, 201);
+    let next = seal_for_link(
+        &[7; 32],
+        &secret,
+        &EpochId {
+            channel_id: channel_id(),
+            epoch: 2,
+        },
+    );
+    refused(post(next.sign(&member_key(1))).await);
 }

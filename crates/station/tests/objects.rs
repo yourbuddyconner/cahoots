@@ -516,7 +516,8 @@ async fn deposits_post_then_get() {
         epoch: 1,
     };
     let d = seal_for_link(&[6; 32], &secret, &epoch);
-    let bytes = d.encode();
+    // Ungated, any signer's deposit is stored as sent; readers check the signer.
+    let bytes = d.sign(&seat_key(0));
     let (s, v) = send(
         c.post(format!("{}/deposits", ch(&base)))
             .body(bytes.clone()),
@@ -560,10 +561,14 @@ async fn deposits_post_then_get() {
     );
     let (s, v) = send(
         c.post(format!("{}/deposits", ch(&base)))
-            .body(other.encode()),
+            .body(other.sign(&seat_key(0))),
     )
     .await;
     assert_eq!((s, v["error"].as_str()), (400, Some("channel_id")));
+
+    // An unsigned deposit is not a deposit.
+    let (s, _) = send(c.post(format!("{}/deposits", ch(&base))).body(d.encode())).await;
+    assert_eq!(s, 400);
 }
 
 // Reads without credentials: the ungated relay. See tests/gate.rs.

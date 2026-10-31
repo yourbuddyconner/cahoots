@@ -25,6 +25,13 @@
 //! An announcement's approvals must meet the current policy's post rule. Refusals are
 //! `403 {"error":"grant","reason": "missing"|"chain"|"signature"|"revoked"|"expired"|"budget"|
 //! "action"|"quorum"}`.
+//!
+//! **Deposits.** `POST …/deposits` takes a signed deposit only from a key one of whose stored
+//! chains for the deposit's COSE kid verifies, allows `govern` at the channel head, and names
+//! the key that signed; otherwise `403 {"error":"grant","reason":"action"}`.
+//!
+//! **Nonces.** Each client address holds at most [`NONCES_PER_CLIENT`] live nonces, and the
+//! relay at most [`MAX_NONCES`]; beyond either, `GET /v1/nonce` answers 429.
 #![allow(clippy::result_large_err)]
 
 use crate::log::Log;
@@ -51,6 +58,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
+use std::net::IpAddr;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -70,13 +78,19 @@ type ChannelKid = ([u8; 16], [u8; 32]);
 /// What makes a message unique in a channel's stream: its channel, `kid`, epoch id and counter.
 type MessageKey = ([u8; 16], [u8; 32], [u8; 20], u32);
 
-/// The most nonces held at once; `GET /v1/nonce` answers 429 beyond it.
+/// The most nonces held at once, whoever asked; `GET /v1/nonce` answers 429 beyond it. A
+/// backstop behind [`NONCES_PER_CLIENT`].
 pub const MAX_NONCES: usize = 10_000;
+
+/// The most live nonces one client address holds; `GET /v1/nonce` answers it 429 beyond it,
+/// so one client cannot use up the pool that proofs by everyone else draw on.
+pub const NONCES_PER_CLIENT: usize = 100;
 
 /// The gate's memory: unused nonces, each key's post count per channel, and the messages each
 /// channel's stream holds.
 pub struct Gate {
-    nonces: Mutex<HashMap<[u8; 16], Instant>>,
+    /// Each unused nonce: when it was given out, and to which client address.
+    nonces: Mutex<HashMap<[u8; 16], (Instant, IpAddr)>>,
     posts: Mutex<HashMap<ChannelKid, u32>>,
     seen: Mutex<HashSet<MessageKey>>,
 }
@@ -104,16 +118,20 @@ impl Gate {
         }
     }
 
-    /// A fresh nonce, or `None` when [`MAX_NONCES`] live nonces are held.
-    fn new_nonce(&self) -> Option<[u8; 16]> {
+    /// A fresh nonce for `client`, or `None` when `client` holds [`NONCES_PER_CLIENT`] live
+    /// nonces or the relay holds [`MAX_NONCES`]. Expired nonces are dropped first.
+    fn new_nonce(&self, client: IpAddr) -> Option<[u8; 16]> {
         let mut n = [0u8; 16];
         getrandom::getrandom(&mut n).expect("the OS random source is available");
         let mut nonces = self.nonces.lock().unwrap();
-        nonces.retain(|_, at| at.elapsed() < NONCE_TTL);
+        nonces.retain(|_, (at, _)| at.elapsed() < NONCE_TTL);
         if nonces.len() >= MAX_NONCES {
             return None;
         }
-        nonces.insert(n, Instant::now());
+        if nonces.values().filter(|(_, ip)| *ip == client).count() >= NONCES_PER_CLIENT {
+            return None;
+        }
+        nonces.insert(n, (Instant::now(), client));
         Some(n)
     }
 
@@ -127,7 +145,7 @@ impl Gate {
             .lock()
             .unwrap()
             .remove(n)
-            .is_some_and(|at| at.elapsed() < NONCE_TTL)
+            .is_some_and(|(at, _)| at.elapsed() < NONCE_TTL)
     }
 
     fn posts_used(&self, channel: &[u8; 16], kid: &[u8; 32]) -> u32 {
@@ -152,8 +170,16 @@ pub fn routes(router: Router<State>) -> Router<State> {
     router.route("/v1/nonce", get(nonce))
 }
 
-async fn nonce(axum::extract::State(st): axum::extract::State<State>) -> Response {
-    match st.gate.new_nonce() {
+async fn nonce(
+    axum::extract::State(st): axum::extract::State<State>,
+    req: axum::extract::Request,
+) -> Response {
+    let peer = req
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|c| c.0);
+    let client = st.limiter.client_ip(req.headers(), peer);
+    match st.gate.new_nonce(client) {
         Some(n) => Json(json!({ "nonce": hex::encode(n) })).into_response(),
         None => crate::limits::rate_limited("too many open nonces; try again in a few seconds"),
     }
@@ -476,6 +502,45 @@ pub(crate) fn check_policy(
     })
 }
 
+/// Check a signed deposit for `channel` before it is stored: one of the stored chains for the
+/// deposit's COSE kid must verify against the owner circle's manifest, allow `govern` at the
+/// channel head with no link revoked, and its leaf's key must be the one that signed. Anything
+/// else is `403 {"error":"grant","reason":"action"}`: only a key that may rotate may deposit.
+pub(crate) fn check_deposit(
+    log: &mut Log,
+    channel: &[u8; 16],
+    kid: &[u8; 32],
+    signed: &[u8],
+) -> Checked {
+    let at = head(log, channel);
+    let conn = log.conn();
+    let row = stored_channel(conn, channel)?;
+    let (_, manifest) = stored_manifest(conn, &row.circle)?;
+    let revoked = |id: &[u8; 16]| store::revoked(conn, channel, id).unwrap_or(true);
+    for chain in chains(conn, channel, kid)? {
+        let Ok((leaf, ids)) = open_chain(&chain, &manifest, channel) else {
+            continue;
+        };
+        let req = EvalRequest {
+            action: Action::Govern,
+            channel_id: channel,
+            log: at,
+            posts_used: 0,
+            revoked: &revoked,
+            signer: &leaf.grantee,
+        };
+        if evaluate(&leaf, &ids, &req).is_ok()
+            && cahoots_channel::deposit::verify_signed(signed, &leaf.grantee).is_ok()
+        {
+            return Ok(());
+        }
+    }
+    Err(refused(
+        "action",
+        "a deposit must be signed by a key whose grant for this channel carries govern",
+    ))
+}
+
 /// Check a grant chain for `channel` against the owner circle's manifest.
 pub(crate) fn check_grant(conn: &Connection, channel: &[u8; 16], links: &[&[u8]]) -> Checked {
     let row = stored_channel(conn, channel)?;
@@ -483,4 +548,64 @@ pub(crate) fn check_grant(conn: &Connection, channel: &[u8; 16], links: &[&[u8]]
     verify_chain(links, &manifest, channel)
         .map(|_| ())
         .map_err(|e| refused("chain", format!("{e:?}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    fn gate() -> Gate {
+        Gate {
+            nonces: Mutex::new(HashMap::new()),
+            posts: Mutex::new(HashMap::new()),
+            seen: Mutex::new(HashSet::new()),
+        }
+    }
+
+    fn ip(n: u32) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::from(0x0a00_0000 + n))
+    }
+
+    #[test]
+    fn one_client_holds_at_most_its_share_of_nonces() {
+        let g = gate();
+        let mine: Vec<_> = (0..NONCES_PER_CLIENT)
+            .map(|_| g.new_nonce(ip(1)).expect("under the cap"))
+            .collect();
+        assert_eq!(g.new_nonce(ip(1)), None, "the client's cap");
+        // Everyone else still gets one.
+        assert!(g.new_nonce(ip(2)).is_some());
+        // Spending one frees a place.
+        assert!(g.take_nonce(&mine[0]));
+        assert!(g.new_nonce(ip(1)).is_some());
+        assert_eq!(g.new_nonce(ip(1)), None);
+    }
+
+    #[test]
+    fn expired_nonces_are_dropped_before_the_caps_are_counted() {
+        let g = gate();
+        let old = Instant::now() - NONCE_TTL - Duration::from_secs(1);
+        {
+            let mut nonces = g.nonces.lock().unwrap();
+            for i in 0..NONCES_PER_CLIENT as u32 {
+                nonces.insert([i as u8; 16], (old, ip(1)));
+            }
+        }
+        assert!(g.new_nonce(ip(1)).is_some());
+        assert_eq!(g.nonces.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_relay_holds_at_most_max_nonces_in_all() {
+        let g = gate();
+        let clients = (MAX_NONCES / NONCES_PER_CLIENT) as u32;
+        for c in 0..clients {
+            for _ in 0..NONCES_PER_CLIENT {
+                assert!(g.new_nonce(ip(c)).is_some());
+            }
+        }
+        assert_eq!(g.nonces.lock().unwrap().len(), MAX_NONCES);
+        assert_eq!(g.new_nonce(ip(clients + 1)), None, "the global ceiling");
+    }
 }

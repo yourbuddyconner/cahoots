@@ -50,10 +50,10 @@ Cargo features choose what the station serves. The default features reproduce th
 | `objects` | manifests, channel objects, policies, grants, revocations, deposits, join requests: stored, served, listed by channel | base |
 | `channels` | version 4 messages chained per channel, per-channel heads, long-poll by channel | `objects` |
 | `gate` | read and post checks: a gate token or a verified grant to read a channel; a verified post grant, signature, budget and quorum to post | `channels` |
-| `issuer` | the relay checks evidence and issues grants and deposits under its own key | `gate`, and the TVC build only |
-| `anchor` | periodic head anchoring to the TVC log | base |
+| `issuer` | declared only, no code: the relay checks evidence and issues grants and deposits under its own key | `gate`, and the TVC build only |
+| `anchor` | declared only, no code: periodic head anchoring to the TVC log | base |
 
-`issuer` and `anchor` are declared so that `/v1/info` can name them; neither has any code yet. The default relay runs `objects`, `channels` and `gate`, which is what the Docker image builds.
+`issuer` and `anchor` are declared only: neither has any code yet, and `/v1/info` does not list them even when they are compiled in, so no app relies on them. The default relay runs `objects`, `channels` and `gate`, which is what the Docker image builds.
 
 Build with features:
 
@@ -71,7 +71,7 @@ cargo run -p cahoots-station --features objects,channels,gate -- --db ./station.
 | `GET /v1/head` | | global `{"seq", "hash"}`; `seq` is `null` when empty |
 | `GET /v1/circles` | | `{"circles":[{"circle_id","count","last_seq"}]}` |
 | `GET /v1/feed` | `after=<seq>` | up to 500 entries across all circles, for the display page |
-| `GET /v1/info` | | `{"version", "features":[...], "limits":{"max_body":65536, "posts_per_minute", "reads_per_minute"}}`, plus `channel_posts_per_minute` with `channels`; `features` lists the compiled features in the order `feed-page, objects, channels, gate, issuer, anchor`; a limit that is off is `null` |
+| `GET /v1/info` | | `{"version", "features":[...], "limits":{"max_body":65536, "posts_per_minute", "reads_per_minute"}}`, plus `channel_posts_per_minute` with `channels`; `features` lists the compiled features that have code, in the order `feed-page, objects, channels, gate`; a limit that is off is `null` |
 | `GET /healthz` | | `ok` |
 
 Any request under `/v1` can also answer `429 {"error":"rate"}` (over the per-client limit) and a post `507 {"error":"full"}` (the log has reached its cap).
@@ -107,7 +107,7 @@ All bodies are raw bytes, at most 64 KiB. Ids in paths are lowercase hex. Byte s
 | `GET /v1/channels/{channel_id}/grants/{cti}` | objects | | `{"grant": chain}`; `404 grant`; gated |
 | `POST /v1/channels/{channel_id}/revocations` | objects | `[grant_id, statement]` | `201 {"grant_id"}`; the statement is a seat's COSE_Sign1 under `cahoots/revoke/v1` |
 | `GET /v1/channels/{channel_id}/revocations` | objects | | `{"revocations":[{"grant_id","seq"}]}` |
-| `POST /v1/channels/{channel_id}/deposits` | objects | an encoded deposit | `201 {"deposit_id"}` |
+| `POST /v1/channels/{channel_id}/deposits` | objects | a signed deposit (COSE_Sign1 under `cahoots/deposit/v1`, kid the signer's key id); gated, the signer's stored chain must carry `govern`, else `403 {"error":"grant","reason":"action"}` | `201 {"deposit_id"}`, the SHA-256 of the unsigned deposit |
 | `GET /v1/channels/{channel_id}/deposits?to=<hex>&epoch=<hex>` | objects | both filters optional | `{"deposits":[...]}`, empty when none; gated |
 | `POST /v1/channels/{channel_id}/requests` | objects | a join request, any non-empty bytes | `201 {"request_id","seq"}`; open to anyone |
 | `GET /v1/channels/{channel_id}/requests?after=<seq>` | objects | | `{"requests":[{"id","body","seq"}]}`, at most 500; gated, and needs `admit` |
@@ -116,7 +116,7 @@ All bodies are raw bytes, at most 64 KiB. Ids in paths are lowercase hex. Byte s
 | `POST /v1/channels/{channel_id}/messages` | channels | a version 4 message | `201 {"seq","hash"}`; `404 channel` for a channel the station does not hold; `400 malformed` for a message that names another channel; `429 rate` past the per-channel limit; with `gate`, `403 grant` and `409 replay` (below) |
 | `GET /v1/channels/{channel_id}/messages` | channels | `after=<seq>`, `wait=<ms>` | `{"entries":[{"seq","received_at","channel_id","message","hash"}], "head_seq"}`; gated |
 | `GET /v1/channels/{channel_id}/head` | channels | | `{"seq","hash"}` of the channel's latest entry; gated |
-| `GET /v1/nonce` | gate | | `{"nonce"}`, 16 bytes in hex, good once for 300 seconds |
+| `GET /v1/nonce` | gate | | `{"nonce"}`, 16 bytes in hex, good once for 300 seconds; 429 when the client address already holds 100 unused nonces, or the relay 10 000 |
 
 Objects are verified against the owner circle's stored manifest. A policy must name the circle that owns the channel.
 

@@ -89,19 +89,33 @@ fn http_against_a_station() {
         .unwrap();
     assert_eq!(id.len(), 32);
     r.put_object(&CH, ObjectKind::Request, b"and me").unwrap();
-    let all = r.list(&CH, ObjectKind::Request, &[], &Auth::None).unwrap();
-    assert_eq!(all, vec![b"let me in".to_vec(), b"and me".to_vec()]);
     let after = [("after", "0")];
-    let later = r
-        .list(&CH, ObjectKind::Request, &after, &Auth::None)
-        .unwrap();
-    assert_eq!(later, vec![b"and me".to_vec()]);
-    // Deposits for an unknown epoch: an empty list.
     let q = [("to", &*"00".repeat(32)), ("epoch", &*"00".repeat(20))];
-    assert!(r
-        .list(&CH, ObjectKind::Deposit, &q, &Auth::None)
-        .unwrap()
-        .is_empty());
+    // A workspace build with every feature turns the station's gate on: then the queue and
+    // the deposits of a channel it does not hold are refused rather than listed.
+    if cahoots_station::server::features().contains(&"gate") {
+        for (kind, query) in [
+            (ObjectKind::Request, &after[..]),
+            (ObjectKind::Deposit, &q[..]),
+        ] {
+            assert!(matches!(
+                r.list(&CH, kind, query, &Auth::None),
+                Err(RelayError::Refused(_))
+            ));
+        }
+    } else {
+        let all = r.list(&CH, ObjectKind::Request, &[], &Auth::None).unwrap();
+        assert_eq!(all, vec![b"let me in".to_vec(), b"and me".to_vec()]);
+        let later = r
+            .list(&CH, ObjectKind::Request, &after, &Auth::None)
+            .unwrap();
+        assert_eq!(later, vec![b"and me".to_vec()]);
+        // Deposits for an unknown epoch: an empty list.
+        assert!(r
+            .list(&CH, ObjectKind::Deposit, &q, &Auth::None)
+            .unwrap()
+            .is_empty());
+    }
     // A channel the station does not hold: 4xx comes back as Refused.
     assert!(matches!(
         r.post_channel(&CH, b"x", &Auth::None),

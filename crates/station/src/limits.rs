@@ -102,7 +102,7 @@ impl Limiter {
             .is_none_or(|n| Self::take(&self.channel_posts, *channel, n))
     }
 
-    fn client_ip(&self, headers: &HeaderMap, peer: Option<SocketAddr>) -> IpAddr {
+    pub(crate) fn client_ip(&self, headers: &HeaderMap, peer: Option<SocketAddr>) -> IpAddr {
         if self.limits.trust_forwarded {
             let forwarded = headers
                 .get("fly-client-ip")

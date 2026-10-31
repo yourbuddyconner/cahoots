@@ -351,15 +351,15 @@ async fn circles(AxState(st): AxState<State>) -> Response {
     Json(json!({ "circles": c })).into_response()
 }
 
-/// The features compiled in, in a fixed order.
+/// The features compiled in that have code, in a fixed order. `issuer` and `anchor` are
+/// declared but do nothing in this version, so they are never reported: an app must not rely
+/// on them.
 pub fn features() -> Vec<&'static str> {
     [
         ("feed-page", cfg!(feature = "feed-page")),
         ("objects", cfg!(feature = "objects")),
         ("channels", cfg!(feature = "channels")),
         ("gate", cfg!(feature = "gate")),
-        ("issuer", cfg!(feature = "issuer")),
-        ("anchor", cfg!(feature = "anchor")),
     ]
     .into_iter()
     .filter_map(|(name, on)| on.then_some(name))

@@ -344,14 +344,15 @@ async fn info_reports_version_and_default_features() {
         ("objects", cfg!(feature = "objects")),
         ("channels", cfg!(feature = "channels")),
         ("gate", cfg!(feature = "gate")),
-        ("issuer", cfg!(feature = "issuer")),
-        ("anchor", cfg!(feature = "anchor")),
     ]
     .into_iter()
     .filter(|&(_, on)| on)
     .map(|(name, _)| Value::from(name))
     .collect();
     assert_eq!(v["features"], Value::Array(expect));
+    // `issuer` and `anchor` have no code, so they are never reported, even compiled in.
+    let names = v["features"].as_array().unwrap();
+    assert!(!names.contains(&Value::from("issuer")) && !names.contains(&Value::from("anchor")));
     // Under default features, exactly the feed page.
     #[cfg(all(
         feature = "feed-page",
