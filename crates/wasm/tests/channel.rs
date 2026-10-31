@@ -865,7 +865,8 @@ fn permitted_is_what_the_link_proves_and_the_owner_picks_the_rest() {
     assert_eq!(owner.admit(&req, "read,admit").unwrap_err(), "policy");
     assert_eq!(split(&owner.admit(&req, "read,post").unwrap()).len(), 3);
 
-    for preset in [3u8, 4] {
+    // Members post: the link grants read, post is by hand; closed: nothing by link.
+    for (preset, want) in [(3u8, "read"), (4, "")] {
         let mut o = circle().channel_owner("Inner", preset, 1).unwrap();
         let link = o.link_url("relay.example").unwrap();
         o.rotate().unwrap();
@@ -873,8 +874,18 @@ fn permitted_is_what_the_link_proves_and_the_owner_picks_the_rest() {
             .unwrap()
             .join_request("Dee", "read,post")
             .unwrap();
-        assert_eq!(o.permitted(&r).unwrap(), "", "preset {preset}");
+        assert_eq!(o.permitted(&r).unwrap(), want, "preset {preset}");
     }
+    // Closed: the owner lets a reader in by hand.
+    let mut o = circle().channel_owner("Inner", 4, 1).unwrap();
+    let link = o.link_url("relay.example").unwrap();
+    o.rotate().unwrap();
+    let r = ChannelMember::from_link(&link)
+        .unwrap()
+        .join_request("Dee", "read,post")
+        .unwrap();
+    assert_eq!(o.admit(&r, "read,post").unwrap_err(), "policy");
+    assert_eq!(split(&o.admit(&r, "read").unwrap()).len(), 3);
 }
 
 #[test]

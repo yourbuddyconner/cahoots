@@ -561,7 +561,7 @@ The app writes one of five presets. Every preset has an admit rule with no evide
 | Announcements with approvals | link | no evidence, quorum `k` |
 | Group chat | link | link |
 | Members post | link | key, empty `ref` |
-| Closed | no evidence | no evidence |
+| Closed | key, empty `ref`: readers the owner admits by hand | no evidence |
 
 The app sets a new policy's `log` to the previous policy's `log` plus 1, and its `parent` to the previous ID. A relay refuses a policy whose `log` is not greater than the current one's.
 
@@ -676,7 +676,7 @@ A key asks to join with a join request: a COSE_Sign1 by the member key, kid its 
 | 4 | name, tstr, 1 to 64 bytes, the name the person typed |
 | 5 | gate_token, bstr 32, or empty when the request comes without a link |
 
-The request goes to the relay's queue for the channel. The owner's device reads the queue, checks the signature and the evidence against the policy, and on approval posts the grant, a key deposit for the current epoch, and a join control message. An action whose rule is missing or has no evidence (in every preset, `admit` and `govern`) is never granted. Without the owner choosing, a device grants only the actions whose rule has link evidence that the request's gate token proves against the live link; a request that also asks for an action the owner gives by hand (key evidence) waits for the owner, who chooses read, or read and post. A link holder reads before any of this: the link deposit is enough. The join request is for posting.
+The request goes to the relay's queue for the channel. The owner's device reads the queue, checks the signature and the evidence against the policy, and on approval posts the grant, a key deposit for the current epoch, and a join control message. An action whose rule is missing or has no evidence (in every preset, `admit` and `govern`) is never granted. Without the owner choosing, a device grants only the subset of the requested actions whose rule has link evidence that the request's gate token proves against the live link; key evidence is always the owner's choice, by hand, of read, or read and post. A link holder reads before any of this: the link deposit is enough. The join request is for posting.
 
 #### Governance and revocation
 

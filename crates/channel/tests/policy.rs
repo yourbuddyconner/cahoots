@@ -183,8 +183,13 @@ fn presets_have_the_documented_rules() {
         "announcements and members post differ"
     );
 
+    // Closed: readers admitted by hand; nobody but the owner's seats posts, admits or governs.
     let closed = make(Preset::Closed, 3);
-    assert!(closed.rules.iter().all(|r| r.evidence.is_empty()));
+    assert_eq!(
+        closed.rule(Action::Read).unwrap().evidence,
+        vec![evidence(1, &[], "")]
+    );
+    assert!(closed.rules[1..].iter().all(|r| r.evidence.is_empty()));
 
     for (seats, quorum) in [(1, 1), (2, 2), (3, 2), (4, 3), (5, 3)] {
         let p = make(Preset::GroupChat, seats);

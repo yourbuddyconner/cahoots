@@ -159,17 +159,24 @@ fn admit_grants_only_what_a_rule_gives_evidence_for() {
 }
 
 #[test]
-fn nothing_is_permitted_under_closed_or_members_post() {
-    for preset in [CLOSED, MEMBERS_POST] {
-        let (o, link) = owner(preset);
-        let m = ChannelMember::from_link(&link).unwrap();
-        for wanted in ["read,post", "read,post,admit,govern"] {
-            let request = m.join_request("Cee", wanted).unwrap();
-            assert!(
-                o.permitted(&request).unwrap().is_empty(),
-                "preset {preset}, {wanted}"
-            );
-        }
+fn permitted_is_the_link_granted_subset() {
+    // Members post: the link proves read; post is by hand, so it is left out.
+    let (o, link) = owner(MEMBERS_POST);
+    let m = ChannelMember::from_link(&link).unwrap();
+    for wanted in ["read,post", "read,post,admit,govern"] {
+        let request = m.join_request("Cee", wanted).unwrap();
+        assert_eq!(
+            o.permitted(&request).unwrap(),
+            vec![Action::Read],
+            "{wanted}"
+        );
+    }
+    // Closed: nothing is granted by link.
+    let (o, link) = owner(CLOSED);
+    let m = ChannelMember::from_link(&link).unwrap();
+    for wanted in ["read", "read,post", "read,post,admit,govern"] {
+        let request = m.join_request("Cee", wanted).unwrap();
+        assert!(o.permitted(&request).unwrap().is_empty(), "{wanted}");
     }
     // Members post: the owner may still let someone post by hand.
     let (mut o, link) = owner(MEMBERS_POST);
@@ -183,6 +190,34 @@ fn nothing_is_permitted_under_closed_or_members_post() {
         Err("policy".into())
     );
     o.admit(&request, "read,post", &seat).unwrap();
+}
+
+#[test]
+fn the_closed_preset_admits_readers_by_hand() {
+    let (mut o, link) = owner(CLOSED);
+    let seat = SeatKey::from_seed(&fill(350, 32).try_into().unwrap()).unwrap();
+    let m = ChannelMember::from_link(&link).unwrap();
+    let request = m.join_request("Cee", "read,post").unwrap();
+    assert!(o.permitted(&request).unwrap().is_empty());
+    // Post, admit and govern stay with the owner's seats.
+    assert_eq!(
+        o.admit(&request, "read,post", &seat).map(|_| ()),
+        Err("policy".into())
+    );
+    let a = o.admit(&request, "read", &seat).unwrap();
+    assert_eq!(o.members().len(), 1);
+    // The member opens the key deposit it was given, from the owner's member key.
+    let mut m = m;
+    m.install_from_key_deposit(&a.deposit, &o.self_grant(), o.manifest())
+        .unwrap();
+    assert_eq!(m.current_epoch(), o.member().current_epoch());
+    // And a request without a link at all is let in by hand too.
+    let bare = link.rsplit_once('/').unwrap().0;
+    let request = ChannelMember::from_link(bare)
+        .unwrap()
+        .join_request("Dee", "read")
+        .unwrap();
+    o.admit(&request, "read", &seat).unwrap();
 }
 
 #[test]

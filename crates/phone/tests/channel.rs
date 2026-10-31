@@ -688,7 +688,7 @@ fn only_what_the_link_proves_is_let_in_without_the_owner() {
     let st = station();
     let (a, b) = (device(), device());
     let circle_id = circle(&a, &b, &st.base);
-    for (preset, want) in [(2u8, "read,post"), (3, "")] {
+    for (preset, want) in [(2u8, "read,post"), (3, "read")] {
         let id = a
             .phone
             .channel_start(circle_id.clone(), "Garden".into(), preset)

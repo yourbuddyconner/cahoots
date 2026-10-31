@@ -113,7 +113,8 @@ pub enum Preset {
     GroupChat,
     /// Read by link, post by key once the owner admits it (one key evidence with an empty ref).
     MembersPost,
-    /// Read by key only.
+    /// Read by key, once the owner admits it by hand (one key evidence with an empty ref); only
+    /// the owner posts.
     Closed,
 }
 
@@ -164,7 +165,7 @@ impl Policy {
             Preset::AnnouncementsQuorum(k) => (link(), Vec::new(), k),
             Preset::GroupChat => (link(), link(), 0),
             Preset::MembersPost => (link(), admitted(), 0),
-            Preset::Closed => (Vec::new(), Vec::new(), 0),
+            Preset::Closed => (admitted(), Vec::new(), 0),
         };
         let govern_quorum = if seats == 1 { 1 } else { seats / 2 + 1 };
         Policy {

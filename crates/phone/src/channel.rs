@@ -206,9 +206,16 @@ fn host_of(url: &str) -> String {
     }
 }
 
-/// The policy's read rule takes no evidence (or there is none): no link reads.
+/// The policy's read rule takes no link evidence (or there is none): no link reads, only
+/// readers the owner lets in (the closed preset admits them by hand).
 fn read_is_closed(policy: &[u8]) -> bool {
-    read_policy(policy).is_ok_and(|p| p.rule(Action::Read).is_none_or(|r| r.evidence.is_empty()))
+    read_policy(policy).is_ok_and(|p| {
+        p.rule(Action::Read).is_none_or(|r| {
+            !r.evidence
+                .iter()
+                .any(|e| e.kind == cahoots_channel::policy::kind::LINK)
+        })
+    })
 }
 
 /// A relay address or a link's host, as compared: the host lowercased and the port kept;

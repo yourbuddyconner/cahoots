@@ -589,16 +589,12 @@ impl ChannelOwner {
         }
     }
 
-    /// The actions a join request may be granted without the owner choosing: those it asks
-    /// for whose rule takes link evidence that the request's gate token proves against the
-    /// live link, and that needs no quorum. Key evidence (an empty ref included) is never
-    /// automatic, and an action no one but the owner's seats holds (no rule, no evidence:
-    /// `admit` and `govern`) is left out.
-    ///
-    /// A request that also asks for an action the owner gives by hand (a rule with key
-    /// evidence and no link the token proves, as `post` in members post) yields nothing: it
-    /// waits for the owner, who sees the whole request. So the result is empty for a closed
-    /// channel, for members post, and for an old link. What auto-allow passes to `admit`.
+    /// The actions a join request may be granted without the owner choosing: the subset of
+    /// those it asks for whose rule takes link evidence that the request's gate token proves
+    /// against the live link, and that needs no quorum. The others are left out: key evidence
+    /// (an empty ref included) is never automatic, and `admit` and `govern` have no evidence.
+    /// So `read,post` under members post gives `[read]`, a closed channel or an old link gives
+    /// nothing. What auto-allow passes to `admit`.
     /// Errors: `malformed`, `signature`, `wrong-channel`, `actions`.
     pub fn permitted(&self, request: &[u8]) -> Result<Vec<Action>, String> {
         let r = JoinRequest::parse(request)?;
@@ -607,23 +603,18 @@ impl ChannelOwner {
         }
         let wanted = parse_actions(&r.wanted)?;
         let policy = read_policy(&self.policy)?;
-        let mut out = Vec::new();
-        for a in wanted {
-            let Some(rule) = policy.rule(a).filter(|r| !r.evidence.is_empty()) else {
-                continue;
-            };
-            let by_link = rule.quorum == 0
-                && rule
-                    .evidence
-                    .iter()
-                    .any(|e| self.shows(e, &r.token, &r.member_key, false));
-            if by_link {
-                out.push(a);
-            } else if rule.evidence.iter().any(|e| e.kind == kind::KEY) {
-                return Ok(Vec::new());
-            }
-        }
-        Ok(out)
+        Ok(wanted
+            .into_iter()
+            .filter(|a| {
+                policy.rule(*a).is_some_and(|rule| {
+                    rule.quorum == 0
+                        && rule
+                            .evidence
+                            .iter()
+                            .any(|e| self.shows(e, &r.token, &r.member_key, false))
+                })
+            })
+            .collect())
     }
 
     /// Admit a join request (as `ChannelMember::join_request` makes it), granting `actions`
