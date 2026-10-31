@@ -38,15 +38,29 @@ final class UrlSessionHttpTests: XCTestCase {
             guard case let PhoneError.Network(message) = error else {
                 return XCTFail("expected PhoneError.Network, got \(error)")
             }
-            XCTAssertTrue(message.contains("4"), message)
+            XCTAssertTrue(message.hasPrefix("The relay "), message)
+            XCTAssertNotEqual(message, UrlSessionHttp.unreachable)
         }
+    }
+
+    func testARefusalSaysTheRelaysDetailOrItsStatus() {
+        let body = Data(#"{"detail":"unknown message version","error":"malformed"}"#.utf8)
+        XCTAssertEqual(UrlSessionHttp.refusal(status: 400, body: body, method: "POST"),
+                       "The relay refused the message: unknown message version")
+        XCTAssertEqual(UrlSessionHttp.refusal(status: 400, body: body, method: "GET"),
+                       "The relay refused the request: unknown message version")
+        XCTAssertEqual(UrlSessionHttp.refusal(status: 500, body: Data("oops".utf8), method: "POST"),
+                       "The relay answered 500.")
+        XCTAssertEqual(UrlSessionHttp.refusal(status: 502, body: nil, method: "GET"),
+                       "The relay answered 502.")
     }
 
     func testNoRelayIsANetworkError() {
         XCTAssertThrowsError(try UrlSessionHttp().get(url: "http://127.0.0.1:9/v1/head")) { error in
-            guard case PhoneError.Network = error else {
+            guard case let PhoneError.Network(message) = error else {
                 return XCTFail("expected PhoneError.Network, got \(error)")
             }
+            XCTAssertEqual(message, UrlSessionHttp.unreachable)
         }
     }
 }

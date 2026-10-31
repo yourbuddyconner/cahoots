@@ -69,21 +69,24 @@ final class CeremonyModel: ObservableObject {
                 s = signed
                 s = try await core.run { [id] in try $0.ceremonyTick(id: id) }
             }
-            if status == relayDown { status = nil }
+            if relayTrouble { status = nil; relayTrouble = false }
             await apply(s)
         } catch {
             fail(error)
         }
     }
 
-    private let relayDown = "Cannot reach the relay. Trying again."
+    /// The status shows a relay problem, cleared by the next tick that goes through.
+    private var relayTrouble = false
 
     private func fail(_ error: Error) {
         switch error {
         case PhoneError.NotFound(let m):
             gone = m
-        case PhoneError.Network:
-            status = relayDown
+        case PhoneError.Network(let m):
+            // No answer at all: the tick tries again. An answer with an error: its own words.
+            status = m == UrlSessionHttp.unreachable ? "\(m) Trying again." : m
+            relayTrouble = true
         default:
             status = plain(error)
         }
