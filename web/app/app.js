@@ -9,6 +9,7 @@ import init, {
   Ceremony, Circle, FountainEncoder, FountainDecoder, offer_params,
   b64_encode, b64_decode, bucket_pad, bucket_unpad, chat_bucket_pad, chat_bucket_unpad, qr_svg, qr_decode_rgba,
 } from './pkg/cahoots_wasm.js';
+import { setupChannels, routeChannels, loadChannels } from './channels.js';
 
 const CLAIM = {
   TRNG: 'Secure against unlimited computing power, as long as no pad byte is reused.',
@@ -78,7 +79,7 @@ const SIZES = [
 
 // ---------------------------------------------------------------- storage (IndexedDB)
 const db = await new Promise((resolve, reject) => {
-  const req = indexedDB.open('cahoots', 2);
+  const req = indexedDB.open('cahoots', 3);
   req.onupgradeneeded = (ev) => {
     const d = req.result;
     if (ev.oldVersion < 1) {
@@ -88,6 +89,11 @@ const db = await new Promise((resolve, reject) => {
     if (ev.oldVersion < 2) {
       d.createObjectStore('chat', { keyPath: 'key', autoIncrement: true }).createIndex('circle', 'circle');
       d.createObjectStore('settings', { keyPath: 'id' });
+    }
+    if (ev.oldVersion < 3) {
+      // Channels this browser owns or joined by link, and their posts.
+      d.createObjectStore('channels', { keyPath: 'id' });
+      d.createObjectStore('chmsgs', { keyPath: 'key', autoIncrement: true }).createIndex('channel', 'channel');
     }
   };
   req.onsuccess = () => resolve(req.result);
@@ -397,12 +403,14 @@ const toolLink = (href, symbol, title, detail) => h('a', { class: 'tool-card', h
 async function screenHome() {
   const generation = routeGeneration;
   const circles = (await loadCircles()).sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  const channels = await loadChannels();
   if (generation !== routeGeneration) return;
   walletScreen({ title: 'Cahoots', className: 'entry-screen', menu: aboutSheet,
     body: [h('header', { class: 'entry-heading' }, h('img', { src: 'icon.svg', alt: '', width: 38, height: 38 }),
       h('h1', {}, circles.length ? 'Your circles' : 'Meet in person. Stay in cahoots.'),
       h('p', { class: 'lead' }, circles.length ? 'Choose a circle to pick up the conversation.' : 'Create a private circle with the people beside you. Then keep talking, wherever you go.')),
       circles.length ? h('div', { class: 'entry-list' }, ...circles.map(c => h('a', { class: 'row-item', href: `#/c/${c.id}`, 'aria-label': c.name }, circleMark(c.id, c.name), h('div', {}, h('b', {}, c.name), h('span', {}, `${c.members || '—'} people · on this device`)), h('span', { 'aria-hidden': 'true' }, '›')))) : null,
+      channels.length ? h('div', { class: 'entry-list' }, h('p', { class: 'eyebrow' }, 'Channels'), ...channels.map(c => h('a', { class: 'row-item', href: `#/ch/${c.id}`, 'aria-label': c.name }, circleMark(c.id, c.name), h('div', {}, h('b', {}, c.name), h('span', {}, c.role === 'owner' ? `your channel · on ${c.relay}` : `joined by link · on ${c.relay}`)), h('span', { 'aria-hidden': 'true' }, '›')))) : null,
       h('div', { class: 'entry-actions' }, btn('Create a circle', () => go('#/new'), 'primary'), btn('Join a circle', () => go('#/join'))),
       h('p', { class: 'device-note' }, 'Circles and history are saved in this browser. No account needed.')],
   });
@@ -415,6 +423,7 @@ function circleTools(circle) {
     toolLink(`#/c/${id}/send`, '↗', 'Send a message', 'Encrypt a short note to share by code or text.'),
     toolLink(`#/c/${id}/read`, '↙', 'Read a message', 'Open a note from someone in this circle.'),
     toolLink(`#/c/${id}/history`, '≡', 'History', 'Notes sent and read on this device.'),
+    toolLink(`#/ch/new/${id}`, '◎', 'Start a channel', 'Post to anyone with a link. Let people in to post.'),
   ];
 }
 
@@ -1298,12 +1307,14 @@ async function route() {
       else if (parts[2] === 'people') await screenPeople(parts[1]);
       else if (parts[2] === 'hello') await screenHello(parts[1], parts[3]);
       else await screenCircle(parts[1]);
-    } else if (parts[0] === 'chat') await screenChat(parts[1]);
+    } else if (parts[0] === 'ch') await routeChannels(parts);
+    else if (parts[0] === 'chat') await screenChat(parts[1]);
     else await screenHome();
   } catch (e) { screen({ title: 'Cahoots', body: [h('div', { class: 'empty' }, h('h1', {}, 'Something went wrong.'), h('p', { class: 'lead' }, friendly(e)))], actions: [btn('Home', () => go('#/'), 'primary')] }); }
 }
 
 await init();
+setupChannels({ h, screen, sheet, btn, link, notice, status, next, field, input, seg, stepper, toast, copyBtn, go, tx, utf8, utf8d, openCircle, loadSettings, friendly, SITE, generation: () => routeGeneration });
 window.addEventListener('hashchange', route);
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(() => {});
 route();

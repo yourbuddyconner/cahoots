@@ -676,6 +676,17 @@ impl ChannelMember {
             .unwrap_or_default()
     }
 
+    /// The link's id (`SHA-256("cahoots/link/id/v1" || secret)`), hex: the `to` of its link
+    /// deposits; `""` when the link had no secret.
+    pub fn link_id_hex(&self) -> String {
+        self.inner
+            .borrow()
+            .secret
+            .as_ref()
+            .map(|sec| hex(&sec.id()))
+            .unwrap_or_default()
+    }
+
     /// The member key's id (`SHA-256` of the compressed key), hex: the `Cahoots-Kid` header and
     /// the `kid` of this member's messages.
     pub fn my_kid_hex(&self) -> String {
@@ -967,6 +978,76 @@ impl ChannelMember {
     }
 }
 
+/// A join request, parsed and its signature checked.
+struct JoinRequest {
+    channel: Vec<u8>,
+    member_key: SeatPublic,
+    xwing_pk: Vec<u8>,
+    wanted: String,
+    name: String,
+    token: Vec<u8>,
+    kid: [u8; 32],
+}
+
+impl JoinRequest {
+    /// Errors: `malformed`, `signature`.
+    fn parse(request: &[u8]) -> Result<JoinRequest, String> {
+        let bad = || s("malformed");
+        let payload = cose::payload1(request).map_err(|_| bad())?;
+        let mut d = Decoder::new(&payload);
+        let key = |d: &mut Decoder<'_>, k: u8| -> Result<(), String> {
+            (d.u8().ok() == Some(k)).then_some(()).ok_or_else(bad)
+        };
+        if d.map().ok().flatten() != Some(6) {
+            return Err(bad());
+        }
+        key(&mut d, 0)?;
+        let channel = d.bytes().map_err(|_| bad())?.to_vec();
+        key(&mut d, 1)?;
+        let member_key = SeatPublic::parse(d.bytes().map_err(|_| bad())?).map_err(|_| bad())?;
+        key(&mut d, 2)?;
+        let xwing_pk = d.bytes().map_err(|_| bad())?.to_vec();
+        key(&mut d, 3)?;
+        let wanted = d.str().map_err(|_| bad())?.to_string();
+        key(&mut d, 4)?;
+        let name = d.str().map_err(|_| bad())?.to_string();
+        key(&mut d, 5)?;
+        let token = d.bytes().map_err(|_| bad())?.to_vec();
+        if d.position() != payload.len() {
+            return Err(bad());
+        }
+        let kid = kid_of(&member_key);
+        if cose::kid1(request).map_err(|_| bad())? != kid {
+            return Err(s("signature"));
+        }
+        cose::verify1(&member_key, request, None, JOIN_DOMAIN).map_err(|_| s("signature"))?;
+        Ok(JoinRequest {
+            channel,
+            member_key,
+            xwing_pk,
+            wanted,
+            name,
+            token,
+            kid,
+        })
+    }
+}
+
+/// What a join request asks for, for the owner's Requests screen, after its signature checks:
+/// `{"channel_id":"<hex>","kid":"<hex 32>","name":"...","actions":"read,post"}`.
+/// Errors: `malformed`, `signature`.
+#[wasm_bindgen]
+pub fn join_request_summary(request: &[u8]) -> Result<String, String> {
+    let r = JoinRequest::parse(request)?;
+    Ok(format!(
+        "{{\"channel_id\":\"{}\",\"kid\":\"{}\",\"name\":{},\"actions\":{}}}",
+        hex(&r.channel),
+        hex(&r.kid),
+        json_str(&r.name),
+        json_str(&r.wanted)
+    ))
+}
+
 // ---------------------------------------------------------------------------------------------
 // Owner
 // ---------------------------------------------------------------------------------------------
@@ -1112,6 +1193,45 @@ impl Circle {
             self_grant,
             member: ChannelMember::from_state(member),
         })
+    }
+
+    /// One approval of a proposed announcement by this device's seat, for a channel this
+    /// circle owns but this device does not run (another seat's device proposed it): as
+    /// `ChannelOwner::approve_post`, under `policy`, the channel's current signed policy,
+    /// which must be signed by a seat of this circle. Errors: `no-seat-key`, `manifest`,
+    /// `seat`, `malformed`, `signature`, `wrong-circle`, `digest`.
+    pub fn approve_channel_post(
+        &self,
+        policy: &[u8],
+        digest_hex: &str,
+        channel_name: &str,
+        first_line: &str,
+        log: u64,
+    ) -> Result<Vec<u8>, String> {
+        let seed = self.seat_key.as_ref().ok_or_else(|| s("no-seat-key"))?;
+        let manifest = open_manifest(&self.manifest)?;
+        let seat = self.my_slice();
+        let key = SeatKey::from_seed(seed).map_err(|_| s("seat"))?;
+        if manifest.seat_key(seat) != Some(&key.public()) {
+            return Err(s("seat"));
+        }
+        Policy::verify(policy, &manifest).map_err(err)?;
+        let digest: [u8; 32] = unhex_n(digest_hex, "digest")?;
+        Ok(approval_for(
+            &key,
+            seat,
+            &manifest.circle_id,
+            PROFILE_POST,
+            vec![
+                (s("channel"), channel_name.to_string()),
+                (s("text"), first_line.to_string()),
+            ],
+            digest,
+            &policy::id(policy),
+            log,
+            assurance::PRESENT,
+            random::<16>(),
+        ))
     }
 }
 
@@ -1330,35 +1450,15 @@ impl ChannelOwner {
     /// Errors: `malformed`, `signature`, `wrong-channel`, `actions`, `name`, `policy`,
     /// `evidence`, `unknown-epoch`, `hpke`.
     pub fn admit(&mut self, request: &[u8], actions: &str) -> Result<Vec<u8>, String> {
-        let bad = || s("malformed");
-        let payload = cose::payload1(request).map_err(|_| bad())?;
-        let mut d = Decoder::new(&payload);
-        let key = |d: &mut Decoder<'_>, k: u8| -> Result<(), String> {
-            (d.u8().ok() == Some(k)).then_some(()).ok_or_else(bad)
-        };
-        if d.map().ok().flatten() != Some(6) {
-            return Err(bad());
-        }
-        key(&mut d, 0)?;
-        let channel = d.bytes().map_err(|_| bad())?;
-        key(&mut d, 1)?;
-        let member_key = SeatPublic::parse(d.bytes().map_err(|_| bad())?).map_err(|_| bad())?;
-        key(&mut d, 2)?;
-        let xwing_pk = d.bytes().map_err(|_| bad())?.to_vec();
-        key(&mut d, 3)?;
-        let wanted = d.str().map_err(|_| bad())?.to_string();
-        key(&mut d, 4)?;
-        let name = d.str().map_err(|_| bad())?.to_string();
-        key(&mut d, 5)?;
-        let token = d.bytes().map_err(|_| bad())?.to_vec();
-        if d.position() != payload.len() {
-            return Err(bad());
-        }
-        let kid = kid_of(&member_key);
-        if cose::kid1(request).map_err(|_| bad())? != kid {
-            return Err(s("signature"));
-        }
-        cose::verify1(&member_key, request, None, JOIN_DOMAIN).map_err(|_| s("signature"))?;
+        let JoinRequest {
+            channel,
+            member_key,
+            xwing_pk,
+            wanted,
+            name,
+            token,
+            kid,
+        } = JoinRequest::parse(request)?;
         if channel != self.channel_id {
             return Err(s("wrong-channel"));
         }

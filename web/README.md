@@ -17,6 +17,8 @@ In a codes-only ceremony a commitment code carries the circle parameters, so a j
 | `crates/wasm/` | `cahoots-wasm`: wasm-bindgen API over the core. Ceremony, `Circle` (pad + ledger + label + circle root + chat session + relay cursor) with pure-pad send/receive, chat send/receive, epoch rotation, and export/import for IndexedDB; RaptorQ fountain coding for animated QR; QR rendering to SVG; bucket padding; base64url. Also compiles natively, so `cargo test -p cahoots-wasm` exercises the whole API. |
 | `app/` | The static PWA: `index.html`, `app.js` (ES module), `styles.css`, `sw.js` (network-first service worker with a cache fallback; bump `VERSION` on every release), `manifest.json`, icons. |
 | `e2e.mjs` | End-to-end check: isolated browser contexts run a codes-only ceremony through the paste fallbacks and a ceremony through the relay, chat through a Numbers Station the script starts, and exchange a pure-pad message. `cargo build -p cahoots-station && node web/e2e.mjs`. |
+| `app/channels.js` | Channels: start one from a circle, open one from a link (`#/ch/<relay host>/<channel id>/<secret>`), post, and, for the owner, share or retire the link, start new keys, change the policy, let people in from Requests and revoke them from Members. Kept in IndexedDB stores `channels` and `chmsgs`. |
+| `channels-e2e.mjs` | End-to-end check of channels against a relay built with `--features objects,channels,gate`: A starts a group chat, B opens the link and reads, asks to post, is allowed, posts; A revokes B, and B is told the link no longer works and reads nothing after it. `cargo build -p cahoots-station --features objects,channels,gate && node web/channels-e2e.mjs`. |
 | `app/pkg/` | Build output of `wasm-pack`. Not committed. |
 
 ## Build and run

@@ -635,3 +635,69 @@ fn an_announcement_is_ok_with_the_quorum_of_seat_approvals() {
         "digest"
     );
 }
+
+#[test]
+fn another_seat_approves_through_its_circle() {
+    let (a, b) = circles();
+    let mut owner = a.channel_owner("News", 1, 2).unwrap();
+    let manifest = owner.manifest();
+    let link = owner.link_url("relay.example").unwrap();
+    owner.rotate().unwrap();
+    let mut member = joined(&owner, &link);
+    member.set_policy(&owner.policy()).unwrap();
+    let mut poster = owner.member();
+    poster.propose_announcement(b"from two seats").unwrap();
+    let digest = poster.announcement_digest().unwrap();
+    let mine = owner
+        .approve_post(&digest, "News", "from two seats", 0)
+        .unwrap();
+    let theirs = b
+        .approve_channel_post(&owner.policy(), &digest, "News", "from two seats", 0)
+        .unwrap();
+    let wire = poster.send_proposed(&array(&[&mine, &theirs])).unwrap();
+    let got = member
+        .receive(&wire, &owner.self_grant(), &manifest)
+        .unwrap();
+    assert!(got.announcement_ok());
+    assert_eq!(
+        b.approve_channel_post(b"junk", &digest, "News", "x", 0)
+            .unwrap_err(),
+        "signature"
+    );
+    assert_eq!(
+        b.approve_channel_post(&owner.policy(), "00", "News", "x", 0)
+            .unwrap_err(),
+        "digest"
+    );
+}
+
+#[test]
+fn the_link_id_and_a_request_summary_for_the_app() {
+    let (owner, link) = group_chat();
+    let m = ChannelMember::from_link(&link).unwrap();
+    let secret = b64_decode(link.rsplit('/').next().unwrap()).unwrap();
+    let mut h = Sha256::new();
+    h.update(b"cahoots/link/id/v1");
+    h.update(&secret);
+    assert_eq!(m.link_id_hex(), hex::encode(h.finalize()));
+    // The link deposit is addressed to that id.
+    let first = split(&owner.deposits()).remove(0);
+    assert!(hex::encode(&first).contains(&m.link_id_hex()));
+    let req = m.join_request("Rosa", "read,post").unwrap();
+    let json = cahoots_wasm::channel::join_request_summary(&req).unwrap();
+    assert_eq!(
+        json,
+        format!(
+            "{{\"channel_id\":\"{}\",\"kid\":\"{}\",\"name\":\"Rosa\",\"actions\":\"read,post\"}}",
+            owner.channel_id_hex(),
+            m.my_kid_hex()
+        )
+    );
+    let mut bad = req.clone();
+    let n = bad.len();
+    bad[n - 1] ^= 1;
+    assert_eq!(
+        cahoots_wasm::channel::join_request_summary(&bad).unwrap_err(),
+        "signature"
+    );
+}
