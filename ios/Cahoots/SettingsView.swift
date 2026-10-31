@@ -38,6 +38,21 @@ struct SettingsView: View {
                         .padding(.vertical, Space.m)
                 }
                 if !app.circles.isEmpty { circles }
+                PaperSection(title: "Bench", footer: "For trying a badge’s chip over NFC. It reads the chip’s version and random bytes and touches no key.") {
+                    NavigationLink {
+                        NfcDiagnosticsView()
+                    } label: {
+                        HStack {
+                            Label("NFC check", systemImage: "wave.3.right")
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                        }
+                        .foregroundStyle(Color.brand)
+                        .frame(minHeight: 44)
+                    }
+                    .buttonStyle(RowButtonStyle())
+                    .accessibilityIdentifier("nfc-check")
+                }
                 if let info {
                     Text("Cahoots \(info.appVersion)")
                         .font(.footnote).foregroundStyle(Color.muted)

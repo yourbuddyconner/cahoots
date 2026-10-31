@@ -37,14 +37,18 @@ targets:
         embed: false
       - sdk: SystemConfiguration.framework
       - sdk: Security.framework
+      - sdk: CoreNFC.framework
     # Universal links: cahoots.network/app/ links open here, once the site serves
-    # /.well-known/apple-app-site-association. Automatic signing adds the capability.
+    # /.well-known/apple-app-site-association. NFC tag reading is for the bench check of a
+    # badge's chip (Settings). Automatic signing adds both capabilities to the App ID.
     # XcodeGen writes the file from these properties.
     entitlements:
       path: Cahoots/Cahoots.entitlements
       properties:
         com.apple.developer.associated-domains:
           - applinks:cahoots.network
+        com.apple.developer.nfc.readersession.formats:
+          - TAG
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: network.cahoots.app

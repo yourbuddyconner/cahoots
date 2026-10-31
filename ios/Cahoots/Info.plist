@@ -37,6 +37,12 @@
 	<string>Cahoots uses the camera to scan circle setup codes. It does not save photos or video.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Use Face ID to authorize this phone to join and confirm your circle.</string>
+	<key>NFCReaderUsageDescription</key>
+	<string>Cahoots reads a badge’s chip over NFC when you hold the phone to it.</string>
+	<key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
+	<array>
+		<string>A0000003965453000000010300000000</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
