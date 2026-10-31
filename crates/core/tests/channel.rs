@@ -1,6 +1,6 @@
 use cahoots_core::channel::{
     join_code, parse_join_code, parts, Channel, ChannelError, Gate, Mailbox, Round,
-    CEREMONY_VERSION, MAX_WIRE, OFFER_PREFIX,
+    CEREMONY_VERSION, MAX_WIRE, OFFER_PREFIX, OFFER_PREFIX_V1,
 };
 use cahoots_core::params::CircleParams;
 use rand_core::{CryptoRng, RngCore};
@@ -45,7 +45,7 @@ fn params() -> CircleParams {
 fn offer_round_trips() {
     let ch = Channel::new(&mut rng(1));
     let text = ch.offer(&params(), RELAY, &HOST, 0).unwrap();
-    assert!(text.starts_with(OFFER_PREFIX), "{text}");
+    assert!(text.starts_with(OFFER_PREFIX_V1), "{text}");
     // One small static code: well under what a version 10 QR code holds at low correction.
     assert!(text.len() < 200, "{} characters", text.len());
     let o = Channel::from_offer(&text).unwrap();
@@ -64,6 +64,10 @@ fn offer_round_trips() {
     );
     assert_eq!(
         Channel::from_offer(&format!("{OFFER_PREFIX}AAAA")).unwrap_err(),
+        ChannelError::Malformed
+    );
+    assert_eq!(
+        Channel::from_offer(&format!("{OFFER_PREFIX_V1}AAAA")).unwrap_err(),
         ChannelError::Malformed
     );
     // Parameters that do not read are refused.
@@ -240,7 +244,12 @@ fn reproduces_the_channel_vector() {
     assert_eq!(host, cahoots_core::channel::commitment_hash(&h(&v["host_commitment"])));
     assert_eq!(ch.offer(&params, relay, &host, 0).unwrap(), v["offer"].as_str().unwrap());
     let o = Channel::from_offer(v["offer"].as_str().unwrap()).unwrap();
-    assert_eq!((o.relay.as_str(), o.host), (relay, host));
+    assert_eq!((o.relay.as_str(), o.host, o.badges), (relay, host, 0));
+    let wb = &v["offer_with_badges"];
+    let badges = wb["badges"].as_u64().unwrap() as u8;
+    assert_eq!(ch.offer(&params, relay, &host, badges).unwrap(), wb["offer"].as_str().unwrap());
+    let o = Channel::from_offer(wb["offer"].as_str().unwrap()).unwrap();
+    assert_eq!((o.relay.as_str(), o.host, o.badges), (relay, host, badges));
     let j = &v["join"];
     assert_eq!(
         join_code(&id, j["seat"].as_u64().unwrap() as u8, &h(&j["commitment"])),
@@ -291,7 +300,8 @@ fn an_offer_round_trips_its_badge_count() {
     let p = CircleParams::new(4, 65536, "park", false).unwrap();
     let ch = Channel::new(&mut rng(10));
     let text = ch.offer(&p, RELAY, &HOST, 2).unwrap();
-    assert!(text.starts_with("cahoots:ceremony:v2:"), "{text}");
+    assert!(text.starts_with(OFFER_PREFIX), "{text}");
+    assert_eq!(OFFER_PREFIX, "cahoots:ceremony:v2:");
     let o = Channel::from_offer(&text).unwrap();
     assert_eq!(o.badges, 2);
     assert_eq!(o.params, p);
@@ -302,11 +312,42 @@ fn an_offer_round_trips_its_badge_count() {
 }
 
 #[test]
-fn a_v1_offer_is_refused_as_older() {
-    assert_eq!(
-        Channel::from_offer("cahoots:ceremony:v1:AAAA").unwrap_err(),
-        ChannelError::OlderOffer
+fn an_offer_without_cards_is_a_v1_code() {
+    let ch = Channel::new(&mut rng(12));
+    let text = ch.offer(&params(), RELAY, &HOST, 0).unwrap();
+    assert!(text.starts_with("cahoots:ceremony:v1:"), "{text}");
+    let o = Channel::from_offer(&text).unwrap();
+    assert_eq!(o.badges, 0);
+    assert_eq!(o.params, params());
+    assert_eq!(o.relay, RELAY);
+    assert_eq!(o.host, HOST);
+    assert_eq!(o.channel.id, ch.id);
+    assert!(!o.is_badge_seat(1));
+}
+
+#[test]
+fn a_v1_code_reads_as_no_cards() {
+    // The v1 layout, built by hand: id || key || host || relay_len || relay || params.
+    use base64::Engine;
+    let mut raw = vec![7u8; 16];
+    raw.extend_from_slice(&[9u8; 32]);
+    raw.extend_from_slice(&HOST);
+    raw.push(RELAY.len() as u8);
+    raw.extend_from_slice(RELAY.as_bytes());
+    raw.extend_from_slice(&params().encode());
+    let text = format!(
+        "cahoots:ceremony:v1:{}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&raw)
     );
+    let o = Channel::from_offer(&text).unwrap();
+    assert_eq!(o.badges, 0);
+    assert_eq!(o.channel.id, [7u8; 16]);
+    assert_eq!(o.host, HOST);
+    assert_eq!(o.relay, RELAY);
+    assert_eq!(o.params, params());
+    // The same channel makes the same code.
+    let again = Channel::from_key([7u8; 16], [9u8; 32]).offer(&params(), RELAY, &HOST, 0).unwrap();
+    assert_eq!(again, text);
 }
 
 #[test]

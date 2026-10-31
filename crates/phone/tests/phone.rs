@@ -688,7 +688,7 @@ fn two_phones_hold_a_ceremony_through_the_relay() {
     assert!(a.phone.set_default_relay("relay.test".into()).is_err());
     let ida = a.phone.start_ceremony("park".into(), 2, 0, PAD, true).unwrap();
     let offer = a.phone.offer_code(ida.clone()).unwrap();
-    assert!(offer.starts_with("cahoots:ceremony:v2:"), "{offer}");
+    assert!(offer.starts_with("cahoots:ceremony:v1:"), "{offer}");
     // The offer fits one small code.
     assert!(a.phone.qr_matrix(offer.clone()).unwrap().size <= 49, "{} characters", offer.len());
     // Scanned before joining: the circle and its size, to pick a seat.
@@ -1098,11 +1098,31 @@ fn too_many_badges_is_refused_before_a_code_exists() {
 }
 
 #[test]
-fn an_old_offer_is_explained() {
+fn a_v1_code_joins_as_a_circle_without_cards() {
+    // A v1 code is what a host made before cards, or makes now with none.
+    use cahoots_core::channel::{commitment_hash, Channel};
+    use cahoots_core::params::CircleParams;
     let r = relay();
     let a = device(&r);
-    let e = a.phone.join_scan("cahoots:ceremony:v1:AAAA".into()).unwrap_err();
-    assert!(message(e).contains("older version"));
-    let e = a.phone.join_offer("cahoots:ceremony:v1:AAAA".into(), 1).unwrap_err();
-    assert!(message(e).contains("older version"));
+    let params = CircleParams::new(3, 16384, "park", false).unwrap();
+    let channel = Channel::new(&mut rand_core::OsRng);
+    let text = channel.offer(&params, RELAY, &commitment_hash(b"host"), 0).unwrap();
+    assert!(text.starts_with("cahoots:ceremony:v1:"), "{text}");
+    let seen = a.phone.join_scan(text.clone()).unwrap().unwrap();
+    assert_eq!((seen.members, seen.badges), (3, 0));
+    assert!(seen.through_relay);
+    // Seat 1, which a card would hold in a v2 code, is a phone's seat here.
+    let id = a.phone.join_offer(text, 1).unwrap();
+    let state = a.phone.ceremony_state(id).unwrap();
+    assert_eq!(state.badges, 0);
+}
+
+#[test]
+fn a_newer_offer_is_explained() {
+    let r = relay();
+    let a = device(&r);
+    let e = a.phone.join_scan("cahoots:ceremony:v3:AAAA".into()).unwrap_err();
+    assert!(message(e).contains("newer version"));
+    let e = a.phone.join_offer("cahoots:ceremony:v9:AAAA".into(), 1).unwrap_err();
+    assert!(message(e).contains("newer version"));
 }

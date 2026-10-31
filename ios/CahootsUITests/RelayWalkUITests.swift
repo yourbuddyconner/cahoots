@@ -60,7 +60,7 @@ final class RelayWalkUITests: XCTestCase {
         app.buttons["start-ceremony"].tap()
 
         let offer = try readCode()
-        XCTAssertTrue(offer.hasPrefix("cahoots:ceremony:v2:"), offer)
+        XCTAssertTrue(offer.hasPrefix(cards > 0 ? "cahoots:ceremony:v2:" : "cahoots:ceremony:v1:"), offer)
         shot("host-3-offer")
         if cards > 0 {
             // Each card's seat row says it comes through the bridge.

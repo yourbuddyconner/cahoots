@@ -37,7 +37,6 @@ const ERRORS = {
   aborted: 'This ceremony was stopped.',
   'not-an-offer': 'That is not a host\'s code.',
   offer: 'The host’s code could not be read. Scan it again.',
-  'offer-older': 'This code is from an older version of Cahoots. Ask the host to update.',
   'offer-newer': 'This code is from a newer version of Cahoots. Update the app.',
   'host-seat': 'Seat 1 is the host\'s. Pick another seat.',
   'not-a-join-code': 'That is not a joiner\'s code.',
@@ -66,7 +65,8 @@ const CEREMONY_POLL_MS = 2000; // a ceremony through the relay reads the relay e
 const LOST = 'Setup couldn’t be restored after Cahoots closed. Ask everyone to start a new ceremony and scan the new code.';
 /** A ceremony in memory is gone after a reload or a close. Joining it again cannot work. */
 const ceremonyLost = () => screen({ title: 'Ceremony lost', body: [h('div', {}, h('h1', {}, 'This setup session has ended'), h('p', { class: 'lead' }, LOST), h('p', { class: 'muted' }, 'Nothing was kept.'))], actions: [btn('Back to start', () => go('#/'), 'primary')] });
-const OFFER_PREFIX = 'cahoots:ceremony:v2:';
+// Every host's code starts with this, then its version: v1 with no cards, v2 with cards.
+const OFFER_FAMILY = 'cahoots:ceremony:v';
 const JOINED_PREFIX = 'cahoots:joined:v1:';
 const QR_PACKET = 300;   // payload bytes per animated frame: ~77 modules per side, readable by phone cameras
 const QR_FPS = 10;
@@ -333,7 +333,7 @@ function fountainReceiver(onDone, hint, onTagged = null) {
   const st = status();
   st.textContent = onTagged ? '' : 'Keep the animated code in view until the progress bar fills.';
   const feed = (text) => {
-    if (onTagged && (text.startsWith('cahoots-') || text.startsWith(OFFER_PREFIX))) { onTagged(text); return; }
+    if (onTagged && (text.startsWith('cahoots-') || text.startsWith(OFFER_FAMILY))) { onTagged(text); return; }
     try {
       const done = dec.add(b64_decode(text));
       bar.value = dec.progress();
@@ -535,12 +535,12 @@ function screenJoin() {
       go(`#/ceremony/${paramsHash(params)}/pick`);
     } catch (e) { err.textContent = friendly(e); }
   };
-  const take = (text) => (text.trim().startsWith(OFFER_PREFIX) ? acceptOffer(text) : accept(parseTagged(text)));
+  const take = (text) => (text.trim().startsWith(OFFER_FAMILY) ? acceptOffer(text) : accept(parseTagged(text)));
   screen({
     title: 'Join a ceremony', back: '#/',
-    menu: () => sheet(h('h2', {}, 'No camera?'), btn('Paste a code', () => pasteSheet('cahoots:ceremony:v2:…', take)), fileBtn('Load a file', take)),
+    menu: () => sheet(h('h2', {}, 'No camera?'), btn('Paste a code', () => pasteSheet('cahoots:ceremony:v1:…', take)), fileBtn('Load a file', take)),
     body: [next('Scan the host\'s code.'), h('p', { class: 'muted' }, 'For a ceremony with codes only, scan anyone who has joined. Their code is a short animation.'), fountainReceiver((bytes) => accept(parsePacked(bytes)), 'Fill the frame with the code', take).el, err],
-    actions: [link('No camera? Paste a code', () => pasteSheet('cahoots:ceremony:v2:…', take))],
+    actions: [link('No camera? Paste a code', () => pasteSheet('cahoots:ceremony:v1:…', take))],
   });
 }
 

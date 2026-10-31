@@ -51,7 +51,7 @@ fn three_browsers_hold_a_ceremony_through_a_mem_relay() {
     let mut host = member(0, None);
     assert!(!host.through_relay());
     let offer = host.offer(RELAY).unwrap();
-    assert!(offer.starts_with("cahoots:ceremony:v2:"), "{offer}");
+    assert!(offer.starts_with("cahoots:ceremony:v1:"), "{offer}");
     assert!(host.through_relay());
     // The offer is the same each time it is shown.
     assert_eq!(host.offer("https://elsewhere.test").unwrap(), offer);
@@ -272,10 +272,9 @@ fn offer_badges_reads_the_count_and_names_a_code_from_another_version() {
     let with_cards = channel.offer(&params, RELAY, &[7; 32], 2).unwrap();
     assert_eq!(offer_badges(&with_cards).unwrap(), 2);
     let none = channel.offer(&params, RELAY, &[7; 32], 0).unwrap();
+    assert!(none.starts_with("cahoots:ceremony:v1:"), "{none}");
     assert_eq!(offer_badges(&none).unwrap(), 0);
 
-    let older = offer_badges("cahoots:ceremony:v1:AAAA").unwrap_err();
-    assert!(older.contains("older"), "{older}");
     let newer = offer_badges("cahoots:ceremony:v3:AAAA").unwrap_err();
     assert!(newer.contains("newer"), "{newer}");
     assert_eq!(offer_badges("hello").unwrap_err(), "not-an-offer");

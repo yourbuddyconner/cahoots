@@ -477,7 +477,8 @@ await H.snap('relay-offer');
 const offerFits = await H.page.evaluate(() => { const qr = document.querySelector('.qr svg').getBoundingClientRect(); return qr.width >= 180 && qr.height >= 180 && qr.bottom <= innerHeight; });
 if (!offerFits) throw new Error('The join code does not fit the screen');
 await H.menu(); await H.page.getByRole('button', { name: 'Copy the code', exact: true }).click(); const offer = await H.clip(); await H.closeSheet();
-if (!offer?.startsWith('cahoots:ceremony:v2:')) throw new Error(`offer text: ${offer}`);
+// No cards, so the code is the v1 form every version reads.
+if (!/^cahoots:ceremony:v[12]:/.test(offer ?? '')) throw new Error(`offer text: ${offer}`);
 // The code on the host's screen reads back as the offer, at its displayed size.
 const shown = await H.page.evaluate(async () => {
   const { qr_decode_rgba } = await import('./pkg/cahoots_wasm.js');
@@ -496,6 +497,10 @@ const shown = await H.page.evaluate(async () => {
 if (shown !== offer) throw new Error(`the code on screen reads as ${shown}`);
 await G.page.getByRole('button', { name: 'Join a circle', exact: true }).click();
 await G.page.waitForSelector("text=Scan the host's code");
+// A code from a newer version says so.
+await G.page.getByRole('button', { name: 'No camera? Paste a code', exact: true }).click();
+await G.paste('cahoots:ceremony:v9:AAAA');
+await G.page.waitForSelector('text=This code is from a newer version of Cahoots. Update the app.');
 await G.page.getByRole('button', { name: 'No camera? Paste a code', exact: true }).click();
 await G.paste(offer);
 await G.page.waitForSelector('text=Which seat are you?');
@@ -519,7 +524,7 @@ if (wH !== wG) throw new Error(`relay check words differ: ${wH} / ${wG}`);
 console.log("relay check words:", wH);
 // The ceremony went through the station started here: each member's setup, its reveal in two
 // parts (a 64 KiB pad) and its signature. The public listing does not show the channel.
-const channelHex = Buffer.from(offer.slice('cahoots:ceremony:v2:'.length), 'base64url').subarray(0, 16).toString('hex');
+const channelHex = Buffer.from(offer.slice(offer.indexOf(':', 'cahoots:ceremony:v'.length) + 1), 'base64url').subarray(0, 16).toString('hex');
 const held = await (await fetch(`${stationUrl}/v1/circles/${channelHex}/messages`)).json();
 if (held.entries.length !== 8) throw new Error(`the station holds ${held.entries.length} ceremony messages, expected 8`);
 const listed = await (await fetch(`${stationUrl}/v1/circles`)).json();

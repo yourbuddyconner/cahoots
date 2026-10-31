@@ -20,7 +20,7 @@ struct JoinView: View {
                         .font(.body)
                         .foregroundStyle(Color.muted)
                         .fixedSize(horizontal: false, vertical: true)
-                    ScanPanel(core: core, placeholder: "cahoots:ceremony:v2:...") { text, pasted in
+                    ScanPanel(core: core, placeholder: "cahoots:ceremony:v1:...") { text, pasted in
                         Task { await read(text, pasted: pasted) }
                     }
                     if reading {
@@ -98,8 +98,10 @@ struct JoinView: View {
                 reading = true
             }
         } catch {
-            // The camera sees many things that are not codes. Only a pasted code is worth a word.
-            if pasted { self.error = plain(error) }
+            // The camera sees many things that are not codes. Only a pasted code, or a host's
+            // code the app cannot read (one from a newer version), is worth a word.
+            let hostCode = text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("cahoots:ceremony:")
+            if pasted || hostCode { self.error = plain(error) }
         }
     }
 

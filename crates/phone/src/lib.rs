@@ -596,7 +596,7 @@ impl Phone {
     }
 
     /// Join a ceremony held through the relay as `seat` (from 0), from the host's code
-    /// (`cahoots:ceremony:v2:...`). Seat 0 is the host's. Returns the ceremony id. The
+    /// (`cahoots:ceremony:v1:...`, or `v2` with cards). Seat 0 is the host's. Returns the ceremony id. The
     /// ceremony, and the circle it makes, use the host's relay from the code, whatever this
     /// phone's default is. Of two devices on one seat, the one whose setup reached the relay
     /// second is told (`seat_lost`) and posts nothing more.
@@ -1052,7 +1052,6 @@ fn check_seat(params: &CircleParams, badges: u8, seat: u8) -> Result<(), PhoneEr
 fn offer_err(e: cahoots_core::channel::ChannelError, other: &str) -> PhoneError {
     use cahoots_core::channel::ChannelError;
     let message = match e {
-        ChannelError::OlderOffer => "This code is from an older version of Cahoots. Ask the host to update.",
         ChannelError::NewerOffer => "This code is from a newer version of Cahoots. Update the app.",
         _ => other,
     };

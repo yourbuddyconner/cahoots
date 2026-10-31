@@ -44,7 +44,7 @@ final class PhoneSmokeTests: XCTestCase {
         let id = try phone.startCeremony(name: "park", members: 3, badges: 0, padLen: 16384, throughRelay: true)
         defer { phone.ceremonyDiscard(id: id) }
         let offer = try phone.offerCode(id: id)
-        XCTAssertTrue(offer.hasPrefix("cahoots:ceremony:v2:"), offer)
+        XCTAssertTrue(offer.hasPrefix("cahoots:ceremony:v1:"), offer)
         let seen = try XCTUnwrap(try phone.joinScan(text: offer))
         XCTAssertEqual(seen.members, 3)
         XCTAssertTrue(seen.throughRelay)

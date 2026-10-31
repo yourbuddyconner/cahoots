@@ -8,12 +8,16 @@
 //! from the same place. The round logic is [`crate::ceremony::Ceremony`], the same as with
 //! animated codes, so both ways make the same circle.
 //!
-//! The offer is `"cahoots:ceremony:v2:" || base64url(id || key || host || badges || relay_len ||
-//! relay || params)`: `badges` is the number of badges in the pile, one byte, below the
-//! circle's size (badges take seats 1 through `badges`); `host` is SHA-256 of the host's commitment payload, so joiners take seat 0's
-//! commitment only if it is the host's; the relay address the host uses, at most 255 bytes of
-//! UTF-8 after its one-byte length; and the parameters in their canonical encoding
-//! ([`CircleParams::encode`]). Everyone joining uses the host's relay.
+//! An offer with no badges is `"cahoots:ceremony:v1:" || base64url(id || key || host ||
+//! relay_len || relay || params)`. An offer with badges is `"cahoots:ceremony:v2:" ||
+//! base64url(id || key || host || badges || relay_len || relay || params)`: `badges` is the
+//! number of badges in the pile, one byte, above zero and below the circle's size (badges take
+//! seats 1 through `badges`). A v1 code reads as no badges, so a circle without badges reads
+//! the same in a version of the app from before badges. `host` is SHA-256 of the host's
+//! commitment payload, so joiners take seat 0's commitment only if it is the host's; `relay` is
+//! the relay address the host uses, at most 255 bytes of UTF-8 after its one-byte length; and
+//! `params` are the parameters in their canonical encoding ([`CircleParams::encode`]).
+//! Everyone joining uses the host's relay.
 //!
 //! A message on the wire is what the station stores:
 //!
@@ -48,10 +52,10 @@ use zeroize::Zeroizing;
 
 /// The HKDF info that turns the offer's key into the cipher key.
 pub const CHANNEL_DOMAIN: &[u8] = b"cahoots/ceremony/channel/v1";
-/// The text every offer starts with.
+/// The text an offer with badges starts with.
 pub const OFFER_PREFIX: &str = "cahoots:ceremony:v2:";
-/// The text offers started with before they carried a badge count.
-pub const OLD_OFFER_PREFIX: &str = "cahoots:ceremony:v1:";
+/// The text an offer with no badges starts with: the layout from before badges.
+pub const OFFER_PREFIX_V1: &str = "cahoots:ceremony:v1:";
 /// What every offer's text starts with, before its version number.
 const OFFER_FAMILY: &str = "cahoots:ceremony:v";
 /// The station's message version for the ceremony channel.
@@ -92,8 +96,6 @@ impl Round {
 pub enum ChannelError {
     /// The text is not a ceremony offer.
     NotAnOffer,
-    /// A code from an older version of the app.
-    OlderOffer,
     /// A code from a newer version of the app.
     NewerOffer,
     /// An offer or a message that does not parse.
@@ -162,11 +164,13 @@ impl Channel {
         }
     }
 
-    /// The code text to show: `"cahoots:ceremony:v2:" || base64url(id || key || host ||
-    /// badges || relay_len || relay || params)`. `host` is [`commitment_hash`] of the host's
-    /// commitment payload. `badges` is how many badges are in the pile and must be below the
-    /// circle's size. `relay` is the host's relay address, at most 255 bytes. A longer relay,
-    /// or too many badges, is refused with `Malformed`.
+    /// The code text to show. With no badges it is `"cahoots:ceremony:v1:" || base64url(id ||
+    /// key || host || relay_len || relay || params)`, which a version of the app from before
+    /// badges also reads. With badges it is `"cahoots:ceremony:v2:" || base64url(id || key ||
+    /// host || badges || relay_len || relay || params)`. `host` is [`commitment_hash`] of the
+    /// host's commitment payload. `badges` is how many badges are in the pile and must be
+    /// below the circle's size. `relay` is the host's relay address, at most 255 bytes. A
+    /// longer relay, or too many badges, is refused with `Malformed`.
     pub fn offer(
         &self,
         params: &CircleParams,
@@ -184,22 +188,24 @@ impl Channel {
         raw.extend_from_slice(&self.id);
         raw.extend_from_slice(self.key.as_ref());
         raw.extend_from_slice(host);
-        raw.push(badges);
+        if badges > 0 {
+            raw.push(badges);
+        }
         raw.push(relay_len);
         raw.extend_from_slice(relay.as_bytes());
         raw.extend_from_slice(&params.encode());
-        let mut out = String::from(OFFER_PREFIX);
+        let mut out = String::from(if badges > 0 { OFFER_PREFIX } else { OFFER_PREFIX_V1 });
         out.push_str(&URL_SAFE_NO_PAD.encode(&raw[..]));
         Ok(out)
     }
 
-    /// What an offer holds: the channel, the circle's parameters, the host's relay address and
-    /// the hash of the host's commitment.
+    /// What an offer holds: the channel, the circle's parameters, the host's relay address,
+    /// the hash of the host's commitment and the badge count. A v1 code has no badges.
     pub fn from_offer(text: &str) -> Result<Offer, ChannelError> {
         let text = text.trim();
-        let body = match text.strip_prefix(OFFER_PREFIX) {
-            Some(body) => body,
-            None if text.starts_with(OLD_OFFER_PREFIX) => return Err(ChannelError::OlderOffer),
+        let (body, with_badges) = match text.strip_prefix(OFFER_PREFIX) {
+            Some(body) => (body, true),
+            None if text.starts_with(OFFER_PREFIX_V1) => (&text[OFFER_PREFIX_V1.len()..], false),
             None => {
                 let version = text
                     .strip_prefix(OFFER_FAMILY)
@@ -217,14 +223,15 @@ impl Channel {
                 .map_err(|_| ChannelError::Malformed)?,
         );
         let host_at = ID_LEN + KEY_LEN;
-        if raw.len() < host_at + 32 + 2 {
+        let len_at = host_at + 32 + usize::from(with_badges);
+        if raw.len() < len_at + 1 {
             return Err(ChannelError::Malformed);
         }
         let mut host = [0u8; 32];
         host.copy_from_slice(&raw[host_at..host_at + 32]);
-        let badges = raw[host_at + 32];
-        let relay_at = host_at + 32 + 2;
-        let relay_end = relay_at + usize::from(raw[host_at + 33]);
+        let badges = if with_badges { raw[host_at + 32] } else { 0 };
+        let relay_at = len_at + 1;
+        let relay_end = relay_at + usize::from(raw[len_at]);
         let relay = raw
             .get(relay_at..relay_end)
             .and_then(|r| core::str::from_utf8(r).ok())

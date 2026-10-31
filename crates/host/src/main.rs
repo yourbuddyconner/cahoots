@@ -155,8 +155,8 @@ fn run_bridge(args: &Args) -> Result<(), String> {
     };
     let offer = cahoots_core::channel::Channel::from_offer(&text)
         .map_err(|e| match e {
-            cahoots_core::channel::ChannelError::OlderOffer | cahoots_core::channel::ChannelError::NewerOffer => {
-                "the host's code is from another version of the app. Update both and start again".to_string()
+            cahoots_core::channel::ChannelError::NewerOffer => {
+                "the host's code is from a newer version of the app. Update the bridge and start again".to_string()
             }
             _ => "the host's code could not be read. Copy it again from the host's phone".to_string(),
         })?;

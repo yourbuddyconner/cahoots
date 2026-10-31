@@ -8,7 +8,7 @@
 //! `1 || seat || params len || params || commitment`, `2 || sealed reveal`, `3 || seat || attestation`.
 //!
 //! A ceremony can also be held through the relay (`cahoots_core::channel`): the host shows one
-//! static code, `cahoots:ceremony:v2:...`, everyone joining scans it, and each round's
+//! static code, `cahoots:ceremony:v1:...` (`v2` when cards take part), everyone joining scans it, and each round's
 //! messages go through the relay, sealed under the code's key. The payloads are the same
 //! bytes as above, and the rounds are the same `Ceremony`.
 

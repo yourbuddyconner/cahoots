@@ -441,6 +441,7 @@ fn channel_vectors() -> Value {
     let host_commitment = fill(705, 1282);
     let host = cahoots_core::channel::commitment_hash(&host_commitment);
     let offer = ch.offer(&params, relay, &host, 0).unwrap();
+    let offer_with_badges = ch.offer(&params, relay, &host, 2).unwrap();
     let nonce: [u8; 12] = fill(702, 12).try_into().unwrap();
     let payload = fill(703, 48);
     let wire = ch.seal_with_nonce(2, Round::Reveal, &payload, nonce);
@@ -449,7 +450,7 @@ fn channel_vectors() -> Value {
     let joined = cahoots_core::channel::join_code(&id, 1, &commitment);
     assert_eq!(opened, payload);
     json!({
-        "description": "The ceremony channel (crates/core/src/channel.rs, docs/protocol.md section 3.7). offer = \"cahoots:ceremony:v2:\" || base64url without padding (id || key || SHA-256(host commitment) || badge count (u8) || relay length (u8) || relay (UTF-8) || params). The host commitment is the host's commitment payload; a joiner takes seat 0's commitment only if its hash matches. A message is version 3 | id (16) | len (u32 LE, the bytes after it) | seat | round (1 commit, 2 reveal, 3 attest) | nonce (12) | ChaCha20-Poly1305 ciphertext and tag, under HKDF-SHA256(ikm = key, salt = id, info = \"cahoots/ceremony/channel/v1\"), with id || seat || round as associated data.",
+        "description": "The ceremony channel (crates/core/src/channel.rs, docs/protocol.md section 3.7). offer, with no badges, = \"cahoots:ceremony:v1:\" || base64url without padding (id || key || SHA-256(host commitment) || relay length (u8) || relay (UTF-8) || params). offer_with_badges = \"cahoots:ceremony:v2:\" || base64url without padding (id || key || SHA-256(host commitment) || badge count (u8) || relay length (u8) || relay (UTF-8) || params), here with 2 badges. The host commitment is the host's commitment payload; a joiner takes seat 0's commitment only if its hash matches. A message is version 3 | id (16) | len (u32 LE, the bytes after it) | seat | round (1 commit, 2 reveal, 3 attest) | nonce (12) | ChaCha20-Poly1305 ciphertext and tag, under HKDF-SHA256(ikm = key, salt = id, info = \"cahoots/ceremony/channel/v1\"), with id || seat || round as associated data.",
         "id": hex::encode(id),
         "key": hex::encode(key),
         "params": hex::encode(params.encode()),
@@ -457,6 +458,10 @@ fn channel_vectors() -> Value {
         "host_commitment": hex::encode(&host_commitment),
         "host_commitment_hash": hex::encode(host),
         "offer": offer,
+        "offer_with_badges": {
+            "badges": 2,
+            "offer": offer_with_badges,
+        },
         "join": {
             "description": "A joiner's code: \"cahoots:joined:v1:\" || base64url without padding (id || seat || SHA-256(commitment)).",
             "seat": 1,
