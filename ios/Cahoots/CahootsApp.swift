@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct CahootsApp: App {
@@ -9,12 +10,25 @@ struct CahootsApp: App {
         let model = AppModel()
         _model = StateObject(wrappedValue: model)
         BackgroundRefresh.register(model)
+        Self.styleBars()
+    }
+
+    /// Large titles in the system serif, as the site's Georgia headlines. Only the title fonts
+    /// and colours change, so the bars keep their system material (glass on iOS 26).
+    private static func styleBars() {
+        let ink = UIColor(named: "Ink") ?? .label
+        let large = UIFont.preferredFont(forTextStyle: .largeTitle)
+        let serif = large.fontDescriptor.withDesign(.serif) ?? large.fontDescriptor
+        let bar = UINavigationBar.appearance()
+        bar.largeTitleTextAttributes = [.font: UIFont(descriptor: serif, size: 0), .foregroundColor: ink]
+        bar.titleTextAttributes = [.foregroundColor: ink]
     }
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(model)
+                .tint(Color.brand)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { BackgroundRefresh.schedule() }
@@ -36,16 +50,20 @@ struct RootView: View {
                         }
                 }
             } else if let error = model.openError {
-                ContentUnavailableView {
-                    Label("Cahoots cannot open its records", systemImage: "lock")
-                } description: {
-                    Text(error + " Unlock the phone and try again.")
-                } actions: {
+                VStack(alignment: .leading, spacing: Space.xl) {
+                    Spacer()
+                    Image(systemName: "lock").font(.largeTitle).foregroundStyle(Color.ink)
+                        .accessibilityHidden(true)
+                    ScreenHeader(title: "Cahoots cannot open its records",
+                                 detail: error + " Unlock the phone and try again.", style: .title)
+                    Spacer()
                     Button("Try again") { Task { await model.open() } }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.filled)
                 }
+                .padding(Space.l)
+                .paperBackground()
             } else {
-                ProgressView()
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).paperBackground()
             }
         }
         .task { await model.open() }

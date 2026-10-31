@@ -93,3 +93,25 @@ dashes, no semicolons, no all caps. Meta is written as sentences.
 - Middle-dot meta strings, the epoch on every message, "you · 1" seat chips.
 - Grey grouped backgrounds and the default `Form` look.
 - Red status text.
+
+## Notes from building it
+
+- `Theme.swift` holds the tokens, the button styles, `PaperSection`, `OptionRow`, `ScreenHeader`
+  and `actionBar`. `FaceView.swift` draws a face from the 576 pixel bytes of
+  `Phone.facePixels(seed:)`; the seeds come from `Phone.seatFaceSeed(circle:seat:)` and
+  `Phone.myFaceSeed()`, all three on the phone queue. So `FaceView` takes pixels, not a seed.
+- Large titles are the system serif through `UINavigationBar.appearance()`: only the title font
+  and colour change, so the bars keep their system material.
+- An action bar is attached only when it holds something. On iOS 17 an empty bar is still a
+  strip of paper above the keyboard, and it took the tap meant for the paste field's Use button.
+- The paste field focuses on a tap anywhere inside its border, not only on the text.
+- The ceremony's step bar counts Meet the group, Exchange secrets, Confirm members, Compare words.
+  A joiner still showing its code to the host is on step 1, whatever the relay's phase.
+- Relay errors: no answer at all reads "Cannot reach the relay. Trying again." An answer with an
+  error reads the relay's `detail` ("The relay refused the message: unknown message version"),
+  or its status ("The relay answered 500."). Swift writes these words in `UrlSessionHttp`, and
+  the phone crate passes them through unchanged. Telling the two apart rests on the message
+  text, since `PhoneError` has one `Network` case for both.
+- Screenshots were taken on the iOS 17.5 simulator, the only runtime installed, in light mode,
+  dark mode, and at accessibility extra large text. The iOS 26 glass paths (`safeAreaBar`, the
+  composer's `glassEffect`) compile but have not been seen running.

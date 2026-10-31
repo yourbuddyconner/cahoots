@@ -12,8 +12,10 @@ struct CeremonyView: View {
 
     var body: some View {
         content
-            .navigationBarBackButtonHidden(true)
+            .paperBackground()
+            .navigationTitle(model.state?.name ?? "Ceremony")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(true)
             .toolbar {
                 if !model.finished {
                     ToolbarItem(placement: .topBarLeading) {
@@ -26,11 +28,13 @@ struct CeremonyView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 if model.signing {
-                    FaceIDBanner().padding()
+                    FaceIDBanner().padding(.horizontal, Space.l).padding(.bottom, Space.s).background(Color.paper)
                 } else if model.signRefused {
                     Button("Sign with Face ID") { Task { await model.retrySign() } }
-                        .buttonStyle(.borderedProminent)
-                        .padding()
+                        .buttonStyle(.filled)
+                        .padding(.horizontal, Space.l)
+                        .padding(.bottom, Space.s)
+                        .background(Color.paper)
                 }
             }
             .task {
@@ -42,13 +46,13 @@ struct CeremonyView: View {
     @ViewBuilder
     private var content: some View {
         if let gone = model.gone {
-            EndedView(title: "Ceremony lost", headline: "This ceremony is gone.", detail: gone) { await leave() }
+            EndedView(headline: "This ceremony is gone.", detail: gone) { await leave() }
         } else if let s = model.state {
             if s.seatLost {
-                EndedView(title: "Seat taken", headline: "Seat \(s.mySeat + 1) was taken by someone else.",
+                EndedView(headline: "Seat \(s.mySeat + 1) was taken by someone else.",
                           detail: "Leave and join again with a free seat.", button: "Leave") { await leave() }
             } else if s.phase == .aborted {
-                EndedView(title: "Ceremony stopped", headline: "A reveal did not match its commitment.",
+                EndedView(headline: "The ceremony stopped. A reveal did not match its commitment.",
                           detail: s.throughRelay
                           ? "Nothing was kept. Someone outside the room may have the code. Everyone starts over with a new code."
                           : "Nothing was kept. Either someone's contribution changed after they committed, or a code was corrupted. Start again from the beginning.") { await leave() }
@@ -62,7 +66,7 @@ struct CeremonyView: View {
                 CodesCeremonyView(model: model, state: s)
             }
         } else {
-            ProgressView()
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -72,29 +76,55 @@ struct CeremonyView: View {
     }
 }
 
-/// Seat chips: you, and who is in.
-struct SeatChips: View {
-    let members: UInt8
-    let me: UInt8
-    /// Seats still missing, from 0.
-    let missing: Set<UInt8>
+// MARK: - The frame every step shares
+
+/// Four short segments, blue up to the current step.
+struct StepBar: View {
+    let step: Int
+    var of = 4
+    let name: String
 
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(0..<Int(members), id: \.self) { i in
-                let seat = UInt8(i)
-                let mine = seat == me
-                let inHere = !missing.contains(seat)
-                Text(mine ? "you · \(i + 1)" : inHere ? "\(i + 1) ✓" : "\(i + 1)")
-                    .font(.footnote.weight(.medium))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(mine ? Color.accentColor.opacity(0.2) : inHere ? Color.green.opacity(0.2) : Color.secondary.opacity(0.12),
-                                in: Capsule())
+        VStack(alignment: .leading, spacing: Space.s) {
+            HStack(spacing: Space.xs) {
+                ForEach(1...of, id: \.self) { i in
+                    Capsule()
+                        .fill(i <= step ? Color.brand : Color.line)
+                        .frame(height: 3)
+                }
             }
+            Text("Step \(step) of \(of). \(name)")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Color.muted)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Step \(step) of \(of). \(name)")
+    }
+}
+
+/// A ceremony step: where it is, what to do, then the step's own content.
+struct CeremonyStep<Content: View>: View {
+    let step: Int
+    let stepName: String
+    let headline: String
+    var detail: String?
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.xl) {
+                StepBar(step: step, name: stepName)
+                ScreenHeader(title: headline, detail: detail, style: .title)
+                content
+            }
+            .padding(.horizontal, Space.l)
+            .padding(.top, Space.l)
+            .padding(.bottom, Space.xl)
         }
     }
 }
+
+// MARK: - Through the relay
 
 /// Through the relay: the host shows one code and scans each joiner, the joiner shows its code to
 /// the host, and the rest goes through the relay.
@@ -108,59 +138,54 @@ struct RelayCeremonyView: View {
     private var commit: Bool { state.phase == .commit }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("\(state.name) · you are seat \(me + 1)").font(.footnote).foregroundStyle(.secondary)
-                SeatChips(members: state.members, me: me, missing: commit ? Set(state.missing.seats) : [])
-                Text(commit ? "\(Int(state.members) - state.missing.count) of \(state.members) here"
-                            : "Everyone is here · \(state.members) of \(state.members)")
-                    .font(.footnote).foregroundStyle(.secondary)
-                Text(step).font(.headline)
-                if !host && state.hostMismatch {
-                    StatusLine(text: "Seat 1 on the relay is not the host whose code you scanned. Someone outside the room may have the code.")
-                }
-                if host && commit, let offer = model.offer {
-                    QRCodeView(matrix: offer, caption: "\(state.name) · join")
-                    scannedList
-                }
-                if let code = model.joinCode {
-                    QRCodeView(matrix: code, caption: "seat \(me + 1) · for the host")
-                }
-                StatusLine(text: model.notice, problem: false)
-                StatusLine(text: model.status)
+        CeremonyStep(step: step, stepName: stepName, headline: headline, detail: detail) {
+            if !host && state.hostMismatch {
+                StatusLine(text: "Seat 1 on the relay is not the host whose code you scanned. Someone outside the room may have the code.")
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
+            if host && commit && !state.needsContinue, let offer = model.offer {
+                QRCodeView(matrix: offer)
+            }
+            if let code = model.joinCode {
+                QRCodeView(matrix: code, caption: "You are seat \(me + 1) of \(state.members).")
+            }
+            if host && (commit || state.needsContinue) {
+                seatList
+            } else if model.joinCode == nil {
+                HStack(spacing: Space.m) {
+                    ProgressView()
+                    Text(waiting).font(.subheadline).foregroundStyle(Color.muted)
+                }
+            }
+            StatusLine(text: model.notice, problem: false)
+            StatusLine(text: model.status)
         }
-        .navigationTitle(title)
-        .safeAreaInset(edge: .bottom) {
-            VStack {
-                if state.needsContinue {
-                    Button("Continue") { Task { await model.proceed() } }
-                        .buttonStyle(.borderedProminent)
-                        .accessibilityIdentifier("continue")
-                } else if host && commit {
-                    Button("Scan a joiner's code") { scanning = true }
-                        .buttonStyle(.borderedProminent)
-                        .accessibilityIdentifier("scan-joiner")
-                }
+        .actionBar(shown: state.needsContinue || (host && commit)) {
+            if state.needsContinue {
+                Button("Continue") { Task { await model.proceed() } }
+                    .buttonStyle(.filled)
+                    .accessibilityIdentifier("continue")
+            } else if host && commit {
+                Button("Scan a joiner's code") { scanning = true }
+                    .buttonStyle(.filled)
+                    .accessibilityIdentifier("scan-joiner")
             }
-            .frame(maxWidth: .infinity)
-            .padding(.bottom, 8)
         }
         .sheet(isPresented: $scanning) {
             NavigationStack {
                 ScrollView {
-                    ScanPanel(core: model.core, hint: "Fill the frame with their code",
-                              placeholder: "cahoots:joined:v1:...") { text, pasted in
-                        Task {
-                            await model.scan(text, pasted: pasted)
-                            if model.status == nil { scanning = false }
+                    VStack(alignment: .leading, spacing: Space.l) {
+                        ScanPanel(core: model.core, hint: "Fill the frame with their code",
+                                  placeholder: "cahoots:joined:v1:...") { text, pasted in
+                            Task {
+                                await model.scan(text, pasted: pasted)
+                                if model.status == nil { scanning = false }
+                            }
                         }
+                        StatusLine(text: model.status)
                     }
-                    .padding()
-                    StatusLine(text: model.status).padding(.horizontal)
+                    .padding(Space.l)
                 }
+                .paperBackground()
                 .navigationTitle("Scan a joiner's code")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -170,41 +195,124 @@ struct RelayCeremonyView: View {
         }
     }
 
-    private var title: String {
-        if state.needsContinue { return "Everyone is scanned" }
-        if host && commit { return "Show this code to everyone joining" }
-        if model.joinCode != nil { return "Show this to the host" }
-        return "Through the relay"
-    }
-
-    private var step: String {
-        if state.needsContinue { return "Everyone is scanned." }
+    private var step: Int {
+        // Until the host has scanned this seat, the joiner is still meeting the group.
+        if state.needsContinue || model.joinCode != nil { return 1 }
         switch state.phase {
-        case .commit:
-            if host { return "Show this code to everyone joining. Then scan the code on each of their screens." }
-            return model.joinCode != nil ? "Show this to the host." : "Wait here while everyone joins."
-        case .reveal:
-            return model.joinCode != nil ? "Show this to the host." : "Exchanging secrets through the relay."
-        default:
-            return "Confirming who is in the circle."
+        case .commit: return 1
+        case .reveal: return 2
+        default: return 3
         }
     }
 
-    private var scannedList: some View {
+    private var stepName: String {
+        switch step {
+        case 1: return "Meet the group"
+        case 2: return "Exchange secrets"
+        default: return "Confirm members"
+        }
+    }
+
+    private var headline: String {
+        if state.needsContinue { return "Everyone is scanned" }
+        switch state.phase {
+        case .commit:
+            if host { return "Show this code to everyone joining" }
+            return model.joinCode != nil ? "Show this to the host" : "Wait here while everyone joins"
+        case .reveal:
+            return model.joinCode != nil ? "Show this to the host" : "Exchanging secrets"
+        default:
+            return "Confirming who is in the circle"
+        }
+    }
+
+    private var detail: String? {
+        if state.needsContinue { return "Every seat is here and scanned. Continue when the room is ready." }
+        switch state.phase {
+        case .commit:
+            if host { return "Then scan the code on each of their screens." }
+            return model.joinCode != nil ? "The host scans it to let you in." : nil
+        case .reveal:
+            if model.joinCode != nil { return "The host scans it to let you in." }
+            return "This goes through the relay. Keep the app open."
+        default:
+            return "Each phone signs who is in the circle. Keep the app open."
+        }
+    }
+
+    private var waiting: String {
+        switch state.phase {
+        case .commit: return "\(Int(state.members) - state.missing.count) of \(state.members) here."
+        case .reveal: return "Waiting for the others."
+        default: return "Waiting for every signature."
+        }
+    }
+
+    /// Every seat and where it is, for the host.
+    private var seatList: some View {
         let ok = Set(state.scanned.seats)
         let seen = Set(state.unscanned.seats)
-        return VStack(alignment: .leading, spacing: 6) {
-            ForEach(1..<Int(state.members), id: \.self) { i in
+        let missing = Set(state.missing.seats)
+        return PaperSection(title: "Seats",
+                            footer: seen.isEmpty ? nil : "A seat that is here but not scanned joined through the relay without showing you its code. Scan it, or start over if you do not know who it is.") {
+            ForEach(0..<Int(state.members), id: \.self) { i in
                 let seat = UInt8(i)
-                Text(ok.contains(seat) ? "Seat \(i + 1) · scanned ✓"
-                     : seen.contains(seat) ? "Seat \(i + 1) committed but was not scanned here."
-                     : "Seat \(i + 1) · waiting")
-                    .font(.subheadline)
-                    .foregroundStyle(seen.contains(seat) ? Color.orange : Color.primary)
+                if i > 0 { Hairline() }
+                SeatRow(number: i + 1,
+                        state: i == 0 ? .you : ok.contains(seat) ? .scanned
+                            : (seen.contains(seat) || (!missing.contains(seat) && !commit)) ? .here : .waiting)
             }
         }
     }
 }
+
+/// One seat in the host's list.
+struct SeatRow: View {
+    enum Where { case you, waiting, here, scanned }
+    let number: Int
+    let state: Where
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: Space.m) {
+            Image(systemName: symbol)
+                .font(.title3)
+                .foregroundStyle(state == .scanned || state == .you ? Color.brand : state == .here ? Color.ink : Color.muted)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 28)
+                .accessibilityHidden(true)
+            Text("Seat \(number)").font(.body).foregroundStyle(Color.ink)
+            Spacer()
+            Text(words)
+                .font(.subheadline)
+                .foregroundStyle(state == .here ? Color.ink : Color.muted)
+        }
+        .padding(.vertical, Space.m)
+        .frame(minHeight: 44)
+        .animation(reduceMotion ? nil : .snappy, value: state)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var symbol: String {
+        switch state {
+        case .you: return "person.crop.circle"
+        case .waiting: return "circle.dotted"
+        case .here: return "circle"
+        case .scanned: return "checkmark.circle.fill"
+        }
+    }
+
+    private var words: String {
+        switch state {
+        case .you: return "You, the host"
+        case .waiting: return "Waiting"
+        case .here: return "Here, not scanned"
+        case .scanned: return "Scanned"
+        }
+    }
+}
+
+// MARK: - Codes only
 
 /// Codes only: each step, show this seat's code and scan everyone else's.
 struct CodesCeremonyView: View {
@@ -212,51 +320,43 @@ struct CodesCeremonyView: View {
     let state: CeremonyState
     @State private var showing = true
 
-    private static let steps: [CeremonyPhase: String] = [
-        .commit: "Step 1 of 4 · Meet the group",
-        .reveal: "Step 2 of 4 · Exchange secrets",
-        .attest: "Step 3 of 4 · Confirm members",
+    private static let names: [CeremonyPhase: String] = [
+        .commit: "Meet the group",
+        .reveal: "Exchange secrets",
+        .attest: "Confirm members",
     ]
 
     private var me: UInt8 { state.mySeat }
     private var left: [UInt8] { state.missing.seats.filter { $0 != me } }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("\(state.name) · you are seat \(me + 1)").font(.footnote).foregroundStyle(.secondary)
-                SeatChips(members: state.members, me: me, missing: Set(state.missing.seats))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(taskTitle).font(.headline)
-                    Text(taskDetail).foregroundStyle(.secondary)
+        CeremonyStep(step: stepNumber, stepName: Self.names[state.phase] ?? "", headline: taskTitle, detail: taskDetail) {
+            Picker("Show or scan", selection: $showing) {
+                Text(state.phase == .reveal ? "Show my reveal" : "Show my code").tag(true)
+                Text(state.phase == .reveal ? "Scan their reveals" : "Scan their codes").tag(false)
+            }
+            .pickerStyle(.segmented)
+            if showing {
+                CodeAnimation(frames: model.frames, caption: "You are seat \(me + 1).")
+            } else {
+                ScanPanel(core: model.core, hint: "Fill the frame with their animation",
+                          placeholder: "cahoots-...") { text, pasted in
+                    Task { await model.scan(text, pasted: pasted) }
                 }
-                Picker("Mode", selection: $showing) {
-                    Text(state.phase == .reveal ? "Show my reveal" : "Show my code").tag(true)
-                    Text(state.phase == .reveal ? "Scan their reveals" : "Scan their codes").tag(false)
-                }
-                .pickerStyle(.segmented)
-                if showing {
-                    CodeAnimation(frames: model.frames, caption: "seat \(me + 1) · step \(stepNumber)")
-                } else {
-                    ScanPanel(core: model.core, hint: "Fill the frame with their animation",
-                              placeholder: "cahoots-...") { text, pasted in
-                        Task { await model.scan(text, pasted: pasted) }
-                    }
-                    if state.framesNeeded > 0 {
+                if state.framesNeeded > 0 {
+                    VStack(alignment: .leading, spacing: Space.s) {
                         ProgressView(value: Double(min(state.framesRead, state.framesNeeded)),
                                      total: Double(state.framesNeeded))
+                            .tint(Color.brand)
                         Text("Hold steady on the animation. The bar fills as frames arrive.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.footnote).foregroundStyle(Color.muted)
                     }
                 }
-                Text("Received \(Int(state.members) - 1 - left.count) of \(state.members - 1) \(noun)")
-                    .font(.footnote).foregroundStyle(.secondary)
-                StatusLine(text: model.status)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
+            Text("Received \(Int(state.members) - 1 - left.count) of \(state.members - 1) \(noun).")
+                .font(.subheadline).foregroundStyle(Color.muted)
+            StatusLine(text: model.status)
         }
-        .navigationTitle(Self.steps[state.phase] ?? "")
     }
 
     private var stepNumber: Int {
@@ -276,7 +376,9 @@ struct CodesCeremonyView: View {
     }
 
     private var who: String {
-        left.map { "seat \($0 + 1)" }.joined(separator: ", ")
+        let seats = left.map { "seat \($0 + 1)" }
+        if seats.count <= 1 { return seats.first ?? "" }
+        return seats.dropLast().joined(separator: ", ") + " and " + seats.last!
     }
 
     private var taskTitle: String {
@@ -296,7 +398,7 @@ struct CodesCeremonyView: View {
         }
         switch state.phase {
         case .commit: return "Scan the setup codes from \(who). They also need to scan yours. You can take turns in any order."
-        case .reveal: return "Ask \(who) to show their step-2 codes. Scan each animation until the progress bar fills."
+        case .reveal: return "Ask \(who) to show their step 2 codes. Scan each animation until the bar fills."
         default: return "Scan signatures from \(who) to confirm the circle's members. They also need to scan yours."
         }
     }
@@ -309,20 +411,40 @@ struct SignatureHandoffView: View {
 
     var body: some View {
         let others = (0..<Int(state.members)).filter { $0 != Int(state.mySeat) }.map { "seat \($0 + 1)" }
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("You have every signature. Before comparing words, make sure \(others.joined(separator: " and ")) \(state.members > 2 ? "have" : "has") scanned yours too. Keep this code on screen until they confirm.")
-                CodeAnimation(frames: model.frames, caption: "seat \(state.mySeat + 1) · step 3")
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
+        let list = others.count <= 1 ? (others.first ?? "") : others.dropLast().joined(separator: ", ") + " and " + others.last!
+        CeremonyStep(step: 3, stepName: "Confirm members", headline: "Keep this code on screen",
+                     detail: "You have every signature. Before comparing words, make sure \(list) \(state.members > 2 ? "have" : "has") scanned yours too.") {
+            CodeAnimation(frames: model.frames, caption: "You are seat \(state.mySeat + 1).")
         }
-        .navigationTitle("Step 3 of 4 · Confirm members")
-        .safeAreaInset(edge: .bottom) {
+        .actionBar {
             Button(state.members > 2 ? "Everyone has scanned it" : "They have scanned it") { model.handedOff = true }
-                .buttonStyle(.borderedProminent)
-                .padding(.bottom, 8)
+                .buttonStyle(.filled)
         }
+    }
+}
+
+// MARK: - The six words
+
+/// Words set large in the serif, numbered in blue. The six check words and hello words use it.
+struct WordView: View {
+    let number: Int?
+    let word: String
+    var style: Font.TextStyle = .title
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+            if let number {
+                Text("\(number)")
+                    .font(.footnote.monospacedDigit().weight(.medium))
+                    .foregroundStyle(Color.brand)
+                    .frame(minWidth: 14, alignment: .trailing)
+            }
+            Text(word)
+                .serifTitle(style)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -333,50 +455,31 @@ struct WordsView: View {
     let state: CeremonyState
     @State private var confirmDiffer = false
     @State private var keeping = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Read all six words aloud together. Check your own screen: every word must match, in the same order. If one differs, everyone starts again.")
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(state.name).font(.footnote).foregroundStyle(.secondary)
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 12) {
-                        ForEach(Array(state.words.enumerated()), id: \.offset) { i, w in
-                            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Text("\(i + 1)").font(.caption).foregroundStyle(.secondary)
-                                Text(w).font(.title3.weight(.semibold))
-                            }
-                        }
-                    }
-                    .padding()
-                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("words")
-                }
-                StatusLine(text: model.status)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
+        CeremonyStep(step: 4, stepName: "Compare words", headline: "Read the six words aloud together",
+                     detail: "Check your own screen. Every word must match, in the same order. If one differs, everyone starts again.") {
+            words
+            StatusLine(text: model.status)
         }
-        .navigationTitle("Step 4 of 4 · Compare words")
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 10) {
-                Button {
-                    Task {
-                        keeping = true
-                        defer { keeping = false }
-                        if let id = await model.keep() { await app.kept(id) }
-                    }
-                } label: {
-                    Text("They match").frame(maxWidth: .infinity)
+        .actionBar {
+            Button {
+                Task {
+                    keeping = true
+                    defer { keeping = false }
+                    if let id = await model.keep() { await app.kept(id) }
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(keeping)
-                Button("They differ", role: .destructive) { confirmDiffer = true }
+            } label: {
+                Working(busy: keeping, title: "They match")
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
+            .buttonStyle(.filled)
+            .disabled(keeping)
+            .accessibilityLabel("They match")
+            Button("They differ") { confirmDiffer = true }
+                .buttonStyle(.text)
         }
+        .sensoryFeedback(.success, trigger: keeping) { _, now in now }
         .confirmationDialog("Throw this away and start again?", isPresented: $confirmDiffer, titleVisibility: .visible) {
             Button("Throw it away", role: .destructive) {
                 Task {
@@ -386,26 +489,52 @@ struct WordsView: View {
             }
         }
     }
+
+    private var words: some View {
+        let w = state.words
+        let half = (w.count + 1) / 2
+        let column = { (range: Range<Int>) in
+            VStack(alignment: .leading, spacing: Space.l) {
+                ForEach(range, id: \.self) { i in WordView(number: i + 1, word: w[i]) }
+            }
+        }
+        return VStack(spacing: 0) {
+            Hairline()
+            Group {
+                if typeSize.isAccessibilitySize {
+                    column(0..<w.count)
+                } else {
+                    HStack(alignment: .top, spacing: Space.l) {
+                        column(0..<half)
+                        column(half..<w.count)
+                    }
+                }
+            }
+            .padding(.vertical, Space.xl)
+            Hairline()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(w.enumerated().map { "\($0.offset + 1) \($0.element)" }.joined(separator: ", "))
+        .accessibilityIdentifier("words")
+    }
 }
 
 /// A ceremony that ended without a circle.
 struct EndedView: View {
-    let title: String
     let headline: String
     let detail: String
     var button = "Back to start"
     let action: () async -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(headline).font(.title2.weight(.semibold))
-            Text(detail).foregroundStyle(.secondary)
-            Spacer()
-            Button(button) { Task { await action() } }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
+        ScrollView {
+            ScreenHeader(title: headline, detail: detail, style: .title)
+                .padding(.horizontal, Space.l)
+                .padding(.top, Space.xxl)
         }
-        .padding()
-        .navigationTitle(title)
+        .actionBar {
+            Button(button) { Task { await action() } }
+                .buttonStyle(.filled)
+        }
     }
 }

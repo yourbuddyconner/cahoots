@@ -9,77 +9,86 @@ struct NewCircleView: View {
     @State private var size = Self.sizes[1].bytes
     @State private var error: String?
     @State private var starting = false
+    @FocusState private var naming: Bool
 
     static let sizes: [(bytes: UInt32, label: String, hint: String)] = [
-        (16384, "Small", "16 KiB · about 100 messages · a few seconds to scan"),
-        (65536, "Medium", "64 KiB · a few hundred messages · about half a minute to scan"),
-        (262144, "Large", "256 KiB · a couple thousand messages · about two minutes to scan"),
+        (16384, "Small", "About 100 messages. A few seconds to scan."),
+        (65536, "Medium", "A few hundred messages. About half a minute to scan."),
+        (262144, "Large", "A couple thousand messages. About two minutes to scan."),
     ]
 
     var body: some View {
-        Form {
-            Section {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Bring your people together.").font(.title2.weight(.semibold))
-                    Text("Give your circle a name, then exchange codes with the people beside you.")
-                        .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.xxl) {
+                Text("Give your circle a name, then exchange codes with the people beside you.")
+                    .font(.body)
+                    .foregroundStyle(Color.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: Space.s) {
+                    Text("Name")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.muted)
+                    TextField("park, book club, family", text: $name)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                        .focused($naming)
+                        .paperField()
+                        .accessibilityLabel("Name")
+                        .accessibilityIdentifier("circle-name")
+                }
+
+                PaperSection(title: "People in the room",
+                             footer: "Count every device that will hold the secret, including yours.") {
+                    PeopleStepper(value: $members, range: 2...8)
+                }
+
+                PaperSection(title: "How to hold the ceremony") {
+                    OptionRow(title: "Through the relay",
+                              detail: "Everyone scans one code from your screen. The rest goes through the relay.",
+                              chosen: throughRelay) { throughRelay = true }
+                    Hairline()
+                    OptionRow(title: "Codes only",
+                              detail: "Everyone shows and scans codes. No network is needed.",
+                              chosen: !throughRelay) { throughRelay = false }
+                }
+
+                PaperSection(title: "Secret size") {
+                    ForEach(Array(Self.sizes.enumerated()), id: \.offset) { i, s in
+                        if i > 0 { Hairline() }
+                        OptionRow(title: s.label, detail: s.hint, chosen: size == s.bytes) { size = s.bytes }
+                    }
                 }
             }
-            Section("Name") {
-                TextField("e.g. sf-meetup", text: $name)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("circle-name")
-            }
-            Section {
-                Stepper("\(members) people", value: $members, in: 2...8)
-                    .accessibilityIdentifier("people")
-            } header: {
-                Text("People in the room")
-            } footer: {
-                Text("Count every device that will hold the secret, including yours.")
-            }
-            Section {
-                Picker("How to hold the ceremony", selection: $throughRelay) {
-                    Text("Through the relay").tag(true)
-                    Text("Codes only").tag(false)
-                }
-                .pickerStyle(.segmented)
-            } header: {
-                Text("How to hold the ceremony")
-            } footer: {
-                Text(throughRelay
-                     ? "Everyone scans one code from your screen. The rest goes through the relay."
-                     : "Everyone shows and scans codes. No network is needed.")
-            }
-            Section {
-                Picker("Secret size", selection: $size) {
-                    ForEach(Self.sizes, id: \.bytes) { Text($0.label).tag($0.bytes) }
-                }
-                .pickerStyle(.segmented)
-            } header: {
-                Text("Secret size")
-            } footer: {
-                Text(Self.sizes.first { $0.bytes == size }?.hint ?? "")
-            }
-            Section {
-                Button {
-                    Task { await start() }
-                } label: {
-                    if starting { ProgressView() } else { Text("Continue") }
-                }
-                .disabled(starting)
-                StatusLine(text: error)
-            }
+            .padding(.horizontal, Space.l)
+            .padding(.top, Space.s)
+            .padding(.bottom, Space.xl)
         }
+        .scrollDismissesKeyboard(.interactively)
+        .paperBackground()
         .navigationTitle("Create a circle")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
+        .sensoryFeedback(.selection, trigger: throughRelay)
+        .sensoryFeedback(.selection, trigger: size)
+        .actionBar {
+            StatusLine(text: error)
+            Button {
+                Task { await start() }
+            } label: {
+                Working(busy: starting, title: "Start the ceremony")
+            }
+            .buttonStyle(.filled)
+            .disabled(starting)
+            .accessibilityIdentifier("start-ceremony")
+        }
     }
 
     private func start() async {
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !n.isEmpty else {
             error = "Give the circle a name."
+            naming = true
             return
         }
         starting = true
@@ -89,5 +98,58 @@ struct NewCircleView: View {
         } catch {
             self.error = plain(error)
         }
+    }
+}
+
+/// How many people: the count in words, and two large targets to change it.
+struct PeopleStepper: View {
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+
+    var body: some View {
+        HStack(spacing: Space.m) {
+            Text("\(value) people")
+                .font(.body.monospacedDigit())
+                .foregroundStyle(Color.ink)
+                .contentTransition(.numericText(value: Double(value)))
+            Spacer()
+            step("minus", by: -1).disabled(value <= range.lowerBound)
+            step("plus", by: 1).disabled(value >= range.upperBound)
+        }
+        .padding(.vertical, Space.s)
+        .sensoryFeedback(.selection, trigger: value)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("People in the room")
+        .accessibilityValue("\(value)")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: if value < range.upperBound { value += 1 }
+            case .decrement: if value > range.lowerBound { value -= 1 }
+            @unknown default: break
+            }
+        }
+        .accessibilityIdentifier("people")
+    }
+
+    private func step(_ symbol: String, by delta: Int) -> some View {
+        Button {
+            withAnimation(.snappy) { value += delta }
+        } label: {
+            Image(systemName: symbol)
+                .font(.body.weight(.semibold))
+                .frame(width: 44, height: 44)
+                .overlay(Circle().strokeBorder(Color.ink.opacity(0.22)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(StepperButtonStyle())
+    }
+}
+
+private struct StepperButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(Color.ink)
+            .opacity(enabled ? (configuration.isPressed ? 0.5 : 1) : 0.3)
     }
 }

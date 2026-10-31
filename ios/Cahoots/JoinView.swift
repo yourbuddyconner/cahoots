@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// "Join a ceremony": scan the host's code, then pick a seat.
+/// "Join a circle": scan the host's code, then pick a seat.
 struct JoinView: View {
     let core: Core
     @EnvironmentObject private var model: AppModel
@@ -11,67 +11,73 @@ struct JoinView: View {
     @State private var joining = false
 
     var body: some View {
-        Form {
-            if let offer {
-                pick(offer)
-            } else {
-                Section {
-                    Text("Scan the host's code.").font(.headline)
-                    Text("For a ceremony with codes only, scan anyone who has joined. Their code is a short animation.")
-                        .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.xl) {
+                if let offer {
+                    pick(offer)
+                } else {
+                    Text("Scan the host's code. For a ceremony with codes only, scan anyone who has joined. Their code is a short animation.")
+                        .font(.body)
+                        .foregroundStyle(Color.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                     ScanPanel(core: core, placeholder: "cahoots:ceremony:v1:...") { text, pasted in
                         Task { await read(text, pasted: pasted) }
                     }
                     if reading {
-                        Text("Reading the animation. Hold steady.").font(.footnote).foregroundStyle(.secondary)
+                        StatusLine(text: "Reading the animation. Hold steady.", problem: false)
                     }
                     StatusLine(text: error)
                 }
             }
+            .padding(.horizontal, Space.l)
+            .padding(.top, Space.s)
+            .padding(.bottom, Space.xl)
         }
-        .navigationTitle(offer?.name ?? "Join a ceremony")
-        .navigationBarTitleDisplayMode(.inline)
+        .scrollDismissesKeyboard(.interactively)
+        .paperBackground()
+        .navigationTitle(offer?.name ?? "Join a circle")
+        .navigationBarTitleDisplayMode(offer == nil ? .large : .inline)
+        .actionBar(shown: offer != nil) {
+            if let offer {
+                StatusLine(text: error)
+                Button {
+                    Task { await join(offer) }
+                } label: {
+                    Working(busy: joining, title: "Make my contribution")
+                }
+                .buttonStyle(.filled)
+                .disabled(joining)
+                .accessibilityIdentifier("make-contribution")
+            }
+        }
     }
 
     @ViewBuilder
     private func pick(_ offer: JoinOffer) -> some View {
-        Section {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Which seat are you?").font(.title2.weight(.semibold))
-                Text("Seat 1 is the host's. Pick a free one, and make sure nobody else picks the same.")
-                    .foregroundStyle(.secondary)
-                Text("\(offer.members) people · \(offer.throughRelay ? "through the relay" : "codes only")")
-                    .font(.footnote).foregroundStyle(.secondary)
+        ScreenHeader(title: "Which seat are you?",
+                     detail: "Seat 1 is the host's. Pick a free one, and make sure nobody else picks the same.",
+                     style: .title)
+        Text("\(spelled(Int(offer.members))) people, \(offer.throughRelay ? "through the relay" : "with codes only").")
+            .font(.subheadline)
+            .foregroundStyle(Color.muted)
+        PaperSection(title: "Your seat") {
+            ForEach(1..<Int(offer.members), id: \.self) { i in
+                if i > 1 { Hairline() }
+                OptionRow(title: "Seat \(i + 1)", chosen: seat == UInt8(i)) { seat = UInt8(i) }
             }
         }
-        Section("Your seat") {
-            Picker("Your seat", selection: $seat) {
-                ForEach(1..<Int(offer.members), id: \.self) { i in
-                    Text("Seat \(i + 1)").tag(UInt8(i))
-                }
-            }
-            .pickerStyle(.inline)
-            .labelsHidden()
-        }
-        Section {
-            Button {
-                Task { await join(offer) }
-            } label: {
-                if joining { ProgressView() } else { Text("Make my contribution") }
-            }
-            .disabled(joining)
-            .accessibilityIdentifier("make-contribution")
-            StatusLine(text: error)
-        }
+        .sensoryFeedback(.selection, trigger: seat)
     }
 
     private func read(_ text: String, pasted: Bool) async {
         do {
             if let o = try await core.run({ try $0.joinScan(text: text) }) {
-                offer = o
-                seat = 1
-                error = nil
-                reading = false
+                withAnimation(.snappy) {
+                    offer = o
+                    seat = 1
+                    error = nil
+                    reading = false
+                }
             } else {
                 reading = true
             }

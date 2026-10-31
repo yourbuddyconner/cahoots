@@ -41,6 +41,8 @@ to `$CARGO_TARGET_DIR/ios` when the target directory is elsewhere.
   UserDefaults while it is open, so a ceremony lost when the app closed is reported once at the
   next launch ("This ceremony was lost when the app closed. Everyone starts over with a new
   code.") and the seat key made for it is deleted.
+- The look: `Theme.swift` (colours, type, buttons, sections) and `FaceView.swift` (a seat's
+  cahoot, drawn from `Phone.facePixels`). `DESIGN.md` has the plan.
 - The screens: `CirclesView`, `NewCircleView`, `JoinView`, `CeremonyView` (with `CeremonyModel`),
   `ChatView`, `PeopleView` and `HelloView`, `SettingsView`.
 

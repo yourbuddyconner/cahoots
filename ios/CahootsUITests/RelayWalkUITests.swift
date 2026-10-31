@@ -43,7 +43,7 @@ final class RelayWalkUITests: XCTestCase {
         name.tap()
         name.typeText("park")
         shot("host-2-new-circle")
-        app.buttons["Continue"].tap()
+        app.buttons["start-ceremony"].tap()
 
         let offer = try readCode()
         XCTAssertTrue(offer.hasPrefix("cahoots:ceremony:v1:"), offer)
@@ -69,10 +69,12 @@ final class RelayWalkUITests: XCTestCase {
         app.buttons["send"].tap()
         XCTAssertTrue(app.staticTexts["hello from the joiner"].waitForExistence(timeout: 120))
         shot("host-7-chat")
+        tour(side: "host")
     }
 
     func testJoiner() throws {
         launch("walk-joiner")
+        shot("joiner-0-empty")
         let offer = try wait(for: "offer.txt")
         app.buttons["Join a circle"].tap()
         paste(offer)
@@ -95,6 +97,26 @@ final class RelayWalkUITests: XCTestCase {
         app.buttons["send"].tap()
         XCTAssertTrue(app.staticTexts["hello from the joiner"].waitForExistence(timeout: 20))
         shot("joiner-4-chat")
+        tour(side: "joiner")
+    }
+
+    /// After the chat: the roster, hello words, the list of circles and settings, for the record.
+    private func tour(side: String) {
+        app.buttons["People in park"].tap()
+        let other = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Seat' AND label CONTAINS 'Hello words'")).firstMatch
+        XCTAssertTrue(other.waitForExistence(timeout: 10))
+        shot("\(side)-8-people")
+        other.tap()
+        XCTAssertTrue(app.buttons["Next hello"].waitForExistence(timeout: 10))
+        shot("\(side)-9-hello")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["Create a circle"].waitForExistence(timeout: 10))
+        shot("\(side)-10-circles")
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(element("default-relay").waitForExistence(timeout: 10))
+        shot("\(side)-11-settings")
     }
 
     // MARK: - Steps
@@ -112,7 +134,11 @@ final class RelayWalkUITests: XCTestCase {
     private func paste(_ code: String) {
         let field = element("paste-code")
         XCTAssertTrue(field.waitForExistence(timeout: 20))
-        field.tap()
+        // A sheet may still be sliding in. Tap until the keyboard is up.
+        for _ in 0..<5 where !app.keyboards.firstMatch.exists {
+            field.tap()
+            _ = app.keyboards.firstMatch.waitForExistence(timeout: 2)
+        }
         field.typeText(code)
         app.buttons["use-code"].tap()
     }
