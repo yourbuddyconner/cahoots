@@ -477,7 +477,7 @@ await H.snap('relay-offer');
 const offerFits = await H.page.evaluate(() => { const qr = document.querySelector('.qr svg').getBoundingClientRect(); return qr.width >= 180 && qr.height >= 180 && qr.bottom <= innerHeight; });
 if (!offerFits) throw new Error('The join code does not fit the screen');
 await H.menu(); await H.page.getByRole('button', { name: 'Copy the code', exact: true }).click(); const offer = await H.clip(); await H.closeSheet();
-if (!offer?.startsWith('cahoots:ceremony:v1:')) throw new Error(`offer text: ${offer}`);
+if (!offer?.startsWith('cahoots:ceremony:v2:')) throw new Error(`offer text: ${offer}`);
 // The code on the host's screen reads back as the offer, at its displayed size.
 const shown = await H.page.evaluate(async () => {
   const { qr_decode_rgba } = await import('./pkg/cahoots_wasm.js');
@@ -519,7 +519,7 @@ if (wH !== wG) throw new Error(`relay check words differ: ${wH} / ${wG}`);
 console.log("relay check words:", wH);
 // The ceremony went through the station started here: each member's setup, its reveal in two
 // parts (a 64 KiB pad) and its signature. The public listing does not show the channel.
-const channelHex = Buffer.from(offer.slice('cahoots:ceremony:v1:'.length), 'base64url').subarray(0, 16).toString('hex');
+const channelHex = Buffer.from(offer.slice('cahoots:ceremony:v2:'.length), 'base64url').subarray(0, 16).toString('hex');
 const held = await (await fetch(`${stationUrl}/v1/circles/${channelHex}/messages`)).json();
 if (held.entries.length !== 8) throw new Error(`the station holds ${held.entries.length} ceremony messages, expected 8`);
 const listed = await (await fetch(`${stationUrl}/v1/circles`)).json();

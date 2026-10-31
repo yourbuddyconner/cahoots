@@ -20,7 +20,7 @@ struct JoinView: View {
                         .font(.body)
                         .foregroundStyle(Color.muted)
                         .fixedSize(horizontal: false, vertical: true)
-                    ScanPanel(core: core, placeholder: "cahoots:ceremony:v1:...") { text, pasted in
+                    ScanPanel(core: core, placeholder: "cahoots:ceremony:v2:...") { text, pasted in
                         Task { await read(text, pasted: pasted) }
                     }
                     if reading {

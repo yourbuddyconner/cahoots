@@ -46,7 +46,7 @@ final class RelayWalkUITests: XCTestCase {
         app.buttons["start-ceremony"].tap()
 
         let offer = try readCode()
-        XCTAssertTrue(offer.hasPrefix("cahoots:ceremony:v1:"), offer)
+        XCTAssertTrue(offer.hasPrefix("cahoots:ceremony:v2:"), offer)
         shot("host-3-offer")
         try write("offer.txt", offer)
 
