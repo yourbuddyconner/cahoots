@@ -29,7 +29,7 @@ cargo build -p cahoots-station -p cahoots-chat --features cahoots-chat/cli
 Terminal 0, the relay:
 
 ```sh
-./target/debug/cahoots-station --listen 127.0.0.1:8080 --log ./station.jsonl
+./target/debug/cahoots-station --listen 127.0.0.1:8080 --db ./station.db
 ```
 
 Terminal 1, the ceremony and the first member:

@@ -110,8 +110,8 @@ An **evidence** map is `{0: kind, 1: ref, 2: scope}`, where `scope` is a tstr an
 
 | Kind | Name | `ref` | `scope` | Checked by |
 |---|---|---|---|---|
-| 0 | link | bstr 32, the link id (section 7) | unused | anyone: a gate token or a seal proves the secret |
-| 1 | key | bstr 33, one explicit key | unused | the grant itself |
+| 0 | link | bstr 32, the link id (section 7), or empty: an empty `ref` means the owner's current link, which the relay's registered gate token names | unused | anyone: a gate token or a seal proves the secret |
+| 1 | key | bstr 33, one explicit key, or empty: an empty `ref` means any key the owner admits by hand | unused | the grant itself |
 | 2 | circle | bstr 32, a manifest id | unused | the issuer: that circle's sealed manifest and its latest checkpoint carry the key |
 | 3 | document | bstr, the verifier's registry root | tstr, the nullifier scope | the issuer: a zero-knowledge document proof bound to the key, with a nullifier under the scope |
 | 4 | account | bstr 32, an enclave measurement | tstr, the issuer and the predicate, such as `github:org:example` | the issuer: a fact signed by the enclave key naming the member key |
@@ -229,10 +229,10 @@ The station becomes a workspace crate with Cargo features. Default features repr
 | (base) | circles, messages, hash chain, rate limits, size cap, `/v1/head`, `/healthz` | |
 | `feed-page` | the live feed page at `/` | base. On by default |
 | `objects` | manifests, channel objects, policies, grants, revocations, deposits, join requests: stored, served, listed by channel | base |
-| `channels` | version 4 messages chained per channel, per-channel heads, long-poll by channel | `objects` |
+| `channels` | version 4 messages in the relay's one hash chain, per-channel heads, long-poll by channel | `objects` |
 | `gate` | read and post checks: a gate token or a verified grant to read a channel; a verified post grant, signature, budget and quorum to post | `channels` |
-| `issuer` | the relay checks evidence and issues grants and deposits under its own key | `gate`, and the TVC build only: the feature refuses to compile outside the enclave target profile, since a relay that issues holds keys |
-| `anchor` | periodic head anchoring to the TVC log (C5) | base |
+| `issuer` | the relay checks evidence and issues grants and deposits under its own key. Declared; no code in this version | `gate`, and the TVC build only: the feature refuses to compile outside the enclave target profile, since a relay that issues holds keys |
+| `anchor` | periodic head anchoring to the TVC log (C5). Declared; no code in this version | base |
 
 `GET /v1/info` returns the features compiled in, the relay's version, and its limits, so the app knows whether this relay serves channels, gates, or issues, and says so to the person before they rely on it.
 

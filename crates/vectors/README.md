@@ -11,6 +11,7 @@ Generated from `cahoots-core` and `cahoots-objects`. Regenerate with `cargo run 
 | `frames.json` | Touch-link framing with CRC-32 |
 | `objects.json` | The four signed objects: a root grant and a delegated grant, an approval, a fact and a receipt, and a sign grant with an agent's proof, each with its inputs, canonical CBOR payload, COSE_Sign1 and JSON projection, against a three-seat manifest |
 | `chat.json` | Chat on root epochs: the key of root epoch 7 for the root and circle of `root.json`, chain and message keys for two senders, three messages, and a tampered message. Written by `crates/chat/tests/vectors.rs`, not by this crate |
+| `channels.json` | Channels (protocol section 8.9): a link and its derived keys, an epoch's keys and chains, a channel object, the policy presets and one signed policy, a grant chain of depth 2, a link deposit and a key deposit, and a text message, a rotation, a revocation and an announcement with approvals. Reproduced by `crates/channel/tests/vectors.rs`. Not to be confused with `channel.json`, the ceremony channel of section 3.7 |
 | `root.json` | The circle root from the content keys of the ceremony in `ceremony.json`, chat keys for four epochs, and seal keys for two labels, among them the card seal key |
 | `ssh.json` | Requests to sign for ssh and git: four logins (bound to a P-256 host key, host-bound, unbound, bound to another session) and a git commit, each with the badge's screen lines and the signature it returns |
 

@@ -188,6 +188,8 @@ Implementation: `crates/core/src/channel.rs`. Vectors: `crates/vectors/channel.j
 
 ## 4. Messages
 
+The first byte of every message on the relay is its version: `1` a pure-pad message (this section), `2` a chat message ([chat specification](chat.md)), `3` a ceremony channel message (section 3.7), `4` a channel message (section 8.9).
+
 Each message spends `32 + len` bytes from the sender's slice, starting at the sender's next unused offset `o`.
 
 ```
@@ -301,7 +303,7 @@ A custodian MUST accept only the canonical encoding of a message. It answers `Ma
 
 ## 7. Test vectors
 
-`crates/vectors/*.json` are generated from `cahoots-core` and `cahoots-objects` by `cargo run -p cahoots-vectors`, except `chat.json`, written by `crates/chat/tests/vectors.rs`, and `psk.json`, written by `crates/provider/tests/psk_vectors.rs`. They cover the ceremony (KEM seeds, public keys, sealing randomness, seat seeds and public keys, tiers, version 2 commitments and sealed reveals, each member's attestation, the manifest body and ID, the sealed manifest, a mismatch abort, and a garbled reveal), pair keys and hello words (`pair_keys` and `hello_words` in `ceremony.json`), the ceremony channel (`channel.json`: an offer, and a message sealed under a fixed nonce with its opening), control messages, check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. `objects.json` holds the signed objects of section 8: a root grant and a delegated grant in both versions, an approval, a fact, a receipt, and a contact card with its sealed form, each with its inputs, canonical payload, COSE_Sign1, and JSON projection, against a three-seat manifest. Every client MUST reproduce them.
+`crates/vectors/*.json` are generated from `cahoots-core` and `cahoots-objects` by `cargo run -p cahoots-vectors`, except `chat.json`, written by `crates/chat/tests/vectors.rs`, and `psk.json`, written by `crates/provider/tests/psk_vectors.rs`. They cover the ceremony (KEM seeds, public keys, sealing randomness, seat seeds and public keys, tiers, version 2 commitments and sealed reveals, each member's attestation, the manifest body and ID, the sealed manifest, a mismatch abort, and a garbled reveal), pair keys and hello words (`pair_keys` and `hello_words` in `ceremony.json`), the ceremony channel (`channel.json`: an offer, and a message sealed under a fixed nonce with its opening), control messages, check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. `objects.json` holds the signed objects of section 8: a root grant and a delegated grant in both versions, an approval, a fact, a receipt, and a contact card with its sealed form, each with its inputs, canonical payload, COSE_Sign1, and JSON projection, against a three-seat manifest. `channels.json` holds the channels of section 8.9: a link and the keys it derives, an epoch's keys and chains, a channel object, the policy presets and one signed policy, a grant chain of depth 2, a link deposit and a key deposit, and a text message, a rotation, a revocation and an announcement; `crates/channel/tests/vectors.rs` reproduces it. Every client MUST reproduce them.
 
 ## 8. Signed objects
 
@@ -485,3 +487,203 @@ A handle's kind is a short text such as `email`, `github`, `nostr` or `x`, 1 to 
 A signed card travels sealed for the circle, as a file for now. The sealed form is a random 12-byte nonce, then AES-256-GCM of the signed card under the card seal key, with additional data `cahoots/card/v1`. The card seal key is `HMAC-SHA256(root, "seal/card" || circle_id)`. The badge computes it from the circle root, in the chip when the root is there, and gives it to the laptop only after its holder presses both buttons. The screen shows "key for seal/card". The badge never seals. Before it signs a card, the badge checks that the card names the requested circle and the badge's own seat. Its screen then shows the name and how many handles and endpoints the card has.
 
 Implementation: `crates/objects`.
+
+### 8.9 Channels
+
+A channel is a stream a circle publishes for people outside it. The circle that makes it is the owner. Anyone holding a grant for the channel may read it, and post to it if the grant allows. A channel has its own id, keys, policy and members, and its messages are version 4 messages on the relay. It is not the ceremony channel of section 3.7, which carries one ceremony and then ends.
+
+A channel is conventional cryptography. Its keys are drawn by the owner's device, not spent from the pad, and no pure-pad claim applies to it.
+
+A **member** is a P-256 signing key that holds a grant for the channel. The app makes one for each channel and keeps it in software, so posting never asks for Face ID. A member is not a seat and need not be in any circle. Beside the signing key, each member makes an X-Wing key pair for receiving key deposits. Each admin seat of the owner issues itself a root grant for a member key of its own, so a seat posts like any member and a seat key never appears as a message's `kid`.
+
+Every log position below (`created_log`, a policy's `log`, a grant's `cahoots-log`, an approval's `log`) is the relay's sequence number, the `seq` it gives every entry it accepts, counted across all circles and channels. The relay keeps one hash chain over every entry, as before. A channel's head is its latest entry's `seq` and hash.
+
+Implementation: `crates/channel`. Vectors: `crates/vectors/channels.json`, reproduced by `crates/channel/tests/vectors.rs`.
+
+#### The channel object
+
+Domain `cahoots/channel/v1`. A canonical CBOR map, signed as a COSE_Sign1 by an admin seat of the owner circle with kid `[seat]`.
+
+| Key | Value |
+|---|---|
+| 0 | version, 1 |
+| 1 | circle_id, bstr 16, the owner circle |
+| 2 | channel_id, bstr 16 |
+| 3 | name, tstr, 1 to 64 bytes |
+| 4 | created_log, uint, the log position at which this object takes effect, 0 for the first |
+| 5 | policy_id, bstr 32, the SHA-256 of the current policy's signed bytes |
+| 6 | nonce, bstr 16 |
+
+`channel_id` is the first 16 bytes of `SHA-256("cahoots/channel-id/v1" || circle_id || nonce)`. The object is published with the owner's sealed manifest, so any reader can verify the signing seat. A channel object is replaced, never edited: a new one with the same `channel_id` and a later `created_log` supersedes it. When the owner changes the policy, it signs a new object with the same name and nonce, the new `policy_id`, and `created_log` equal to the new policy's `log`.
+
+#### The policy
+
+Domain `cahoots/policy/v1`. Signed by an admin seat with kid `[seat]`. The policy ID is the SHA-256 of the signed bytes.
+
+| Key | Value |
+|---|---|
+| 0 | version, 1 |
+| 1 | circle_id, bstr 16 |
+| 2 | channel_id, bstr 16 |
+| 3 | rules, array of rule maps, in ascending action order, at most one per action |
+| 4 | issuers, array of issuer maps |
+| 5 | log, uint, the log position at which the policy takes effect |
+| 6 | parent, bstr 32 or nil, the previous policy's ID |
+| 7 | nonce, bstr 16 |
+
+A **rule** is `{0: action, 1: evidence, 2: per_evidence, 3: quorum, 4: assurance}`.
+
+- `action` is `0` read, `1` post, `2` admit, `3` govern (change the policy or the channel object, rotate, revoke).
+- `evidence` is an array of evidence maps. A key that shows any one of them may be granted the action. An empty array means nobody may be granted it but the owner's seats. A missing rule means the same.
+- `per_evidence` is how many member keys one piece of evidence may back, `0` for no limit.
+- `quorum` is how many approvals from the owner's seats each use of the action needs. `0` means the grant alone is enough.
+- `assurance` is the least assurance (section 8.2) those approvals must carry. The presets write `2`, present.
+
+An **evidence** map is `{0: kind, 1: ref, 2: scope}`. `scope` is a tstr, empty when the kind does not use it.
+
+| Kind | Name | `ref` | `scope` | Checked by |
+|---|---|---|---|---|
+| 0 | link | empty, or bstr 32, a link ID | unused | anyone: a gate token or a link deposit proves the secret |
+| 1 | key | empty, or bstr 33, one explicit key | unused | the grant itself |
+| 2 | circle | bstr 32, a manifest ID | unused | an issuer |
+| 3 | document | bstr, the verifier's registry root | tstr, the nullifier scope | an issuer |
+| 4 | account | bstr 32, an enclave measurement | tstr, the issuer and the predicate | an issuer |
+
+A link entry with an empty `ref` means the owner's current link: the gate token the owner has registered on the relay names it, so retiring a link and issuing another needs no new policy. A key entry with an empty `ref` means any key the owner admits by hand. Kinds 0 and 1 are built. Kinds 2 to 4 are defined so that the policy does not change when they are built; no code checks them yet.
+
+An **issuer** map is `{0: key, 1: endpoint, 2: measurement}`: a key that may issue grants and deposits for the channel, where to send a join request, and the enclave measurement when the issuer runs in one (nil otherwise). The owner's admin seats are always issuers and are not listed. In this version the list is empty and the owner's device issues.
+
+The app writes one of five presets. Every preset has an admit rule with no evidence, and a govern rule with no evidence whose quorum is 1 for a circle of one seat and `seats / 2 + 1` otherwise.
+
+| Preset | Read | Post |
+|---|---|---|
+| Announcements | link | no evidence: only the owner's seats |
+| Announcements with approvals | link | no evidence, quorum `k` |
+| Group chat | link | link |
+| Members post | link | key, empty `ref` |
+| Closed | no evidence | no evidence |
+
+The app sets a new policy's `log` to the previous policy's `log` plus 1, and its `parent` to the previous ID. A relay refuses a policy whose `log` is not greater than the current one's.
+
+#### Keys and epochs
+
+The owner draws 32 random bytes, the epoch root, for each epoch, and numbers the epochs from 1.
+
+```
+epoch_id    = channel_id (16) | epoch (u32 LE)
+epoch_key   = HKDF-SHA256(salt = "cahoots/channel/epoch/v1" || epoch_id, ikm = root, info = "", 32)
+chain[k][0] = HKDF-Expand(prk = epoch_key, info = "cahoots/channel/chain/v1" || kid, 32)
+```
+
+`kid` is the member key's key ID, the SHA-256 of its 33 bytes, as in a grant's `sub`. From `chain[k][0]`, message keys and later chain keys step as in the [chat specification](chat.md) section 2, with its zeroization and skip rules. Chains are keyed by key ID, so a channel can have more than 256 members and a member needs no seat. A reader keeps at most four epochs. The current epoch is the one with the highest number.
+
+**Rotation** starts a new epoch. The owner sends a rotation control message (below) under the previous epoch, so every member who held it can read it, and then installs the new one. The first epoch has no previous one, so its rotation is sent under itself. A member who is shut out reads that control and learns only the new epoch's ID and the deposit IDs; it cannot open the deposits.
+
+#### Deposits
+
+Domain `cahoots/deposit/v1`. A deposit carries an epoch key to readers. It is stored on the relay and opaque to it. A deposit is not signed. Its ID is the SHA-256 of its encoding.
+
+| Key | Value |
+|---|---|
+| 0 | version, 1 |
+| 1 | channel_id, bstr 16 |
+| 2 | epoch_id, bstr 20 |
+| 3 | to, bstr 32: for a link, the link ID; for a key, the key ID of the member's signing key |
+| 4 | kind, uint: `0` link, `1` key |
+| 5 | sealed, bstr |
+
+Both kinds use `aad = "cahoots/deposit/v1" || channel_id || epoch_id || to`.
+
+- A **link deposit** is `ChaCha20-Poly1305(seal_key, nonce = epoch (u32 LE) || 0x00 * 8, aad, epoch_key)`, with the link's seal key (below). There is one link deposit per live link per epoch, so each nonce is used once.
+- A **key deposit** is HPKE base mode with X-Wing to the member's X-Wing public key, info `cahoots/deposit/v1`, the same `aad`, and `epoch_key` as plaintext. `sealed = enc (1120) || ct`. Base mode has no PSK, since a reader holds no pad.
+
+At each rotation the owner makes a link deposit for the live link, if there is one, and a key deposit for every member it has admitted.
+
+#### Links
+
+A link is
+
+```
+https://cahoots.network/app/#/ch/<relay host>/<channel_id hex>/<secret base64url>
+```
+
+The secret `s` is 32 random bytes. It is in the fragment, which browsers do not send to any server. Three values come from it:
+
+```
+link_id    = SHA-256("cahoots/link/id/v1" || s)
+seal_key   = HKDF-SHA256(salt = "cahoots/link/seal/v1", ikm = s, info = channel_id, 32)
+gate_token = HKDF-SHA256(salt = "cahoots/link/gate/v1", ikm = s, info = channel_id, 32)
+```
+
+The owner gives the relay `gate_token`, from which it cannot learn `s` or `seal_key`. A reader sends the token to fetch messages and deposits, and opens the link deposit with `seal_key`. A link is retired by removing its token from the relay and rotating without a deposit for it. A link without a secret names a channel whose read rule has no link evidence: only a member with a grant can read it.
+
+#### Messages
+
+A channel message is version 4 on the relay.
+
+```
+header  = version (u8 = 4) | channel_id (16) | epoch_id (20) | kid (32) | counter (u32 LE) | len (u32 LE) | type (u8)
+nonce   = counter (u32 LE) | 0x00 * 8
+ct      = ChaCha20-Poly1305(msg_key[kid][counter], nonce, aad = header, plaintext)
+body    = header || ct
+message = body || COSE_Sign1(payload = approvals, kid = kid, external AAD = "cahoots/channel-msg/v1" || body)
+```
+
+The header is 78 bytes. `len` is the plaintext length. `approvals` is a canonical CBOR array of signed approvals (section 8.4) as byte strings, empty for every message but an announcement. It is outside the ciphertext so that a relay can count it; the signature covers it and the body. The signature is by the member key. A reader verifies it against the key in the member's grant, which it fetches from the relay by `kid` and verifies up its chain to a seat in the owner's manifest.
+
+`type` is `0` text, `1` control, `2` announcement. Text plaintext is bucket-padded as in the chat specification.
+
+A **control** message's plaintext is a canonical CBOR map `{0: kind, ...}`. A control message needs a grant with `govern`.
+
+| Kind | Name | Fields |
+|---|---|---|
+| 0 | rotation | `1: epoch_id bstr 20, 2: [deposit ID bstr 32, ...]` |
+| 1 | policy change | `1: policy_id bstr 32` |
+| 2 | revocation | `1: grant_id bstr 16, 2: reason tstr` |
+| 3 | join | `1: grant_id bstr 16, 2: xwing_pk bstr, 3: name tstr, 1 to 64 bytes` |
+| 4 | leave | none |
+
+An **announcement** carries approvals in its COSE_Sign1 payload. Each approval has `profile` `channel-post`, `request_digest` the SHA-256 of the body, `fields` `[["channel", name], ["text", first line]]`, the current policy's ID, and a `log` the proposer names. A reader counts approvals from distinct seats of the owner's manifest at the post rule's assurance, and marks the post as an announcement only when the count reaches the post rule's quorum. A quorum of 1 still carries one approval. Readers in this version do not compare `fields` with the text.
+
+#### Grants
+
+A channel grant is a version 2 grant (section 8.3) under domain `cahoots/grant/v1` with one detail:
+
+```
+{"type": "cahoots:channel", "budget": uint, "actions": [tstr, ...], "channel": <channel_id, lowercase hex>}
+```
+
+The keys are in canonical order. `actions` is a non-empty subset of `read`, `post`, `admit`, `govern`, each once, in that order. `budget` is the number of posts the grant allows, `0` for no limit; it applies to `post` only. `iss` names the owner circle, `cnf` is the member key, and `cahoots-log` is the log position at which the grant stops holding. The `cti` is the grant's ID for the relay and for revocation.
+
+The chain rules are those of section 8.3. A root grant is signed by an admin seat with kid `[seat]`; a delegated one by the parent's grantee. Down the chain, actions are a subset, the budget is no greater (`0`, no limit, is greater than any other budget), `cahoots-log` is no greater, and the depth is exactly one less. Only a grant that carries `admit` may have a child. A revoked grant ends every grant below it.
+
+A seat's own grant carries all four actions, a budget of 0, depth 2, and no expiry (`cahoots-log` the largest u64). A grant the owner issues on admission is a root grant with the actions granted, a budget of 0, depth 0 and no expiry.
+
+A verifier checks a request against the leaf in this order and stops at the first failure: revoked (any grant in the chain), key, channel, action, expired (the channel's head is at or past `cahoots-log`), budget (posts only). Readers in this version check the chain, the key, the revocations they have read and the action. The relay also checks expiry and budget.
+
+#### Admission
+
+A key asks to join with a join request: a COSE_Sign1 by the member key, kid its key ID, domain `cahoots/join/v1`, over this canonical map.
+
+| Key | Value |
+|---|---|
+| 0 | channel_id, bstr 16 |
+| 1 | member_key, bstr 33 |
+| 2 | xwing_pk, bstr, the member's X-Wing public key |
+| 3 | actions, tstr, the actions asked for, comma-separated, such as `read,post` |
+| 4 | name, tstr, 1 to 64 bytes, the name the person typed |
+| 5 | gate_token, bstr 32, or empty when the request comes without a link |
+
+The request goes to the relay's queue for the channel. The owner's device reads the queue, checks the signature and the evidence against the policy, and on approval posts the grant, a key deposit for the current epoch, and a join control message. A link holder reads before any of this: the link deposit is enough. The join request is for posting.
+
+#### Governance and revocation
+
+A governed change in a circle of several seats carries approvals with `profile` `channel-govern` and `request_digest` the SHA-256 of the signed object. A policy goes to the relay as `[signed policy, [approval, ...]]`. When the current policy's govern quorum is 2 or more, the change needs that many approvals from distinct seats, and the signing seat's own signature does not count toward them. In this version the app cannot collect governance approvals, so a circle of more than one seat cannot change a channel's policy.
+
+A revocation is two things: a revocation control message in the channel, which members read, and a statement for the relay, which cannot read the channel:
+
+```
+[grant_id (bstr 16), COSE_Sign1 by a seat, kid [seat], domain "cahoots/revoke/v1", over {0: channel_id, 1: grant_id, 2: reason}]
+```
+
+The owner registers a link's gate token on the relay with a COSE_Sign1 by a seat, kid `[seat]`, domain `cahoots/gate/v1`, over the canonical map `{0: channel_id, 1: gate_token}`. It retires the token with the same map signed under `cahoots/gate-retire/v1`.

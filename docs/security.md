@@ -10,6 +10,7 @@ That design does not protect against every attack. Cahoots is experimental; the 
 |---|---|---|
 | **Send a message**: pure-pad mode | One-time-pad confidentiality with a one-time authentication key. | Pad bytes must be truly random, kept secret, and never reused. |
 | **Chat** | Conventional ChaCha20-Poly1305 encryption with keys derived from the circle root. | This is computational security, not one-time-pad encryption. Chat is as secret as the root: anyone who compromises one member's device can read every message the relay still holds. |
+| **Channels** | Conventional ChaCha20-Poly1305 encryption with keys the owner's device draws, and a signature on every post. | Never pad-hedged. Anyone holding the link can read until the owner retires it. |
 | File and network integrations | Conventional encryption using a key derived from the circle. | The integration’s security properties still apply. |
 
 Information-theoretic claims apply only to pure-pad messages under the required conditions. They do not apply to ordinary chat, WireGuard, or encrypted files.
@@ -45,6 +46,17 @@ Do not use two restored copies of the same send state. They may spend the same p
 A relay can observe traffic, drop messages, delay them, or stop responding. Its hash chain helps readers check history against hashes they already know; it does not by itself prevent an operator from presenting conflicting histories.
 
 The enclave deployment and external log anchoring are planned. They are not a guarantee of the current relay.
+
+## A channel is ordinary encryption
+
+A [channel](browser.md#channels) is conventional cryptography. Its keys are random bytes the owner's device draws, never pad, and nothing about a channel carries the pure-pad claim, whatever the circle that owns it.
+
+- **Inside a set of keys,** each sender's message keys move forward with every message and the used ones are erased, so one message key opens one message. The device still holds the channel key for its last four sets of keys, so whoever takes the device can read every message of those sets that the relay still keeps. Older sets, whose keys the device has dropped, stay closed.
+- **At new keys,** a member who was revoked, or a link that was retired, gets nothing sealed for it. Whoever held them, or stole them, stops reading from that point. The app starts new keys whenever the owner revokes someone or retires a link. New keys alone do not shut out a thief who still holds a live link or a member's keys: the owner must retire that link or revoke that member.
+- **Who posted:** every post is signed by its member's key, which a grant ties to the owner circle. Readers can tell which member key posted each message, which circle chat cannot do. The owner sees beside each post the name that person typed when they asked to post, which nobody checks; other readers see a short key id. A channel does not offer anonymous posting.
+- **What a link holder sees:** everything any reader sees, for as long as the link works. Anyone the holder forwards it to sees the same, and a link alone cannot count or expire its readers.
+- **What the relay sees:** channel ids, message sizes and timing, which member key posted each message, which link tokens read and when, and the join queue: each request's name, key and what it asks for. It holds no channel key and cannot read messages, key deposits or link secrets. It can still delay, drop or refuse, as for circles.
+- **Who lets people in:** the owner's device, while the app is open there. A relay that checks joiners from an enclave, so that admission works with the owner's phone closed, is defined and not built.
 
 ## A hosted member receives the secret
 

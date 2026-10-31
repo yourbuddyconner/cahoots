@@ -44,6 +44,24 @@ Terms used in the guides. For exact formats and requirements, use the [protocol 
 
 **Relay / Numbers Station / feed:** the server and public log used to deliver encrypted messages. The relay does not have the circle’s keys. See [Run a relay](relay.md).
 
+## Channels
+
+**Channel:** a stream a circle publishes for people outside it. The circle that makes it is the owner. People read it, and post to it if allowed, without joining the circle. A channel is keyed by the owner's device with conventional encryption, never from the pad. It is not the **ceremony channel**, the short-lived path through the relay that one ceremony uses to make a circle. See [Channels](browser.md#channels).
+
+**Member (of a channel):** a signing key that holds a grant for a channel. The app makes one for each channel you read or own. A member is not a seat and does not need to be in any circle.
+
+**Policy:** the signed rules of a channel: who may read, who may post, who may let others in, and who may change the rules, and what each needs. The app offers five presets, from Announcements to Closed.
+
+**Evidence:** what a key shows to be let into a channel under a policy. This version has two kinds: holding the link, and being a key the owner lets in by hand.
+
+**Link:** a channel's invite address. It names the relay and the channel, and carries a secret in the part after `#`, which browsers do not send to any server. Anyone holding the link can read until the owner retires it.
+
+**Deposit:** a channel's current key, sealed for one link or one member and stored on the relay, which cannot open it. New keys come with new deposits.
+
+**Gate token:** a value derived from a link's secret that the owner gives the relay. The relay lets a reader in when it shows the token, and cannot work out the secret from it.
+
+**Issuer:** whoever checks a joiner's evidence and issues their grant and keys. In this version it is the owner's device, while the app is open there. A relay that issues from an enclave is defined and not built.
+
 ## Identity and security
 
 **Circle ID:** a public identifier derived from the pad. The relay uses it to group encrypted messages.
