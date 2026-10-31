@@ -26,6 +26,8 @@ hkdf = { version = "0.12.4", default-features = false }
 hmac = { version = "0.12", default-features = false }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "arithmetic"] }
 minicbor = { version = "2.3", default-features = false, features = ["alloc", "derive"] }
+rand_core = { version = "0.6", default-features = false }
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 sha2 = { workspace = true, features = ["std"] }

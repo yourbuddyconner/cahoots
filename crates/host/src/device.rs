@@ -1,5 +1,9 @@
 //! One simulated badge. Its state directory holds `pad.bin`, `ledger.bin`, `circle.txt`,
-//! and `display.png`.
+//! `root.bin` and `display.png`.
+//!
+//! `root.bin` is the circle root from the ceremony, 32 bytes in plaintext like the pad, mode
+//! 0600. Chat is keyed by it (`docs/chat.md`). A state directory from before it has none, and
+//! [`Device::root`] is `None`.
 //!
 //! `circle.txt` holds one `key=value` per line: `params`, `index`, `circle_id`, `words`,
 //! `label`, and from the signed manifest on, `seat_key`, `tier` and `manifest`. The seat key
@@ -60,6 +64,8 @@ pub struct Device {
     dir: PathBuf,
     pad: Pad<StorePad<FilePadStore>, PersistentLedger<FileRecordStore>>,
     words: [&'static str; 6],
+    /// The circle root, from `root.bin`. `None` for a state directory written before it.
+    root: Option<Zeroizing<[u8; 32]>>,
     /// The seat key's seed, the tier and the encoded sealed manifest. `None` for a circle
     /// file written before seat keys.
     seat: Option<Seat>,
@@ -140,6 +146,12 @@ impl Device {
             hex(&seat.manifest)
         ));
         std::fs::write(dir.join("circle.txt"), circle_txt.as_bytes())?;
+        let root = result
+            .root
+            .as_ref()
+            .ok_or_else(|| DeviceError::State("root".into()))?
+            .clone();
+        write_secret(&dir.join("root.bin"), root.as_ref())?;
         let pad = Pad::with_circle_id(
             params,
             index,
@@ -151,6 +163,7 @@ impl Device {
             dir: dir.to_path_buf(),
             pad,
             words: result.check_words,
+            root: Some(root),
             seat: Some(seat),
         })
     }
@@ -213,11 +226,25 @@ impl Device {
                 })
             }
         };
+        let root = match std::fs::read(dir.join("root.bin")) {
+            Ok(bytes) => {
+                let bytes = Zeroizing::new(bytes);
+                let mut root = Zeroizing::new([0u8; 32]);
+                if bytes.len() != 32 {
+                    return Err(DeviceError::State("root.bin is not 32 bytes".into()));
+                }
+                root.copy_from_slice(&bytes);
+                Some(root)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e.into()),
+        };
         let pad = Pad::with_circle_id(params, index, circle_id, StorePad::new(store), ledger)?;
         Ok(Device {
             dir: dir.to_path_buf(),
             pad,
             words,
+            root,
             seat,
         })
     }
@@ -233,6 +260,11 @@ impl Device {
     }
     pub fn params(&self) -> &CircleParams {
         self.pad.params()
+    }
+    /// The circle root, which keys chat, or `None` for a state directory kept before
+    /// `root.bin`.
+    pub fn root(&self) -> Option<&[u8; 32]> {
+        self.root.as_deref()
     }
     /// This seat's signing key, or `None` for a circle kept before seat keys, a stored seed
     /// that is not a valid key, or a seat key kept in the badge's chip: the file holds zeros in
@@ -288,6 +320,26 @@ impl Device {
         self.pad.storage().read(0, &mut whole);
         check_words(self.pad.params(), &whole)
     }
+}
+
+/// Write a secret file readable by its owner only. The bytes go to a temporary file that is
+/// created with mode 0600, then renamed over `path`, so they are never readable by others.
+fn write_secret(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let tmp = path.with_extension("tmp");
+    let _ = std::fs::remove_file(&tmp);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut f = opts.open(&tmp)?;
+    f.write_all(bytes)?;
+    f.sync_all()?;
+    drop(f);
+    std::fs::rename(&tmp, path)
 }
 
 fn hex(b: &[u8]) -> String {

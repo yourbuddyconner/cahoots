@@ -282,25 +282,29 @@ fn circle_state_roundtrips_with_ledger() {
     assert_eq!(id.len(), 64);
     assert_eq!(ca.manifest_id_hex().unwrap(), id);
     let saved = cb.export();
-    assert_eq!(saved[0], 4);
+    assert_eq!(saved[0], 5);
     let mut restored = Circle::import(&saved).unwrap();
     assert!(restored.has_seat_key());
+    assert!(restored.has_root());
     assert_eq!(restored.manifest_id_hex().unwrap(), id);
     assert_eq!(restored.export(), saved);
-    // A version 3 state is the same without the trailer: it loads with no seat key.
-    let mlen = (0..saved.len() - 38)
+    // A version 3 state is the same without the version 4 and 5 trailers: it loads with no
+    // seat key.
+    let v4 = &saved[..saved.len() - 33];
+    let mlen = (0..v4.len() - 38)
         .find(|&m| {
-            let at = saved.len() - m - 4;
-            u32::from_le_bytes(saved[at..at + 4].try_into().unwrap()) as usize == m
+            let at = v4.len() - m - 4;
+            u32::from_le_bytes(v4[at..at + 4].try_into().unwrap()) as usize == m
         })
         .unwrap();
-    let mut v3 = saved[..saved.len() - (33 + 1 + 4 + mlen)].to_vec();
+    let mut v3 = v4[..v4.len() - (33 + 1 + 4 + mlen)].to_vec();
     v3[0] = 3;
     let old = Circle::import(&v3).unwrap();
     assert!(!old.has_seat_key());
+    assert!(!old.has_root());
     assert!(old.manifest_id_hex().is_none());
     assert_eq!(old.remaining(), cb.remaining());
-    assert_eq!(old.export()[0], 4);
+    assert_eq!(old.export()[0], 5);
     assert!(!Circle::import(&old.export()).unwrap().has_seat_key());
     assert_eq!(restored.circle_id_hex(), cb.circle_id_hex());
     assert_eq!(restored.name(), "s");

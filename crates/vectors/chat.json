@@ -1,52 +1,50 @@
 {
-  "circle_id": "6361686f6f74732d636861742d766563",
-  "description": "docs/chat.md v1. epoch_key = HKDF-SHA256(salt = \"cahoots/chat/epoch/v1\" || circle_id || slice || offset LE, ikm = psk, info = \"\"). chain_0[i] = HKDF-Expand(epoch_key, \"cahoots/chat/chain/v1\" || i); msg_key = Expand(chain, \"cahoots/chat/msg/v1\"); next = Expand(chain, \"cahoots/chat/next/v1\"). AEAD ChaCha20-Poly1305, nonce = sender || counter LE || 7 zero bytes, aad = header.",
-  "epoch_id": {
-    "offset": 96,
-    "slice": 1
-  },
-  "epoch_key": "6e71df340bf3ed1ec3b269b39bca76043e752b62efdd94f88126fe628b569851",
+  "circle_id": "6f8648f8add6df732cae1325a1fe798f",
+  "description": "docs/chat.md v2, root epochs. epoch_id = 0xFF || n as u32 LE. epoch_key = HMAC-SHA256(root, \"chat\" || circle_id || n as u64 BE), the chat key of root.json, whose root and circle_id these are. chain_0[i] = HKDF-Expand(epoch_key, \"cahoots/chat/chain/v1\" || i); msg_key = Expand(chain, \"cahoots/chat/msg/v1\"); next = Expand(chain, \"cahoots/chat/next/v1\"). AEAD ChaCha20-Poly1305, nonce = sender || counter LE || 7 zero bytes, aad = header.",
+  "epoch": 7,
+  "epoch_id": "ff07000000",
+  "epoch_key": "f05a38b03032a8b0211332f1863fcd53f7d52dcb3007d5c8346553972c7c8734",
   "messages": [
     {
       "counter": 0,
-      "message": "026361686f6f74732d636861742d766563016000000000000000000f00000000e3adc81e16e56216dbef0957bab9199de4f60e7ad8001b8fb2e7639fb21d29",
+      "message": "026f8648f8add6df732cae1325a1fe798fff0700000000000000000f00000000055abe59b8ebfe182d2b0ea8f32a4e69f05ba60357e47e96368213360c1a4a",
       "plaintext": "66697273742066726f6d207a65726f",
       "sender": 0
     },
     {
       "counter": 1,
-      "message": "026361686f6f74732d636861742d766563016000000002010000001d0000000017b4ce21662b5394309eacab041c36eec60c1a0b97fcbc718c95c0505ed352392fac7604d9d9850bf92fa2160e",
+      "message": "026f8648f8add6df732cae1325a1fe798fff0700000002010000001d00000000a46ff98b1a942c0c0cb2ee3aaf4678b9f95040106fed29c0ae0a8a70cb994e024476e0ea51fbcfc88c18794e1e",
       "plaintext": "7365636f6e642066726f6d2074776f2c206f7574206f66206f72646572",
       "sender": 2
     },
     {
       "counter": 0,
-      "message": "026361686f6f74732d636861742d766563016000000002000000000e000000005cce4196754cad1725b7787edba1d1154a2baa57bb4b1c7ae44f04616c42",
+      "message": "026f8648f8add6df732cae1325a1fe798fff0700000002000000000e000000007c3afcdc403db89aa83f09597bdd33093adbf5154b91deaccb073302264a",
       "plaintext": "66697273742066726f6d2074776f",
       "sender": 2
     }
   ],
-  "psk": "0b30557a9fc4e90e33587da2c7ec11365b80a5caef14395e83a8cdf2173c6186",
+  "root": "46698fd55ab2a5a50e36dbb17f6fe7bc394a77928305cb194e5cae0b2da9ea2a",
   "senders": [
     {
-      "chain_0": "58c5f99d106225a79aa5c0d7cda1824fbdabaadc97b79b5748cbcee950ebd0fb",
-      "chain_1": "78b03d887c33899a832aa8027d51eb06e358a6fc7cfa56154c3426f1fe7c02ce",
-      "chain_2": "22e0076b568e53bc533316c117fbd7c852a02104b730ebbe6a085f9540c6cc1d",
-      "msg_key_0": "f35c7006fc24dcf8b31bedd013b6a06b912070192707d00d64dd16ed67a61832",
-      "msg_key_1": "70bb1a0cc48cfd64cd6538111e249344e6133e0bb1cf065fbf9682f0a93f4c97",
+      "chain_0": "7409df3308d8d6abc27a964f892718c042561ac5ae2621c30b3b289b307913f1",
+      "chain_1": "3060982445bc255a9065c36d96779e7b66c0839441f1bcb3bd02826fcac2b301",
+      "chain_2": "63fc5e1135ffff97f4bc3733d49f88d75dc6d36009fcad75b21bec53b72c7fb6",
+      "msg_key_0": "b66f8a80fd036600b486a5ad546f52351bacafbb5f313d335b5270ab734f53c2",
+      "msg_key_1": "1f61ffc3f3d05810d32b19c4b1f4f00af3732ce35bb3175af6424efc944c1677",
       "sender": 0
     },
     {
-      "chain_0": "1a8f22128f1393ecde88e703fee4f2526eb7393da7e06dc6b0b0c499bab7aa3e",
-      "chain_1": "d0df1212a0b78dd3c88be2b5d3b72903d0442837bfc11c9e9fb97d87976561b3",
-      "chain_2": "4a89efa33efbb7932ed5f0123cbc83a2256bf66970d2288d0efc73933fa4b307",
-      "msg_key_0": "05927b342d292afc4284dda0cd9cfa993e1c3c69c2feaf9acb962809d013595b",
-      "msg_key_1": "494d92bf9e718dd2f64cf0f6adeec27a2e52834d04e546da36490659a568a2b3",
+      "chain_0": "2a8af356242ada28358163503abc0ed1e17e3ecb4331b9699b44261d066fd591",
+      "chain_1": "5392a6aba3cc142ce09831b0bf97525ae117fdc458adb8a1bdeaa4379c2bf322",
+      "chain_2": "332eaaeeaa0b27f949e708f635d37523620caf9efb8692e8b91a362ab04d0c7d",
+      "msg_key_0": "881d7f34ed200a3663a42f1f09bc1645dbab8df7e667ee9ec8dbebed5a00ef78",
+      "msg_key_1": "211cf4e33f19c0c96952e48c45f749caaf0ead6ae9af798085822b6424589dff",
       "sender": 2
     }
   ],
   "tampered": {
     "expected": "reject: tag",
-    "message": "026361686f6f74732d636861742d766563016000000000000000000f00000000e3adc81e16e56216daef0957bab9199de4f60e7ad8001b8fb2e7639fb21d29"
+    "message": "026f8648f8add6df732cae1325a1fe798fff0700000000000000000f00000000055abe59b8ebfe182c2b0ea8f32a4e69f05ba60357e47e96368213360c1a4a"
   }
 }

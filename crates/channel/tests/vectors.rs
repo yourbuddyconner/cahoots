@@ -1,4 +1,4 @@
-//! Reproduces `crates/vectors/channel.json`: every recorded byte string is decoded, verified
+//! Reproduces `crates/vectors/channels.json`: every recorded byte string is decoded, verified
 //! against the manifest rebuilt from the recorded seat seeds, and encoded again to the same hex.
 
 use cahoots_channel::control::Control;
@@ -19,7 +19,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 fn load() -> Value {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../vectors/channel.json");
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../vectors/channels.json");
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 

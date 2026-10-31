@@ -14,14 +14,17 @@ pub const HEADER_LEN: usize = 1 + 16 + EPOCH_ID_LEN + 1 + 4 + 4 + 1;
 pub const TAG_LEN: usize = 16;
 pub const KEY_LEN: usize = 32;
 
-pub const EPOCH_DOMAIN: &[u8] = b"cahoots/chat/epoch/v1";
 pub const CHAIN_DOMAIN: &[u8] = b"cahoots/chat/chain/v1";
 pub const MSG_DOMAIN: &[u8] = b"cahoots/chat/msg/v1";
 pub const NEXT_DOMAIN: &[u8] = b"cahoots/chat/next/v1";
 
 pub type Key = Zeroizing<[u8; KEY_LEN]>;
 
-/// The public name of an epoch: the pad address of the 32 bytes that key it.
+/// The slice byte that marks a root epoch. Any other value is a retired pad epoch.
+pub const ROOT_EPOCH_SLICE: u8 = 0xFF;
+
+/// The public name of an epoch, 5 bytes on the wire. A root epoch `n` is `slice = 0xFF`,
+/// `offset = n`. Pad epochs, where the two fields were a pad address, are retired.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct EpochId {
     pub slice: u8,
@@ -29,6 +32,17 @@ pub struct EpochId {
 }
 
 impl EpochId {
+    /// Root epoch `n`.
+    pub fn root(n: u32) -> EpochId {
+        EpochId {
+            slice: ROOT_EPOCH_SLICE,
+            offset: n,
+        }
+    }
+    /// The root epoch number, or `None` for a pad epoch id.
+    pub fn number(&self) -> Option<u32> {
+        (self.slice == ROOT_EPOCH_SLICE).then_some(self.offset)
+    }
     pub fn encode(&self) -> [u8; EPOCH_ID_LEN] {
         let mut b = [0u8; EPOCH_ID_LEN];
         b[0] = self.slice;
@@ -70,26 +84,20 @@ pub enum ChatError {
     WrongCircle,
     /// `sender` is not a member index of this circle.
     BadSender,
-    /// The epoch's pad range was already spent. Possible reuse, or an evicted epoch.
-    Reuse,
     /// This counter was already consumed.
     Replay,
     /// More than `MAX_SKIP` messages ahead of the chain.
     TooFarAhead,
-    /// No state for this epoch (only from `send_in`-style calls).
+    /// No state for this epoch, and it cannot be made again: the epoch was dropped to make
+    /// room for newer ones, or is older than one that was. Epoch 0 is never used.
     UnknownEpoch,
+    /// This session has not read the relay to the end since it was made or imported, so it
+    /// may not know its own sending position. Call `mark_synced` after a full read.
+    NotSynced,
+    /// The epoch id names a pad epoch (a slice other than `0xFF`). Pad epochs are retired.
+    PadEpoch,
     /// Malformed exported state.
     State,
-    Pad(cahoots_core::pad::PadError),
-}
-
-impl From<cahoots_core::pad::PadError> for ChatError {
-    fn from(e: cahoots_core::pad::PadError) -> Self {
-        match e {
-            cahoots_core::pad::PadError::Reuse => ChatError::Reuse,
-            other => ChatError::Pad(other),
-        }
-    }
 }
 
 impl Header {
@@ -141,17 +149,10 @@ pub fn parse(wire: &[u8]) -> Result<(Header, &[u8]), ChatError> {
     Ok((h, body))
 }
 
-/// `epoch_key = HKDF(salt = domain || circle_id || epoch_id, ikm = psk, info = "")`.
-pub fn epoch_key(circle_id: &CircleId, epoch: &EpochId, psk: &[u8; 32]) -> Key {
-    let mut salt = Vec::with_capacity(EPOCH_DOMAIN.len() + 16 + EPOCH_ID_LEN);
-    salt.extend_from_slice(EPOCH_DOMAIN);
-    salt.extend_from_slice(circle_id);
-    salt.extend_from_slice(&epoch.encode());
-    let hk = Hkdf::<Sha256>::new(Some(&salt), psk);
-    let mut out = Zeroizing::new([0u8; KEY_LEN]);
-    hk.expand(b"", out.as_mut())
-        .expect("32 bytes is a valid HKDF length");
-    out
+/// The key of root epoch `n`: `HMAC-SHA256(root, "chat" || circle_id || n as u64 BE)`,
+/// which is `cahoots_core::root::chat_key`.
+pub fn epoch_key(root: &[u8; 32], circle_id: &CircleId, n: u32) -> Key {
+    Zeroizing::new(cahoots_core::root::chat_key(root, circle_id, u64::from(n)))
 }
 
 fn expand(prk: &[u8; 32], info: &[u8]) -> Key {

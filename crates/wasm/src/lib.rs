@@ -8,6 +8,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use cahoots_chat::{self as chat, ChatError, ChatSession, EpochId};
 use cahoots_core::ceremony::{Ceremony, CeremonyError, Phase};
+use cahoots_core::channel::{commitment_hash, join_code, Channel, ChannelError, Gate, Mailbox, Round};
 use cahoots_core::ledger::{MemLedger, SpentLedger};
 use cahoots_core::manifest::{Manifest, SealedManifest};
 use cahoots_core::message::{MessageError, MessageType};
@@ -16,6 +17,7 @@ use cahoots_core::pairwise;
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::PUBLIC_KEY_LEN;
 use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
+use rand_core::{OsRng, RngCore};
 use wasm_bindgen::prelude::*;
 use zeroize::Zeroizing;
 
@@ -123,7 +125,6 @@ fn ceremony_err(e: CeremonyError) -> String {
         CeremonyError::CommitMismatch(i) => format!("commit-mismatch:{i}"),
         CeremonyError::ConflictingReveal(i) => format!("conflicting-reveal:{i}"),
         CeremonyError::BadAttestation(i) => format!("bad-attestation:{i}"),
-        CeremonyError::ConflictingAttestation(i) => format!("conflicting-attestation:{i}"),
         CeremonyError::Aborted => "aborted".into(),
     }
 }
@@ -142,6 +143,82 @@ fn params_err(e: cahoots_core::params::ParamsError) -> String {
 #[wasm_bindgen(js_name = Ceremony)]
 pub struct WasmCeremony {
     inner: Ceremony,
+    /// The relay channel, for a ceremony held through the relay. `None` for codes only.
+    mailbox: Option<Mailbox>,
+    /// The relay the channel is on: the host's, from the offer.
+    relay: Option<String>,
+    /// Signatures read from the relay before every reveal was in, checked once the manifest
+    /// exists. A few per seat, so a bogus one cannot keep the real one out.
+    early: Vec<(u8, Vec<u8>)>,
+    /// The host's scans of each joiner's code, or a joiner's check of seat 0 against the
+    /// offer. `Some` in a relay ceremony.
+    gate: Option<Gate>,
+    /// The host's offer, made once: it binds the host's commitment, which never changes.
+    offer: Option<String>,
+    /// The host tapped Continue after everyone was scanned: its reveal may go.
+    proceeded: bool,
+}
+
+/// Signatures kept per seat before the manifest exists.
+const EARLY_PER_SEAT: usize = 4;
+
+fn offer_err(e: ChannelError) -> String {
+    match e {
+        ChannelError::NotAnOffer => "not-an-offer".into(),
+        _ => "offer".into(),
+    }
+}
+
+/// The circle's parameter bytes in a host's offer (`cahoots:ceremony:v1:...`), to show the seat
+/// picker before joining. Errors: `"not-an-offer"`, `"offer"` (an offer that does not read).
+#[wasm_bindgen]
+pub fn offer_params(text: &str) -> Result<Vec<u8>, String> {
+    Channel::from_offer(text)
+        .map(|o| o.params.encode())
+        .map_err(offer_err)
+}
+
+#[allow(clippy::too_many_arguments)] // the ceremony's inputs, as the constructor takes them
+fn build(
+    params: CircleParams,
+    index: u8,
+    contribution: &[u8],
+    extra: Option<Vec<u8>>,
+    kem_seed: &[u8],
+    seat_seed: &[u8],
+    tier: u8,
+) -> Result<Ceremony, String> {
+    // Held in `Zeroizing` so these copies are wiped; the core gets its own copies.
+    let seed: Zeroizing<[u8; 32]> = Zeroizing::new(
+        kem_seed
+            .try_into()
+            .map_err(|_| "kem-seed-length".to_string())?,
+    );
+    let seat_seed: Zeroizing<[u8; 32]> = Zeroizing::new(
+        seat_seed
+            .try_into()
+            .map_err(|_| "seat-seed-length".to_string())?,
+    );
+    match extra {
+        Some(x) => Ceremony::with_extra_source(
+            params,
+            index,
+            contribution.to_vec(),
+            &x,
+            *seed,
+            *seat_seed,
+            tier,
+        ),
+        None => Ceremony::new(
+            params,
+            index,
+            contribution.to_vec(),
+            *seed,
+            *seat_seed,
+            tier,
+        ),
+    }
+    .map_err(ceremony_err)
 }
 
 #[wasm_bindgen(js_class = Ceremony)]
@@ -166,38 +243,277 @@ impl WasmCeremony {
         tier: u8,
     ) -> Result<WasmCeremony, String> {
         let params = CircleParams::new(n, pad_len, name, agent_seat).map_err(params_err)?;
-        // Held in `Zeroizing` so these copies are wiped; the core gets its own copies.
-        let seed: Zeroizing<[u8; 32]> = Zeroizing::new(
-            kem_seed
-                .try_into()
-                .map_err(|_| "kem-seed-length".to_string())?,
-        );
-        let seat_seed: Zeroizing<[u8; 32]> = Zeroizing::new(
-            seat_seed
-                .try_into()
-                .map_err(|_| "seat-seed-length".to_string())?,
-        );
-        let inner = match extra {
-            Some(x) => Ceremony::with_extra_source(
-                params,
-                index,
-                contribution.to_vec(),
-                &x,
-                *seed,
-                *seat_seed,
-                tier,
-            ),
-            None => Ceremony::new(
-                params,
-                index,
-                contribution.to_vec(),
-                *seed,
-                *seat_seed,
-                tier,
-            ),
+        let inner = build(params, index, contribution, extra, kem_seed, seat_seed, tier)?;
+        Ok(WasmCeremony {
+            inner,
+            mailbox: None,
+            relay: None,
+            early: Vec::new(),
+            gate: None,
+            offer: None,
+            proceeded: false,
+        })
+    }
+
+    /// Join a ceremony held through the relay, from the host's offer, as seat `index`. The other
+    /// arguments are the constructor's. Seat 0 is the host's: `"host-seat"`.
+    #[allow(clippy::too_many_arguments)] // a JavaScript-facing constructor
+    pub fn from_offer(
+        offer: &str,
+        index: u8,
+        contribution: &[u8],
+        extra: Option<Vec<u8>>,
+        kem_seed: &[u8],
+        seat_seed: &[u8],
+        tier: u8,
+    ) -> Result<WasmCeremony, String> {
+        let o = Channel::from_offer(offer).map_err(offer_err)?;
+        if index == 0 {
+            return Err("host-seat".into());
         }
-        .map_err(ceremony_err)?;
-        Ok(WasmCeremony { inner })
+        let gate = Gate::for_joiner(&o);
+        let inner = build(o.params, index, contribution, extra, kem_seed, seat_seed, tier)?;
+        Ok(WasmCeremony {
+            inner,
+            mailbox: Some(Mailbox::new(o.channel, index)),
+            relay: Some(o.relay),
+            early: Vec::new(),
+            gate: Some(gate),
+            offer: Some(offer.trim().to_string()),
+            proceeded: false,
+        })
+    }
+
+    /// The code to show everyone joining through the relay. The first call opens the channel
+    /// on `relay`, the host's relay address: from then on the ceremony is held through the
+    /// relay, and everyone joining uses that relay. Later calls show the same code.
+    pub fn offer(&mut self, relay: &str) -> Result<String, String> {
+        if let Some(o) = &self.offer {
+            return Ok(o.clone());
+        }
+        if self.inner.index() != 0 {
+            return Err("host-seat".into());
+        }
+        // The host's commitment is fixed when the ceremony is built; the offer binds it.
+        let host = commitment_hash(&self.commitment());
+        let channel = Channel::new(&mut OsRng);
+        let text = channel
+            .offer(self.inner.params(), relay, &host)
+            .map_err(|_| "relay-too-long".to_string())?;
+        self.mailbox = Some(Mailbox::for_host(channel));
+        self.gate = Some(Gate::new());
+        self.relay = Some(relay.to_string());
+        self.offer = Some(text.clone());
+        Ok(text)
+    }
+
+    /// A joiner: a seat-0 commitment appeared on the relay that is not the host whose code
+    /// was scanned. It is held and never used. Say: "Seat 1 on the relay is not the host
+    /// whose code you scanned."
+    pub fn host_mismatch(&self) -> bool {
+        self.inner.index() != 0 && self.gate.as_ref().is_some_and(|g| g.stray(0))
+    }
+
+    /// A joiner's code to show the host: `cahoots:joined:v1:...`, binding this seat's
+    /// commitment. `Some` from the start until the host's reveal arrives, which says the host
+    /// took it. `None` on the host, for codes only, and once the seat is lost.
+    pub fn join_code(&self) -> Option<String> {
+        let mb = self.mailbox.as_ref()?;
+        if self.inner.index() == 0 || mb.lost_seat() {
+            return None;
+        }
+        let waiting = match self.inner.phase() {
+            Phase::Commit => true,
+            Phase::Reveal => self.inner.missing_reveals().contains(&0),
+            _ => false,
+        };
+        waiting.then(|| join_code(&mb.channel().id, self.inner.index(), &self.commitment()))
+    }
+
+    /// The host scans a joiner's code. Returns the joiner's seat, from 0. Errors:
+    /// `"not-a-join-code"`, `"other-ceremony"`, `"not-host"`.
+    pub fn scan_join(&mut self, text: &str) -> Result<u8, String> {
+        let (Some(gate), Some(mb)) = (self.gate.as_mut(), self.mailbox.as_ref()) else {
+            return Err("not-host".into());
+        };
+        if self.inner.index() != 0 {
+            return Err("not-host".into());
+        }
+        let seat = gate.scan(mb.channel(), text).map_err(|e| match e {
+            ChannelError::OtherChannel => "other-ceremony".to_string(),
+            _ => "not-a-join-code".to_string(),
+        })?;
+        self.feed_gate()?;
+        Ok(seat)
+    }
+
+    /// Seats the host scanned whose commitment it took.
+    pub fn scanned(&self) -> Vec<u8> {
+        self.host_gate().map(Gate::scanned).unwrap_or_default()
+    }
+
+    fn host_gate(&self) -> Option<&Gate> {
+        self.gate.as_ref().filter(|_| self.inner.index() == 0)
+    }
+
+    /// Seats with a commitment on the relay that the host has not scanned.
+    pub fn unscanned(&self) -> Vec<u8> {
+        self.host_gate().map(Gate::unscanned).unwrap_or_default()
+    }
+
+    /// The host holds every scanned commitment and waits for Continue (`proceed`).
+    pub fn needs_continue(&self) -> bool {
+        self.host_gate().is_some()
+            && !self.proceeded
+            && matches!(self.inner.phase(), Phase::Reveal | Phase::Attest)
+    }
+
+    /// The host, with everyone scanned, lets its reveal go.
+    pub fn proceed(&mut self) {
+        if self.needs_continue() {
+            self.proceeded = true;
+        }
+    }
+
+    /// The relay the ceremony is held on. `None` for codes only.
+    pub fn relay(&self) -> Option<String> {
+        self.relay.clone()
+    }
+
+    /// Another device's commitment for this seat came first on the relay. This device posts
+    /// nothing more: leave, and join again with a free seat.
+    pub fn lost_seat(&self) -> bool {
+        self.mailbox.as_ref().is_some_and(Mailbox::lost_seat)
+    }
+
+    pub fn through_relay(&self) -> bool {
+        self.mailbox.is_some()
+    }
+
+    /// The channel id, 32 hex characters: the relay files the messages under it where a circle
+    /// id would go. `None` for codes only.
+    pub fn channel_hex(&self) -> Option<String> {
+        self.mailbox.as_ref().map(|m| hex(&m.channel().id))
+    }
+
+    /// The sealed messages to post now, base64url: this seat's commitment, then its reveal once
+    /// every commitment is in, then its signature once every reveal is in. Each is sealed once
+    /// and returned until `posted` names it or it is read back from the relay. Post them in
+    /// order and stop at the first that fails.
+    pub fn outbound(&mut self) -> Result<Vec<String>, String> {
+        if self.mailbox.is_none() {
+            return Ok(Vec::new());
+        }
+        let commitment = self.commitment();
+        let phase = self.inner.phase();
+        let hold_back = self.host_gate().is_some() && !self.proceeded;
+        let reveal = if !hold_back && matches!(phase, Phase::Reveal | Phase::Attest | Phase::Complete) {
+            let mut fill = |buf: &mut [u8]| OsRng.fill_bytes(buf);
+            self.inner.my_reveal(&mut fill).map(<[u8]>::to_vec)
+        } else {
+            None
+        };
+        let attestation = if hold_back { None } else { self.inner.my_attestation() };
+        let mb = self.mailbox.as_mut().expect("checked");
+        mb.queue(Round::Commit, &commitment, &mut OsRng);
+        if let Some(r) = reveal {
+            mb.queue(Round::Reveal, &r, &mut OsRng);
+        }
+        if let Some(a) = attestation {
+            mb.queue(Round::Attest, &a, &mut OsRng);
+        }
+        Ok(mb.unposted().iter().map(|w| URL_SAFE_NO_PAD.encode(w)).collect())
+    }
+
+    /// The relay took this message, as `outbound` gave it.
+    pub fn posted(&mut self, wire_b64: &str) {
+        if let (Some(mb), Ok(w)) = (self.mailbox.as_mut(), URL_SAFE_NO_PAD.decode(wire_b64)) {
+            mb.posted(&w);
+        }
+    }
+
+    /// One message read from the relay under the channel id, in the relay's order. `true`
+    /// when it moved the ceremony. A message that does not open (a stranger's), our own,
+    /// another device's for our seat, or a second one for a seat and round already held is
+    /// passed over with `false`. So is one the core refuses, and its seat and round stay open
+    /// for the real one. Only an abort is an error (`"commit-mismatch:<i>"`). Check
+    /// `lost_seat` after reading.
+    pub fn inbound(&mut self, wire: &[u8]) -> Result<bool, String> {
+        let mb = self
+            .mailbox
+            .as_mut()
+            .ok_or_else(|| "not-through-relay".to_string())?;
+        let Some((seat, round, payload)) = mb.receive(wire) else {
+            return Ok(false);
+        };
+        if let Some(gate) = self.gate.as_mut() {
+            // The host takes a seat's commitment only once its scan matches, and that seat's
+            // later messages wait for it.
+            if gate.gates(seat) {
+                match round {
+                    Round::Commit => gate.commitment(seat, payload),
+                    _ => gate.defer(seat, round, payload),
+                }
+                return self.feed_gate();
+            }
+        }
+        self.apply_relay(seat, round, payload)
+    }
+
+    /// Give the host's ceremony every commitment a scan matched, then the messages that waited.
+    fn feed_gate(&mut self) -> Result<bool, String> {
+        let Some(gate) = self.gate.as_ref() else {
+            return Ok(false);
+        };
+        let mut moved = false;
+        for (seat, c) in gate.ready() {
+            if self.inner.phase() == Phase::Commit && self.add_commitment(seat, &c).is_ok() {
+                self.mailbox.as_mut().expect("host").hold(seat, Round::Commit);
+                self.gate.as_mut().expect("host").fed(seat);
+                moved = true;
+            }
+        }
+        let waiting = self.gate.as_mut().expect("host").take_deferred();
+        for (seat, round, payload) in waiting {
+            moved |= self.apply_relay(seat, round, payload)?;
+        }
+        Ok(moved)
+    }
+
+    fn apply_relay(&mut self, seat: u8, round: Round, payload: Vec<u8>) -> Result<bool, String> {
+        let applied = match (round, self.inner.phase()) {
+            (Round::Commit, Phase::Commit) => self.add_commitment(seat, &payload),
+            // Every commitment is held once the phase has moved on.
+            (Round::Commit, _) => return Ok(false),
+            (Round::Reveal, _) => self.add_reveal(seat, &payload),
+            (Round::Attest, Phase::Commit | Phase::Reveal) => {
+                let mine = self.early.iter().filter(|(i, _)| *i == seat).count();
+                if mine < EARLY_PER_SEAT && !self.early.iter().any(|(i, a)| *i == seat && *a == payload) {
+                    self.early.push((seat, payload));
+                }
+                return Ok(false);
+            }
+            (Round::Attest, _) => self.add_attestation(seat, &payload),
+        };
+        if let Err(e) = applied {
+            if self.inner.phase() == Phase::Aborted {
+                return Err(e);
+            }
+            return Ok(false);
+        }
+        let mb = self.mailbox.as_mut().expect("through the relay");
+        mb.hold(seat, round);
+        if self.inner.phase() == Phase::Attest {
+            for (i, a) in std::mem::take(&mut self.early) {
+                // A bad one is dropped. The first that verifies is held.
+                if self.inner.add_attestation(i, &a).is_ok()
+                    && !self.inner.missing_attestations().contains(&i)
+                {
+                    mb.hold(i, Round::Attest);
+                }
+            }
+        }
+        Ok(true)
     }
 
     /// Canonical parameter bytes, shown to every member for confirmation and shared with joiners.
@@ -321,6 +637,9 @@ impl WasmCeremony {
         )
         .map_err(pad_err)?;
         let mut circle = Circle::from_pad_with_pairs(pad, label, r.pair_keys);
+        if let Some(root) = &r.root {
+            circle.set_root(root);
+        }
         circle.seat_key = r.seat_key.as_ref().map(|k| k.to_bytes());
         circle.tier = r.tier;
         circle.manifest = r.manifest.encode();
@@ -396,8 +715,9 @@ fn pad_err(e: PadError) -> String {
 
 /// State format: v1 is pad + ledger + label; v2 appends chat session state and the relay seq;
 /// v3 appends the pair keys and hello counters; v4 appends the seat key seed, the tier and the
-/// sealed manifest.
-const STATE_VERSION: u8 = 4;
+/// sealed manifest; v5 appends the circle root, and its chat state is in root epochs. The chat
+/// state of v2 to v4 is in pad epochs, which are retired, so those import without chat.
+const STATE_VERSION: u8 = 5;
 
 fn chat_err(e: ChatError) -> String {
     match e {
@@ -407,24 +727,34 @@ fn chat_err(e: ChatError) -> String {
         ChatError::Tag => "tag".into(),
         ChatError::WrongCircle => "wrong-circle".into(),
         ChatError::BadSender => "bad-sender".into(),
-        ChatError::Reuse => "reuse".into(),
         ChatError::Replay => "replay".into(),
         ChatError::TooFarAhead => "too-far-ahead".into(),
         ChatError::UnknownEpoch => "unknown-epoch".into(),
+        ChatError::NotSynced => "not-synced".into(),
+        ChatError::PadEpoch => "pad-epoch".into(),
         ChatError::State => "state".into(),
-        ChatError::Pad(p) => pad_err(p),
     }
 }
 
+/// A root epoch as its number, `"3"`. A retired pad epoch id never gets this far.
 fn epoch_str(id: EpochId) -> String {
-    format!("{}:{}", id.slice, id.offset)
+    match id.number() {
+        Some(n) => n.to_string(),
+        None => format!("{}:{}", id.slice, id.offset),
+    }
 }
 
-/// A circle on this device: the pad and ledger, the pad-seeded chat session over them,
-/// the randomness label, and the last relay sequence number this device has consumed.
+const NO_ROOT: &str = "no-root";
+
+/// A circle on this device: the pad and ledger, the circle root and the chat session keyed
+/// by it, the randomness label, and the last relay sequence number this device has consumed.
 #[wasm_bindgen]
 pub struct Circle {
-    chat: ChatSession<MemPadStorage, MemLedger>,
+    pad: Pad<MemPadStorage, MemLedger>,
+    /// The circle root. `None` for a circle made before root epochs: it cannot chat.
+    root: Option<Zeroizing<[u8; 32]>>,
+    /// The chat session, present exactly when the root is.
+    chat: Option<ChatSession>,
     label: Label,
     relay_seq: Option<u64>,
     /// One X-Wing-derived key per other member, from the sealed reveals. See `cahoots_core::pairwise`.
@@ -461,7 +791,7 @@ impl ChatReceived {
     pub fn counter(&self) -> u32 {
         self.counter
     }
-    /// `"<slice>:<offset>"` of the 32 pad bytes that key this epoch.
+    /// The root epoch number, as text.
     pub fn epoch(&self) -> String {
         self.epoch.clone()
     }
@@ -477,10 +807,11 @@ impl Circle {
         label: Label,
         pair_keys: Vec<Option<Zeroizing<[u8; 32]>>>,
     ) -> Circle {
-        let me = pad.my_slice();
         let n = pair_keys.len();
         Circle {
-            chat: ChatSession::new(pad, me),
+            pad,
+            root: None,
+            chat: None,
             label,
             relay_seq: None,
             pair_keys,
@@ -491,10 +822,19 @@ impl Circle {
         }
     }
     fn pad(&self) -> &Pad<MemPadStorage, MemLedger> {
-        self.chat.pad()
+        &self.pad
     }
     fn pad_mut(&mut self) -> &mut Pad<MemPadStorage, MemLedger> {
-        self.chat.pad_mut()
+        &mut self.pad
+    }
+    /// Keep `root` and start a fresh chat session keyed by it.
+    fn set_root(&mut self, root: &[u8; 32]) {
+        let (id, n, me) = (self.pad.circle_id(), self.pad.params().n, self.pad.my_slice());
+        self.root = Some(Zeroizing::new(*root));
+        self.chat = Some(ChatSession::new(root, id, n, me));
+    }
+    fn chat_mut(&mut self) -> Result<&mut ChatSession, String> {
+        self.chat.as_mut().ok_or_else(|| NO_ROOT.to_string())
     }
 }
 
@@ -579,29 +919,55 @@ impl Circle {
         self.pad().remaining()
     }
 
-    // ---- pad-seeded chat (docs/chat.md) ----
+    // ---- chat on root epochs (docs/chat.md) ----
 
-    /// `"<slice>:<offset>"` of the epoch this device sends in, if any.
-    pub fn current_epoch(&self) -> Option<String> {
-        self.chat.current_epoch().map(epoch_str)
+    /// Whether this circle holds the circle root, which chat needs. A circle made before root
+    /// epochs does not.
+    pub fn has_root(&self) -> bool {
+        self.root.is_some()
     }
 
-    /// Spend 32 bytes from this member's slice and switch to a fresh epoch.
+    /// The number of the root epoch this device sends in, if any.
+    pub fn current_epoch(&self) -> Option<String> {
+        self.chat.as_ref()?.current_epoch().map(epoch_str)
+    }
+
+    /// Record that the relay has been read to the end, our own messages included. Call it
+    /// when a poll returns no entries. Until then `chat_send` refuses with `not-synced`. It
+    /// is not saved: a loaded circle starts unsynced.
+    pub fn chat_mark_synced(&mut self) {
+        if let Some(c) = self.chat.as_mut() {
+            c.mark_synced();
+        }
+    }
+
+    /// Whether `chat_mark_synced` has been called since this circle was made or loaded.
+    pub fn chat_synced(&self) -> bool {
+        self.chat.as_ref().is_some_and(ChatSession::synced)
+    }
+
+    /// Move to the next root epoch. Nothing is spent. Error: `no-root`.
     pub fn rotate_epoch(&mut self) -> Result<String, String> {
-        self.chat.start_epoch().map(epoch_str).map_err(chat_err)
+        Ok(epoch_str(self.chat_mut()?.start_epoch()))
     }
 
     /// Encrypt a chat message (starting an epoch if needed) and return base64url wire bytes.
+    /// Errors: `no-root`, and `not-synced` until `chat_mark_synced` after a full read of the
+    /// relay since this circle was loaded.
     pub fn chat_send(&mut self, plaintext: &[u8]) -> Result<String, String> {
-        let wire = self.chat.send(plaintext).map_err(chat_err)?;
+        let wire = self.chat_mut()?.send(plaintext).map_err(chat_err)?;
         Ok(b64_encode(&wire))
     }
 
-    /// Verify and decrypt a chat message. Errors: `reuse`, `tag`, `replay`, `too-far-ahead`,
-    /// `wrong-circle`, `version`, `length`, `base64url`.
+    /// Verify and decrypt a chat message. Feed our own messages here too: they are not
+    /// decrypted (the text is empty), but they move our sending position past them, so a
+    /// device restored from older state never reuses a key. Errors: `no-root`, `tag`,
+    /// `replay`, `too-far-ahead`, `unknown-epoch`, `pad-epoch`, `wrong-circle`, `version`,
+    /// `length`, `base64url`.
     pub fn chat_receive(&mut self, wire_b64: &str) -> Result<ChatReceived, String> {
+        let chat = self.chat_mut()?;
         let wire = b64_decode(wire_b64)?;
-        let (hdr, text) = self.chat.receive(&wire).map_err(chat_err)?;
+        let (hdr, text) = chat.receive(&wire).map_err(chat_err)?;
         Ok(ChatReceived {
             text,
             sender: hdr.sender,
@@ -728,8 +1094,12 @@ impl Circle {
         let mut bytes = Zeroizing::new(vec![0u8; pad_len as usize]);
         pad.storage().read(0, &mut bytes);
         out.extend_from_slice(&bytes);
-        // v2 trailer: chat state and relay seq.
-        let chat_state = self.chat.export_state();
+        // v2 trailer: chat state and relay seq. Empty chat state without a root.
+        let chat_state = self
+            .chat
+            .as_ref()
+            .map(ChatSession::export_state)
+            .unwrap_or_default();
         out.extend_from_slice(&(chat_state.len() as u32).to_le_bytes());
         out.extend_from_slice(&chat_state);
         match self.relay_seq {
@@ -763,6 +1133,14 @@ impl Circle {
         out.push(self.tier);
         out.extend_from_slice(&(self.manifest.len() as u32).to_le_bytes());
         out.extend_from_slice(&self.manifest);
+        // v5 trailer: the circle root.
+        match &self.root {
+            Some(k) => {
+                out.push(1);
+                out.extend_from_slice(k.as_ref());
+            }
+            None => out.extend_from_slice(&[0; 33]),
+        }
         out
     }
 
@@ -871,11 +1249,41 @@ impl Circle {
         } else {
             (None, 0, Vec::new())
         };
+        let root = if version >= 5 {
+            let present = r.u8().map_err(err)?;
+            let bytes = r.take(32).map_err(err)?;
+            match present {
+                0 => None,
+                1 => {
+                    let mut k = Zeroizing::new([0u8; 32]);
+                    k.copy_from_slice(bytes);
+                    Some(k)
+                }
+                _ => return Err("state".into()),
+            }
+        } else {
+            None
+        };
         if !r.0.is_empty() {
             return Err("state".into());
         }
-        let chat = ChatSession::import_state(pad, my_slice, chat_state).map_err(chat_err)?;
+        // Chat state before version 5 is in retired pad epochs: it is dropped.
+        let chat = match &root {
+            None => None,
+            Some(root) if chat_state.is_empty() => Some(ChatSession::new(
+                root,
+                circle_id,
+                params_n,
+                my_slice,
+            )),
+            Some(root) => Some(
+                ChatSession::import_state(root, circle_id, params_n, my_slice, chat_state)
+                    .map_err(chat_err)?,
+            ),
+        };
         Ok(Circle {
+            pad,
+            root,
             chat,
             label,
             relay_seq,

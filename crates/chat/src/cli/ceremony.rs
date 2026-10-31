@@ -2,7 +2,7 @@
 //! process with OS-CSPRNG contributions. Nothing here is a hardware TRNG, so the circles
 //! are labelled `CSPRNG`.
 
-use super::store::{write_label, StoreError};
+use super::store::{write_label, write_root, StoreError};
 use cahoots_core::ceremony::Ceremony;
 use cahoots_core::params::CircleParams;
 use cahoots_core::CircleId;
@@ -86,7 +86,17 @@ pub fn local_ceremony(
         let id = provider
             .add_circle(params.clone(), i as u8, r.pad.to_vec())
             .map_err(|e| StoreError::Io(std::format!("{e:?}")))?;
-        write_label(&dir.join(hex::encode(id)), "CSPRNG")?;
+        let circle_dir = dir.join(hex::encode(id));
+        write_label(&circle_dir, "CSPRNG")?;
+        let root = r
+            .root
+            .as_ref()
+            .ok_or_else(|| StoreError::Format("ceremony gave no root".into()))?;
+        let key = std::fs::read(dir.join("key"))?;
+        let key: [u8; 32] = key
+            .try_into()
+            .map_err(|_| StoreError::Format("key file is not 32 bytes".into()))?;
+        write_root(&circle_dir, &Zeroizing::new(key), root)?;
         member_dirs.push(dir);
         match &result {
             None => result = Some((r.circle_id, r.check_words)),

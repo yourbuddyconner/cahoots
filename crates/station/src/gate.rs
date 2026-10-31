@@ -91,7 +91,7 @@ impl Gate {
     pub(crate) fn from_log(log: &Log) -> Gate {
         let mut posts = HashMap::new();
         let mut seen = HashSet::new();
-        for e in log.all_after(None, usize::MAX) {
+        for e in log.entries() {
             if let Ok(h) = message::Header::parse(&e.message) {
                 *posts.entry((e.circle_id, h.kid)).or_insert(0u32) += 1;
                 seen.insert(message_key(&e.circle_id, &h));

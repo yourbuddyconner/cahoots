@@ -9,7 +9,7 @@ That design does not protect against every attack. Cahoots is experimental; the 
 | Mode | Protection | Important condition |
 |---|---|---|
 | **Send a message**: pure-pad mode | One-time-pad confidentiality with a one-time authentication key. | Pad bytes must be truly random, kept secret, and never reused. |
-| **Chat** | Conventional ChaCha20-Poly1305 encryption with keys seeded from the pad. | This is computational security, not one-time-pad encryption. |
+| **Chat** | Conventional ChaCha20-Poly1305 encryption with keys derived from the circle root. | This is computational security, not one-time-pad encryption. Chat is as secret as the root: anyone who compromises one member's device can read every message the relay still holds. |
 | File and network integrations | Conventional encryption using a key derived from the circle. | The integration’s security properties still apply. |
 
 Information-theoretic claims apply only to pure-pad messages under the required conditions. They do not apply to ordinary chat, WireGuard, or encrypted files.

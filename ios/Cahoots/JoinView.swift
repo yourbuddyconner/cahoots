@@ -1,0 +1,105 @@
+import SwiftUI
+
+/// "Join a circle": scan the host's code, then pick a seat.
+struct JoinView: View {
+    let core: Core
+    @EnvironmentObject private var model: AppModel
+    @State private var offer: JoinOffer?
+    @State private var seat: UInt8 = 1
+    @State private var error: String?
+    @State private var reading = false
+    @State private var joining = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.xl) {
+                if let offer {
+                    pick(offer)
+                } else {
+                    Text("Scan the host's code. For a ceremony with codes only, scan anyone who has joined. Their code is a short animation.")
+                        .font(.body)
+                        .foregroundStyle(Color.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ScanPanel(core: core, placeholder: "cahoots:ceremony:v1:...") { text, pasted in
+                        Task { await read(text, pasted: pasted) }
+                    }
+                    if reading {
+                        StatusLine(text: "Reading the animation. Hold steady.", problem: false)
+                    }
+                    StatusLine(text: error)
+                }
+            }
+            .padding(.horizontal, Space.l)
+            .padding(.top, Space.s)
+            .padding(.bottom, Space.xl)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .paperBackground()
+        .navigationTitle(offer?.name ?? "Join a circle")
+        .navigationBarTitleDisplayMode(offer == nil ? .large : .inline)
+        .actionBar(shown: offer != nil) {
+            if let offer {
+                StatusLine(text: error)
+                Button {
+                    Task { await join(offer) }
+                } label: {
+                    Working(busy: joining, title: "Make my contribution")
+                }
+                .buttonStyle(.filled)
+                .disabled(joining)
+                .accessibilityIdentifier("make-contribution")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func pick(_ offer: JoinOffer) -> some View {
+        ScreenHeader(title: "Which seat are you?",
+                     detail: "Seat 1 is the host's. Pick a free one, and make sure nobody else picks the same.",
+                     style: .title)
+        Text("\(spelled(Int(offer.members))) people, \(offer.throughRelay ? "through the relay" : "with codes only").")
+            .font(.subheadline)
+            .foregroundStyle(Color.muted)
+        PaperSection(title: "Your seat") {
+            ForEach(1..<Int(offer.members), id: \.self) { i in
+                if i > 1 { Hairline() }
+                OptionRow(title: "Seat \(i + 1)", chosen: seat == UInt8(i)) { seat = UInt8(i) }
+            }
+        }
+        .sensoryFeedback(.selection, trigger: seat)
+    }
+
+    private func read(_ text: String, pasted: Bool) async {
+        do {
+            if let o = try await core.run({ try $0.joinScan(text: text) }) {
+                withAnimation(.snappy) {
+                    offer = o
+                    seat = 1
+                    error = nil
+                    reading = false
+                }
+            } else {
+                reading = true
+            }
+        } catch {
+            // The camera sees many things that are not codes. Only a pasted code is worth a word.
+            if pasted { self.error = plain(error) }
+        }
+    }
+
+    private func join(_ offer: JoinOffer) async {
+        joining = true
+        defer { joining = false }
+        do {
+            let s = seat
+            let id = try await core.run {
+                offer.throughRelay
+                    ? try $0.joinOffer(text: offer.paramsCode, seat: s)
+                    : try $0.joinCeremony(paramsCode: offer.paramsCode, seat: s)
+            }
+            model.joined(id)
+        } catch {
+            self.error = plain(error)
+        }
+    }
+}

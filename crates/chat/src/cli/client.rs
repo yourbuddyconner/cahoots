@@ -1,10 +1,12 @@
 //! The send/receive logic of the demo client, free of threads and stdin so tests can
 //! drive it. `Client::poll` pulls relay entries after the last seen sequence number and
-//! turns each into an `Event`. `send_line` seals and posts. State is persisted after
-//! every send and every processed entry.
+//! turns each into an `Event`. Our own messages go through the session too, so a client
+//! restored from older state finds its sending position. A poll that returns nothing marks
+//! the session synced, and `send_line` refuses until then (`sync` polls until it is).
+//! `send_line` seals, persists, then posts.
 
 use super::relay::{Relay, RelayError};
-use super::store::{self, CircleChat, OpenedCircle, StoreError};
+use super::store::{self, CircleChat, CirclePad, OpenedCircle, StoreError};
 use crate::{bucket_pad, bucket_unpad, parse_header, ChatError, EpochId, Header};
 use cahoots_core::CircleId;
 use std::path::{Path, PathBuf};
@@ -14,7 +16,7 @@ use zeroize::Zeroizing;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    /// One of our own messages came back from the relay.
+    /// One of our own messages came back from the relay. Our sending position is past it.
     Own {
         seq: u64,
     },
@@ -40,6 +42,8 @@ pub enum ClientError {
     Relay(RelayError),
     Chat(ChatError),
     LineTooLong,
+    /// The circle has no root file: it was made before chat moved to root epochs.
+    NoRoot,
 }
 
 impl From<StoreError> for ClientError {
@@ -65,6 +69,10 @@ impl core::fmt::Display for ClientError {
             ClientError::Relay(e) => write!(f, "{e}"),
             ClientError::Chat(e) => write!(f, "chat: {e:?}"),
             ClientError::LineTooLong => write!(f, "line longer than the largest bucket"),
+            ClientError::NoRoot => write!(
+                f,
+                "this circle was made before root epochs; run a new ceremony to chat"
+            ),
         }
     }
 }
@@ -76,6 +84,7 @@ pub struct Client<R: Relay> {
     my_index: u8,
     label: String,
     session: CircleChat,
+    pad: CirclePad,
     relay: R,
     last_seq: Option<u64>,
     rotate_after: u32,
@@ -89,14 +98,19 @@ impl<R: Relay> Client<R> {
             dir,
             key,
             circle_id,
+            params,
             my_slice,
             label,
             pad,
+            root,
             ..
         } = store::open_circle(member_dir)?;
+        let root = root.ok_or(ClientError::NoRoot)?;
         let session = match store::load_chat_state(&dir, &key)? {
-            Some(state) => CircleChat::import_state(pad, my_slice, &state)?,
-            None => CircleChat::new(pad, my_slice),
+            Some(state) => {
+                CircleChat::import_state(&root, circle_id, params.n, my_slice, &state)?
+            }
+            None => CircleChat::new(&root, circle_id, params.n, my_slice),
         };
         let last_seq = store::load_seq(&dir)?;
         Ok(Client {
@@ -106,6 +120,7 @@ impl<R: Relay> Client<R> {
             my_index: my_slice,
             label,
             session,
+            pad,
             relay,
             last_seq,
             rotate_after: rotate_after.max(1),
@@ -129,7 +144,7 @@ impl<R: Relay> Client<R> {
         self.session.current_epoch()
     }
     pub fn remaining(&self) -> u32 {
-        self.session.pad().remaining()
+        self.pad.remaining()
     }
 
     fn persist(&mut self) -> Result<(), ClientError> {
@@ -141,7 +156,7 @@ impl<R: Relay> Client<R> {
 
     fn seal_line(&mut self, text: &str) -> Result<Vec<u8>, ClientError> {
         if self.session.current_epoch().is_none() || self.sent_in_epoch >= self.rotate_after {
-            self.session.start_epoch()?;
+            self.session.start_epoch();
             self.sent_in_epoch = 0;
         }
         let padded = bucket_pad(text.as_bytes()).ok_or(ClientError::LineTooLong)?;
@@ -169,12 +184,10 @@ impl<R: Relay> Client<R> {
 
     /// Process one relay entry without touching `last_seq` or persisting.
     pub fn handle_entry(&mut self, seq: u64, message: &[u8]) -> Event {
-        if let Ok(h) = parse_header(message) {
-            if h.sender == self.my_index && h.circle_id == self.circle_id {
-                return Event::Own { seq };
-            }
-        }
+        let own = parse_header(message)
+            .is_ok_and(|h| h.sender == self.my_index && h.circle_id == self.circle_id);
         match self.session.receive(message) {
+            Ok(_) if own => Event::Own { seq },
             Ok((Header { sender, .. }, pt)) => {
                 match bucket_unpad(&pt).and_then(|b| core::str::from_utf8(b).ok()) {
                     Some(text) => Event::Received {
@@ -198,9 +211,23 @@ impl<R: Relay> Client<R> {
             events.push(self.handle_entry(seq, &msg));
             self.last_seq = Some(seq);
         }
-        if !events.is_empty() {
+        if events.is_empty() {
+            self.session.mark_synced();
+        } else {
             self.persist()?;
         }
         Ok(events)
+    }
+
+    /// Poll until the relay has nothing more, so the session may send. Returns every event.
+    pub fn sync(&mut self) -> Result<Vec<Event>, ClientError> {
+        let mut all = Vec::new();
+        loop {
+            let events = self.poll(0)?;
+            if events.is_empty() {
+                return Ok(all);
+            }
+            all.extend(events);
+        }
     }
 }

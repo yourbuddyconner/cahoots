@@ -1,10 +1,8 @@
-//! The stateful chat session: epochs, per-sender ratchets, skipped keys, and the
-//! spend discipline for epoch ranges.
+//! The stateful chat session: root epochs, per-sender ratchets and skipped keys.
 
 use crate::primitives::*;
 use alloc::vec::Vec;
-use cahoots_core::ledger::SpentLedger;
-use cahoots_core::pad::{Pad, PadStorage};
+use cahoots_core::CircleId;
 use zeroize::{Zeroize, Zeroizing};
 
 /// Start a new epoch after this many of our own messages in the current one.
@@ -13,8 +11,12 @@ pub const ROTATE_AFTER: u32 = 1000;
 pub const MAX_SKIP: u32 = 256;
 /// Epoch states kept per session. The oldest is evicted beyond this.
 pub const MAX_EPOCHS: usize = 4;
+/// How far one of our own messages may move our sending position in one step. Our own
+/// counter rotates long before this, so a larger jump is not ours.
+pub const MAX_OWN_SKIP: u32 = 1 << 16;
 
-const STATE_MAGIC: &[u8; 4] = b"CHS1";
+/// `CHS1` was the pad-epoch state. It does not import.
+const STATE_MAGIC: &[u8; 4] = b"CHS2";
 
 #[derive(Clone)]
 struct SenderChain {
@@ -64,6 +66,24 @@ impl SenderChain {
         Ok(mk)
     }
 
+    /// Move our own chain past `counter` without keeping skipped keys, and return the key
+    /// for `counter`. Our own messages are never decrypted, only checked.
+    fn own_key_for(&mut self, counter: u32) -> Result<Key, ChatError> {
+        if counter < self.next {
+            return Err(ChatError::Replay);
+        }
+        if counter - self.next > MAX_OWN_SKIP {
+            return Err(ChatError::TooFarAhead);
+        }
+        while self.next < counter {
+            let (_, next) = step(&self.chain);
+            self.chain = next;
+            self.next += 1;
+        }
+        self.skipped.clear();
+        Ok(self.advance().1)
+    }
+
     /// Next key for our own sends.
     fn advance(&mut self) -> (u32, Key) {
         let (mk, next) = step(&self.chain);
@@ -75,15 +95,15 @@ impl SenderChain {
 }
 
 struct EpochState {
-    id: EpochId,
-    key: Key,
+    n: u32,
     senders: Vec<SenderChain>,
 }
 
 impl EpochState {
-    fn new(id: EpochId, key: Key, members: u8) -> Self {
+    fn new(root: &[u8; 32], circle_id: &CircleId, n: u32, members: u8) -> Self {
+        let key = epoch_key(root, circle_id, n);
         let senders = (0..members).map(|i| SenderChain::new(&key, i)).collect();
-        EpochState { id, key, senders }
+        EpochState { n, senders }
     }
 }
 
@@ -93,33 +113,55 @@ impl Drop for SenderChain {
     }
 }
 
-pub struct ChatSession<S: PadStorage, L: SpentLedger> {
-    pad: Pad<S, L>,
+/// One member's chat in one circle, keyed by root epochs. Holds the circle root, the
+/// chains of up to `MAX_EPOCHS` epochs, and where this member stands. No pad is spent.
+pub struct ChatSession {
+    root: Zeroizing<[u8; 32]>,
+    circle_id: CircleId,
+    members: u8,
     my_index: u8,
     epochs: Vec<EpochState>,
-    current: Option<EpochId>,
+    /// The highest root epoch held or started, 0 before any. This member sends in it.
+    highest: u32,
+    /// Every epoch at or below this is refused: its state was dropped, or never held and
+    /// older than one that was. Starts at 0, so epoch 0 is never used.
+    floor: u32,
     sent_in_current: u32,
+    /// Whether the caller has read the relay to the end since this session was made or
+    /// imported. Not exported: an imported session starts unsynced.
+    synced: bool,
 }
 
-impl<S: PadStorage, L: SpentLedger> ChatSession<S, L> {
-    pub fn new(pad: Pad<S, L>, my_index: u8) -> Self {
+impl ChatSession {
+    pub fn new(root: &[u8; 32], circle_id: CircleId, members: u8, my_index: u8) -> Self {
         ChatSession {
-            pad,
+            root: Zeroizing::new(*root),
+            circle_id,
+            members,
             my_index,
             epochs: Vec::new(),
-            current: None,
+            highest: 0,
+            floor: 0,
             sent_in_current: 0,
+            synced: false,
         }
     }
 
-    pub fn pad(&self) -> &Pad<S, L> {
-        &self.pad
+    /// Record that the relay has been read to the end, our own messages included. Until
+    /// then `send` refuses with `NotSynced`, so a session restored from older state cannot
+    /// send from a counter it already used.
+    pub fn mark_synced(&mut self) {
+        self.synced = true;
     }
-    pub fn pad_mut(&mut self) -> &mut Pad<S, L> {
-        &mut self.pad
+    pub fn synced(&self) -> bool {
+        self.synced
     }
-    pub fn into_pad(self) -> Pad<S, L> {
-        self.pad
+
+    pub fn circle_id(&self) -> CircleId {
+        self.circle_id
+    }
+    pub fn members(&self) -> u8 {
+        self.members
     }
     pub fn my_index(&self) -> u8 {
         self.my_index
@@ -128,66 +170,72 @@ impl<S: PadStorage, L: SpentLedger> ChatSession<S, L> {
     pub fn epochs(&self) -> usize {
         self.epochs.len()
     }
+    /// The epoch this member sends in: the highest it has started or read.
     pub fn current_epoch(&self) -> Option<EpochId> {
-        self.current
+        (self.highest > 0).then(|| EpochId::root(self.highest))
     }
 
-    fn members(&self) -> u8 {
-        self.pad.params().n
-    }
-
-    fn install_epoch(&mut self, id: EpochId, psk: &[u8; 32]) {
-        let key = epoch_key(&self.pad.circle_id(), &id, psk);
-        self.epochs.push(EpochState::new(id, key, self.members()));
+    /// Keep `state`, drop the oldest beyond `MAX_EPOCHS`, and move to it if it is the newest.
+    fn install(&mut self, state: EpochState) {
+        let n = state.n;
+        self.epochs.push(state);
         while self.epochs.len() > MAX_EPOCHS {
-            self.epochs.remove(0);
+            let oldest = (0..self.epochs.len())
+                .min_by_key(|&i| self.epochs[i].n)
+                .expect("not empty");
+            let gone = self.epochs.remove(oldest);
+            self.floor = self.floor.max(gone.n);
         }
-        self.current = Some(id);
-        self.sent_in_current = 0;
+        if n > self.highest {
+            self.highest = n;
+            self.sent_in_current = 0;
+        }
     }
 
-    /// Spend 32 bytes from our slice and switch to the new epoch.
-    pub fn start_epoch(&mut self) -> Result<EpochId, ChatError> {
-        let (offset, bytes) = self.pad.spend_next(32)?;
-        let id = EpochId {
-            slice: self.pad.my_slice(),
-            offset,
-        };
-        let psk: Zeroizing<[u8; 32]> =
-            Zeroizing::new(bytes.as_slice().try_into().expect("spent 32 bytes"));
-        self.install_epoch(id, &psk);
-        Ok(id)
+    /// Move to the next root epoch: one past the highest seen, or 1 on a fresh session.
+    /// Nothing is spent, so this cannot fail.
+    pub fn start_epoch(&mut self) -> EpochId {
+        let n = self.highest.saturating_add(1);
+        if self.epoch_mut(n).is_none() {
+            let state = EpochState::new(&self.root, &self.circle_id, n, self.members);
+            self.install(state);
+        }
+        EpochId::root(n)
     }
 
-    fn epoch_mut(&mut self, id: EpochId) -> Option<&mut EpochState> {
-        self.epochs.iter_mut().find(|e| e.id == id)
+    fn epoch_mut(&mut self, n: u32) -> Option<&mut EpochState> {
+        self.epochs.iter_mut().find(|e| e.n == n)
     }
 
     pub fn send(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, ChatError> {
         self.send_typed(MessageType::Text, plaintext)
     }
 
+    /// Seal `plaintext` in the current epoch, starting epoch 1 if there is none and the
+    /// next one after `ROTATE_AFTER` of our own messages.
     pub fn send_typed(
         &mut self,
         msg_type: MessageType,
         plaintext: &[u8],
     ) -> Result<Vec<u8>, ChatError> {
-        let needs_epoch = match self.current {
-            None => true,
-            Some(id) => self.sent_in_current >= ROTATE_AFTER || self.epoch_mut(id).is_none(),
-        };
-        if needs_epoch {
-            self.start_epoch()?;
+        if !self.synced {
+            return Err(ChatError::NotSynced);
         }
-        let id = self.current.expect("epoch installed");
-        let circle_id = self.pad.circle_id();
+        if self.highest == 0
+            || self.sent_in_current >= ROTATE_AFTER
+            || self.epoch_mut(self.highest).is_none()
+        {
+            self.start_epoch();
+        }
+        let n = self.highest;
+        let circle_id = self.circle_id;
         let me = self.my_index;
-        let epoch = self.epoch_mut(id).ok_or(ChatError::UnknownEpoch)?;
+        let epoch = self.epoch_mut(n).ok_or(ChatError::UnknownEpoch)?;
         let (counter, mk) = epoch.senders[usize::from(me)].advance();
         let header = Header {
             version: CHAT_VERSION,
             circle_id,
-            epoch: id,
+            epoch: EpochId::root(n),
             sender: me,
             counter,
             len: plaintext.len() as u32,
@@ -197,52 +245,65 @@ impl<S: PadStorage, L: SpentLedger> ChatSession<S, L> {
         Ok(seal(&header, &mk, plaintext))
     }
 
-    /// Verify and decrypt. An unknown epoch is spent from the pad on first sight,
-    /// before the tag is checked. State for a known epoch changes only on success.
+    /// Verify and decrypt. An unknown root epoch `n` above the floor is derived from the root
+    /// and kept only if the message opens. State changes only on success.
+    ///
+    /// A message from our own seat is not decrypted. If it is past our sending position and
+    /// its tag checks, our chain moves past it, and the plaintext returned is empty. If we
+    /// are already past it, nothing changes and the plaintext is empty too. This is how a
+    /// device that lost or rolled back its chat state finds its place again.
     pub fn receive(&mut self, wire: &[u8]) -> Result<(Header, Vec<u8>), ChatError> {
         let (header, body) = parse(wire)?;
-        if header.circle_id != self.pad.circle_id() {
+        if header.circle_id != self.circle_id {
             return Err(ChatError::WrongCircle);
         }
-        if header.sender >= self.members() {
+        if header.sender >= self.members {
             return Err(ChatError::BadSender);
         }
-        if self.epoch_mut(header.epoch).is_none() {
-            let bytes = self
-                .pad
-                .spend_range(header.epoch.slice, header.epoch.offset, 32)?;
-            let psk: Zeroizing<[u8; 32]> =
-                Zeroizing::new(bytes.as_slice().try_into().expect("32 bytes"));
-            self.install_epoch(header.epoch, &psk);
+        let n = header.epoch.number().ok_or(ChatError::PadEpoch)?;
+        let sender = usize::from(header.sender);
+        let own = header.sender == self.my_index;
+        let held = self.epoch_mut(n).is_some();
+        if !held && n <= self.floor {
+            return Err(ChatError::UnknownEpoch);
         }
-        let epoch = self.epoch_mut(header.epoch).expect("just installed");
-        let chain = &mut epoch.senders[usize::from(header.sender)];
+        let mut fresh = None;
+        let epoch = match self.epoch_mut(n) {
+            Some(e) => e,
+            None => fresh.insert(EpochState::new(&self.root, &self.circle_id, n, self.members)),
+        };
+        let chain = &mut epoch.senders[sender];
+        if own && header.counter < chain.next {
+            return Ok((header, Vec::new()));
+        }
         // Work on a copy so a tag failure leaves the chain untouched.
         let mut trial = chain.clone();
-        let mk = trial.key_for(header.counter)?;
+        let mk = if own {
+            trial.own_key_for(header.counter)?
+        } else {
+            trial.key_for(header.counter)?
+        };
         let pt = open(&header, &mk, body)?;
         *chain = trial;
-        Ok((header, pt))
+        if let Some(state) = fresh {
+            self.install(state);
+        }
+        Ok((header, if own { Vec::new() } else { pt }))
     }
 
-    /// Serialize epoch and chain state (secrets included) for persistence.
+    /// Serialize epoch and chain state (secrets included) for persistence. The root is not
+    /// in it: `import_state` takes the root again.
     pub fn export_state(&self) -> Zeroizing<Vec<u8>> {
         let mut out = Zeroizing::new(Vec::new());
         out.extend_from_slice(STATE_MAGIC);
         out.push(self.my_index);
-        match self.current {
-            Some(id) => {
-                out.push(1);
-                out.extend_from_slice(&id.encode());
-            }
-            None => out.extend_from_slice(&[0; 1 + EPOCH_ID_LEN]),
-        }
+        out.push(self.members);
+        out.extend_from_slice(&self.highest.to_le_bytes());
+        out.extend_from_slice(&self.floor.to_le_bytes());
         out.extend_from_slice(&self.sent_in_current.to_le_bytes());
         out.push(self.epochs.len() as u8);
         for e in &self.epochs {
-            out.extend_from_slice(&e.id.encode());
-            out.extend_from_slice(e.key.as_ref());
-            out.push(e.senders.len() as u8);
+            out.extend_from_slice(&e.n.to_le_bytes());
             for s in &e.senders {
                 out.extend_from_slice(s.chain.as_ref());
                 out.extend_from_slice(&s.next.to_le_bytes());
@@ -256,34 +317,32 @@ impl<S: PadStorage, L: SpentLedger> ChatSession<S, L> {
         out
     }
 
-    pub fn import_state(pad: Pad<S, L>, my_index: u8, state: &[u8]) -> Result<Self, ChatError> {
+    pub fn import_state(
+        root: &[u8; 32],
+        circle_id: CircleId,
+        members: u8,
+        my_index: u8,
+        state: &[u8],
+    ) -> Result<Self, ChatError> {
         let mut r = Reader { b: state, pos: 0 };
-        if r.take(4)? != STATE_MAGIC || r.u8()? != my_index {
+        if r.take(4)? != STATE_MAGIC || r.u8()? != my_index || r.u8()? != members {
             return Err(ChatError::State);
         }
-        let has_current = r.u8()?;
-        let cur = EpochId::decode(r.take(EPOCH_ID_LEN)?);
-        let current = match has_current {
-            0 => None,
-            1 => Some(cur),
-            _ => return Err(ChatError::State),
-        };
+        let highest = r.u32()?;
+        let floor = r.u32()?;
         let sent_in_current = r.u32()?;
         let n_epochs = usize::from(r.u8()?);
-        if n_epochs > MAX_EPOCHS {
+        if n_epochs > MAX_EPOCHS || floor > highest {
             return Err(ChatError::State);
         }
-        let members = pad.params().n;
-        let mut epochs = Vec::with_capacity(n_epochs);
+        let mut epochs: Vec<EpochState> = Vec::with_capacity(n_epochs);
         for _ in 0..n_epochs {
-            let id = EpochId::decode(r.take(EPOCH_ID_LEN)?);
-            let key = r.key()?;
-            let n_senders = r.u8()?;
-            if n_senders != members {
+            let n = r.u32()?;
+            if n <= floor || n > highest || epochs.iter().any(|e| e.n == n) {
                 return Err(ChatError::State);
             }
-            let mut senders = Vec::with_capacity(usize::from(n_senders));
-            for _ in 0..n_senders {
+            let mut senders = Vec::with_capacity(usize::from(members));
+            for _ in 0..members {
                 let chain = r.key()?;
                 let next = r.u32()?;
                 let n_skipped = usize::from(r.u16()?);
@@ -301,17 +360,21 @@ impl<S: PadStorage, L: SpentLedger> ChatSession<S, L> {
                     skipped,
                 });
             }
-            epochs.push(EpochState { id, key, senders });
+            epochs.push(EpochState { n, senders });
         }
         if r.pos != state.len() {
             return Err(ChatError::State);
         }
         Ok(ChatSession {
-            pad,
+            root: Zeroizing::new(*root),
+            circle_id,
+            members,
             my_index,
             epochs,
-            current,
+            highest,
+            floor,
             sent_in_current,
+            synced: false,
         })
     }
 }

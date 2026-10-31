@@ -362,3 +362,131 @@ async fn info_reports_version_and_default_features() {
     assert_eq!(v["limits"]["posts_per_minute"], 5);
     assert_eq!(v["limits"]["reads_per_minute"], Value::Null);
 }
+
+fn ceremony_message(id: [u8; 16], payload: &[u8]) -> Vec<u8> {
+    let ch = cahoots_core::channel::Channel::from_key(id, [5; 32]);
+    ch.seal_with_nonce(1, cahoots_core::channel::Round::Commit, payload, [9; 12])
+}
+
+#[tokio::test]
+async fn a_ceremony_message_is_stored_and_served() {
+    let (base, _dir) = start().await;
+    let client = reqwest::Client::new();
+    let id = [0x3C; 16];
+    let url = format!("{base}/v1/circles/{}/messages", hex::encode(id));
+    let first = ceremony_message(id, b"a commitment");
+    let second = ceremony_message(id, b"the same bytes are not a reuse");
+    for (m, seq) in [(&first, 0), (&second, 1), (&first, 2)] {
+        let r = client.post(&url).body(m.clone()).send().await.unwrap();
+        assert_eq!(r.status(), 201);
+        let v: Value = r.json().await.unwrap();
+        assert_eq!(v["seq"], seq);
+    }
+    let v: Value = client.get(&url).send().await.unwrap().json().await.unwrap();
+    let entries = v["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 3);
+    use base64::Engine;
+    let got = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(entries[1]["message"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(got, second);
+    // The id in the body must be the id in the path, and the length must be right.
+    let other = format!("{base}/v1/circles/{}/messages", hex::encode([0x3D; 16]));
+    let r = client
+        .post(&other)
+        .body(first.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+    let mut short = first.clone();
+    short.pop();
+    let r = client.post(&url).body(short).send().await.unwrap();
+    assert_eq!(r.status(), 400);
+}
+
+#[tokio::test]
+async fn an_oversized_ceremony_message_is_refused() {
+    let (base, _dir) = start().await;
+    let client = reqwest::Client::new();
+    let id = [0x4E; 16];
+    let url = format!("{base}/v1/circles/{}/messages", hex::encode(id));
+    let cap = cahoots_station::rules::MAX_BODY;
+    let fits = ceremony_message(id, &vec![1u8; cap - 21 - 30]);
+    assert_eq!(fits.len(), cap);
+    let r = client.post(&url).body(fits).send().await.unwrap();
+    assert_eq!(r.status(), 201);
+    let over = ceremony_message(id, &vec![1u8; cap - 21 - 30 + 1]);
+    let r = client.post(&url).body(over).send().await.unwrap();
+    assert_eq!(r.status(), 413);
+}
+
+#[tokio::test]
+async fn ceremony_channels_are_not_listed_publicly() {
+    let (base, _dir) = start().await;
+    let client = reqwest::Client::new();
+    let id = [0x5F; 16];
+    let cid = [0x60; 16];
+    let post = |path: [u8; 16], body: Vec<u8>| {
+        client
+            .post(format!("{base}/v1/circles/{}/messages", hex::encode(path)))
+            .body(body)
+            .send()
+    };
+    assert_eq!(
+        post(id, ceremony_message(id, b"a commitment"))
+            .await
+            .unwrap()
+            .status(),
+        201
+    );
+    assert_eq!(post(cid, chat(cid, 0)).await.unwrap().status(), 201);
+    assert_eq!(
+        post(id, ceremony_message(id, b"a reveal"))
+            .await
+            .unwrap()
+            .status(),
+        201
+    );
+    // The listing and the feed show the circle, not the channel.
+    let v: Value = client
+        .get(format!("{base}/v1/circles"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let listed: Vec<&str> = v["circles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["circle_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(listed, [hex::encode(cid)]);
+    let v: Value = client
+        .get(format!("{base}/v1/feed"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let fed: Vec<u64> = v["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["seq"].as_u64().unwrap())
+        .collect();
+    assert_eq!(fed, [1]);
+    // Whoever holds the channel id still reads it.
+    let v: Value = client
+        .get(format!("{base}/v1/circles/{}/messages", hex::encode(id)))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(v["entries"].as_array().unwrap().len(), 2);
+}

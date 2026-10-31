@@ -19,6 +19,12 @@ qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 rqrr = "0.11"
 base64 = "0.22.1"
 zeroize = "1.8"
+getrandom = { version = "0.2", features = ["js"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+[dev-dependencies]
+cahoots-relay = { path = "../relay" }
+hex = { workspace = true, features = ["std"] }
 
 
 [package.metadata.wasm-pack.profile.release]

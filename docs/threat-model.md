@@ -6,7 +6,7 @@ This reference describes the attackers Cahoots is designed to address and the li
 
 **Pure-pad messages:** confidentiality can be information-theoretic when the pad is truly random, secret, and never reused. Integrity uses a one-time Poly1305 authentication key. A `CSPRNG` circle has computational confidentiality.
 
-**Chat and integrations:** pad-seeded chat, WireGuard, HPKE, and age use conventional cryptography. The pure-pad confidentiality and integrity claims do not apply to their payloads. See the [chat specification](chat.md) and [adapter reference](../crates/ADAPTERS.md).
+**Chat and integrations:** chat keyed by the circle root, WireGuard, HPKE, and age use conventional cryptography. The pure-pad confidentiality and integrity claims do not apply to their payloads. See the [chat specification](chat.md) and [adapter reference](../crates/ADAPTERS.md).
 
 **Ceremony recordings:** contributions are encrypted using X-Wing, which combines X25519 and ML-KEM-768. A recorder’s ability to recover a contribution depends on that encryption, even when the resulting pad qualifies for pure-pad claims.
 

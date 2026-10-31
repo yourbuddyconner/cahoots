@@ -16,9 +16,9 @@ use cahoots_core::pairwise;
 use cahoots_core::params::CircleParams;
 use cahoots_core::reveal::{self, randomness_len};
 use cahoots_core::seat::SeatKey;
-use cahoots_objects::grant::{self, verify_chain, Grant, Grantor};
 use cahoots_objects::authz::{proof_sign, proof_verify, Action, SignGrant};
 use cahoots_objects::card::{self, Card, PURPOSE_CHAT, PURPOSE_SSH};
+use cahoots_objects::grant::{self, verify_chain, Grant, Grantor};
 use cahoots_objects::{assurance, fact_nonce, Approval, Fact, Receipt};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -431,6 +431,48 @@ fn frame_vectors() -> Value {
     })
 }
 
+fn channel_vectors() -> Value {
+    use cahoots_core::channel::{Channel, Round};
+    let id: [u8; 16] = fill(700, 16).try_into().unwrap();
+    let key: [u8; 32] = fill(701, 32).try_into().unwrap();
+    let params = CircleParams::new(3, 65536, "park", false).unwrap();
+    let ch = Channel::from_key(id, key);
+    let relay = "https://relay.cahoots.network";
+    let host_commitment = fill(705, 1282);
+    let host = cahoots_core::channel::commitment_hash(&host_commitment);
+    let offer = ch.offer(&params, relay, &host).unwrap();
+    let nonce: [u8; 12] = fill(702, 12).try_into().unwrap();
+    let payload = fill(703, 48);
+    let wire = ch.seal_with_nonce(2, Round::Reveal, &payload, nonce);
+    let (seat, round, opened) = ch.open(&wire).unwrap();
+    let commitment = fill(704, 1282);
+    let joined = cahoots_core::channel::join_code(&id, 1, &commitment);
+    assert_eq!(opened, payload);
+    json!({
+        "description": "The ceremony channel (crates/core/src/channel.rs, docs/protocol.md section 3.7). offer = \"cahoots:ceremony:v1:\" || base64url without padding (id || key || SHA-256(host commitment) || relay length (u8) || relay (UTF-8) || params). The host commitment is the host's commitment payload; a joiner takes seat 0's commitment only if its hash matches. A message is version 3 | id (16) | len (u32 LE, the bytes after it) | seat | round (1 commit, 2 reveal, 3 attest) | nonce (12) | ChaCha20-Poly1305 ciphertext and tag, under HKDF-SHA256(ikm = key, salt = id, info = \"cahoots/ceremony/channel/v1\"), with id || seat || round as associated data.",
+        "id": hex::encode(id),
+        "key": hex::encode(key),
+        "params": hex::encode(params.encode()),
+        "relay": relay,
+        "host_commitment": hex::encode(&host_commitment),
+        "host_commitment_hash": hex::encode(host),
+        "offer": offer,
+        "join": {
+            "description": "A joiner's code: \"cahoots:joined:v1:\" || base64url without padding (id || seat || SHA-256(commitment)).",
+            "seat": 1,
+            "commitment": hex::encode(&commitment),
+            "code": joined,
+        },
+        "message": {
+            "seat": seat,
+            "round": round as u8,
+            "nonce": hex::encode(nonce),
+            "payload": hex::encode(&payload),
+            "wire": hex::encode(&wire),
+        },
+    })
+}
+
 /// Inputs of a grant, every field, so a client can rebuild the payload.
 fn grant_inputs(g: &Grant) -> Value {
     json!({
@@ -608,18 +650,24 @@ fn object_vectors() -> Value {
     let card_signed = contact.sign(seat_key, &[seat]).unwrap();
     assert_eq!(Card::verify(&card_signed, &manifest).unwrap(), contact);
     let circle_root: [u8; 32] = fill(560, 32).try_into().unwrap();
-    let seal_key = cahoots_core::root::seal_key(&circle_root, cahoots_core::root::SEAL_CARD, &circle);
+    let seal_key =
+        cahoots_core::root::seal_key(&circle_root, cahoots_core::root::SEAL_CARD, &circle);
     let seal_nonce: [u8; 12] = fill(561, 12).try_into().unwrap();
     let sealed = card::seal_with_nonce(&card_signed, &seal_key, seal_nonce);
     assert_eq!(card::open(&sealed, &seal_key).unwrap(), card_signed);
-    let mut card_vector = signed_object(json!({
-        "circle_id": hex::encode(contact.circle_id),
-        "seat": contact.seat,
-        "name": contact.name,
-        "handles": contact.handles.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
-        "endpoints": contact.endpoints.iter().map(|(p, v)| json!([p, v])).collect::<Vec<_>>(),
-        "log": contact.log,
-    }), contact.encode().unwrap(), &card_signed, contact.to_json());
+    let mut card_vector = signed_object(
+        json!({
+            "circle_id": hex::encode(contact.circle_id),
+            "seat": contact.seat,
+            "name": contact.name,
+            "handles": contact.handles.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
+            "endpoints": contact.endpoints.iter().map(|(p, v)| json!([p, v])).collect::<Vec<_>>(),
+            "log": contact.log,
+        }),
+        contact.encode().unwrap(),
+        &card_signed,
+        contact.to_json(),
+    );
     card_vector["seal"] = json!({
         "root": hex::encode(circle_root),
         "key": hex::encode(seal_key),
@@ -652,20 +700,30 @@ fn object_vectors() -> Value {
     let proof_hash: [u8; 32] = fill(572, 32).try_into().unwrap();
     let proof_nonce: [u8; 16] = fill(573, 16).try_into().unwrap();
     let proof = proof_sign(&agent, &proof_hash, &proof_nonce);
-    assert!(proof_verify(&proof, &agent.public(), &proof_hash, &proof_nonce));
-    let mut sign_grant_vector = signed_object(json!({
-        "circle_id": hex::encode(sign_grant.circle_id),
-        "seat": sign_grant.seat,
-        "grantee": hex::encode(sign_grant.grantee.0),
-        "cti": hex::encode(sign_grant.cti),
-        "actions": ["git-commit"],
-        "author": sign_grant.author,
-        "locations": sign_grant.locations,
-        "agent": sign_grant.agent,
-        "budget": sign_grant.budget,
-        "exp": sign_grant.exp,
-        "base": sign_grant.base,
-    }), sign_grant.claims().encode(), &sign_grant_signed, Value::Null);
+    assert!(proof_verify(
+        &proof,
+        &agent.public(),
+        &proof_hash,
+        &proof_nonce
+    ));
+    let mut sign_grant_vector = signed_object(
+        json!({
+            "circle_id": hex::encode(sign_grant.circle_id),
+            "seat": sign_grant.seat,
+            "grantee": hex::encode(sign_grant.grantee.0),
+            "cti": hex::encode(sign_grant.cti),
+            "actions": ["git-commit"],
+            "author": sign_grant.author,
+            "locations": sign_grant.locations,
+            "agent": sign_grant.agent,
+            "budget": sign_grant.budget,
+            "exp": sign_grant.exp,
+            "base": sign_grant.base,
+        }),
+        sign_grant.claims().encode(),
+        &sign_grant_signed,
+        Value::Null,
+    );
     sign_grant_vector.as_object_mut().unwrap().remove("json");
     sign_grant_vector["agent_seed"] = json!(hex::encode(agent_seed));
     sign_grant_vector["proof"] = json!({
@@ -771,7 +829,13 @@ fn ssh_string(out: &mut Vec<u8>, b: &[u8]) {
 }
 
 /// The userauth request OpenSSH asks an agent to sign.
-fn userauth(session_id: &[u8], user: &str, method: &str, key: &[u8], host_key: Option<&[u8]>) -> Vec<u8> {
+fn userauth(
+    session_id: &[u8],
+    user: &str,
+    method: &str,
+    key: &[u8],
+    host_key: Option<&[u8]>,
+) -> Vec<u8> {
     let mut v = Vec::new();
     ssh_string(&mut v, session_id);
     v.push(50);
@@ -942,7 +1006,7 @@ fn objects_circle() -> (Vec<[u8; 32]>, Vec<SeatKey>, Manifest) {
     (seeds, keys, manifest)
 }
 
-fn channel_vectors() -> Value {
+fn channels_vectors() -> Value {
     use cahoots_channel::control::Control as ChanControl;
     use cahoots_channel::deposit::{self, Deposit};
     use cahoots_channel::grant as cgrant;
@@ -1270,8 +1334,9 @@ fn main() {
         ("messages.json", message_vectors()),
         ("spend.json", spend_vectors()),
         ("frames.json", frame_vectors()),
-        ("objects.json", object_vectors()),
         ("channel.json", channel_vectors()),
+        ("objects.json", object_vectors()),
+        ("channels.json", channels_vectors()),
     ];
     let mut stale = Vec::new();
     for (name, value) in files {

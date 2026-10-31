@@ -36,11 +36,11 @@ Terms used in the guides. For exact formats and requirements, use the [protocol 
 
 **Pure-pad mode:** encrypting a short message directly with fresh pad bytes, plus a one-time authentication key. Its strongest confidentiality claim requires truly random secret bytes that are never reused.
 
-**PSK:** preshared key. Cahoots can spend 32 pad bytes to seed keys for conventional encryption. Chat and the file/network integrations use this approach.
+**PSK:** preshared key. Cahoots can spend 32 pad bytes to seed keys for conventional encryption. The file and network integrations use this approach. Chat does not: its keys come from the circle root.
 
 **Seal / tag:** authentication data attached to a message. The circle tag establishes that someone with the shared secret created the message; it does not identify a particular person within the circle.
 
-**Epoch:** one period of chat keys, started by a 32-byte pad spend. It can carry many chat messages.
+**Epoch:** one period of chat keys, derived from the circle root and numbered from 1. Starting one spends no pad. It can carry many chat messages.
 
 **Relay / Numbers Station / feed:** the server and public log used to deliver encrypted messages. The relay does not have the circle’s keys. See [Run a relay](relay.md).
 

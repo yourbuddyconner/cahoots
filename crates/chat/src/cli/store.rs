@@ -7,7 +7,8 @@
 //! provider: ledger line appended and fsynced first, then `pad.enc` rewritten
 //! atomically with the range zeroed, then decrypted back and verified.
 //!
-//! The client adds two files of its own next to them: `chat.state` (the exported
+//! The client adds files of its own next to them: `root` (the circle root from the
+//! ceremony, encrypted under the same key, mode 0600), `chat.state` (the exported
 //! `ChatSession` state, secrets included, encrypted under the same key) and `chat.seq`
 //! (the last relay sequence number seen).
 
@@ -158,7 +159,7 @@ impl SpentLedger for CircleLedger {
 }
 
 pub type CirclePad = Pad<CircleStorage, CircleLedger>;
-pub type CircleChat = ChatSession<CircleStorage, CircleLedger>;
+pub type CircleChat = ChatSession;
 
 /// One member's circle, opened from a provider directory holding exactly one circle.
 pub struct OpenedCircle {
@@ -169,6 +170,9 @@ pub struct OpenedCircle {
     pub my_slice: u8,
     pub label: String,
     pub pad: CirclePad,
+    /// The circle root, which keys the chat. `None` for a circle written before the client
+    /// kept it.
+    pub root: Option<Zeroizing<[u8; 32]>>,
 }
 
 fn read_key(root: &Path) -> Result<Zeroizing<[u8; 32]>, StoreError> {
@@ -224,6 +228,7 @@ pub fn open_circle(root: &Path) -> Result<OpenedCircle, StoreError> {
     let ledger = CircleLedger::open(&dir.join("ledger"), params.slices())?;
     let pad = Pad::with_circle_id(params.clone(), my_slice, circle_id, storage, ledger)
         .map_err(|e| StoreError::Format(std::format!("pad: {e:?}")))?;
+    let root = load_root(&dir, &key)?;
     Ok(OpenedCircle {
         dir,
         key,
@@ -232,7 +237,45 @@ pub fn open_circle(root: &Path) -> Result<OpenedCircle, StoreError> {
         my_slice,
         label,
         pad,
+        root,
     })
+}
+
+/// Write the circle root next to the pad, encrypted under the provider key, mode 0600.
+/// The temporary file is created with mode 0600 before any byte is written.
+pub fn write_root(circle_dir: &Path, key: &[u8; 32], root: &[u8; 32]) -> Result<(), StoreError> {
+    let path = circle_dir.join("root");
+    let tmp = path.with_extension("tmp");
+    let _ = fs::remove_file(&tmp);
+    let mut opts = OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut f = opts.open(&tmp)?;
+    f.write_all(&seal_blob(key, root)?)?;
+    f.sync_all()?;
+    drop(f);
+    fs::rename(&tmp, &path)?;
+    File::open(circle_dir)?.sync_all()?;
+    Ok(())
+}
+
+/// The circle root, or `None` if this circle has no `root` file.
+pub fn load_root(circle_dir: &Path, key: &[u8; 32]) -> Result<Option<Zeroizing<[u8; 32]>>, StoreError> {
+    let path = circle_dir.join("root");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = open_blob(key, &fs::read(path)?)?;
+    let mut root = Zeroizing::new([0u8; 32]);
+    if bytes.len() != 32 {
+        return Err(StoreError::Format("root file is not 32 bytes".into()));
+    }
+    root.copy_from_slice(&bytes);
+    Ok(Some(root))
 }
 
 /// Write the label file the provider format does not have. `TRNG` or `CSPRNG`.

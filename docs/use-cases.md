@@ -14,7 +14,7 @@ Start with [Create a circle](ceremony-guide.md), then [Use the browser app](brow
 
 ## Keep a group chat
 
-Open **Chat** to send messages through a relay. The pad seeds chat keys, and conventional encryption protects the conversation.
+Open **Chat** to send messages through a relay. The circle root from the ceremony seeds the chat keys, and conventional encryption protects the conversation. Chat is as secret as the root: anyone who gets one member's unlocked device can read it.
 
 The relay needs to be reachable by every member. It holds ciphertext, not the circle’s keys. See [Run a relay](relay.md).
 

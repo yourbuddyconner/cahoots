@@ -44,7 +44,7 @@ Native Swift, because everything that makes this different from the browser app 
 
 ## What exists and is reused
 
-- `crates/core` (ceremony, pad, check words, pair keys, seat keys, manifest, circle root), `crates/chat` (pad-seeded chat with epochs), `crates/relay` (the station client, `HttpRelay` and `MemRelay`), `crates/objects` (grants, the sign grant, the evaluator, the proof, cards), `crates/custodian` (the wire protocol a badge speaks).
+- `crates/core` (ceremony, pad, check words, pair keys, seat keys, manifest, circle root), `crates/chat` (chat on root epochs), `crates/relay` (the station client, `HttpRelay` and `MemRelay`), `crates/objects` (grants, the sign grant, the evaluator, the proof, cards), `crates/custodian` (the wire protocol a badge speaks).
 - `crates/wasm` proves the core compiles for a constrained target and shows the API the browser app uses: `Circle` with send and receive, `chat_send`, `chat_receive`, `rotate_epoch`, export and import, fountain-coded animated codes, bucket padding.
 - `web/app/app.js`: the screens' logic to port: the ceremony's three rounds of codes, the late-joiner path, the chat screen, hello words, the relay sheet.
 - The badge: `crates/badge/src/chip.rs` (the chip record, slots, `KeyKind::{Seat, Root, Epoch, Grant}`), `crates/chip/src/se05x.rs` (object ids `0x4C41_kkss`, policies, the applet), the menu and its consent prompts.
@@ -73,7 +73,7 @@ Where a badge is in the room, the badge's seat is the badge's own as today; the 
 
 ### 4. Chat, hello words, history
 
-Chat uses the chat crate as the browser app does: the pad seeds the epoch keys, per-sender forward secrecy, rotation as a message. The relay is `relay.cahoots.network` by default, with a per-circle override, the same setting the browser app has. The app long-polls when a chat is open, polls every circle when the app is in the foreground, and asks for background refresh (`BGAppRefreshTask`) to fetch new entries and set the badge count on the icon; iOS decides when that runs, and the app says so in its settings. History is local. Hello words are the browser app's screen.
+Chat uses the chat crate as the browser app does: the circle root seeds the epoch keys, each sender has its own chain, and a new epoch starts when a member sends in the next number. Chat is as secret as the root, so a phone that holds the root and is compromised reveals every message the relay still holds. The app reads the relay to the end, its own messages included, before its first send after a launch. The relay is `relay.cahoots.network` by default, with a per-circle override, the same setting the browser app has. The app long-polls when a chat is open, polls every circle when the app is in the foreground, and asks for background refresh (`BGAppRefreshTask`) to fetch new entries and set the badge count on the icon; iOS decides when that runs, and the app says so in its settings. History is local. Hello words are the browser app's screen.
 
 For a circle where the phone's chat key comes from a card (section 7), the chat screen shows "tap your card" when it lacks the current epoch's key, and nothing else changes.
 
@@ -117,6 +117,8 @@ Pairing itself needs the badge awake, on its `pair a phone` page. On the badge, 
 ### 7a. Open decision: one chat scheme or two
 
 Pad epochs spend 32 bytes of pad per rotation and tie the chat to the pad's randomness; root epochs spend nothing and tie it to the root, which is derived from the same contributions. Every member holds the root. One scheme (root epochs everywhere) means one code path, one set of vectors, the browser app and the phone interoperate by default, and the pad is kept for pure-pad messages, which is what it is for. Two schemes keep today's browser chat byte-for-byte and add a mode. Decided 2026-10-30 (Conner): one scheme. Chat moves to root epochs everywhere, the browser app included; the pad is spent only by pure-pad messages.
+
+Decided the same day, after review: the epoch key is derived flat from the root (`HMAC(root, "chat" || circle_id || n)`), not from a ratchet. A ratchet (root(n+1) from root(n), old roots deleted) would give software members forward secrecy against a later device compromise, which pad epochs had and flat derivation does not. It was set aside because the chip cannot chain HMACs internally, so a paired phone would have to hold root(n) itself and could then derive every later epoch, and unpairing would no longer revoke future taps. Revocable taps are the card's promise; the loss of forward secrecy for software members is stated in docs/chat.md, and the ratchet stays recorded there as the fix if the badge can cheaply keep the chip's root advanced.
 
 ### 8. Screens
 

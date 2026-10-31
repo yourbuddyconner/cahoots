@@ -1,7 +1,8 @@
 //! What the station checks before it accepts a message. It cannot verify any tag, because
 //! it holds no pad. It can parse the public header, match the circle, and refuse pure-pad
 //! address reuse. Chat epochs are reused legitimately, so chat messages are never refused
-//! for reuse (see `docs/chat.md` section 6).
+//! for reuse (see `docs/chat.md` section 7). Ceremony channel messages are filed under the
+//! channel id where a circle id would go, and are never refused for reuse either.
 
 use cahoots_core::circle_id::CircleId;
 use cahoots_core::message::{self, MessageError};
@@ -13,6 +14,10 @@ pub const CHAT_VERSION: u8 = 2;
 /// `version | circle_id | epoch_id (5) | sender | counter u32 | len u32 | type`.
 pub const CHAT_HEADER_LEN: usize = 1 + 16 + 5 + 1 + 4 + 4 + 1;
 pub const AEAD_TAG_LEN: usize = 16;
+/// A ceremony held through the relay: `version | channel_id (16) | len u32 | sealed`, where
+/// `len` counts the sealed bytes (see `cahoots_core::channel`).
+pub const CEREMONY_VERSION: u8 = cahoots_core::channel::CEREMONY_VERSION;
+pub const CEREMONY_HEADER_LEN: usize = cahoots_core::channel::HEADER_LEN;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuleError {
@@ -36,7 +41,7 @@ pub struct Submission {
     /// The stream the entry joins: the circle id, or for version 3 the channel id.
     stream: [u8; 16],
     bytes: Vec<u8>,
-    /// `(slice, start, end)` for pure-pad messages. `None` for chat.
+    /// `(slice, start, end)` for pure-pad messages. `None` for chat and ceremony messages.
     pad_range: Option<(u8, u32, u32)>,
 }
 
@@ -76,6 +81,18 @@ impl Submission {
                     return Err(RuleError::Length);
                 }
                 (cid, None)
+            }
+            CEREMONY_VERSION => {
+                if body.len() < CEREMONY_HEADER_LEN {
+                    return Err(RuleError::Length);
+                }
+                let mut id = [0u8; 16];
+                id.copy_from_slice(&body[1..17]);
+                let len = u32::from_le_bytes([body[17], body[18], body[19], body[20]]) as usize;
+                if body.len() - CEREMONY_HEADER_LEN != len {
+                    return Err(RuleError::Length);
+                }
+                (id, None)
             }
             _ => return Err(RuleError::Version),
         };

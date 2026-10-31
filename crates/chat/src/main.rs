@@ -1,4 +1,4 @@
-//! `cahoots-chat`: the pad-seeded chat demo. See `crates/chat/README.md`.
+//! `cahoots-chat`: the chat demo. See `crates/chat/README.md`.
 
 use cahoots_chat::cli::ceremony::local_ceremony;
 use cahoots_chat::cli::client::{Client, Event};
@@ -12,7 +12,7 @@ use std::time::Duration;
 #[derive(Parser)]
 #[command(
     name = "cahoots-chat",
-    about = "Pad-seeded end-to-end encrypted chat demo"
+    about = "End-to-end encrypted chat demo, keyed by the circle root"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -88,6 +88,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Cmd::TamperTest { circle, relay } => {
             let mut c =
                 Client::open(&circle, HttpRelay::new(&relay), 1000).map_err(|e| e.to_string())?;
+            c.sync().map_err(|e| e.to_string())?;
             let seq = c
                 .post_tampered("this message was tampered with")
                 .map_err(|e| e.to_string())?;
@@ -99,9 +100,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             name,
             rotate_after,
         } => {
-            let client = Client::open(&circle, HttpRelay::new(&relay), rotate_after)
+            let mut client = Client::open(&circle, HttpRelay::new(&relay), rotate_after)
                 .map_err(|e| e.to_string())?;
-            println!("end-to-end encrypted, pad-hedged");
+            // Read the relay to the end, our own messages included, before the first send.
+            let backlog = client.sync().map_err(|e| e.to_string())?;
+            println!("end-to-end encrypted, keyed by the circle root");
             println!(
                 "circle   {}  label {}",
                 hex::encode(client.circle_id()),
@@ -113,8 +116,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 client.remaining()
             );
             match client.current_epoch() {
-                Some(e) => println!("epoch    slice {} offset {}", e.slice, e.offset),
+                Some(e) => println!("epoch    {}", e.offset),
                 None => println!("epoch    none yet (first send starts one)"),
+            }
+            for ev in &backlog {
+                print_event(ev);
             }
             println!("type a line and press enter; ctrl-d to quit");
             let client = Arc::new(Mutex::new(client));
@@ -140,16 +146,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 let text = format!("{name}: {line}");
                 let mut c = client.lock().unwrap();
-                match c.send_line(&text) {
-                    Ok(_) => {
-                        if let Some(e) = c.current_epoch() {
-                            if c.remaining() < 1024 {
-                                println!("[pad low: {} bytes left in your slice]", c.remaining());
-                            }
-                            let _ = e;
-                        }
-                    }
-                    Err(e) => println!("[send failed: {e}]"),
+                if let Err(e) = c.send_line(&text) {
+                    println!("[send failed: {e}]");
                 }
             }
         }

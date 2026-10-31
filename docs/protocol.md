@@ -112,9 +112,9 @@ Implementation: `crates/core/src/pairwise.rs`. Vectors: `pair_keys` and `hello_w
 
 When the last reveal is in, the ceremony builds the manifest (section 3.5) from what it holds. Every device builds the same bytes. The phase is now Attest, and no member has finished yet.
 
-**Seat keys.** A seat key is a P-256 key pair. Its 32-byte seed is the secret scalar, and a seed that is zero or not below the curve order is refused and drawn again. Signatures are deterministic ECDSA (RFC 6979) over SHA-256 of the message, as raw `r || s`, 64 bytes. The key is made at the ceremony, one per circle, and never reused across circles. The ring driver draws the seat seed from the entropy source after the KEM seed.
+**Seat keys.** A seat key is a P-256 key pair. Its 32-byte seed is the secret scalar, and a seed that is zero or not below the curve order is refused and drawn again. Signatures are ECDSA over SHA-256 of the message, as raw `r || s`, 64 bytes. A signature MUST verify under the seat key. Deterministic signing (RFC 6979) is recommended, not required, because a key in a phone's Secure Enclave signs with random nonces. The key is made at the ceremony, one per circle, and never reused across circles. The ring driver draws the seat seed from the entropy source after the KEM seed.
 
-**Attestation.** Each member signs the manifest bytes once. The attestation is a detached COSE_Sign1 (section 8.1) with the manifest as payload, kid `[seat]` (the one byte of the seat index), and external AAD `cahoots/manifest/v1`. Each device checks every attestation it receives against the sender's seat key from the manifest and the kid. A bad signature is refused and does not abort. A second, different, valid attestation for a seat already held is refused as a conflict. The ceremony is complete when all `n` attestations are held.
+**Attestation.** Each member signs the manifest bytes once. The attestation is a detached COSE_Sign1 (section 8.1) with the manifest as payload, kid `[seat]` (the one byte of the seat index), and external AAD `cahoots/manifest/v1`. Each device checks every attestation it receives against the sender's seat key from the manifest and the kid. A bad signature is refused and does not abort. A later valid attestation for a seat already held is ignored, even if its bytes differ, because a seat key may sign with random nonces. The first one stays. The ceremony is complete when all `n` attestations are held.
 
 **Attest frame.** `Attest` (5) carries `index u8 | COSE_Sign1 bytes`, at most 256 bytes after the index. A device sends its own as soon as the phase is Attest. It forwards and deduplicates attestations as it does reveals, and holds one that arrives before its phase is Attest.
 
@@ -149,9 +149,42 @@ Implementation: `crates/core/src/manifest.rs`.
 
 A circle root is a 32-byte secret that every member computes and no outsider can. It is `HKDF-SHA256(ikm, salt, info)`, where `ikm` is the content key of each seat's reveal joined in seat order, `salt` is the circle ID, and `info` is `cahoots/root/v1`. The content key of a reveal is the key that reveal is encrypted under. Every member opens every reveal, so every member holds all of them. The pairwise X-Wing secrets are not used, because they differ for each pair of members.
 
-Two keys come from the root. The card seal key is `HMAC-SHA256(root, "seal/card" || circle_id)`. The chat key is `HMAC-SHA256(root, "chat" || circle_id || epoch)`, with the epoch as a big-endian u64. A badge computes the root at the ceremony. With a chip, it stores the root in the chip beside the seat key and keeps none in its circle record; without a chip, the root is in the circle record. Members who are honest get the same root. Nothing in the manifest or the check words checks that yet, so a member who sends different content keys to different members could split the root. A reveal sealed again under another content key by a member already revealed is refused as a conflicting reveal.
+Two keys come from the root. The card seal key is `HMAC-SHA256(root, "seal/card" || circle_id)`. The chat key is `HMAC-SHA256(root, "chat" || circle_id || epoch)`, with the epoch as a big-endian u64. It keys chat epoch `epoch` (`docs/chat.md`). A badge computes the root at the ceremony. With a chip, it stores the root in the chip beside the seat key and keeps none in its circle record; without a chip, the root is in the circle record. Members who are honest get the same root. Nothing in the manifest or the check words checks that yet, so a member who sends different content keys to different members could split the root. A reveal sealed again under another content key by a member already revealed is refused as a conflicting reveal.
 
 Implementation: `crates/core`.
+
+### 3.7 The ceremony channel
+
+A ceremony can run through a relay instead of animated codes. The rounds and the checks are the ones above. Only the way the bytes travel changes. The animated codes remain the way that needs no network.
+
+1. The host draws a channel: a random 16-byte id and a random 32-byte key. It shows one static QR code. The code's text is `cahoots:ceremony:v1:` followed by `id || key || host || relay_len || relay || params` in base64url without padding. `host` is SHA-256 of the host's commitment payload. The host's commitment is fixed when its ceremony starts, so the offer is made before anything is posted and never changes. `relay` is the host's relay address in UTF-8, at most 255 bytes, after its one-byte length. The parameters are in their encoding from section 2.1. Everyone joining uses the host's relay, and so does the circle the ceremony makes.
+2. Each person joining scans that code from the host's screen and picks a seat. The code is shown in the room. There are no remote ceremonies.
+3. Each member posts its commitment, then its sealed reveal, then its attestation to the relay under the channel id. It reads everyone else's from the same place.
+4. After a joiner posts its commitment, it shows a small static code to the host: `cahoots:joined:v1:` followed by `id || seat || SHA-256(commitment)` in base64url without padding. The commitment is the commitment payload below. The host scans each joiner's code.
+
+The host takes a seat's commitment from the relay only when its hash matches the code scanned for that seat. Until then it holds every commitment posted for that seat, and the seat's later messages wait. A commitment no scan matches never reaches the host's ceremony. The host's screen says so: "Seat N committed but was not scanned here." Once every seat is scanned, the host's screen says "Everyone is scanned". The host taps Continue, and only then posts its reveal. Joiners take commitments from the relay as they arrive.
+
+Joiners check seat 0 the same way, against `host` in the offer. A seat-0 commitment whose hash does not match is held and never used, and the joiner's screen says "Seat 1 on the relay is not the host whose code you scanned." The host never loses seat 0 to an earlier commitment on the relay.
+
+The relay only carries bytes. The offer binds the host's commitment, and each join code binds a joiner's. The two scans prove presence in both directions: each joiner scanned the host's screen, and the host scanned each joiner's screen. Someone who photographed the offer can post a commitment from anywhere. The host never takes it, so the host's manifest differs from the one the joiners build with the intruder in it, and nobody completes. If the host scanned the real person, the intruder's reveal does not match that person's commitment and the host stops. The six words then confirm the result for everyone who completes. Joiners seal their reveals to every KEM key they hold, an intruder's included. The intruder then learns contributions to a circle that never completes. That is harmless, because each ceremony draws fresh contributions.
+
+```
+message = 3 | id (16) | len (u32 LE) | seat | round | nonce (12) | ciphertext | tag (16)
+```
+
+`len` counts every byte after it. `round` is 1 for the commitment, 2 for the reveal and 3 for the attestation. The cipher is ChaCha20-Poly1305. Its key is `HKDF-SHA256(ikm = key, salt = id, info = "cahoots/ceremony/channel/v1")`. The nonce is random. The associated data is `id || seat || round`.
+
+The plaintext is one part of a round's payload: `part (u16 LE) | parts (u16 LE) | bytes`. A payload is split into parts of at most 65,481 bytes, so each message fits in 64 KiB. Only a reveal for a large pad needs more than one part. The commitment payload is `C_i || pk_i || seat_pk_i || tier_i`, as in section 3. The reveal payload is the sealed reveal of section 3.2. The attestation payload is the signature of section 3.4.
+
+A reader reads the channel in the relay's order. It opens each message and drops one that does not open. A stranger can post under the id, but cannot seal. The reader gives each complete payload to the ceremony. It holds a seat and round once the ceremony accepts its payload, and ignores later ones. A payload the ceremony refuses is dropped, and the seat and round stay open for the real one. Only an abort stops the ceremony.
+
+The first commitment on the relay for a seat takes the seat. When two people pick one seat, the device whose commitment is second reads the other one first. That device has lost the seat. It posts nothing more and says so: "Seat N was taken by someone else. Leave and join again with a free seat." The others ignore its commitment, so nobody sees a reveal that does not match.
+
+A ceremony lives in memory only. A device that closes cannot rejoin, because its old commitment is already on the relay. Everyone starts over with a new code.
+
+The relay operator sees the channel id, the seats, the rounds, the sizes and the timing. The station leaves channel ids out of its public listings (`/v1/circles` and `/v1/feed`), so only someone who holds the id can read a channel. Nobody can read the payloads without the key. The key is only in the code on the host's screen. Members still read the six words aloud at the end.
+
+Implementation: `crates/core/src/channel.rs`. Vectors: `crates/vectors/channel.json`.
 
 ## 4. Messages
 
@@ -268,7 +301,7 @@ A custodian MUST accept only the canonical encoding of a message. It answers `Ma
 
 ## 7. Test vectors
 
-`crates/vectors/*.json` are generated from `cahoots-core` and `cahoots-objects` by `cargo run -p cahoots-vectors`, except `chat.json`, written by `crates/chat/tests/vectors.rs`, and `psk.json`, written by `crates/provider/tests/psk_vectors.rs`. They cover the ceremony (KEM seeds, public keys, sealing randomness, seat seeds and public keys, tiers, version 2 commitments and sealed reveals, each member's attestation, the manifest body and ID, the sealed manifest, a mismatch abort, and a garbled reveal), pair keys and hello words (`pair_keys` and `hello_words` in `ceremony.json`), control messages, check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. `objects.json` holds the signed objects of section 8: a root grant and a delegated grant in both versions, an approval, a fact, a receipt, and a contact card with its sealed form, each with its inputs, canonical payload, COSE_Sign1, and JSON projection, against a three-seat manifest. Every client MUST reproduce them.
+`crates/vectors/*.json` are generated from `cahoots-core` and `cahoots-objects` by `cargo run -p cahoots-vectors`, except `chat.json`, written by `crates/chat/tests/vectors.rs`, and `psk.json`, written by `crates/provider/tests/psk_vectors.rs`. They cover the ceremony (KEM seeds, public keys, sealing randomness, seat seeds and public keys, tiers, version 2 commitments and sealed reveals, each member's attestation, the manifest body and ID, the sealed manifest, a mismatch abort, and a garbled reveal), pair keys and hello words (`pair_keys` and `hello_words` in `ceremony.json`), the ceremony channel (`channel.json`: an offer, and a message sealed under a fixed nonce with its opening), control messages, check words, circle IDs, message encode and decode, a tag failure, reuse rejection, spend ordering, and framing. `objects.json` holds the signed objects of section 8: a root grant and a delegated grant in both versions, an approval, a fact, a receipt, and a contact card with its sealed form, each with its inputs, canonical payload, COSE_Sign1, and JSON projection, against a three-seat manifest. Every client MUST reproduce them.
 
 ## 8. Signed objects
 
@@ -281,7 +314,7 @@ Every signature in Cahoots is a COSE_Sign1 (RFC 9052), so any COSE library verif
 - The structure is the untagged CBOR array `[protected, unprotected, payload, signature]`. `protected` is a byte string, `unprotected` is the empty map, `payload` is a byte string or nil (detached), and `signature` is 64 bytes.
 - The protected header is the canonical map `{1: -7, 4: kid}`. Label `1` is `alg` and `-7` is ES256. Label `4` is `kid`, a byte string the signer chooses. A protected header with any other content is refused.
 - For a seat, the kid is the one byte of the seat index. For a grantee key, it is the SHA-256 of the key's 33 bytes.
-- The signature covers `Sig_structure = ["Signature1", protected, external_aad, payload]`, encoded canonically, with the seat key's deterministic ECDSA (section 3.4).
+- The signature covers `Sig_structure = ["Signature1", protected, external_aad, payload]`, encoded canonically, with the seat key's ECDSA (section 3.4). A verifier checks the signature under the key and never compares signature bytes, since two valid signatures over the same bytes can differ.
 - Canonical CBOR is RFC 8949 section 4.2.1: definite lengths, shortest integers, map keys in ascending order of their encoding. Every map here has integer keys in ascending order. A decoder MUST refuse a non-canonical encoding.
 - The external AAD is the object's domain string. A signature made for one kind of object does not verify as another.
 

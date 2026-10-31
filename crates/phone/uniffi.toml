@@ -1,0 +1,4 @@
+[bindings.swift]
+module_name = "CahootsCore"
+ffi_module_name = "CahootsCoreFFI"
+ffi_module_filename = "CahootsCoreFFI"

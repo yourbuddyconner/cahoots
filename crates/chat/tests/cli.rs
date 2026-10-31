@@ -32,14 +32,42 @@ fn local_ceremony_writes_file_provider_circles_that_agree() {
         assert_eq!(c.my_slice, i);
         assert_eq!(c.params.n, 3);
         assert_eq!(c.label, "CSPRNG");
+        // Every member keeps the same root, in a file only its owner can read.
+        let root = c.root.expect("the ceremony wrote the root");
+        let first = open_circle(&dir.path().join("member-0")).unwrap().root.unwrap();
+        assert_eq!(*root, *first);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(c.dir.join("root")).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
     }
+}
+
+#[test]
+fn a_circle_without_a_root_does_not_open_for_chat() {
+    let dir = tempfile::tempdir().unwrap();
+    ceremony(dir.path(), 2);
+    let member = dir.path().join("member-0");
+    let c = open_circle(&member).unwrap();
+    std::fs::remove_file(c.dir.join("root")).unwrap();
+    drop(c);
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    assert!(matches!(
+        Client::open(&member, MemRelay::shared(relay), 1000),
+        Err(cahoots_chat::cli::client::ClientError::NoRoot)
+    ));
 }
 
 fn clients(dir: &Path, relay: &Arc<Mutex<MemRelay>>, rotate_after: u32) -> Vec<Client<MemRelay>> {
     (0..3u8)
         .map(|i| {
             let member = dir.path_join(format!("member-{i}"));
-            Client::open(&member, MemRelay::shared(relay.clone()), rotate_after).unwrap()
+            let mut c =
+                Client::open(&member, MemRelay::shared(relay.clone()), rotate_after).unwrap();
+            c.sync().unwrap();
+            c
         })
         .collect()
 }
@@ -148,6 +176,35 @@ fn three_clients_chat_rotate_reject_tamper_and_resume() {
 }
 
 #[test]
+fn a_client_restored_from_old_state_does_not_reuse_a_counter() {
+    let dir = tempfile::tempdir().unwrap();
+    ceremony(dir.path(), 3);
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let mut cs = clients(dir.path(), &relay, 1000);
+    cs[0].send_line("zero").unwrap();
+    let state_dir = open_circle(&dir.path().join("member-0")).unwrap().dir;
+    let old = std::fs::read(state_dir.join("chat.state")).unwrap();
+    cs[0].send_line("one").unwrap();
+    cs[0].send_line("two").unwrap();
+    // Roll member 0's chat state back and forget the relay position.
+    drop(cs.remove(0));
+    std::fs::write(state_dir.join("chat.state"), old).unwrap();
+    std::fs::remove_file(state_dir.join("chat.seq")).unwrap();
+    let mut c0 = Client::open(
+        &dir.path().join("member-0"),
+        MemRelay::shared(relay.clone()),
+        1000,
+    )
+    .unwrap();
+    let backlog = c0.sync().unwrap();
+    assert!(backlog.iter().all(|e| matches!(e, Event::Own { .. })));
+    c0.send_line("three").unwrap();
+    let last = relay.lock().unwrap().entry(3).unwrap();
+    assert_eq!(cahoots_chat::parse(&last).unwrap().0.counter, 3);
+    assert!(matches!(&cs[0].poll(0).unwrap()[..], [.., Event::Received { text, .. }] if text.ends_with("three")));
+}
+
+#[test]
 fn http_end_to_end_against_station() {
     let dir = tempfile::tempdir().unwrap();
     ceremony(dir.path(), 2);
@@ -163,6 +220,12 @@ fn http_end_to_end_against_station() {
 
     let mut a = Client::open(&dir.path().join("member-0"), HttpRelay::new(&base), 1000).unwrap();
     let mut b = Client::open(&dir.path().join("member-1"), HttpRelay::new(&base), 1000).unwrap();
+    assert!(matches!(
+        a.send_line("too soon"),
+        Err(cahoots_chat::cli::client::ClientError::Chat(ChatError::NotSynced))
+    ));
+    a.sync().unwrap();
+    b.sync().unwrap();
     a.send_line("over http").unwrap();
     let ev = b.poll(2000).unwrap();
     assert!(matches!(&ev[0], Event::Received { sender: 0, text, .. } if text == "over http"));

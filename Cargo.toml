@@ -18,6 +18,7 @@ members = [
     "crates/station",
     "crates/relay",
     "crates/chip",
+    "crates/phone",
 ]
 exclude = ["crates/fuzz", "crates/esp32s3", "crates/rp2350", "crates/dabao"]
 # Not workspace members: crates/esp32s3 (needs the esp toolchain), crates/rp2350 (thumbv8m target, own config), crates/dabao (built with

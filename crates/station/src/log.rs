@@ -36,6 +36,14 @@ pub struct Entry {
     pub hash: Hash,
 }
 
+impl Entry {
+    /// Whether the public listings show it. A ceremony channel's messages (version 3) are
+    /// served only to whoever asks for the channel id, which comes from the host's code.
+    pub fn listed(&self) -> bool {
+        self.message.first() != Some(&crate::rules::CEREMONY_VERSION)
+    }
+}
+
 /// On-the-wire form. Bytes are base64url, hashes are hex.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EntryRecord {
@@ -320,9 +328,20 @@ impl Log {
         self.entries_after_stream(circle, after)
     }
 
+    /// Every entry in `seq` order, listed or not.
+    pub fn entries(&self) -> &[Entry] {
+        &self.entries
+    }
+
+    /// Entries for the public feed: every circle's, but no ceremony channel's.
     pub fn all_after(&self, after: Option<u64>, limit: usize) -> Vec<&Entry> {
         let from = after.map(|a| a as usize + 1).unwrap_or(0);
-        self.entries.iter().skip(from).take(limit).collect()
+        self.entries
+            .iter()
+            .skip(from)
+            .filter(|e| e.listed())
+            .take(limit)
+            .collect()
     }
 
     pub fn len(&self) -> usize {
@@ -334,8 +353,12 @@ impl Log {
 
     /// Every stream with its count and last `seq`, the most recently written first.
     pub fn streams(&self) -> Vec<StreamSummary> {
+        Self::summarise(self.entries.iter())
+    }
+
+    fn summarise<'a>(entries: impl Iterator<Item = &'a Entry>) -> Vec<StreamSummary> {
         let mut map: HashMap<[u8; 16], StreamSummary> = HashMap::new();
-        for e in &self.entries {
+        for e in entries {
             let s = map.entry(e.circle_id).or_insert(StreamSummary {
                 stream: e.circle_id,
                 count: 0,
@@ -349,9 +372,10 @@ impl Log {
         v
     }
 
-    /// Every stream as a circle. With `channels`, the server leaves out the channel streams.
+    /// Every listed stream as a circle: no ceremony channel's. With `channels`, the server
+    /// also leaves out the channel streams.
     pub fn circles(&self) -> Vec<CircleSummary> {
-        self.streams()
+        Self::summarise(self.entries.iter().filter(|e| e.listed()))
             .into_iter()
             .map(|s| CircleSummary {
                 circle_id: s.stream,
