@@ -190,8 +190,10 @@ On 2026-10-30, Xcode 15.4, iOS 17.5, on a Mac with Apple silicon.
    code from the other simulator and saw "Scanned seat 3", then chose Continue. The badge took
    seat 2 of 3. The host, the badge and the joiner showed the same six words (that run: night
    vanish sound capable clean emerge), the badge kept the circle, and the host and joiner chatted.
-   The station held 14 entries. With the board on `/dev/cu.usbmodempico21` in place of the
-   simulated badge, the same script without `--sim` has not run yet.
+   The station held 14 entries. The same script without `--sim`, with the Pico 2 and its SE051
+   on `/dev/cu.usbmodempico21` flashed with the bench build, ran on 2026-10-31: the board took
+   seat 2, the host, the board and the joiner showed the same six words (spy shallow young
+   weather afford island), the board kept the circle, and the station held 12 entries.
 6. Not tried in the simulator: the camera (there is none), Face ID on a real enclave key, a
    ceremony with codes only between two screens, background refresh, and the icon badge. The
    unit tests cover the signer's keychain path, HTTP against a real station, and the phone crate

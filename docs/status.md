@@ -8,7 +8,7 @@ This is a snapshot of the repository’s documented status on October 31, 2026. 
 |---|---|---|
 | Browser ceremony | Create a circle through the relay, the default: the host shows one code, each joiner scans it and picks a seat, the host scans each joiner's code, and the rounds go through the relay. Or with codes only, by animated QR or paste, with no network. | Automated end-to-end checks cover both ways, with codes pasted in place of the camera. Camera scanning remains unverified end to end. |
 | Short messages | Encrypt directly with the pad and exchange by code or text. | Browser checks cover decryption and refusal of a replay. |
-| iOS app | Cahoots for iPhone: relay and codes-only ceremonies, chat, hello words, the seat key in the Secure Enclave. Ready for its first TestFlight build. | Two simulators hold a relay ceremony and chat through a local station (`scripts/ios-walk.sh`). A phone-hosted ceremony with a simulated badge through the bridge has run on the laptop (`scripts/bridge-bench.sh --sim`). The same run with the real badge is not yet done. The camera, Face ID and background refresh are not yet tried on a device. Pairing with a badge waits for M4j. |
+| iOS app | Cahoots for iPhone: relay and codes-only ceremonies, chat, hello words, the seat key in the Secure Enclave. Ready for its first TestFlight build. | Two simulators hold a relay ceremony and chat through a local station (`scripts/ios-walk.sh`). A phone-hosted ceremony with a badge through the bridge has run with the Pico 2 on the bench and with a simulated badge (`scripts/bridge-bench.sh`, with and without `--sim`). The camera, Face ID and background refresh are not yet tried on a device. Pairing with a badge waits for M4j. |
 | Group chat | Chat keyed by the circle root, over a Numbers Station relay. | The app ships pointing at `relay.cahoots.network`, which is deployed; the end-to-end check chats through a local station. |
 | Relay | Run the station locally, in Docker, or from the [deploy recipe](../deploy/relay/README.md). | Per-client rate limit and a log size cap are built in. No deployed enclave or external log anchoring. |
 | WireGuard integration | Announce peers and exchange preshared keys. | A two-host tunnel is exercised in CI. |
@@ -16,7 +16,7 @@ This is a snapshot of the repository’s documented status on October 31, 2026. 
 
 ## Hardware progress
 
-A breadboard Pico 2 has completed a ceremony with a laptop acting as the rest of the pile, saved a circle, and loaded it from flash. `scripts/bridge-bench.sh` puts the board in a ceremony a phone hosts, through `cahoots-host bridge`. It has run only with a simulated badge, since the board was not plugged in.
+A breadboard Pico 2 has completed a ceremony with a laptop acting as the rest of the pile, saved a circle, and loaded it from flash. `scripts/bridge-bench.sh` puts the board in a ceremony a phone hosts, through `cahoots-host bridge`. On 2026-10-31 the board took seat 2 of 3 in a circle a simulator hosted, showed the same six words as the phones, and kept the circle.
 
 The V1 PCB, enclosure design, and firmware exist. The secure-element driver builds, and the chip APIs have software-chip tests. A real-chip ceremony, attestation against NXP’s root, and the related signing workflows still need bench verification.
 
