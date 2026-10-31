@@ -46,6 +46,16 @@ to `$CARGO_TARGET_DIR/ios` when the target directory is elsewhere.
 - The screens: `CirclesView`, `NewCircleView`, `JoinView`, `CeremonyView` (with `CeremonyModel`),
   `ChatView`, `PeopleView` and `HelloView`, `SettingsView`.
 
+In People, tap the pencil beside any seat to give it a name. Names are private to this phone,
+appear in chat and hello words, and are stored in the circle's protected `seat-names.json` file.
+An empty name restores the seat number. Deleting a circle also removes its names.
+The chat title and Conversation's People and names action both open the roster.
+
+For hello words, both people open each other's seat and compare the hello number before taking
+turns reading their own pair. Each person checks the reply against their expected pair without
+reading the answer aloud. Next hello advances only the phone on which it was tapped, so both
+people advance after a check. If one number is behind, only that phone advances to catch up.
+
 `Info.plist` is written by hand and preprocessed. Debug builds allow plain HTTP to a local relay
 (`NSAllowsLocalNetworking`) so a `cahoots-station` on the Mac works. Release builds do not. The
 export compliance question (`ITSAppUsesNonExemptEncryption`) is left to be answered at upload,

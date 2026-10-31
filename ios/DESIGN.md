@@ -75,9 +75,18 @@ accessibility sizes.
   Blue; theirs on the left on Paper with a hairline, the sender's face beside the first of a run
   and their name above it. A thin divider marks new keys. The composer is one rounded field with a
   blue send arrow.
-- People: each seat as a row with its 44 pt face, its name, and its declared tier in words. A row
-  opens hello words.
-- Hello words: the same serif word treatment as the six words.
+- People: the circle's faces and name introduce the roster. Each seat has a 44 pt face, a familiar
+  name, its seat number, and a separate pencil button. Other members' rows open hello words.
+  Hardware claims live in an expandable section so the everyday actions remain easy to find.
+- Names: edit any seat, including your own. Save trims surrounding whitespace; a blank name
+  restores the seat number. Names appear in chat and hello words, stay on this phone, and live
+  in `seat-names.json` inside the protected circle directory. They leave when the circle does.
+- Hello words: first open each other's seat and match hello numbers. The two serif word pairs
+  clearly distinguish what to say from what to listen for. Never read out the expected reply.
+  Catch-up guidance is expandable. Advancing requires confirmation, is guarded while saving,
+  and explains that each person advances their own phone. Words wrap at larger text sizes.
+- Create: name, people, and connection method are the main decisions. Shared secret size is
+  under Advanced options. The primary action becomes available after entering a name.
 - Settings: the phone's own face on cream at the top, the key-store sentence and fingerprint under
   it, then quiet sections: relay for new circles, checking for messages, circles.
 

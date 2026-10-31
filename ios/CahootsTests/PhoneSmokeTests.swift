@@ -61,4 +61,25 @@ final class PhoneSmokeTests: XCTestCase {
         let first = try open().describe().fingerprint
         XCTAssertEqual(try open().describe().fingerprint, first)
     }
+
+    func testSeatNamesPersistPerCircleAndCanBeCleared() throws {
+        let store = try PhoneStore(root: dir)
+        for circle in ["a", "b"] {
+            try FileManager.default.createDirectory(at: store.circles.appendingPathComponent(circle),
+                                                    withIntermediateDirectories: true)
+        }
+        try store.setSeatName("  Alice  ", circle: "a", seat: 1)
+        try store.setSeatName("Bob", circle: "a", seat: 0)
+        let reopened = try PhoneStore(root: dir)
+        XCTAssertEqual(try reopened.seatNames(circle: "a"), ["1": "Alice", "0": "Bob"])
+        XCTAssertTrue(try reopened.seatNames(circle: "b").isEmpty)
+        try reopened.setSeatName(" \n ", circle: "a", seat: 1)
+        XCTAssertEqual(try reopened.seatNames(circle: "a"), ["0": "Bob"])
+    }
+
+    func testSavingANameDoesNotRecreateADeletedCircle() throws {
+        let store = try PhoneStore(root: dir)
+        XCTAssertThrowsError(try store.setSeatName("Alice", circle: "missing", seat: 1))
+        XCTAssertEqual(store.circleCount, 0)
+    }
 }

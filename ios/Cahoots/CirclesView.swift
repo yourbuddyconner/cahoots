@@ -72,7 +72,7 @@ struct CirclesView: View {
 private struct EmptyCircles: View {
     private let steps = [
         ("Create a circle", "Say how many people are in the room with you."),
-        ("Scan one code", "Everyone scans your screen, then you all read six words aloud."),
+        ("Meet and compare", "Exchange codes, then check that the same six words appear on every phone."),
         ("Keep talking", "Wherever you go. Messages are encrypted on each phone."),
     ]
 
@@ -84,17 +84,7 @@ private struct EmptyCircles: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(steps.enumerated()), id: \.offset) { i, step in
                     if i > 0 { Hairline() }
-                    HStack(alignment: .firstTextBaseline, spacing: Space.l) {
-                        Text("\(i + 1)")
-                            .font(.subheadline.monospacedDigit().weight(.medium))
-                            .foregroundStyle(Color.brand)
-                            .frame(minWidth: 16, alignment: .leading)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(step.0).font(.headline).foregroundStyle(Color.ink)
-                            Text(step.1).font(.subheadline).foregroundStyle(Color.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
+                    InstructionStep(number: i + 1, title: step.0, detail: step.1)
                     .padding(.vertical, Space.l)
                     .accessibilityElement(children: .combine)
                 }

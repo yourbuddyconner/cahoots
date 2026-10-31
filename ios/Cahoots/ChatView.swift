@@ -109,6 +109,7 @@ struct ChatView: View {
                         }
                         Bubble(message: m,
                                face: model.faces[m.sender],
+                               senderName: app.seatName(circle: model.circle, seat: m.sender),
                                first: prev.map { !Self.sameRun($0, m) } ?? true,
                                last: next.map { !Self.sameRun(m, $0) } ?? true)
                             .id(m.id)
@@ -133,7 +134,11 @@ struct ChatView: View {
                         Text(summary?.name ?? "Chat")
                             .font(.system(.headline, design: .serif))
                             .foregroundStyle(Color.ink)
-                        FaceRow(faces: (0..<(summary?.members ?? 0)).compactMap { model.faces[$0] }, size: 16, limit: 8)
+                        HStack(spacing: Space.xs) {
+                            Text("\(summary?.members ?? 0) people")
+                            Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
+                        }
+                        .font(.caption).foregroundStyle(Color.muted)
                     }
                     .padding(.horizontal, Space.s)
                     .frame(minHeight: 44)
@@ -163,6 +168,7 @@ struct ChatView: View {
         .sheet(isPresented: $showSettings) {
             ConversationSettings(model: model, epoch: model.messages.last?.epoch) { done in
                 showSettings = false
+                if done == "people" { app.path.append(.people(model.circle)) }
                 if done == "relay" { showRelay = true }
                 if done == "rotated" { notice = "New epoch started." }
             }
@@ -268,6 +274,7 @@ private struct EpochDivider: View {
 struct Bubble: View {
     let message: ChatMessage
     let face: Data?
+    var senderName: String? = nil
     /// The first and last message of one sender's run.
     let first: Bool
     let last: Bool
@@ -277,7 +284,7 @@ struct Bubble: View {
     var body: some View {
         VStack(alignment: message.mine ? .trailing : .leading, spacing: Space.xs) {
             if first && !message.mine {
-                Text("Seat \(message.sender + 1)")
+                Text(senderName ?? "Seat \(message.sender + 1)")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(Color.muted)
                     .padding(.leading, Self.faceSize + Space.s + Space.m)
@@ -310,7 +317,7 @@ struct Bubble: View {
         }
         .padding(.top, first ? Space.m : 2)
         .accessibilityElement(children: .contain)
-        .accessibilityHint(message.mine ? "Sent by you" : "From seat \(message.sender + 1)")
+        .accessibilityHint(message.mine ? "Sent by you" : "From \(senderName ?? "seat \(message.sender + 1)")")
     }
 
     @ViewBuilder
@@ -334,9 +341,21 @@ struct ConversationSettings: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.xxl) {
+                    PaperSection(footer: "Add names on this phone or check a member’s hello words.") {
+                        Button { done("people") } label: {
+                            HStack(spacing: Space.m) {
+                                Label("People and names", systemImage: "person.2")
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                            }
+                            .foregroundStyle(Color.ink)
+                            .frame(minHeight: 52)
+                        }
+                        .buttonStyle(RowButtonStyle())
+                    }
                     VStack(alignment: .leading, spacing: Space.s) {
                         Text("End-to-end encrypted").serifTitle(.title2)
-                        Text("The circle root from your ceremony seeds the keys and ChaCha20-Poly1305 encrypts. The relay sees ciphertext and traffic shape only.")
+                        Text("Messages are encrypted before they leave your phone. The relay delivers them without being able to read them. It can still see when messages are sent.")
                             .foregroundStyle(Color.muted)
                             .fixedSize(horizontal: false, vertical: true)
                         if let epoch {
@@ -344,7 +363,7 @@ struct ConversationSettings: View {
                                 .font(.subheadline).foregroundStyle(Color.ink)
                         }
                     }
-                    PaperSection(footer: "Starting a new epoch moves everyone to new keys from here on. It does not protect older messages.") {
+                    PaperSection(footer: "An epoch is a set of message keys. Starting a new one changes the keys for future messages. Earlier messages keep their existing protection.") {
                         Button("Start a new epoch") { confirmRotate = true }
                             .buttonStyle(TextButtonStyle(full: true))
                             .frame(maxWidth: .infinity, alignment: .leading)
