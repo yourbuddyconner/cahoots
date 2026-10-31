@@ -235,7 +235,7 @@ const saved = (p) => p.evaluate(() => new Promise((res, rej) => {
   req.onsuccess = () => { const g = req.result.transaction("circles").objectStore("circles").getAll(); g.onsuccess = () => res(g.result.map((r) => r.state[0])); g.onerror = () => rej(g.error); };
   req.onerror = () => rej(req.error);
 }));
-for (const p of [L, J]) { const v = await saved(p.page); if (v.length !== 1 || v[0] !== 5) throw new Error(`${p.name} saved state versions: ${v}`); }
+for (const p of [L, J]) { const v = await saved(p.page); if (v.length !== 1 || v[0] !== 6) throw new Error(`${p.name} saved state versions: ${v}`); }
 
 // Hello words: what the leader says is what the joiner expects, both move together, and the number survives a reload.
 await L.page.getByRole('button', { name: 'Circle tools', exact: true }).click();
@@ -310,6 +310,16 @@ console.log("chat exchanged; capturing chat screens");
 await L.snap("chat"); await J.snap("chat");
 const headRes = await (await fetch(`${stationUrl}/v1/head`)).json();
 if (headRes.seq !== 1) throw new Error(`relay head seq ${headRes.seq}, expected 1 (two messages)`);
+// Reset keys for everyone: Lena moves the circle to a new generation, and a message after it still arrives.
+await L.menu(); await L.page.click('button:text-is("Reset keys for everyone")');
+await L.page.waitForSelector('text=Keys reset for everyone');
+await L.page.fill('input[placeholder="Message"]', "after the reset");
+await L.page.click('button:text-is("Send")');
+await J.page.waitForSelector('.bubble.in:has-text("after the reset")', { timeout: 15000 });
+await J.page.fill('input[placeholder="Message"]', "new keys here");
+await J.page.keyboard.press("Enter");
+await L.page.waitForSelector('.bubble.in:has-text("new keys here")', { timeout: 15000 });
+if ((await L.page.$$(".bubble.rejected")).length || (await J.page.$$(".bubble.rejected")).length) throw new Error("a chat message was rejected after the reset");
 // Leader sends a one-time-pad message as text; joiner reads it.
 await L.page.getByRole('button', { name: 'Circle tools', exact: true }).click();
 await L.page.getByRole('link', { name: 'Send a message', exact: true }).click();

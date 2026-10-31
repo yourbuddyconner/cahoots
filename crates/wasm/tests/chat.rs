@@ -142,9 +142,9 @@ fn chat_buckets() {
 
 /// A version 4 state: the version 5 layout without the root trailer, with pad-epoch chat
 /// state in the chat slot.
-fn as_version_4(v5: &[u8]) -> Vec<u8> {
-    assert_eq!(v5[0], 5);
-    let mut v4 = v5[..v5.len() - 33].to_vec();
+fn as_version_4(v6: &[u8]) -> Vec<u8> {
+    assert_eq!(v6[0], 6);
+    let mut v4 = v6[..v6.len() - 33].to_vec();
     v4[0] = 4;
     v4
 }
@@ -162,10 +162,10 @@ fn a_version_4_state_opens_without_chat() {
     assert_eq!(old.chat_send(b"x").unwrap_err(), "no-root");
     assert_eq!(old.chat_receive(&w).unwrap_err(), "no-root");
     assert_eq!(old.rotate_epoch().unwrap_err(), "no-root");
-    // The pad still works, and it saves as version 5 with no root.
+    // The pad still works, and it saves as version 6 with no root.
     assert_eq!(old.receive(&pure).unwrap().plaintext(), b"pure pad");
     let again = Circle::import(&old.export()).unwrap();
-    assert_eq!(old.export()[0], 5);
+    assert_eq!(old.export()[0], 6);
     assert!(!again.has_root());
 }
 
@@ -190,4 +190,62 @@ fn own_messages_restore_the_sending_position() {
     let got = b.chat_receive(&w2).unwrap();
     assert_eq!(got.counter(), 2);
     assert_eq!(got.text(), b"two");
+}
+
+#[test]
+fn a_bump_moves_the_other_member_and_a_forged_one_is_ignored() {
+    let (mut a, mut b) = pair();
+    let first = a.chat_send(b"before").unwrap();
+    let got = b.chat_receive(&first).unwrap();
+    assert_eq!(got.kind(), "text");
+    assert!(!got.ignored());
+
+    // A bump signed by a key that is not a seat: b ignores it and the chat goes on.
+    let state = a.export();
+    let root: [u8; 32] = state[state.len() - 32..].try_into().unwrap();
+    let id: [u8; 16] = hex::decode(a.circle_id_hex()).unwrap().try_into().unwrap();
+    let mut forger = cahoots_chat::ChatSession::new(&root, id, 2, 0);
+    forger.mark_synced();
+    forger.start_epoch();
+    forger.start_epoch();
+    let stranger = cahoots_core::seat::SeatKey::from_seed(&[0x55; 32]).unwrap();
+    let fake_gen = [0xEE; 32];
+    let payload = cahoots_chat::sign_bump(&stranger, 0, &id, &fake_gen).unwrap();
+    let wire = b64_encode(&forger.send_bump(fake_gen, &payload).unwrap());
+    let before = b.generation_id_hex();
+    let ignored = b.chat_receive(&wire).unwrap();
+    assert_eq!(ignored.kind(), "bump");
+    assert!(ignored.ignored());
+    assert_eq!(b.generation_id_hex(), before);
+    let more = a.chat_send(b"still here").unwrap();
+    assert_eq!(b.chat_receive(&more).unwrap().text(), b"still here");
+
+    // A real bump moves b, and a later text in the new generation opens.
+    let wire = a.bump_generation().unwrap();
+    assert_ne!(a.generation_id_hex(), before);
+    let moved = b.chat_receive(&wire).unwrap();
+    assert_eq!(moved.kind(), "bump");
+    assert!(!moved.ignored());
+    assert_eq!(b.generation_id_hex(), a.generation_id_hex());
+    let after = a.chat_send(b"after the reset").unwrap();
+    let got = b.chat_receive(&after).unwrap();
+    assert_eq!(got.kind(), "text");
+    assert_eq!(got.text(), b"after the reset");
+    let reply = b.chat_send(b"heard").unwrap();
+    assert_eq!(a.chat_receive(&reply).unwrap().text(), b"heard");
+
+    // The new generation survives a save and a load.
+    let back = Circle::import(&b.export()).unwrap();
+    assert_eq!(back.generation_id_hex(), a.generation_id_hex());
+}
+
+#[test]
+fn a_version_5_state_still_imports() {
+    let (mut a, _) = pair();
+    a.chat_send(b"x").unwrap();
+    let mut state = a.export();
+    state[0] = 5;
+    let back = Circle::import(&state).unwrap();
+    assert!(back.has_root());
+    assert_eq!(back.export()[0], 6);
 }

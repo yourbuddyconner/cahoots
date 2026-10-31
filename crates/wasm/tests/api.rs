@@ -282,7 +282,7 @@ fn circle_state_roundtrips_with_ledger() {
     assert_eq!(id.len(), 64);
     assert_eq!(ca.manifest_id_hex().unwrap(), id);
     let saved = cb.export();
-    assert_eq!(saved[0], 5);
+    assert_eq!(saved[0], 6);
     let mut restored = Circle::import(&saved).unwrap();
     assert!(restored.has_seat_key());
     assert!(restored.has_root());
@@ -304,7 +304,7 @@ fn circle_state_roundtrips_with_ledger() {
     assert!(!old.has_root());
     assert!(old.manifest_id_hex().is_none());
     assert_eq!(old.remaining(), cb.remaining());
-    assert_eq!(old.export()[0], 5);
+    assert_eq!(old.export()[0], 6);
     assert!(!Circle::import(&old.export()).unwrap().has_seat_key());
     assert_eq!(restored.circle_id_hex(), cb.circle_id_hex());
     assert_eq!(restored.name(), "s");

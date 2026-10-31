@@ -729,8 +729,9 @@ fn pad_err(e: PadError) -> String {
 /// State format: v1 is pad + ledger + label; v2 appends chat session state and the relay seq;
 /// v3 appends the pair keys and hello counters; v4 appends the seat key seed, the tier and the
 /// sealed manifest; v5 appends the circle root, and its chat state is in root epochs. The chat
-/// state of v2 to v4 is in pad epochs, which are retired, so those import without chat.
-const STATE_VERSION: u8 = 5;
+/// state of v2 to v4 is in pad epochs, which are retired, so those import without chat. v6 has
+/// the same layout as v5 with chat state in generations; v5 chat state imports as generation 0.
+const STATE_VERSION: u8 = 6;
 
 fn chat_err(e: ChatError) -> String {
     match e {
@@ -790,6 +791,10 @@ pub struct Circle {
 #[wasm_bindgen]
 #[derive(Debug)]
 pub struct ChatReceived {
+    /// `text`, `control`, `bump` or `card`.
+    kind: &'static str,
+    /// A bump whose signature did not verify: nothing moved.
+    ignored: bool,
     text: Vec<u8>,
     sender: u8,
     counter: u32,
@@ -798,6 +803,14 @@ pub struct ChatReceived {
 
 #[wasm_bindgen]
 impl ChatReceived {
+    /// `"text"`, `"control"`, `"bump"` or `"card"`.
+    pub fn kind(&self) -> String {
+        self.kind.into()
+    }
+    /// True for a bump that did not verify against the circle's manifest. It changed nothing.
+    pub fn ignored(&self) -> bool {
+        self.ignored
+    }
     /// Plaintext bytes, still bucket-padded if the sender padded them.
     pub fn text(&self) -> Vec<u8> {
         self.text.clone()
@@ -982,15 +995,65 @@ impl Circle {
     /// `replay`, `too-far-ahead`, `unknown-epoch`, `pad-epoch`, `wrong-circle`, `version`,
     /// `length`, `base64url`.
     pub fn chat_receive(&mut self, wire_b64: &str) -> Result<ChatReceived, String> {
-        let chat = self.chat_mut()?;
         let wire = b64_decode(wire_b64)?;
+        let circle_id = self.pad().circle_id();
+        let manifest = SealedManifest::decode(&self.manifest)
+            .ok()
+            .and_then(|s| Manifest::decode(&s.body).ok());
+        let chat = self.chat_mut()?;
         let (hdr, text) = chat.receive(&wire).map_err(chat_err)?;
+        let mut ignored = false;
+        let kind = match hdr.msg_type {
+            chat::MessageType::Text => "text",
+            chat::MessageType::Control => "control",
+            chat::MessageType::Card => "card",
+            chat::MessageType::Bump => {
+                // Our own copy is empty and moves nothing: we moved when we sent it.
+                let verified = manifest
+                    .as_ref()
+                    .and_then(|m| chat::verify_bump(&text, &circle_id, m).ok());
+                match verified {
+                    Some((generation_id, _)) => match chat.bump(generation_id) {
+                        Ok(()) => {}
+                        Err(e) => return Err(chat_err(e)),
+                    },
+                    None => ignored = true,
+                }
+                "bump"
+            }
+        };
         Ok(ChatReceived {
+            kind,
+            ignored,
             text,
             sender: hdr.sender,
             counter: hdr.counter,
             epoch: epoch_str(hdr.epoch),
         })
+    }
+
+    /// The current chat generation's id, in hex. `None` without a root.
+    pub fn generation_id_hex(&self) -> Option<String> {
+        self.chat.as_ref().map(|c| hex(&c.generation_id()))
+    }
+
+    /// Move everyone to a new chat generation. Signs a bump with this seat's key, seals it in
+    /// the generation the others are in, moves this device, and returns the wire bytes in
+    /// base64url for the relay. Errors: `no-root`, `cannot-bump`, `not-synced`, `state` without
+    /// a seat key.
+    pub fn bump_generation(&mut self) -> Result<String, String> {
+        let seed = self.seat_key.as_ref().ok_or("state")?;
+        let key = cahoots_core::seat::SeatKey::from_seed(seed).map_err(|_| "state".to_string())?;
+        let (circle_id, me) = (self.pad().circle_id(), self.pad().my_slice());
+        let mut generation_id = [0u8; 32];
+        OsRng.fill_bytes(&mut generation_id);
+        let payload =
+            chat::sign_bump(&key, me, &circle_id, &generation_id).map_err(chat_err)?;
+        let wire = self
+            .chat_mut()?
+            .send_bump(generation_id, &payload)
+            .map_err(chat_err)?;
+        Ok(b64_encode(&wire))
     }
 
     /// Last relay sequence number consumed, persisted with the circle.

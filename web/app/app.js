@@ -27,6 +27,8 @@ const ERRORS = {
   'too-far-ahead': 'Too many messages were skipped before this one.',
   'not-synced': 'Still reading the relay. Try again in a moment.',
   'unknown-epoch': 'This device no longer has the encryption keys needed to read this message.',
+  'cannot-bump': 'This device cannot reset the keys.',
+  'needs-generation': 'This device needs its card to read the new keys.',
   'pad-epoch': 'This message uses an older chat format that this app no longer supports.',
   'no-root': 'This circle uses an older format that doesn’t support chat. Create a new circle together to start chatting.',
   version: 'Not a chat message.',
@@ -1254,6 +1256,9 @@ async function screenChat(id) {
         } else if (bytes[0] === 2) {
           try {
             const r = circle.chat_receive(entry.message);
+            // A bump has already moved this device when its signature held. Cards and control
+            // messages are not text and are not shown as text.
+            if (r.kind() !== 'text') { circle.set_relay_seq(BigInt(entry.seq)); changed = true; continue; }
             const un = chat_bucket_unpad(r.text());
             const m = { circle: id, dir: 'in', sender: r.sender(), epoch: r.epoch(), text: utf8d.decode(un ?? r.text()), ts: entry.received_at, seq: entry.seq };
             await saveChat(m); append(m);
@@ -1291,6 +1296,8 @@ async function screenChat(id) {
       h('p', { class: 'muted' }, 'Sender names help you follow a conversation. They do not independently verify who typed a message.'),
       circle.has_root() ? h('p', { class: 'muted' }, 'Renewing the encryption keys changes the keys used for future messages. It does not change the protection of messages already sent.') : null,
       circle.has_root() ? btn('Renew encryption keys', async () => { try { circle.rotate_epoch(); await saveCircle(circle); toast('Encryption keys renewed', 'ok'); close(); } catch (e) { st.textContent = friendly(e); } }) : null,
+      circle.has_root() && circle.has_seat_key() ? btn('Reset keys for everyone', async () => { try { for (let i = 0; i < 100 && !circle.chat_synced() && run === chatRun; i++) await new Promise((r) => setTimeout(r, 100)); const wire = circle.bump_generation(); await saveCircle(circle); await post(b64_decode(wire)); toast('Keys reset for everyone', 'ok'); close(); } catch (e) { st.textContent = `Not reset: ${friendly(e)}`; } }) : null,
+      circle.has_root() && circle.has_seat_key() ? h('p', { class: 'wallet-fine' }, 'Every member moves to new keys. A device that cannot reach its card reads nothing new until it taps.') : null,
       btn('Relay address', () => { close(); relaySheet(); }))),
   });
   if (!workspace) return;
