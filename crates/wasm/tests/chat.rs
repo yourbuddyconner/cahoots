@@ -222,6 +222,14 @@ fn a_bump_moves_the_other_member_and_a_forged_one_is_ignored() {
 
     // A real bump moves b, and a later text in the new generation opens.
     let wire = a.bump_generation().unwrap();
+    // Until the relay accepts it the bump stays with the circle, across a save and a load.
+    assert_eq!(a.pending_bump().as_deref(), Some(wire.as_str()));
+    let mut saved = Circle::import(&a.export()).unwrap();
+    assert_eq!(saved.pending_bump().as_deref(), Some(wire.as_str()));
+    saved.clear_pending_bump();
+    assert!(saved.pending_bump().is_none());
+    assert!(Circle::import(&saved.export()).unwrap().pending_bump().is_none());
+    a.clear_pending_bump();
     assert_ne!(a.generation_id_hex(), before);
     let moved = b.chat_receive(&wire).unwrap();
     assert_eq!(moved.kind(), "bump");

@@ -785,6 +785,9 @@ pub struct Circle {
     tier: u8,
     /// The encoded `SealedManifest`; empty for a circle made before seat keys.
     manifest: Vec<u8>,
+    /// A bump this device sent that the relay has not accepted yet, as wire bytes. Kept with
+    /// the circle so a failed post is retried.
+    pending_bump: Option<Vec<u8>>,
 }
 
 /// A decrypted chat message.
@@ -849,6 +852,7 @@ impl Circle {
             seat_key: None,
             tier: 0,
             manifest: Vec::new(),
+            pending_bump: None,
         }
     }
     fn pad(&self) -> &Pad<MemPadStorage, MemLedger> {
@@ -1013,10 +1017,8 @@ impl Circle {
                     .as_ref()
                     .and_then(|m| chat::verify_bump(&text, &circle_id, m).ok());
                 match verified {
-                    Some((generation_id, _)) => match chat.bump(generation_id) {
-                        Ok(()) => {}
-                        Err(e) => return Err(chat_err(e)),
-                    },
+                    // A bump that cannot be applied is consumed, not retried forever.
+                    Some((generation_id, _)) => ignored = chat.bump(generation_id).is_err(),
                     None => ignored = true,
                 }
                 "bump"
@@ -1053,7 +1055,18 @@ impl Circle {
             .chat_mut()?
             .send_bump(generation_id, &payload)
             .map_err(chat_err)?;
+        self.pending_bump = Some(wire.clone());
         Ok(b64_encode(&wire))
+    }
+
+    /// The bump wire (base64url) still to be posted to the relay, if any.
+    pub fn pending_bump(&self) -> Option<String> {
+        self.pending_bump.as_deref().map(b64_encode)
+    }
+
+    /// Record that the relay accepted the pending bump.
+    pub fn clear_pending_bump(&mut self) {
+        self.pending_bump = None;
     }
 
     /// Last relay sequence number consumed, persisted with the circle.
@@ -1221,6 +1234,11 @@ impl Circle {
             }
             None => out.extend_from_slice(&[0; 33]),
         }
+        // v6 trailer: the bump not yet posted. Absent in a v5 state.
+        if let Some(w) = &self.pending_bump {
+            out.extend_from_slice(&(w.len() as u32).to_le_bytes());
+            out.extend_from_slice(w);
+        }
         out
     }
 
@@ -1344,6 +1362,12 @@ impl Circle {
         } else {
             None
         };
+        let pending_bump = if version >= 6 && !r.0.is_empty() {
+            let n = r.u32().map_err(err)? as usize;
+            Some(r.take(n).map_err(err)?.to_vec())
+        } else {
+            None
+        };
         if !r.0.is_empty() {
             return Err("state".into());
         }
@@ -1372,6 +1396,7 @@ impl Circle {
             seat_key,
             tier,
             manifest,
+            pending_bump,
         })
     }
 }

@@ -1193,6 +1193,14 @@ async function screenChat(id) {
     if (!res.ok) throw `relay ${res.status}: ${await res.text()}`;
     return res.json();
   };
+  // A reset that was sent but not yet accepted by the relay is posted again until it is.
+  const flushBump = async () => {
+    const w = circle.pending_bump();
+    if (!w) return;
+    await post(b64_decode(w));
+    circle.clear_pending_bump();
+    await saveCircle(circle);
+  };
   const doSend = async () => {
     const text = inp.value;
     if (!text || pendingChatSends.has(id)) return;
@@ -1209,6 +1217,7 @@ async function screenChat(id) {
       // The first send after a load waits until the relay has been read to the end, so this
       // device knows where its own messages stopped.
       for (let i = 0; i < 100 && !circle.chat_synced() && run === chatRun; i++) await new Promise((r) => setTimeout(r, 100));
+      await flushBump();
       const wire = circle.chat_send(pt);
       await saveCircle(circle); // the chain step is recorded before the ciphertext leaves
       await post(b64_decode(wire));
@@ -1244,6 +1253,7 @@ async function screenChat(id) {
         continue;
       }
       if (run !== chatRun) break;
+      try { await flushBump(); } catch (e) { /* the relay answers later: tried again on the next poll */ }
       let changed = false;
       const entries = data.entries || [];
       if (!entries.length && !circle.chat_synced()) circle.chat_mark_synced();
@@ -1296,7 +1306,7 @@ async function screenChat(id) {
       h('p', { class: 'muted' }, 'Sender names help you follow a conversation. They do not independently verify who typed a message.'),
       circle.has_root() ? h('p', { class: 'muted' }, 'Renewing the encryption keys changes the keys used for future messages. It does not change the protection of messages already sent.') : null,
       circle.has_root() ? btn('Renew encryption keys', async () => { try { circle.rotate_epoch(); await saveCircle(circle); toast('Encryption keys renewed', 'ok'); close(); } catch (e) { st.textContent = friendly(e); } }) : null,
-      circle.has_root() && circle.has_seat_key() ? btn('Reset keys for everyone', async () => { try { for (let i = 0; i < 100 && !circle.chat_synced() && run === chatRun; i++) await new Promise((r) => setTimeout(r, 100)); const wire = circle.bump_generation(); await saveCircle(circle); await post(b64_decode(wire)); toast('Keys reset for everyone', 'ok'); close(); } catch (e) { st.textContent = `Not reset: ${friendly(e)}`; } }) : null,
+      circle.has_root() && circle.has_seat_key() ? btn('Reset keys for everyone', async () => { try { for (let i = 0; i < 100 && !circle.chat_synced() && run === chatRun; i++) await new Promise((r) => setTimeout(r, 100)); circle.bump_generation(); await saveCircle(circle); } catch (e) { st.textContent = `Not reset: ${friendly(e)}`; return; } try { await flushBump(); toast('Keys reset for everyone', 'ok'); } catch (e) { toast('Reset saved. It reaches the others when the relay answers.', 'ok'); } close(); }) : null,
       circle.has_root() && circle.has_seat_key() ? h('p', { class: 'wallet-fine' }, 'Every member moves to new keys. A device that cannot reach its card reads nothing new until it taps.') : null,
       btn('Relay address', () => { close(); relaySheet(); }))),
   });
