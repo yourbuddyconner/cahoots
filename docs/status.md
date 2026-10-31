@@ -1,6 +1,6 @@
 # Project status
 
-This is a snapshot of the repository’s documented status on October 30, 2026. Cahoots is a development project, not a finished secure messaging service.
+This is a snapshot of the repository’s documented status on October 31, 2026. Cahoots is a development project, not a finished secure messaging service.
 
 ## What you can try
 

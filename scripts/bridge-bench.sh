@@ -2,8 +2,8 @@
 # A phone hosts a ceremony with a badge through the bridge. Two simulators are the phones: the
 # host makes a circle for 3 people with 1 card in the pile, so the host is seat 1, the badge
 # seat 2 and the joiner on the second simulator seat 3. A local cahoots-station is the relay.
-# The laptop runs `cahoots-host bridge` with the bottom card on the cable, and hands each card's
-# join code to the host's simulator as a file, since a simulator has no camera.
+# The laptop runs `cahoots-host bridge` with the badge on the cable, and hands the badge's join
+# code to the host's simulator as a file, since a simulator has no camera. The run has one card.
 #
 #   scripts/bridge-bench.sh [--port /dev/cu.usbmodempico21] [--state /tmp/bridge-bench] [--no-flash]
 #   scripts/bridge-bench.sh --sim [--state /tmp/bridge-bench]
@@ -33,7 +33,10 @@ cd "$ROOT"
 TARGET=${CARGO_TARGET_DIR:-$ROOT/target}
 HOST=$TARGET/debug/cahoots-host
 ELF=crates/rp2350/target/thumbv8m.main-none-eabihf/release/cahoots-rp2350
-rm -rf "$STATE"; mkdir -p "$STATE"
+# Clear only what an earlier run wrote. The app build in $STATE/derived is kept.
+mkdir -p "$STATE"
+rm -rf "$STATE/walk" "$STATE/badge" "$STATE/station.db" "$STATE/station.db-shm" "$STATE/station.db-wal"
+rm -f "$STATE"/*.log "$STATE/bridge.out" "$STATE/bridge.err"
 WALK=$STATE/walk; mkdir -p "$WALK"
 LOG=$STATE/bridge-bench.log
 : > "$LOG"
@@ -140,8 +143,14 @@ fi
 BRIDGE=$!
 PIDS+=($BRIDGE)
 
-# Each card's join code: the line after "Card in seat N.", handed to the host as card-N.txt.
+# The badge's join code: the line after "Card in seat N.", handed to the host as card-N.txt.
+if [ "$SIM" = 1 ]; then
+  SILENT="the simulated badge said nothing in 90 s, see $BADGE_LOG"
+else
+  SILENT="the badge gave no code in 90 s, see $BADGE_LOG. The port may be deaf after the badge re-enumerated. Unplug it and plug it in again, or run without --no-flash"
+fi
 handed=0
+i=0
 until [ $handed = 1 ]; do
   seat=$(sed -nE 's/^Card in seat ([0-9]+)\..*/\1/p' "$STATE/bridge.out" | head -1)
   if [ -n "$seat" ]; then
@@ -154,14 +163,25 @@ until [ $handed = 1 ]; do
   fi
   if [ $handed = 0 ]; then
     kill -0 $BRIDGE 2>/dev/null || fail "the bridge stopped before the badge's code, see $BRIDGE_ERR"
+    kill -0 $H 2>/dev/null || fail "the host's test stopped before the badge's code, see $STATE/testHost.log"
+    i=$((i+1)); [ $i -gt 180 ] && fail "$SILENT"
     sleep 0.5
   fi
 done
 
+# The bridge may finish a moment before the badge shows its words, so a bridge that ended
+# well gets 30 s more.
 i=0
-until grep -q "words: " "$BADGE_LOG"; do
+BRIDGE_STATUS=
+until grep -q "\] words: " "$BADGE_LOG"; do
   i=$((i+1)); [ $i -gt 600 ] && fail "the badge showed no words in 5 minutes, see $BADGE_LOG"
   kill -0 $H 2>/dev/null || fail "the host's test stopped before the words, see $STATE/testHost.log"
+  if [ -z "$BRIDGE_STATUS" ] && ! kill -0 $BRIDGE 2>/dev/null; then
+    wait $BRIDGE; BRIDGE_STATUS=$?
+    [ "$BRIDGE_STATUS" = 0 ] || fail "the bridge stopped before the badge's words, see $BRIDGE_ERR"
+    ended=$i
+  fi
+  [ -n "$BRIDGE_STATUS" ] && [ $((i - ended)) -gt 60 ] && fail "the bridge finished but the badge showed no words in 30 s, see $BADGE_LOG"
   sleep 0.5
 done
 if [ "$SIM" = 1 ]; then
@@ -169,7 +189,8 @@ if [ "$SIM" = 1 ]; then
   echo B > "$STATE/badge/buttons.txt"
 fi
 ok=0
-wait $BRIDGE || { say "the bridge did not finish, see $BRIDGE_ERR"; ok=1; }
+if [ -z "$BRIDGE_STATUS" ]; then wait $BRIDGE; BRIDGE_STATUS=$?; fi
+[ "$BRIDGE_STATUS" = 0 ] || { say "the bridge did not finish, see $BRIDGE_ERR"; ok=1; }
 wait $H || ok=1
 wait $J || ok=1
 i=0
@@ -179,7 +200,7 @@ until grep -q "saved: " "$BADGE_LOG"; do
 done
 
 grep -hE "Test Case .*(passed|failed)|error:" "$STATE/testHost.log" "$STATE/testJoiner.log" | tee -a "$LOG"
-BADGE_WORDS=$(grep -oE "words: .*" "$BADGE_LOG" | tail -1 | sed 's/^words: //')
+BADGE_WORDS=$(grep -oE "\] words: .*" "$BADGE_LOG" | tail -1 | sed 's/^\] words: //')
 HOST_WORDS=$(cat "$WALK/host-words.txt" 2>/dev/null)
 JOINER_WORDS=$(cat "$WALK/joiner-words.txt" 2>/dev/null)
 say "host, seat 1:   $HOST_WORDS"
