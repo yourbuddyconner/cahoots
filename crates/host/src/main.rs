@@ -193,22 +193,30 @@ fn run_bridge(args: &Args) -> Result<(), String> {
     };
     println!("Waiting for the cards. Each card's code appears here for the host's phone to scan.");
     bridge
-        .run(link.as_mut(), &mut poster, &mut poller, &mut |seat, code| {
-            println!();
-            match qrcode::QrCode::new(code.as_bytes()) {
-                Ok(qr) => println!(
-                    "{}",
-                    qr.render::<qrcode::render::unicode::Dense1x2>()
-                        .quiet_zone(true)
-                        .build()
-                ),
-                Err(e) => eprintln!("the code for seat {} could not be drawn: {e}", u16::from(seat) + 1),
-            }
-            println!("Card in seat {}. Scan this code with the host's phone.", u16::from(seat) + 1);
-            println!("{code}");
-        })
+        .run(
+            link.as_mut(),
+            &mut poster,
+            &mut poller,
+            &mut |seat, code| {
+                println!();
+                match qrcode::QrCode::new(code.as_bytes()) {
+                    Ok(qr) => println!(
+                        "{}",
+                        qr.render::<qrcode::render::unicode::Dense1x2>()
+                            .quiet_zone(true)
+                            .build()
+                    ),
+                    Err(e) => eprintln!("the code for seat {} could not be drawn: {e}", u16::from(seat) + 1),
+                }
+                println!("Card in seat {}. Scan this code with the host's phone.", u16::from(seat) + 1);
+                println!("{code}");
+            },
+            &mut || {
+                println!("every seat has signed. The badges are keeping their circles.");
+                println!("Unplug the pile, or press Control-C, to stop the bridge.");
+            },
+        )
         .map_err(|e| e.to_string())?;
-    println!("every seat has signed. The badges are keeping their circles.");
     Ok(())
 }
 

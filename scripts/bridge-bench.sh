@@ -169,19 +169,21 @@ until [ $handed = 1 ]; do
   fi
 done
 
-# The bridge may finish a moment before the badge shows its words, so a bridge that ended
-# well gets 30 s more.
+# The bridge keeps carrying until the badge is unplugged, so it should still be running here.
+# One that stopped must have stopped well.
+bridge_alive() {
+  [ -n "$BRIDGE_STATUS" ] && return 1
+  kill -0 $BRIDGE 2>/dev/null && return 0
+  wait $BRIDGE; BRIDGE_STATUS=$?
+  [ "$BRIDGE_STATUS" = 0 ] || fail "the bridge stopped before the badge kept its circle, see $BRIDGE_ERR"
+  return 1
+}
 i=0
 BRIDGE_STATUS=
 until grep -q "\] words: " "$BADGE_LOG"; do
   i=$((i+1)); [ $i -gt 600 ] && fail "the badge showed no words in 5 minutes, see $BADGE_LOG"
   kill -0 $H 2>/dev/null || fail "the host's test stopped before the words, see $STATE/testHost.log"
-  if [ -z "$BRIDGE_STATUS" ] && ! kill -0 $BRIDGE 2>/dev/null; then
-    wait $BRIDGE; BRIDGE_STATUS=$?
-    [ "$BRIDGE_STATUS" = 0 ] || fail "the bridge stopped before the badge's words, see $BRIDGE_ERR"
-    ended=$i
-  fi
-  [ -n "$BRIDGE_STATUS" ] && [ $((i - ended)) -gt 60 ] && fail "the bridge finished but the badge showed no words in 30 s, see $BADGE_LOG"
+  bridge_alive
   sleep 0.5
 done
 if [ "$SIM" = 1 ]; then
@@ -189,15 +191,20 @@ if [ "$SIM" = 1 ]; then
   echo B > "$STATE/badge/buttons.txt"
 fi
 ok=0
-if [ -z "$BRIDGE_STATUS" ]; then wait $BRIDGE; BRIDGE_STATUS=$?; fi
-[ "$BRIDGE_STATUS" = 0 ] || { say "the bridge did not finish, see $BRIDGE_ERR"; ok=1; }
 wait $H || ok=1
 wait $J || ok=1
 i=0
 until grep -q "saved: " "$BADGE_LOG"; do
   i=$((i+1)); [ $i -gt 60 ] && { say "the badge did not keep the circle"; ok=1; break; }
+  bridge_alive
   sleep 0.5
 done
+i=0
+until grep -q "^every seat has signed" "$STATE/bridge.out"; do
+  i=$((i+1)); [ $i -gt 60 ] && { say "the bridge never said every seat signed, see $STATE/bridge.out"; ok=1; break; }
+  sleep 0.5
+done
+# The cleanup stops the bridge, as unplugging the badge would.
 
 grep -hE "Test Case .*(passed|failed)|error:" "$STATE/testHost.log" "$STATE/testJoiner.log" | tee -a "$LOG"
 BADGE_WORDS=$(grep -oE "\] words: .*" "$BADGE_LOG" | tail -1 | sed 's/^\] words: //')

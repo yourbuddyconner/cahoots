@@ -30,7 +30,7 @@ Badges can join a ceremony that a phone hosts through the relay. A laptop carrie
 4. The laptop prints a code for each badge. Scan each one with the host's phone. Phones that join show their own codes, as usual.
 5. When the host's screen says "Everyone is scanned", select **Continue** on the host's phone.
 
-The badges show the six words with everyone else. When the laptop says every seat has signed, the badges keep the circle.
+The badges show the six words with everyone else. When the laptop says every seat has signed, the badges keep the circle. The laptop keeps running until you unplug the pile or press Control-C.
 
 ## 1. Set up the group
 

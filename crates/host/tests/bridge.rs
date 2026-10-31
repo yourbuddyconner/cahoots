@@ -147,9 +147,18 @@ fn a_phone_hosts_two_cards_through_the_bridge_and_a_phone_joiner() {
         let mut poller = MemRelay::shared(relay.clone());
         std::thread::spawn(move || {
             let mut link = SocketLink::new(bridge_end).unwrap();
-            let r = bridge.run(&mut link, &mut poster, &mut poller, &mut |seat, code: &str| {
-                codes_tx.send((seat, code.to_string())).unwrap();
-            });
+            let mut signed = 0;
+            let r = bridge.run(
+                &mut link,
+                &mut poster,
+                &mut poller,
+                &mut |seat, code: &str| {
+                    codes_tx.send((seat, code.to_string())).unwrap();
+                },
+                &mut || signed += 1,
+            );
+            // The bridge ran until card 1 was gone, and said once that everyone signed.
+            assert_eq!(signed, 1);
             // Keep the cable in until the cards are done with it.
             while !stop.load(Ordering::SeqCst) {
                 link.flush();
@@ -473,7 +482,7 @@ fn a_slow_relay_never_stops_the_bridge_reading_the_cable() {
         reads: reads.clone(),
         until: begun + Duration::from_millis(4500),
     };
-    let r = bridge.run(&mut link, &mut SlowRelay, &mut SlowRelay, &mut |_, _| {});
+    let r = bridge.run(&mut link, &mut SlowRelay, &mut SlowRelay, &mut |_, _| {}, &mut || {});
     assert!(matches!(r, Err(BridgeError::Link)), "{r:?}");
     let reads = reads.lock().unwrap();
     assert!(reads.len() > 10, "{} reads", reads.len());
@@ -484,4 +493,62 @@ fn a_slow_relay_never_stops_the_bridge_reading_the_cable() {
         .unwrap();
     assert!(gap < Duration::from_secs(1), "the cable went {gap:?} without a read");
     assert!(reads.last().unwrap().duration_since(begun) > Duration::from_secs(4));
+}
+
+#[test]
+fn a_forged_host_signature_first_does_not_keep_the_real_one_from_the_cards() {
+    let (channel, text) = offer_text(4, 2, b"host");
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    post(&relay, &channel, 0, Round::Commit, b"host");
+    post(&relay, &channel, 0, Round::Attest, b"forged");
+    post(&relay, &channel, 3, Round::Attest, b"seat 4");
+    let (mut bridge, mut link, mut far) = started_bridge(&text);
+    // The whole pile, and each card's signature.
+    let params = bridge.offer().params.encode();
+    from_pile(&mut far, 1, 2, &params);
+    from_pile(&mut far, 5, 1, b"card 1");
+    from_pile(&mut far, 5, 2, b"card 2");
+    let signed = Arc::new(AtomicBool::new(false));
+    let bridge_thread = {
+        let signed = signed.clone();
+        let mut poster = MemRelay::shared(relay.clone());
+        let mut poller = MemRelay::shared(relay.clone());
+        std::thread::spawn(move || {
+            bridge.run(&mut link, &mut poster, &mut poller, &mut |_, _| {}, &mut || {
+                signed.store(true, Ordering::SeqCst)
+            })
+        })
+    };
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut seen = Vec::new();
+    while !signed.load(Ordering::SeqCst) {
+        assert!(Instant::now() < deadline, "the bridge never said everyone signed");
+        seen.extend(ring_frames(&mut far));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let attests = |seen: &[(u8, u8, Vec<u8>)]| -> Vec<Vec<u8>> {
+        seen.iter().filter(|(k, i, _)| (*k, *i) == (5, 0)).map(|(_, _, b)| b.clone()).collect()
+    };
+    // The forged one went down first, and the bridge thinks everyone signed.
+    seen.extend(ring_frames(&mut far));
+    assert_eq!(attests(&seen), [b"forged".to_vec()]);
+    assert!(!bridge_thread.is_finished(), "the bridge stopped on a signature it cannot check");
+    // The real one, posted later, still reaches the cards.
+    post(&relay, &channel, 0, Round::Attest, b"real");
+    while !attests(&seen).contains(&b"real".to_vec()) {
+        assert!(Instant::now() < deadline, "the real signature never went down: {:?}", attests(&seen));
+        seen.extend(ring_frames(&mut far));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Unplugged after everyone signed: the bridge is done.
+    drop(far);
+    bridge_thread.join().unwrap().unwrap();
+    // Each card's signature went to the relay.
+    let on_relay = relay.lock().unwrap().poll(&channel.id, None, 0).unwrap();
+    let cards: Vec<_> = on_relay
+        .iter()
+        .filter_map(|(_, w)| channel.open(w).ok())
+        .filter(|(seat, round, _)| *round == Round::Attest && (1..=2).contains(seat))
+        .collect();
+    assert_eq!(cards.len(), 2);
 }

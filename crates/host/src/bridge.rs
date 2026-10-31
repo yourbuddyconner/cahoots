@@ -21,6 +21,9 @@
 //! and signature goes up, so one forged copy cannot keep the real one from the cards: the
 //! ring keeps a few copies per seat and drops the ones that do not open or check.
 //!
+//! The bridge cannot check a signature, so it never stops on one. Once everyone has signed
+//! it says so and keeps carrying until the pile is unplugged.
+//!
 //! [`Bridge::run`] keeps the relay off the cable's loop. One thread posts, one long-polls, and
 //! the loop that reads the cable never waits on either, so a board that takes two seconds
 //! without bytes for an unplugged laptop never sees a slow relay that way.
@@ -35,7 +38,7 @@ use rand_core::OsRng;
 use sha2::{Digest, Sha256};
 use std::collections::{HashSet, VecDeque};
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -102,6 +105,9 @@ impl From<RelayError> for BridgeError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeStep {
     Working,
+    /// Every card's signature is queued for the relay, and at least one signature for every
+    /// other seat has gone down the cable. The bridge cannot check a signature, so a later
+    /// copy may still be the real one: [`Bridge::run`] keeps carrying until the pile is gone.
     Done,
 }
 
@@ -411,25 +417,32 @@ impl Bridge {
         })
     }
 
-    /// Carry the pile into the ceremony until every seat's signature has gone across, then
-    /// push the last frames down the cable. `poster` posts and `poller` reads, each on its own
-    /// thread, and this thread only reads and writes the cable. A relay that fails is tried
-    /// again for a while before the bridge gives up.
+    /// Carry the pile into the ceremony until the cable's peer is gone. `on_signed` is called
+    /// once, when every card's signature is on the relay and at least one signature for every
+    /// other seat has gone down the cable. The bridge cannot check a signature, so it keeps
+    /// carrying after that: a forged signature that came first costs nothing, because the real
+    /// one still goes down when it comes. Returns `Ok` when the pile is unplugged after
+    /// `on_signed`, and `Err(Link)` when it is unplugged before. `poster` posts and `poller`
+    /// reads, each on its own thread, and this thread only reads and writes the cable. A relay
+    /// that fails is tried again for a while before the bridge gives up.
     pub fn run(
         &mut self,
         link: &mut dyn Link,
         poster: &mut (dyn Relay + Send),
         poller: &mut (dyn Relay + Send),
         on_join_code: &mut dyn FnMut(u8, &str),
+        on_signed: &mut dyn FnMut(),
     ) -> Result<(), BridgeError> {
         let id = self.offer.channel.id;
         let stop = AtomicBool::new(false);
+        let posted = AtomicUsize::new(0);
         std::thread::scope(|scope| {
             let (post_tx, post_rx) = mpsc::channel::<Vec<u8>>();
             let (read_tx, read_rx) = mpsc::channel::<Vec<(u64, Vec<u8>)>>();
             let (err_tx, err_rx) = mpsc::channel::<RelayError>();
             let post_err = err_tx.clone();
-            let posting = scope.spawn(move || {
+            let posted = &posted;
+            scope.spawn(move || {
                 for wire in post_rx {
                     let mut failures = 0;
                     while let Err(e) = poster.post(&id, &wire) {
@@ -440,6 +453,7 @@ impl Bridge {
                         }
                         std::thread::sleep(Duration::from_secs(1));
                     }
+                    posted.fetch_add(1, Ordering::SeqCst);
                 }
             });
             let stop = &stop;
@@ -474,36 +488,34 @@ impl Bridge {
                 }
             });
             let result = (|| {
+                let mut queued = 0;
+                let mut signed = false;
                 loop {
                     while let Ok(entries) = read_rx.try_recv() {
                         self.deliver(entries);
                     }
-                    let step = self.step(link, on_join_code)?;
+                    let step = match self.step(link, on_join_code) {
+                        // The pile was unplugged after everyone signed: the bridge is done.
+                        Err(BridgeError::Link) if signed => return Ok(()),
+                        other => other?,
+                    };
                     for wire in self.take_posts() {
+                        queued += 1;
                         let _ = post_tx.send(wire);
                     }
                     if let Ok(e) = err_rx.try_recv() {
                         return Err(BridgeError::Relay(e));
                     }
-                    if step == BridgeStep::Done {
-                        break;
+                    if !signed
+                        && step == BridgeStep::Done
+                        && posted.load(Ordering::SeqCst) == queued
+                        && link.flush()
+                    {
+                        signed = true;
+                        on_signed();
                     }
                     std::thread::sleep(LINK_EVERY);
                 }
-                // The last signatures: wait for the poster while the cable keeps moving.
-                drop(post_tx);
-                let mut buf = [0u8; 4096];
-                while !posting.is_finished() || !link.flush() {
-                    if !link.peer_present() {
-                        return Err(BridgeError::Link);
-                    }
-                    while link.recv(&mut buf) > 0 {}
-                    std::thread::sleep(Duration::from_millis(2));
-                }
-                if let Ok(e) = err_rx.try_recv() {
-                    return Err(BridgeError::Relay(e));
-                }
-                Ok(())
             })();
             stop.store(true, Ordering::SeqCst);
             result
