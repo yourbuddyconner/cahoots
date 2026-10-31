@@ -39,8 +39,15 @@ final class AppModel: ObservableObject {
             if waitingLink != nil { Task { @MainActor in self.followWaitingLink() } }
         }
     }
-    /// Shown once at launch when a ceremony was open when the app closed.
-    @Published var lostCeremony: String?
+    /// Shown once at launch when a ceremony was open when the app closed. A link that arrived
+    /// meanwhile is followed once the alert is dismissed.
+    @Published var lostCeremony: String? {
+        didSet {
+            if lostCeremony == nil, oldValue != nil, waitingLink != nil {
+                Task { @MainActor in self.followWaitingLink() }
+            }
+        }
+    }
     let ceremonies = OpenCeremonies()
 
     private var opening: Task<Core?, Never>?
@@ -149,7 +156,8 @@ final class AppModel: ObservableObject {
             waitingLink = url
         case let .open(route):
             dismissSheets()
-            path.append(route)
+            // A link delivered twice (a tap and a universal link) opens its screen once.
+            if path.last != route { path.append(route) }
         case let .rejoin(id, link):
             dismissSheets()
             Task {
@@ -157,14 +165,15 @@ final class AppModel: ObservableObject {
                 // channel opens, and the join's error, if any, shows there on the next poll.
                 _ = try? await core?.run { try $0.channelJoin(url: link) }
                 await refresh()
-                path.append(.channel(id))
+                if path.last != .channel(id) { path.append(.channel(id)) }
             }
         }
     }
 
-    /// A held link, once no ceremony is on screen.
+    /// A held link, once no ceremony is on screen and the "Ceremony lost" alert is gone: following
+    /// it closes sheets, which would take the alert with it unread.
     private func followWaitingLink() {
-        guard let link = waitingLink, core != nil,
+        guard let link = waitingLink, core != nil, lostCeremony == nil,
               !path.contains(where: { if case .ceremony = $0 { return true } else { return false } })
         else { return }
         waitingLink = nil

@@ -279,7 +279,8 @@ struct ChannelView: View {
 
     private func share(note: String?) async {
         // A closed channel has no link to share: say so rather than show the phone crate's error.
-        if model.isOwner, summary?.closed == true {
+        // The view's summary, which the app's list already holds before the model loads.
+        if summary?.role == .owner, summary?.closed == true {
             sharing = SharedLink(link: "", note: nil)
             return
         }

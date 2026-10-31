@@ -67,8 +67,9 @@ struct ChannelRequestsView: View {
         }
     }
 
-    /// With the toggle on: allow every request the owner core accepts as it stands, that is one
-    /// that came with the live link. Anything it refuses stays in the list. How many were let in.
+    /// With the toggle on: let each request in for what the live link proves
+    /// (`channelPermitted`), never for what it asks. A request that yields nothing (members post,
+    /// an old link) stays in the list for the owner. How many were let in.
     static func allowPermitted(core: Core, id: String, requests: [ChannelRequest]? = nil) async -> Int {
         guard UserDefaults.standard.bool(forKey: autoAllowKey(id)) else { return 0 }
         let list: [ChannelRequest]
@@ -79,8 +80,12 @@ struct ChannelRequestsView: View {
             list = read
         }
         var n = 0
-        for r in list where (try? await core.run({ try $0.channelAllow(id: id, requestId: r.id, actions: r.actions) })) != nil {
-            n += 1
+        for r in list {
+            guard let actions = try? await core.run({ try $0.channelPermitted(id: id, requestId: r.id) }),
+                  !actions.isEmpty else { continue }
+            if (try? await core.run({ try $0.channelAllow(id: id, requestId: r.id, actions: actions) })) != nil {
+                n += 1
+            }
         }
         return n
     }
@@ -92,15 +97,34 @@ struct ChannelRequestsView: View {
                 Text("Asks to \(Self.words(r.actions)).").font(.subheadline).foregroundStyle(Color.muted)
             }
             .accessibilityElement(children: .combine)
+            // The owner picks what to give: read, or read and post. Never admit or govern.
             HStack(spacing: Space.s) {
-                Button { Task { await allow(r) } } label: { Working(busy: working == r.id, title: "Allow") }
+                if Self.asksToPost(r.actions) {
+                    Button { Task { await allow(r, "read,post") } } label: {
+                        Working(busy: working == r.id + "read,post", title: "Allow to post")
+                    }
                     .buttonStyle(.filled)
+                    Button { Task { await allow(r, "read") } } label: {
+                        Working(busy: working == r.id + "read", title: "Allow to read")
+                    }
+                    .buttonStyle(.outlined)
+                } else {
+                    Button { Task { await allow(r, "read") } } label: {
+                        Working(busy: working == r.id + "read", title: "Allow to read")
+                    }
+                    .buttonStyle(.filled)
+                }
                 Button("Refuse") { Task { await refuse(r) } }
                     .buttonStyle(.outlined)
             }
             .disabled(working != nil)
         }
         .padding(.vertical, Space.m)
+    }
+
+    /// Whether a request's actions include posting.
+    static func asksToPost(_ actions: String) -> Bool {
+        actions.split(separator: ",").contains { $0.trimmingCharacters(in: .whitespaces) == "post" }
     }
 
     /// "read,post" as "read and post".
@@ -128,12 +152,13 @@ struct ChannelRequestsView: View {
         }
     }
 
-    private func allow(_ r: ChannelRequest) async {
-        working = r.id
+    /// Let `r` in for `actions`, "read" or "read,post", as the owner chose.
+    private func allow(_ r: ChannelRequest, _ actions: String) async {
+        working = r.id + actions
         defer { working = nil }
         do {
-            try await core.run { [id] in try $0.channelAllow(id: id, requestId: r.id, actions: r.actions) }
-            notice = "\(r.name) can \(Self.words(r.actions))."
+            try await core.run { [id] in try $0.channelAllow(id: id, requestId: r.id, actions: actions) }
+            notice = "\(r.name) can \(Self.words(actions))."
             await load()
         } catch {
             status = plain(error)

@@ -73,4 +73,11 @@ final class ChannelLinkTests: XCTestCase {
         XCTAssertEqual(ChannelRequestsView.words("read,post"), "read and post")
         XCTAssertEqual(ChannelRequestsView.words("read"), "read")
     }
+
+    func testAllowToPostIsOfferedOnlyToARequestToPost() {
+        XCTAssertTrue(ChannelRequestsView.asksToPost("read,post"))
+        XCTAssertTrue(ChannelRequestsView.asksToPost("read, post"))
+        XCTAssertFalse(ChannelRequestsView.asksToPost("read"))
+        XCTAssertFalse(ChannelRequestsView.asksToPost("read,postal"))
+    }
 }
