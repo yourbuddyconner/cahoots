@@ -26,7 +26,7 @@ This command accepts connections only from the same computer. On a phone, `127.0
 
 For chat between devices, serve the relay at an address all members can reach. Use HTTPS when connecting from the HTTPS-hosted browser app. A plain HTTP relay can be blocked by the browser as mixed content.
 
-A typical deployment puts a reverse proxy with HTTPS in front of the relay. The proxy forwards requests to the local listening address above. Keep the log on persistent storage and add request limits at the proxy: the station does not provide rate limiting itself.
+A typical deployment puts a reverse proxy with HTTPS in front of the relay. The proxy forwards requests to the local listening address above. Keep the database on persistent storage. The station limits requests per client address itself (and, with channels, posts per channel); if it sits behind a proxy, start it with `--trust-forwarded` so the limit counts each client rather than the proxy.
 
 The [station README](../crates/station/README.md) has Docker commands and the full API. [deploy/relay](../deploy/relay/README.md) is the recipe the default relay uses, with the station’s own rate limit and size cap; it works for a relay of your own too.
 

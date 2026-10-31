@@ -55,6 +55,10 @@ A [channel](browser.md#channels) is conventional cryptography. Its keys are rand
 - **At new keys,** a member who was revoked, or a link that was retired, gets nothing sealed for it. Whoever held them, or stole them, stops reading from that point. The app starts new keys whenever the owner revokes someone or retires a link. New keys alone do not shut out a thief who still holds a live link or a member's keys: the owner must retire that link or revoke that member.
 - **Who posted:** every post is signed by its member's key, which a grant ties to the owner circle. Readers can tell which member key posted each message, which circle chat cannot do. The owner sees beside each post the name that person typed when they asked to post, which nobody checks; other readers see a short key id. A channel does not offer anonymous posting.
 - **What a link holder sees:** everything any reader sees, for as long as the link works. Anyone the holder forwards it to sees the same, and a link alone cannot count or expire its readers.
+- **Who governs:** in this version one seat of the owner circle, on its own, can start new keys, revoke a member, add or retire a link, and replace the channel object. The approval count of a circle with several seats applies only to changing the policy. Give a seat only to someone you trust to run the channel alone.
+
+- **Where keys come from:** every key deposit is signed by the owner's member key, and readers install only deposits whose signer's grant lets it govern the channel. Someone who knows the link, or a relay that lies, cannot hand readers keys of its own.
+
 - **What the relay sees:** channel ids, message sizes and timing, which member key posted each message, which link tokens read and when, and the join queue: each request's name, key and what it asks for. It holds no channel key and cannot read messages, key deposits or link secrets. It can still delay, drop or refuse, as for circles.
 - **Who lets people in:** the owner's device, while the app is open there. A relay that checks joiners from an enclave, so that admission works with the owner's phone closed, is defined and not built.
 

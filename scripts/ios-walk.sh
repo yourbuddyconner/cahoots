@@ -19,7 +19,7 @@ A=$(id "iPhone 15"); B=$(id "iPhone 15 Walk B")
 
 cargo build -q -p cahoots-station
 PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
-"$TARGET/debug/cahoots-station" --listen "127.0.0.1:$PORT" --log "$OUT/station.jsonl" \
+"$TARGET/debug/cahoots-station" --listen "127.0.0.1:$PORT" --db "$OUT/station.db" \
   --posts-per-minute 0 --reads-per-minute 0 2>"$OUT/station.log" &
 STATION=$!
 trap 'kill $STATION 2>/dev/null' EXIT
