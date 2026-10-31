@@ -47,7 +47,7 @@ Every service asks us to establish it again on its terms. Make an account. Find 
 
 There are good tools here. I use Signal and Tailscale. Signal’s [safety numbers](https://support.signal.org/hc/en-us/articles/360007060632-What-is-a-safety-number-and-why-do-I-see-that-it-changed) and Apple’s [iMessage Contact Key Verification](https://security.apple.com/blog/imessage-contact-key-verification) already give people a way to compare codes and check the keys behind a conversation. Meeting someone and checking what appears on both screens is an established pattern. Cahoots builds on it.
 
-The human part matters. Comparing keys doesn't establish who a person is by itself. You bring that knowledge to the exchange: this is the friend sitting across from me, and this is the device they're using. The check connects that relationship to the keys the software will use.
+When you sit down with a friend to compare codes, you already know who you're looking at. The software doesn't. Checking the codes together gives you a way to connect the friend you recognize, and the device they're holding, to the keys your software will use afterward.
 
 I'd like to extend that pattern beyond checking public keys for a conversation in one app. A group could establish a shared secret and agree on its members together, then carry that foundation into other tools. Each tool would still have its own job and its own limits, but the group wouldn't have to establish the relationship from scratch every time.
 
