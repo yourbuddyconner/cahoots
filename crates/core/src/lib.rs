@@ -12,6 +12,7 @@ pub mod combine;
 pub mod commit;
 pub mod control;
 pub mod cose;
+pub mod faces;
 pub mod frame;
 pub mod ledger;
 pub mod manifest;

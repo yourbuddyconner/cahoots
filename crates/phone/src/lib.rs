@@ -810,6 +810,42 @@ impl Phone {
         })
     }
 
+    /// A cahoot, the 24 by 24 face `seed` gives: 576 bytes, row by row from the top left,
+    /// 1 for ink and 0 for paper.
+    pub fn face_pixels(&self, seed: Vec<u8>) -> Vec<u8> {
+        cahoots_core::faces::pixels(&seed)
+            .iter()
+            .flatten()
+            .map(|&ink| u8::from(ink))
+            .collect()
+    }
+
+    /// The face seed of `seat` (from 0) in a circle, from its public key in the manifest.
+    ///
+    /// An interim rule until badges carry their own face into the manifest (M4i): the seed is
+    /// SHA-256 of `cahoots/face/v1` and the seat's public key, so a seat's face changes from
+    /// one circle to the next.
+    pub fn seat_face_seed(&self, circle: String, seat: u8) -> Result<Vec<u8>, PhoneError> {
+        self.with_circle(&circle, |c, _| {
+            let unreadable = || PhoneError::Storage {
+                message: "This circle's member list does not read.".into(),
+            };
+            let sealed = cahoots_core::manifest::SealedManifest::decode(&c.record.manifest)
+                .map_err(|_| unreadable())?;
+            let m = cahoots_core::manifest::Manifest::decode(&sealed.body).map_err(|_| unreadable())?;
+            let s = m.seats.iter().find(|s| s.seat == seat).ok_or_else(|| PhoneError::NotFound {
+                message: format!("This circle has no seat {}.", u16::from(seat) + 1),
+            })?;
+            Ok(face_seed(&s.key.0))
+        })
+    }
+
+    /// The face seed of this phone, from its own key, by the same interim rule as
+    /// `seat_face_seed`.
+    pub fn my_face_seed(&self) -> Vec<u8> {
+        face_seed(&self.me.public)
+    }
+
     /// The `Signer` label of a circle's seat key.
     pub fn circle_seat_label(&self, circle: String) -> Result<String, PhoneError> {
         self.with_circle(&circle, |c, _| Ok(c.record.seat_label.clone()))
@@ -829,6 +865,18 @@ impl Phone {
             fingerprint: self.me.fingerprint.clone(),
         }
     }
+}
+
+/// What a face seed is hashed under, so it is not the fingerprint or any other hash of a key.
+const FACE_DOMAIN: &[u8] = b"cahoots/face/v1";
+
+/// SHA-256 of `cahoots/face/v1` and a public key.
+fn face_seed(public: &[u8]) -> Vec<u8> {
+    Sha256::new()
+        .chain_update(FACE_DOMAIN)
+        .chain_update(public)
+        .finalize()
+        .to_vec()
 }
 
 /// A joiner's seat: not the host's, and one the circle has.

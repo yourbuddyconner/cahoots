@@ -997,3 +997,48 @@ fn the_key_store_sentence_says_where_the_key_is() {
     let s = a.phone.describe().key_store;
     assert!(!s.contains("Secure Enclave") && s.contains("keychain"), "{s}");
 }
+
+#[test]
+fn faces_are_stable_and_differ_between_seats() {
+    use sha2::{Digest, Sha256};
+    let r = relay();
+    let (a, b) = (device(&r), device(&r));
+    let (id, ida, _) = finish(&a, &b);
+
+    // Each seat's seed is SHA-256 of the domain and that seat's key, the same on both phones.
+    let seat0 = a.phone.seat_face_seed(id.clone(), 0).unwrap();
+    let seat1 = a.phone.seat_face_seed(id.clone(), 1).unwrap();
+    assert_eq!(seat0.len(), 32);
+    assert_ne!(seat0, seat1);
+    assert_eq!(b.phone.seat_face_seed(id.clone(), 0).unwrap(), seat0);
+    assert_eq!(b.phone.seat_face_seed(id.clone(), 1).unwrap(), seat1);
+    let key = a.signer.public(&format!("cahoots:seat:{ida}")).unwrap();
+    let want = Sha256::new().chain_update(b"cahoots/face/v1").chain_update(&key).finalize();
+    assert_eq!(seat0, want.to_vec());
+    assert!(matches!(a.phone.seat_face_seed(id.clone(), 2), Err(PhoneError::NotFound { .. })));
+    assert!(matches!(a.phone.seat_face_seed("gone".into(), 0), Err(PhoneError::NotFound { .. })));
+
+    // The phone's own seed comes from its own key, the same way.
+    let mine = a.phone.my_face_seed();
+    let phone_key = a.signer.public("cahoots:phone").unwrap();
+    let want = Sha256::new().chain_update(b"cahoots/face/v1").chain_update(&phone_key).finalize();
+    assert_eq!(mine, want.to_vec());
+    assert_eq!(a.phone.my_face_seed(), mine);
+    assert_ne!(mine, b.phone.my_face_seed());
+
+    // A face is 576 cells of 0 or 1, the same every time, matching the core crate.
+    let face0 = a.phone.face_pixels(seat0.clone());
+    assert_eq!(face0.len(), 576);
+    assert!(face0.iter().all(|&c| c <= 1));
+    assert_eq!(b.phone.face_pixels(seat0.clone()), face0);
+    let rows = cahoots_core::faces::rows(&seat0);
+    for (i, &c) in face0.iter().enumerate() {
+        assert_eq!(c == 1, rows[i / 24][i % 24] == b'#');
+    }
+    assert_ne!(a.phone.face_pixels(seat1), face0);
+    // The seat named "seat" in the fixture draws the same through the phone.
+    assert_eq!(
+        a.phone.face_pixels(b"seat".to_vec()),
+        cahoots_core::faces::pixels(b"seat").iter().flatten().map(|&p| u8::from(p)).collect::<Vec<_>>()
+    );
+}
