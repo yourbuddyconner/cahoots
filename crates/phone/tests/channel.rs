@@ -176,6 +176,14 @@ fn circle(a: &Device, b: &Device, relay: &str) -> String {
     id
 }
 
+/// Change a channel's stored record on `d`, as an older version of the app might have left it.
+fn edit_meta(d: &Device, id: &str, f: impl FnOnce(&mut cahoots_phone::store::ChannelMeta)) {
+    let dir = std::path::Path::new(&d.path).join("channels").join(id);
+    let mut meta = cahoots_phone::store::ChannelMeta::load(&dir).unwrap();
+    f(&mut meta);
+    meta.save(&dir).unwrap();
+}
+
 fn texts(msgs: &[ChannelMessage]) -> Vec<String> {
     msgs.iter()
         .filter(|m| !m.note && !m.refused)
@@ -211,6 +219,11 @@ fn owner_and_members_through_a_station() {
     let host = st.base.trim_start_matches("http://");
     assert!(link.contains(&format!("#/ch/{host}/{id}/")), "{link}");
     assert_eq!(a.phone.channel_link(id.clone()).unwrap(), link);
+    // The owner opening its own link gets its own channel, whatever the stored relay's form.
+    edit_meta(&a, &id, |m| m.relay = format!("{}/", st.base));
+    let own = a.phone.channel_join(link.clone()).unwrap();
+    assert_eq!(own.role, ChannelRole::Owner);
+    edit_meta(&a, &id, |m| m.relay = st.base.clone());
     a.phone
         .channel_send(id.clone(), "hello all".into())
         .unwrap();
@@ -246,6 +259,18 @@ fn owner_and_members_through_a_station() {
         ),
         other => panic!("{other:?}"),
     }
+    assert_eq!(c.phone.channel(id.clone()).unwrap(), cs);
+    // The same relay written another way is the same relay: a cased scheme and host, a
+    // trailing slash. (Host case on its own is in the crate's unit test; this station's host
+    // is an address.)
+    let cased = format!("HTTP://{}/", host.to_uppercase());
+    edit_meta(&c, &id, |m| m.relay = cased.clone());
+    let elsewhere_cased = link.replace(
+        &format!("#/ch/{host}/"),
+        &format!("#/ch/{}/", host.to_uppercase()),
+    );
+    assert_eq!(c.phone.channel_join(elsewhere_cased).unwrap().id, id);
+    edit_meta(&c, &id, |m| m.relay = st.base.clone());
     assert_eq!(c.phone.channel(id.clone()).unwrap(), cs);
     assert_eq!(cs.unread, 1);
     let hist = c.phone.channel_history(id.clone()).unwrap();

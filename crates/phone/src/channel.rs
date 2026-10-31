@@ -210,6 +210,23 @@ fn read_is_closed(policy: &[u8]) -> bool {
     read_policy(policy).is_ok_and(|p| p.rule(Action::Read).is_none_or(|r| r.evidence.is_empty()))
 }
 
+/// A relay address or a link's host, as compared: the host lowercased and the port kept;
+/// scheme, path and trailing slash dropped.
+fn relay_key(relay: &str) -> String {
+    let with_scheme = if relay.contains("://") {
+        relay.to_string()
+    } else {
+        relay_base(relay)
+    };
+    host_of(&with_scheme).to_lowercase()
+}
+
+/// Whether a stored relay address and a link's host name the same relay.
+fn same_relay(stored: &str, link_host: &str) -> bool {
+    let (a, b) = (relay_key(stored), relay_key(link_host));
+    !a.is_empty() && a == b
+}
+
 fn is_grant_error(code: &str) -> bool {
     [
         "grant:",
@@ -1042,12 +1059,16 @@ impl Phone {
         let dir = self.channel_dir(&id);
         if dir.join(store::META).is_file() {
             let mut ch = Ch::load(dir, &id)?;
+            // An owner's link always goes to its own channel.
+            if ch.is_owner() {
+                return Ok(ch);
+            }
             // A link to the same channel on another relay is refused: the channel's keys,
             // cursor and grant belong to the relay it was read on.
-            if relay_base(&link.relay) != ch.meta.relay {
+            if !same_relay(&ch.meta.relay, &link.relay) {
                 return Err(channel(OTHER_RELAY).into());
             }
-            if ch.is_owner() || link.secret.is_none() {
+            if link.secret.is_none() {
                 return Ok(ch);
             }
             // A newer link for a channel this phone already reads: take its secret, keep the
@@ -1261,8 +1282,9 @@ impl Phone {
     /// Open a channel link: read the channel from the relay the link names, check its
     /// signatures against the owner circle's member list, keep it, and read what is there.
     /// A newer link to a channel already kept takes the place of the old one, keeping the key
-    /// and grant; a link to it on another relay is refused and changes nothing. A link without its secret (a closed channel) is refused with the words to
-    /// show; one that does not read is `PhoneError::BadCode`.
+    /// and grant; a link to it on another relay is refused and changes nothing. A link
+    /// without its secret (a closed channel) is refused with the words to show; one that does
+    /// not read is `PhoneError::BadCode`.
     pub fn channel_join(&self, url: String) -> Result<ChannelSummary, PhoneError> {
         let _guard = self.lock();
         let mut ch = self.join(&url)?;
@@ -1519,6 +1541,20 @@ impl Phone {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relays_compare_by_host_and_port() {
+        assert!(same_relay("https://relay.example", "relay.example"));
+        assert!(same_relay("https://Relay.Example/", "relay.EXAMPLE"));
+        assert!(same_relay(
+            "https://relay.example/some/path",
+            "relay.example:443"
+        ));
+        assert!(same_relay("http://127.0.0.1:8080/", "127.0.0.1:8080"));
+        assert!(!same_relay("http://127.0.0.1:8080", "127.0.0.1:8081"));
+        assert!(!same_relay("https://relay.example", "other.example"));
+        assert!(!same_relay("", ""));
+    }
 
     #[test]
     fn this_machine_is_plain_http() {
