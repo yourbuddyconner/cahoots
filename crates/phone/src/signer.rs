@@ -35,6 +35,11 @@ impl SeatSigner for Seat<'_> {
         self.public
     }
     fn sign(&mut self, msg: &[u8]) -> Signature {
+        // After a refusal nothing more is asked: one Face ID prompt said no, and the call
+        // that holds this signer will fail with that error anyway.
+        if self.error.is_some() {
+            return [0; 64];
+        }
         match self.signer.sign(self.label.clone(), msg.to_vec()) {
             Ok(sig) if sig.len() == 64 => sig.try_into().expect("64 bytes"),
             Ok(_) => {
@@ -122,5 +127,40 @@ impl Signer for SoftSigner {
             .sign(&message);
         inner.signs.push(label);
         Ok(sig.to_vec())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// Refuses every signature and counts the asks.
+    struct Refusing(AtomicU32);
+
+    impl Signer for Refusing {
+        fn make_key(&self, _label: String) -> Result<Vec<u8>, PhoneError> {
+            Ok(Vec::new())
+        }
+        fn sign(&self, _label: String, _message: Vec<u8>) -> Result<Vec<u8>, PhoneError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(PhoneError::Locked)
+        }
+    }
+
+    #[test]
+    fn after_a_refusal_the_signer_is_not_asked_again() {
+        let signer = Refusing(AtomicU32::new(0));
+        let key = SeatKey::from_seed(&[7; 32]).unwrap();
+        let mut seat = Seat {
+            signer: &signer,
+            label: "cahoots:seat:x".into(),
+            public: key.public(),
+            error: None,
+        };
+        assert_eq!(SeatSigner::sign(&mut seat, b"one"), [0; 64]);
+        assert_eq!(SeatSigner::sign(&mut seat, b"two"), [0; 64]);
+        assert_eq!(signer.0.load(Ordering::SeqCst), 1);
+        assert!(matches!(seat.error, Some(PhoneError::Locked)));
     }
 }

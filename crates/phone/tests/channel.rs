@@ -218,13 +218,35 @@ fn owner_and_members_through_a_station() {
     assert_eq!(texts(&hist), ["hello all"]);
     assert!(hist[0].mine);
 
-    // A member joins by the link; the join reads what is there.
+    // Before joining, the link's preview reads the channel and keeps nothing.
     let c = device();
+    let p = c.phone.channel_preview(link.clone()).unwrap();
+    assert_eq!(p.name, "Garden");
+    assert_eq!(p.policy_line, "anyone with the link can read and post");
+    assert_eq!(p.relay, host);
+    assert_eq!(p.channel_id, id);
+    assert!(p.has_secret);
+    let bare = link.rsplit_once('/').unwrap().0.to_string();
+    assert!(!c.phone.channel_preview(bare).unwrap().has_secret);
+    assert!(c.phone.channels().is_empty());
+
+    // A member joins by the link; the join reads what is there.
     let cs = c.phone.channel_join(link.clone()).unwrap();
     assert_eq!(cs.id, id);
     assert_eq!(cs.role, ChannelRole::Member);
     assert_eq!(cs.relay, host);
     assert!(!cs.can_post && !cs.waiting && !cs.dead);
+    assert!(cs.may_ask_to_post && !cs.closed);
+    // The same channel's link naming another relay is refused, and changes nothing.
+    let elsewhere = link.replace(&format!("#/ch/{host}/"), "#/ch/127.0.0.1:1/");
+    match c.phone.channel_join(elsewhere) {
+        Err(PhoneError::Channel { message }) => assert_eq!(
+            message,
+            "This link names a different relay than the one this channel uses."
+        ),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(c.phone.channel(id.clone()).unwrap(), cs);
     assert_eq!(cs.unread, 1);
     let hist = c.phone.channel_history(id.clone()).unwrap();
     assert_eq!(texts(&hist), ["hello all"]);
@@ -335,6 +357,7 @@ fn announcements_retire_and_new_keys() {
         cs.policy_line,
         "anyone with the link can read; only the owner can post"
     );
+    assert!(!cs.may_ask_to_post && !cs.closed);
     // Only the owner posts here: asking is refused.
     assert!(matches!(
         c.phone.channel_ask_to_post(id.clone(), "Cee".into()),
@@ -382,6 +405,7 @@ fn a_closed_channel_has_no_link_and_a_bad_link_does_not_read() {
         s.policy_line,
         "members the owner lets in can read; only the owner can post"
     );
+    assert!(s.closed && !s.may_ask_to_post);
     assert!(matches!(
         a.phone.channel_link(s.id.clone()),
         Err(PhoneError::Channel { .. })
@@ -396,4 +420,26 @@ fn a_closed_channel_has_no_link_and_a_bad_link_does_not_read() {
         Err(PhoneError::BadCode { .. })
     ));
     assert!(c.phone.channels().is_empty());
+    assert!(matches!(
+        c.phone
+            .channel_preview("https://cahoots.network/app/#/ch/nowhere".into()),
+        Err(PhoneError::BadCode { .. })
+    ));
+}
+
+#[test]
+fn announcements_with_approvals_are_refused_before_anything_is_uploaded() {
+    let st = station();
+    let (a, b) = (device(), device());
+    let circle_id = circle(&a, &b, &st.base);
+    let before = a.http.requests.lock().unwrap().len();
+    match a.phone.channel_start(circle_id, "News".into(), 1) {
+        Err(PhoneError::Channel { message }) => assert_eq!(
+            message,
+            "Announcements with approvals need more than one owner device to approve, which this version cannot collect yet."
+        ),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(a.http.requests.lock().unwrap().len(), before);
+    assert!(a.phone.channels().is_empty());
 }

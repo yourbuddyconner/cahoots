@@ -137,6 +137,12 @@ pub struct ChannelSummary {
     pub waiting: bool,
     /// Messages from others read since the history was last shown.
     pub unread: u32,
+    /// The policy lets someone who is not the owner ask to post (its post rule takes a link
+    /// or a key): offer "Ask to post" to a member without a grant.
+    pub may_ask_to_post: bool,
+    /// Only people the owner lets in read: a member with neither the link's secret nor a
+    /// grant, or a policy whose read rule takes no link.
+    pub closed: bool,
     /// The owner circle's id when this phone holds that circle (always for an owner).
     pub circle: Option<String>,
 }
@@ -162,6 +168,21 @@ pub struct ChannelMessage {
     pub refused: bool,
     /// The relay's sequence number, when known.
     pub seq: Option<u64>,
+}
+
+/// What a channel link opens, read from its relay before joining. Nothing is kept.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ChannelPreview {
+    pub name: String,
+    /// Who reads and posts, in one line.
+    pub policy_line: String,
+    /// The relay's host, as the link names it.
+    pub relay: String,
+    /// 32 hex characters.
+    pub channel_id: String,
+    /// The link carries its secret, so joining can read. Without it the channel is closed to
+    /// this link: say "Only people the owner lets in can read this channel."
+    pub has_secret: bool,
 }
 
 /// Someone asking to post in a channel this phone owns.

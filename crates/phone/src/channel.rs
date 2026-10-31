@@ -17,8 +17,8 @@
 use crate::signer::Seat;
 use crate::store::{self, ChannelMessageRecord, ChannelMessages, ChannelMeta};
 use crate::{
-    ChannelMemberInfo, ChannelMessage, ChannelRequest, ChannelRole, ChannelSummary, HttpHeader,
-    HttpResponse, Phone, PhoneError,
+    ChannelMemberInfo, ChannelMessage, ChannelPreview, ChannelRequest, ChannelRole, ChannelSummary,
+    HttpHeader, HttpResponse, Phone, PhoneError,
 };
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -26,11 +26,11 @@ use cahoots_channel::control::Control;
 use cahoots_channel::keys::EpochId;
 use cahoots_channel::link::Link;
 use cahoots_channel::member::{
-    bytes_array, open_manifest, policy_summary, ChannelMember, JoinRequest,
+    bytes_array, open_manifest, policy_summary, read_policy, ChannelMember, JoinRequest,
 };
 use cahoots_channel::message::MessageType;
 use cahoots_channel::owner::{majority, ChannelOwner};
-use cahoots_channel::ChannelObject;
+use cahoots_channel::{Action, ChannelObject};
 use cahoots_chat::{bucket_pad, bucket_unpad};
 use cahoots_core::seat::SeatPublic;
 use sha2::{Digest, Sha256};
@@ -42,6 +42,8 @@ const WAITING: &str = "Waiting for the owner to let you post.";
 const READ_ONLY: &str = "You can read this channel. Only the owner posts.";
 const CLOSED: &str = "Only people the owner lets in can read this channel.";
 const NO_LINK: &str = "This channel has no link. Only people you let in can read.";
+const NEEDS_SEATS: &str = "Announcements with approvals need more than one owner device to approve, which this version cannot collect yet.";
+const OTHER_RELAY: &str = "This link names a different relay than the one this channel uses.";
 const OWNER_ONLY: &str = "Only the channel's owner can do that.";
 const REMOVED: &str = "removed by the owner";
 const NOTE_REVOKED: &str = "The owner removed a member and will start new keys.";
@@ -203,6 +205,11 @@ fn host_of(url: &str) -> String {
     }
 }
 
+/// The policy's read rule takes no evidence (or there is none): no link reads.
+fn read_is_closed(policy: &[u8]) -> bool {
+    read_policy(policy).is_ok_and(|p| p.rule(Action::Read).is_none_or(|r| r.evidence.is_empty()))
+}
+
 fn is_grant_error(code: &str) -> bool {
     [
         "grant:",
@@ -237,6 +244,14 @@ fn check_id(id: &str) -> Result<(), PhoneError> {
     } else {
         Err(crate::not_found("channel"))
     }
+}
+
+/// A channel as the relay holds it, checked.
+struct Fetched {
+    obj: ChannelObject,
+    policy: Vec<u8>,
+    manifest: Vec<u8>,
+    line: String,
 }
 
 /// A channel loaded from its directory.
@@ -356,8 +371,19 @@ impl Ch {
             can_post: self.can_post(),
             waiting: !owner && self.meta.grant_chain.is_none() && self.meta.requested,
             unread: self.meta.unread,
+            may_ask_to_post: self.member().may_ask_to_post(),
+            closed: self.closed(),
             circle: (owner || store::circle_ids(root).contains(&circle)).then_some(circle),
         }
+    }
+
+    /// Only people the owner lets in read: a member with no link secret and no grant, or a
+    /// policy whose read rule takes no evidence.
+    fn closed(&self) -> bool {
+        let shut_out = !self.is_owner()
+            && self.member().gate_token().is_none()
+            && self.meta.grant_chain.is_none();
+        shut_out || read_is_closed(&self.meta.policy)
     }
 
     fn name_for(&self, kid: &[u8; 32]) -> String {
@@ -972,34 +998,11 @@ impl Phone {
         })
     }
 
-    fn join(&self, url: &str) -> R<Ch> {
-        let link = Link::parse(url).ok_or_else(|| PhoneError::BadCode {
-            message: "That link does not read.".into(),
-        })?;
-        let id = hex::encode(link.channel_id);
-        let dir = self.channel_dir(&id);
-        if dir.join(store::META).is_file() {
-            let mut ch = Ch::load(dir, &id)?;
-            if ch.is_owner() || link.secret.is_none() {
-                return Ok(ch);
-            }
-            // A newer link for a channel this phone already reads: take its secret, keep the
-            // key and grant.
-            let newer = link.secret.as_ref().map(|s| s.gate_token(&link.channel_id))
-                != ch.member().gate_token();
-            if newer || ch.meta.dead {
-                ch.member_mut().set_link(url).map_err(ch_err)?;
-                ch.meta.relay = relay_base(&link.relay);
-                ch.meta.dead = false;
-                ch.meta.use_proof = false;
-                ch.meta.behind = false;
-                ch.meta.max_epoch = 0;
-                ch.meta.retry_epoch = None;
-                ch.persist()?;
-            }
-            return Ok(ch);
-        }
+    /// The channel a link names, as the relay holds it: the object checked against the owner
+    /// circle's member list, its policy the one the object names. Nothing is stored.
+    fn fetch_channel(&self, link: &Link) -> R<Fetched> {
         let base = relay_base(&link.relay);
+        let id = hex::encode(link.channel_id);
         let v = json(&self.send_raw(
             &base,
             "GET",
@@ -1023,6 +1026,53 @@ impl Phone {
             return Err(channel("The relay's copy of this channel does not check out.").into());
         }
         let line = policy_summary(&policy).map_err(ch_err)?;
+        Ok(Fetched {
+            obj,
+            policy,
+            manifest,
+            line,
+        })
+    }
+
+    fn join(&self, url: &str) -> R<Ch> {
+        let link = Link::parse(url).ok_or_else(|| PhoneError::BadCode {
+            message: "That link does not read.".into(),
+        })?;
+        let id = hex::encode(link.channel_id);
+        let dir = self.channel_dir(&id);
+        if dir.join(store::META).is_file() {
+            let mut ch = Ch::load(dir, &id)?;
+            // A link to the same channel on another relay is refused: the channel's keys,
+            // cursor and grant belong to the relay it was read on.
+            if relay_base(&link.relay) != ch.meta.relay {
+                return Err(channel(OTHER_RELAY).into());
+            }
+            if ch.is_owner() || link.secret.is_none() {
+                return Ok(ch);
+            }
+            // A newer link for a channel this phone already reads: take its secret, keep the
+            // key and grant.
+            let newer = link.secret.as_ref().map(|s| s.gate_token(&link.channel_id))
+                != ch.member().gate_token();
+            if newer || ch.meta.dead {
+                ch.member_mut().set_link(url).map_err(ch_err)?;
+                ch.meta.relay = relay_base(&link.relay);
+                ch.meta.dead = false;
+                ch.meta.use_proof = false;
+                ch.meta.behind = false;
+                ch.meta.max_epoch = 0;
+                ch.meta.retry_epoch = None;
+                ch.persist()?;
+            }
+            return Ok(ch);
+        }
+        let base = relay_base(&link.relay);
+        let Fetched {
+            obj,
+            policy,
+            manifest,
+            line,
+        } = self.fetch_channel(&link)?;
         if link.secret.is_none() {
             return Err(channel(CLOSED).into());
         }
@@ -1080,6 +1130,9 @@ impl Phone {
                 c.params.n,
             ))
         })?;
+        if preset == 1 && majority(seats) > 1 {
+            return Err(channel(NEEDS_SEATS));
+        }
         let _guard = self.lock();
         let host = host_of(&relay);
         let base = relay.clone();
@@ -1188,10 +1241,27 @@ impl Phone {
         Ok(url)
     }
 
+    /// What a channel link opens, before joining: read from the relay the link names, its
+    /// signatures checked against the owner circle's member list. Nothing is kept. A link that
+    /// does not read is `PhoneError::BadCode`.
+    pub fn channel_preview(&self, url: String) -> Result<ChannelPreview, PhoneError> {
+        let link = Link::parse(&url).ok_or_else(|| PhoneError::BadCode {
+            message: "That link does not read.".into(),
+        })?;
+        let f = self.fetch_channel(&link)?;
+        Ok(ChannelPreview {
+            name: f.obj.name,
+            policy_line: f.line,
+            relay: link.relay.clone(),
+            channel_id: hex::encode(link.channel_id),
+            has_secret: link.secret.is_some(),
+        })
+    }
+
     /// Open a channel link: read the channel from the relay the link names, check its
     /// signatures against the owner circle's member list, keep it, and read what is there.
     /// A newer link to a channel already kept takes the place of the old one, keeping the key
-    /// and grant. A link without its secret (a closed channel) is refused with the words to
+    /// and grant; a link to it on another relay is refused and changes nothing. A link without its secret (a closed channel) is refused with the words to
     /// show; one that does not read is `PhoneError::BadCode`.
     pub fn channel_join(&self, url: String) -> Result<ChannelSummary, PhoneError> {
         let _guard = self.lock();

@@ -27,11 +27,11 @@ if [ "${1:-}" != "test" ]; then
   exit "${PIPESTATUS[0]}"
 fi
 
-# A station for UrlSessionHttpTests, on a free port, with an empty log.
-cargo build -q -p cahoots-station
+# A station for UrlSessionHttpTests, on a free port, with an empty database, carrying channels.
+cargo build -q -p cahoots-station --features objects,channels,gate
 WORK=$(mktemp -d)
 PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
-"$TARGET/debug/cahoots-station" --listen "127.0.0.1:$PORT" --log "$WORK/station.jsonl" \
+"$TARGET/debug/cahoots-station" --listen "127.0.0.1:$PORT" --db "$WORK/station.db" \
   --posts-per-minute 0 --reads-per-minute 0 2>"$WORK/station.err" &
 STATION=$!
 trap 'kill $STATION 2>/dev/null; rm -rf "$WORK"' EXIT
