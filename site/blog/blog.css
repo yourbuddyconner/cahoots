@@ -77,6 +77,12 @@
 .post hr { border: 0; border-top: 1px solid var(--line); margin: 2.5em 0; }
 .post .headerlink { display: none; }
 
+/* Optional technical context keeps the essay's main reading path uninterrupted. */
+.post .protocol-note { margin: 2rem 0; padding: 14px 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-2); }
+.post .protocol-note > summary { min-height: 44px; padding: 8px 0; box-sizing: border-box; color: var(--fg); font-weight: 600; line-height: 1.5; cursor: pointer; scroll-margin-top: 90px; }
+.post .protocol-note[open] > summary { margin-bottom: 12px; }
+.post .protocol-note p:last-child { margin-bottom: 4px; }
+
 /* In this article */
 .toc { position: sticky; top: 92px; }
 .toc-inner { display: flex; flex-direction: column; gap: 14px; padding-top: 6px; }

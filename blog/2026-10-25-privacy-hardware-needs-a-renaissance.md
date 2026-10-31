@@ -4,11 +4,12 @@ date: 2026-10-25
 author: Conner Swann
 role: Building Cahoots
 tags: Building in public, Privacy
-about: What would it take for your digital footprint to be truly yours? Why that question led me to circles, deliberate authority, and hardware you can own and inspect.
+about: What would it take for your digital footprint to be truly yours? Why that question led me to circles, identity within our relationships, and hardware you can own and inspect.
 audience: People who want more control over their private lives, and the hardware and software builders who want to help.
 learn:
 - Why choosing good privacy tools still leaves me wanting more
 - How a group could carry its trust between tools
+- Why each member needs an identity within the circle
 - What it means to let a program act on your behalf
 - Why those decisions led me to build a badge
 - What ownership asks of the hardware, and of the people building it
@@ -42,11 +43,11 @@ Why is it still so much work to carry that relationship into a computer?
 
 Every service asks us to establish it again on its terms. Make an account. Find the right person. Invite them. Do it again in the next app. Eventually a group of people who know each other becomes a collection of accounts whose connection is maintained by a dozen unrelated companies.
 
-There are good tools here. I use Signal and Tailscale. A password manager and a hardware security key are good things to have. These tools give people real protections, including ways to verify each other and keep keys on their own devices.
+There are good tools here. I use Signal and Tailscale. Signal’s [safety numbers](https://support.signal.org/hc/en-us/articles/360007060632-What-is-a-safety-number-and-why-do-I-see-that-it-changed) and Apple’s [iMessage Contact Key Verification](https://security.apple.com/blog/imessage-contact-key-verification) already give people a way to compare codes and check the keys behind a conversation. Meeting someone and checking what appears on both screens is an established pattern. Cahoots builds on it.
 
-Putting them together still asks a lot of the person using them. Each has its own way to establish trust, its own recovery story, and its own boundaries. The relationship you verified in one place doesn't automatically help you in the next. The group keeps starting over.
+The human part matters. Comparing keys doesn't establish who a person is by itself. You bring that knowledge to the exchange: this is the friend sitting across from me, and this is the device they're using. The check connects that relationship to the keys the software will use.
 
-I'd like us to have something durable underneath those tools. Something we establish ourselves and can keep using as the tools change.
+I'd like to extend that pattern beyond checking public keys for a conversation in one app. A group could establish a shared secret and agree on its members together, then carry that foundation into other tools. Each tool would still have its own job and its own limits, but the group wouldn't have to establish the relationship from scratch every time.
 
 The people you'd hand a house key to, you have already met. That should count for more.
 
@@ -69,17 +70,37 @@ That's what ownership should let us do: use a service while keeping enough in ou
 
 Cahoots is still a development project, with chat and the browser ceremony available to try while the integrations and hardware are at different stages. The [status page](/docs/#/status) keeps track of that work. The direction I want to take it is simple: making the circle once should make the next private thing easier.
 
-As we start using that circle for more of our lives, we'll also want programs to do some of the work for us. Owning the circle should give us a say in what they're allowed to do, too.
+## A place for each of us
+
+A circle also needs a way to recognize the people inside it. Sharing a private conversation should still leave room for each of us to make our own decisions.
+
+The shared secret gives us something we can protect together. Every member holds it. That is useful for keeping a conversation within the group, but it cannot tell us which member approved a decision. If three of us can make the same cryptographic proof, that proof alone cannot distinguish us.
+
+So the ceremony also gives each device its own signing key and records its public key in the circle's membership list. The private key stays with that device. When I sign something, the others can check it against the key we agreed belonged to my seat at the table. The circle can recognize an individual decision as well as a shared secret.
+
+I want that identity to live in the context of the relationship. My key in a work circle is separate from my key in a family circle. Neither needs to become a universal identifier that follows me everywhere. A stolen key for one circle should not automatically give someone authority in another. Separate keys don't make the relationships impossible to correlate, and a compromised device can still expose several of them. They give us a boundary we can build on.
+
+<details class="protocol-note" id="messaging-protocol-design">
+<summary>A detour into messaging design: shared secrets and individual identity</summary>
+<p>A shared secret and an individual signing key answer different questions. A message authenticated with a key everyone in the circle holds establishes that someone with that key made it. It cannot establish which member did so. A sender label does not change that: another holder of the same key could produce the same kind of proof.</p>
+<p>A signing key gives a device something the other members do not have. It signs with its private key; they check the signature with its public key. Cahoots makes a separate signing key for each seat in each circle. The ceremony binds those public keys into a membership record that every seat signs. People still have to check the ceremony and know whose device is whose. A signature establishes control of a key, not a person's legal identity or good intentions.</p>
+<p>This deliberately combines symmetric secrets for shared privacy with public-key cryptography for individual signatures. The exchange that establishes those secrets also uses public-key cryptography. The strongest one-time-pad claims apply only to messages encrypted with truly random secret bytes that are never reused. They do not extend to the signatures, the exchange, ordinary chat, or the whole system. Those still depend on conventional cryptographic assumptions.</p>
+<p>There are other ways to design individual authentication, including schemes built from hashes. Choosing one would change the protocol and its tradeoffs; a shared group secret alone would still not distinguish the people holding it. The current design uses signing keys. A secure element can generate and use a private key without handing it to the laptop asking for a signature.</p>
+<p>Hello words serve a different purpose again. They come from a secret shared by just two devices and let people check access to that secret during a call. They do not replace the signing keys used to approve actions. Keeping those jobs separate helps make each check's meaning clear.</p>
+<p>The <a href="/docs/#/protocol">protocol specification</a> describes the mechanisms. The <a href="/docs/#/security">security guide</a> explains their limits. The goal here is to carry an established relationship between tools while being explicit about which keys protect shared information and which keys can authorize a particular action.</p>
+</details>
+
+Once the circle can recognize my decisions, I can also make a decision about who may help me. I should be able to authorize a particular job without giving a program my keys or all the permissions that come with them.
 
 ## Who gets to act for us
 
-An agent establishing a private connection for a single task shouldn't require access to every piece of sensitive information the circle protects. I want to be able to give it that job without also giving it permission to read our conversations, open our files, or authorize unrelated work. The access it receives should follow from what we've asked it to do and end when we no longer need it doing that work.
+Suppose I ask a program to connect two of our work machines for the afternoon. It needs permission to establish that connection. It shouldn't also receive the keys to our conversations, the ability to open our files, or standing permission to authorize more work tomorrow.
 
-A program acting on our behalf needs its own identity, so we can distinguish its actions from ours. But knowing who signed a request only gets us part of the way. We also need to know who authorized it and whether that authorization covers what it's asking to do. Handing a program my account and hoping it behaves leaves far too much of that unanswered.
+The program can have its own key, and I can sign a grant naming that key and the job it's allowed to do. Then a service receiving its request can check both the program's signature and the authority I gave it. The program doesn't need to borrow my identity or receive my private key to carry out the task.
 
-I want the circle's members to make those decisions through explicit grants that define the permitted operations, set a budget, and say when the authority expires. We should be able to inspect a grant and withdraw it when our plans change. If the agent needs another program's help, any authority it passes along should be limited to a narrower portion of what it received. The services carrying out those requests should enforce the limits, so the arrangement holds even when a program makes a mistake or tries to exceed its permissions.
+I want those grants to name the permitted operations, set a budget where one makes sense, and say when the authority ends. We should be able to read them and withdraw them when our plans change. If a program is allowed to pass work to another program, the authority it passes on should stay within the original grant. The tools carrying out the requests need to enforce those boundaries each time.
 
-That would let us decide which work can happen while we're busy with something else and which actions still need a person to approve them. I want programs to be useful without having to supervise every step, and I want to understand what I've allowed them to do while I'm away. Owning the circle should include being able to set those boundaries and change them later.
+That gives us a way to decide which work can happen while we're busy and which actions still need a person to approve them. It follows from the same relationship we established at the table: we know whose key authorized the work, what they allowed, and where that permission stops.
 
 For that to mean much, we need to trust the moment when we grant the authority. If a program controls the screen explaining its request, it can misrepresent what we're being asked to approve. If the computer holding our keys is compromised, it might approve the request without us at all. I want somewhere we can read the actual terms and make that decision ourselves. That's where I started wanting a separate piece of hardware.
 
@@ -93,7 +114,7 @@ I want to plug it into a laptop and have it tell me what I'm approving. If I'm g
 
 The phone and browser still belong in that everyday experience. They're where people already read, type, and talk. The badge should give the keys a physical home and give important decisions a place to happen. It shouldn't take a ceremony every time you want to have a conversation.
 
-I want it to store keys for several circles, too. My family, my friends, and the people I work with shouldn't become one public identity just because I carry one device.
+I want it to store the separate keys for several circles, too. The badge can recognize which circle a request belongs to and which key may answer it. My family, my friends, and the people I work with shouldn't become one public identity just because I carry one device.
 
 Hardware wallets and login keys have done important work here. I want to bring that kind of deliberate custody to the private relationships between ordinary groups of people, and make it practical beyond a login screen or a transaction.
 
@@ -125,7 +146,7 @@ A confusing ceremony can wear people down. So can a warning nobody understands o
 
 Verification needs that same care. Ordinary users should be able to run the checks and understand what passed and what they still have to trust. They should be able to rely on an independent reviewer's work. Anyone who wants to inspect more deeply should be able to, but using the tool shouldn't require learning chip design or auditing every dependency.
 
-I want to be able to answer a few questions without digging through a company's promises. Who else can read this? What would they have to do to read it? What happens if they're compromised? And when a program acts for us: who authorized it, what can it do, and how do we stop it?
+I want to be able to answer a few questions without digging through a company's promises. Whose key am I trusting, and how did we agree it was theirs? Who else can read this? What would they have to do to read it? What happens if they're compromised? And when a program acts for us: who authorized it, what can it do, and how do we stop it?
 
 Those answers need to live in the tools, where the people granting access can see and change them. Everyday use should make the safe path easy. We should save people's attention for decisions that deserve it.
 
@@ -139,6 +160,6 @@ For a family, that might mean a private place to talk and keep things together. 
 
 That's what I mean when I ask what it would take for your digital footprint to be truly yours. Some of that footprint will always be out in the world, in other people's hands. I want us to have more say over the part we're still making: who we share it with, what we authorize, and what we can carry with us.
 
-I'm building the badge and working out how to manufacture it because those choices need something behind them. They need keys we hold, decisions we can enforce, and devices we have a chance of understanding. Privacy hardware needs a renaissance because more people deserve access to those things. There should be more boards, more approaches, and more tools we can own, fix, and inspect.
+I'm building the badge and working out how to manufacture it because those choices need something behind them. They need keys we hold, identities grounded in our relationships, decisions we can enforce, and devices we have a chance of understanding. Privacy hardware needs a renaissance because more people deserve access to those things. There should be more boards, more approaches, and more tools we can own, fix, and inspect.
 
 The next posts will get into the board, the constraints, the mistakes, and the work of connecting these pieces. If you've built hardware like this, or tried to, I'd like to hear what you ran into. The code and board files are on [GitHub](https://github.com/yourbuddyconner/cahoots). Build one. Tell me what's wrong with it. Help make the next one better.
