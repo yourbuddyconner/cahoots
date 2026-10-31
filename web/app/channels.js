@@ -565,8 +565,10 @@ async function screenChannel(id) {
   const banner = h('div', { class: 'ch-banner' });
   // Posting follows the grant: one to read only leaves the composer off.
   const canPost = () => !rec.dead && (e.owner || (!!rec.grantChain && e.member.may_post()));
+  let actionsEl = null; // the pinned composer bar; shown only to those who may post
   const refresh = () => {
     inp.disabled = sendBtn.disabled = !canPost();
+    if (actionsEl) actionsEl.hidden = !canPost();
     banner.replaceChildren();
     if (rec.dead) banner.append(U.notice(DEAD, 'bad'));
     else if (!e.owner && !rec.grantChain && rec.requested) banner.append(U.notice(WAITING));
@@ -623,6 +625,7 @@ async function screenChannel(id) {
     actions: [h('div', { class: 'composer' }, inp, sendBtn)],
   });
   el.classList.add('chat-screen', 'channel-screen');
+  actionsEl = el.querySelector('.actions');
   refresh();
   if (e.owner) flushRetires(e).catch(() => { /* sent again on the next round */ });
   if (!rec.dead) poll(e, run, { append, refresh, st });

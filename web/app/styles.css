@@ -388,3 +388,4 @@ progress::-webkit-progress-bar { background: var(--bg-3); } progress::-webkit-pr
 .request .btn, .member .btn { width: auto; min-height: 42px; }
 .ch-start .seg, .ch-presets .seg { grid-auto-flow: row; grid-auto-columns: auto; }
 .ch-get-app { margin: 0; }
+.actions[hidden] { display: none; }
