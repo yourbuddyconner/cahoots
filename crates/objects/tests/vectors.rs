@@ -253,13 +253,10 @@ fn the_v2_grants_are_reproduced() {
     assert_eq!(Grant::from_v2(&claims).unwrap(), root);
 }
 
-#[test]
-fn the_card_is_reproduced() {
-    use cahoots_objects::card::{self, Card};
-    let v = vectors();
-    let m = manifest(&v);
-    let i = &v["card"]["inputs"];
-    let c = Card {
+/// The card a vector's inputs describe. `face` and `device` are absent from a card made
+/// before them.
+fn card_from(i: &Value) -> cahoots_objects::Card {
+    cahoots_objects::Card {
         circle_id: arr(&i["circle_id"]),
         seat: uint(&i["seat"]) as u8,
         name: i["name"].as_str().unwrap().into(),
@@ -276,12 +273,29 @@ fn the_card_is_reproduced() {
             .map(|e| (uint(&e[0]) as u8, e[1].as_str().unwrap().into()))
             .collect(),
         log: uint(&i["log"]),
-    };
+        face: i.get("face").map(arr),
+        device: i.get("device").map(|d| uint(d) as u8),
+    }
+}
+
+#[test]
+fn the_card_is_reproduced() {
+    use cahoots_objects::card::{self, Card};
+    let v = vectors();
+    let m = manifest(&v);
+    let c = card_from(&v["card"]["inputs"]);
+    assert_eq!(
+        (c.face, c.device),
+        (None, None),
+        "the card made before faces"
+    );
     let signed = c
         .sign(&key(&v["seat_seeds"][usize::from(c.seat)]), &[c.seat])
         .unwrap();
     check(&v["card"], c.encode().unwrap(), &signed, c.to_json());
     assert_eq!(Card::verify(&signed, &m).unwrap(), c);
+    // The stored bytes decode as they are, with no face and no device.
+    assert_eq!(Card::decode(&unhex(&v["card"]["payload"])).unwrap(), c);
 
     let s = &v["card"]["seal"];
     let root: [u8; 32] = arr(&s["root"]);
@@ -290,6 +304,25 @@ fn the_card_is_reproduced() {
     let sealed = card::seal_with_nonce(&signed, &seal_key, arr(&s["nonce"]));
     assert_eq!(hex::encode(&sealed), s["sealed"].as_str().unwrap());
     assert_eq!(card::open(&sealed, &seal_key).unwrap(), signed);
+}
+
+#[test]
+fn the_card_with_a_face_is_reproduced() {
+    use cahoots_objects::card::Card;
+    let v = vectors();
+    let m = manifest(&v);
+    let c = card_from(&v["card_with_face"]["inputs"]);
+    assert!(c.face.is_some() && c.device.is_some());
+    let signed = c
+        .sign(&key(&v["seat_seeds"][usize::from(c.seat)]), &[c.seat])
+        .unwrap();
+    check(
+        &v["card_with_face"],
+        c.encode().unwrap(),
+        &signed,
+        c.to_json(),
+    );
+    assert_eq!(Card::verify(&signed, &m).unwrap(), c);
 }
 
 #[test]

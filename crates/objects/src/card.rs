@@ -10,6 +10,12 @@
 //! | 4 | handles: array of [kind tstr, value tstr], at most 16 |
 //! | 5 | endpoints: array of [purpose uint, value tstr], at most 16 |
 //! | 6 | log uint, the log position the laptop names |
+//! | 7 | face bstr 32, optional: the seed of the member's face |
+//! | 8 | device uint, optional: the kind of device that holds the seat |
+//!
+//! Keys 7 and 8 are optional, each left out when absent, so a card made before them reads the
+//! same. A device kind is [`DEVICE_PHONE`], [`DEVICE_BADGE`], [`DEVICE_BROWSER`] or
+//! [`DEVICE_LAPTOP`]. A reader shows an unknown kind as no kind.
 //!
 //! A handle's `kind` is a short text (`email`, `github`, `nostr`, `x`), 1 to 16 bytes. An
 //! endpoint's `purpose` is a [`cahoots_core::control::Purpose`] byte (0 to 5), or
@@ -43,6 +49,12 @@ pub const PURPOSE_SSH: u8 = 6;
 /// An endpoint for chat: a chat address.
 pub const PURPOSE_CHAT: u8 = 7;
 
+/// Device kinds, key 8.
+pub const DEVICE_PHONE: u8 = 0;
+pub const DEVICE_BADGE: u8 = 1;
+pub const DEVICE_BROWSER: u8 = 2;
+pub const DEVICE_LAPTOP: u8 = 3;
+
 pub const MAX_NAME: usize = 64;
 pub const MAX_KIND: usize = 16;
 pub const MAX_VALUE: usize = 256;
@@ -67,6 +79,10 @@ pub struct Card {
     /// `(purpose, value)`: `(0, "203.0.113.7:51820")` for WireGuard.
     pub endpoints: Vec<(u8, String)>,
     pub log: u64,
+    /// The seed of the member's face, drawn by `cahoots_core::faces::pixels`.
+    pub face: Option<[u8; 32]>,
+    /// The kind of device that holds the seat: [`DEVICE_PHONE`] and the others.
+    pub device: Option<u8>,
 }
 
 /// A purpose's name, for people: the `Purpose` names, then ssh and chat.
@@ -108,7 +124,7 @@ impl Card {
     }
 
     fn write(&self, e: &mut Enc) -> EncResult {
-        e.map(7)?;
+        e.map(7 + u64::from(self.face.is_some()) + u64::from(self.device.is_some()))?;
         e.u8(0)?.u8(VERSION)?;
         e.u8(1)?.bytes(&self.circle_id)?;
         e.u8(2)?.u8(self.seat)?;
@@ -122,6 +138,12 @@ impl Card {
             e.array(2)?.u8(*purpose)?.str(value)?;
         }
         e.u8(6)?.u64(self.log)?;
+        if let Some(face) = &self.face {
+            e.u8(7)?.bytes(face)?;
+        }
+        if let Some(device) = self.device {
+            e.u8(8)?.u8(device)?;
+        }
         Ok(())
     }
 
@@ -132,7 +154,7 @@ impl Card {
         if bytes.len() > MAX_CARD_LEN {
             return Err(m);
         }
-        let mut r = Reader::open(bytes, 7)?;
+        let mut r = Reader::open_between(bytes, 7, 9)?;
         let circle_id = r.array()?;
         let seat = r.u8()?;
         let name = r.string()?;
@@ -179,13 +201,24 @@ impl Card {
             }
             list
         };
+        let log = r.u64()?;
+        let face = match r.optional(7)? {
+            Some(d) => Some(d.bytes().map_err(|_| m)?.try_into().map_err(|_| m)?),
+            None => None,
+        };
+        let device = match r.optional(8)? {
+            Some(d) => Some(d.u64().map_err(|_| m)?.try_into().map_err(|_| m)?),
+            None => None,
+        };
         let card = Card {
             circle_id,
             seat,
             name,
             handles,
             endpoints,
-            log: r.u64()?,
+            log,
+            face,
+            device,
         };
         r.finish()?;
         let encoded = card.encode_unchecked();

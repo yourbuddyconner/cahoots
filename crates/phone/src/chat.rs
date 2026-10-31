@@ -11,7 +11,8 @@
 //! to the end, its own messages included.
 
 use crate::store::{
-    self, ChatRecord, CircleRecord, CursorRecord, MessageRecord, OutboxEntry, SettingsRecord,
+    self, CardsRecord, ChatRecord, CircleRecord, CursorRecord, MessageRecord, OutboxEntry,
+    SettingsRecord,
 };
 use crate::{ChatMessage, Http, PhoneError};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -52,6 +53,8 @@ pub struct Circle {
     pub chat: ChatRecord,
     pub cursor: CursorRecord,
     pub settings: SettingsRecord,
+    /// The cards read from the chat, and this seat's own.
+    pub cards: CardsRecord,
 }
 
 impl Circle {
@@ -76,7 +79,9 @@ impl Circle {
             store::load_if_present(&dir.join(store::SETTINGS))?.unwrap_or(SettingsRecord {
                 relay: DEFAULT_RELAY.into(),
                 unread: 0,
+                face_override: None,
             });
+        let cards = CardsRecord::load(dir)?;
         let mut circle = Circle {
             dir: dir.to_path_buf(),
             id_hex: hex::encode(circle_id),
@@ -87,6 +92,7 @@ impl Circle {
             chat,
             cursor,
             settings,
+            cards,
         };
         circle.copy_journal()?;
         Ok(circle)
@@ -151,6 +157,7 @@ impl Circle {
                 break;
             }
             let mut lines = Vec::new();
+            let mut cards = false;
             for (seq, bytes) in fresh {
                 // Our own post that landed though its answer was lost: it is not sent again.
                 if let Some(i) = self.chat.outbox.iter().position(|e| e.wire[..] == bytes[..]) {
@@ -180,7 +187,14 @@ impl Circle {
                             lines.push(m);
                         }
                     }
-                    // Only text is history. Bumps and cards are handled elsewhere.
+                    // A card is kept for its seat when it verifies, and is never history.
+                    if h.msg_type == MessageType::Card
+                        && h.sender != me
+                        && self.verify_card(&pt, h.sender)
+                    {
+                        cards |= self.cards.put(h.sender, pt.clone(), Some(seq));
+                    }
+                    // Only text is history. Bumps and cards are handled above.
                     if h.sender != me && h.msg_type == MessageType::Text {
                         let text = String::from_utf8_lossy(bucket_unpad(&pt).unwrap_or(&pt))
                             .into_owned();
@@ -203,12 +217,17 @@ impl Circle {
             // The chain state with its history lines first, then the cursor. Read again after
             // a crash, an entry is passed over as a replay, and its line is already kept.
             let any = !lines.is_empty();
+            if cards {
+                self.cards.save(&self.dir)?;
+            }
             self.save_with(lines)?;
             self.cursor.save(&self.dir)?;
             if any {
                 self.settings.save(&self.dir)?;
             }
         }
+        // Read to the end: a card waiting for that can be sealed now.
+        let _ = self.queue_card();
         let _ = self.flush(http);
         Ok(new)
     }
@@ -262,6 +281,61 @@ impl Circle {
         self.save_with(vec![m])?;
         let _ = self.flush(http);
         Ok(())
+    }
+
+    /// Publish this seat's signed card in the chat: keep it as this seat's card, seal it as a
+    /// card message once the relay has been read to the end, and post it through the outbox.
+    /// A relay that cannot be read or posted to now leaves it waiting for the next poll.
+    pub fn publish_card(&mut self, http: &dyn Http, card: Vec<u8>) -> Result<(), PhoneError> {
+        self.cards.put(self.record.seat, card.clone(), None);
+        self.cards.save(&self.dir)?;
+        self.chat.pending_card = Some(card.into());
+        self.save_chat()?;
+        if self.session.synced() {
+            self.queue_card()?;
+            let _ = self.flush(http);
+        } else {
+            let _ = self.poll(http);
+        }
+        Ok(())
+    }
+
+    /// Seal the waiting card into the outbox. The session must have read the relay to the end.
+    fn queue_card(&mut self) -> Result<(), PhoneError> {
+        let Some(card) = self.chat.pending_card.clone() else {
+            return Ok(());
+        };
+        let id = random_id()?;
+        let wire = self
+            .session
+            .send_typed(MessageType::Card, &card)
+            .map_err(chat_err)?;
+        self.chat.outbox.push(OutboxEntry {
+            id,
+            wire: wire.into(),
+        });
+        self.chat.pending_card = None;
+        self.save_chat()
+    }
+
+    /// A card read from the chat counts when a seat of the manifest signed it, under its own
+    /// seat as kid, for this circle, and the card names the seat that sent the message.
+    fn verify_card(&self, signed: &[u8], sender: u8) -> bool {
+        let Ok(sealed) = cahoots_core::manifest::SealedManifest::decode(&self.record.manifest)
+        else {
+            return false;
+        };
+        let Ok(manifest) = cahoots_core::manifest::Manifest::decode(&sealed.body) else {
+            return false;
+        };
+        cahoots_objects::Card::verify(signed, &manifest).is_ok_and(|c| c.seat == sender)
+    }
+
+    /// The card held for `seat`, decoded. It verified when it was kept.
+    pub fn card(&self, seat: u8) -> Option<cahoots_objects::Card> {
+        let entry = self.cards.get(seat)?;
+        let payload = cahoots_core::cose::payload1(&entry.card).ok()?;
+        cahoots_objects::Card::decode(&payload).ok()
     }
 
     /// Verify a bump read from the relay against the manifest and move to its generation.

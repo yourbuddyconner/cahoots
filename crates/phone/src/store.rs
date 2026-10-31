@@ -1,14 +1,15 @@
 //! The phone's records: CBOR files in the app's container.
 //!
 //! ```text
-//! phone.cbor                     this phone's own key: label, public key, fingerprint
+//! phone.cbor                     this phone's own key, the name and the face seed
 //! circles/<id>/circle.cbor       params, seat, words, manifest, root, pair keys, seat key label
 //! circles/<id>/pad.bin           the pad, raw
 //! circles/<id>/ledger.bin        spent ranges per slice (none yet: the app sends no pure-pad messages)
 //! circles/<id>/chat.cbor         chat session state and the outbox
+//! circles/<id>/cards.cbor        the signed cards read from the chat, and this seat's own
 //! circles/<id>/messages.log      one CBOR message record after another, plaintext
 //! circles/<id>/cursor.cbor       the last relay sequence number read
-//! circles/<id>/settings.cbor     the relay address and the unread count
+//! circles/<id>/settings.cbor     the relay address, the unread count, the circle's own face
 //! channels/<id>/owner.cbor       a channel this phone owns: the owner core's export (secrets)
 //! channels/<id>/member.cbor      a channel this phone reads: the member core's export (secrets)
 //! channels/<id>/meta.cbor        the channel's app record: relay, name, policy, cursor, flags
@@ -36,6 +37,7 @@ pub const CIRCLE: &str = "circle.cbor";
 pub const PAD: &str = "pad.bin";
 pub const LEDGER: &str = "ledger.bin";
 pub const CHAT: &str = "chat.cbor";
+pub const CARDS: &str = "cards.cbor";
 pub const MESSAGES: &str = "messages.log";
 pub const CURSOR: &str = "cursor.cbor";
 pub const SETTINGS: &str = "settings.cbor";
@@ -107,6 +109,13 @@ pub struct PhoneRecord {
     /// The relay new ceremonies and circles use, when set. `None` is the default relay.
     #[n(3)]
     pub relay: Option<String>,
+    /// The name on this phone's cards. `None` until the person gives one.
+    #[n(4)]
+    pub name: Option<String>,
+    /// The seed of this phone's face: 32 random bytes drawn on first open, or drawn again on
+    /// request. `None` only in a record written before faces, and `Phone::open` fills it.
+    #[n(5)]
+    pub face_seed: Option<ByteVec>,
 }
 
 impl PhoneRecord {
@@ -198,6 +207,10 @@ pub struct ChatRecord {
     /// byte for byte, before the outbox, until the relay answers or the poll reads it back.
     #[n(3)]
     pub pending_bump: Option<ByteVec>,
+    /// This seat's signed card, waiting to be sealed into the chat once the relay has been
+    /// read to the end. Once sealed it moves to the outbox.
+    #[n(4)]
+    pub pending_card: Option<ByteVec>,
 }
 
 impl Drop for ChatRecord {
@@ -238,6 +251,9 @@ pub struct SettingsRecord {
     /// Messages from others read from the relay since the history was last shown.
     #[n(1)]
     pub unread: u32,
+    /// A face seed for this circle only, used on this seat's card in place of the phone's.
+    #[n(2)]
+    pub face_override: Option<ByteVec>,
 }
 
 impl SettingsRecord {
@@ -246,6 +262,63 @@ impl SettingsRecord {
     }
     pub fn save(&self, dir: &Path) -> Result<(), PhoneError> {
         save(&dir.join(SETTINGS), self)
+    }
+}
+
+/// One seat's card: the signed bytes as read, and the relay sequence number they were read
+/// at. `seq` is `None` for this seat's own card, kept when it was made.
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct CardEntry {
+    #[n(0)]
+    pub seat: u8,
+    #[n(1)]
+    pub card: ByteVec,
+    #[n(2)]
+    pub seq: Option<u64>,
+}
+
+/// The cards of a circle, one per seat at most.
+#[derive(Encode, Decode, Clone, Debug, Default)]
+pub struct CardsRecord {
+    #[n(0)]
+    pub cards: Vec<CardEntry>,
+}
+
+impl CardsRecord {
+    pub fn load(dir: &Path) -> Result<Self, PhoneError> {
+        Ok(load_if_present(&dir.join(CARDS))?.unwrap_or_default())
+    }
+    pub fn save(&self, dir: &Path) -> Result<(), PhoneError> {
+        save(&dir.join(CARDS), self)
+    }
+
+    pub fn get(&self, seat: u8) -> Option<&CardEntry> {
+        self.cards.iter().find(|c| c.seat == seat)
+    }
+
+    /// Keep `card` for `seat` unless the card held was read at a later relay position.
+    /// Returns whether it was kept.
+    pub fn put(&mut self, seat: u8, card: Vec<u8>, seq: Option<u64>) -> bool {
+        let entry = CardEntry {
+            seat,
+            card: card.into(),
+            seq,
+        };
+        match self.cards.iter_mut().find(|c| c.seat == seat) {
+            Some(held) => {
+                if let (Some(old), Some(new)) = (held.seq, seq) {
+                    if new < old {
+                        return false;
+                    }
+                }
+                *held = entry;
+            }
+            None => {
+                self.cards.push(entry);
+                self.cards.sort_by_key(|c| c.seat);
+            }
+        }
+        true
     }
 }
 

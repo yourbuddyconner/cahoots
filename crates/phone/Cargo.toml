@@ -21,6 +21,8 @@ cahoots-core = { workspace = true, features = ["std"] }
 cahoots-chat = { workspace = true, features = ["std"] }
 # The channel owner and member cores, shared with the browser.
 cahoots-channel = { workspace = true, features = ["std"] }
+# Contact cards, published in the chat.
+cahoots-objects = { workspace = true, features = ["std"] }
 uniffi = { version = "0.29", features = ["cli"] }
 thiserror = "2"
 minicbor = { version = "2.3", features = ["alloc", "derive", "std"] }

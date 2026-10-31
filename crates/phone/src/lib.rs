@@ -325,11 +325,20 @@ pub struct HelloWords {
     pub number: u32,
 }
 
-/// One seat of a circle, from its manifest.
+/// One seat of a circle, from its manifest and the seat's card.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Member {
     /// The seat, from 0.
     pub seat: u8,
+    /// The name on the seat's card, or the empty string when there is no card: the app then
+    /// shows the name it keeps for the seat, or "Seat N".
+    pub name: String,
+    /// The seed of the seat's face: the card's, or the interim one from the seat's key.
+    pub face_seed: Vec<u8>,
+    /// A card for the seat has been read (or, for this seat, published).
+    pub has_card: bool,
+    /// The kind of device on the card: 0 phone, 1 badge, 2 browser, 3 laptop.
+    pub device: Option<u8>,
     /// The device tier the seat declared at the ceremony: 0 software, 1 open
     /// microcontroller, 2 sealed microcontroller, 3 hardware key store, 4 inspected hardware.
     /// A claim the ceremony binds, not a proof.
@@ -364,7 +373,8 @@ pub struct Phone {
     dir: PathBuf,
     signer: Box<dyn Signer>,
     http: Box<dyn Http>,
-    me: PhoneRecord,
+    /// This phone's own record. Taken after `state` when both are held.
+    me: Mutex<PhoneRecord>,
     state: Mutex<State>,
     /// Whether the `Signer` keeps keys in the Secure Enclave. Swift says when it does not.
     enclave: std::sync::atomic::AtomicBool,
@@ -431,6 +441,80 @@ impl Phone {
         }
         let c = st.circles.get_mut(id).expect("inserted");
         f(c, self)
+    }
+
+    fn me(&self) -> MutexGuard<'_, PhoneRecord> {
+        self.me.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// The device's face seed, as stored.
+    fn device_face(&self) -> [u8; 32] {
+        self.me()
+            .face_seed
+            .as_ref()
+            .and_then(|f| f[..].try_into().ok())
+            .unwrap_or([0; 32])
+    }
+
+    /// Sign this seat's card for `c` and publish it in the chat. Nothing is published before
+    /// the person has given a name. A relay that cannot be reached leaves the card waiting.
+    fn publish_my_card(&self, c: &mut Circle) -> Result<(), PhoneError> {
+        let Some(name) = self.me().name.clone() else {
+            return Ok(());
+        };
+        let face = c
+            .settings
+            .face_override
+            .as_ref()
+            .and_then(|f| f[..].try_into().ok())
+            .unwrap_or_else(|| self.device_face());
+        let card = cahoots_objects::Card {
+            circle_id: c.circle_id,
+            seat: c.record.seat,
+            name,
+            handles: Vec::new(),
+            endpoints: Vec::new(),
+            log: c.cursor.after.unwrap_or(0),
+            face: Some(face),
+            device: Some(cahoots_objects::card::DEVICE_PHONE),
+        };
+        let public = cahoots_core::seat::SeatPublic::parse(&c.record.seat_public).map_err(|_| {
+            PhoneError::Storage {
+                message: "The saved data for this circle is damaged or cannot be read.".into(),
+            }
+        })?;
+        let mut seat = signer::Seat {
+            signer: self.signer.as_ref(),
+            label: c.record.seat_label.clone(),
+            public,
+            error: None,
+        };
+        let signed = card.sign(&mut seat, &[c.record.seat]).map_err(|_| PhoneError::Chat {
+            message: "The card is too long.".into(),
+        })?;
+        if let Some(e) = seat.error.take() {
+            return Err(e);
+        }
+        c.publish_card(self.http.as_ref(), signed)
+    }
+
+    /// Publish this seat's card in every circle `pick` chooses. Every circle is tried, and
+    /// the first error is returned.
+    fn publish_everywhere(&self, pick: impl Fn(&Circle) -> bool) -> Result<(), PhoneError> {
+        let mut first = None;
+        for id in store::circle_ids(&self.dir) {
+            let r = self.with_circle(&id, |c, me| {
+                if pick(c) {
+                    me.publish_my_card(c)
+                } else {
+                    Ok(())
+                }
+            });
+            if let Err(e) = r {
+                first.get_or_insert(e);
+            }
+        }
+        first.map_or(Ok(()), Err)
     }
 
     fn with_ceremony<T>(
@@ -501,7 +585,7 @@ impl Phone {
         std::fs::create_dir_all(store::circles_dir(&dir)).map_err(store::io)?;
         // Only a missing file is a first open. A file that cannot be read (iOS protection while
         // locked) is an error, and nothing is made or written over it.
-        let me = match PhoneRecord::load(&dir) {
+        let mut me = match PhoneRecord::load(&dir) {
             Ok(r) => r,
             Err(_) if !dir.join(store::PHONE).exists() => {
                 let public = signer.make_key(PHONE_KEY.into())?;
@@ -510,18 +594,25 @@ impl Phone {
                     fingerprint: fingerprint(&public),
                     public: public.into(),
                     relay: None,
+                    name: None,
+                    face_seed: Some(random_seed().to_vec().into()),
                 };
                 r.save(&dir)?;
                 r
             }
             Err(e) => return Err(e),
         };
+        // A record from before faces gets its face seed now, once.
+        if me.face_seed.as_ref().is_none_or(|f| f.len() != 32) {
+            me.face_seed = Some(random_seed().to_vec().into());
+            me.save(&dir)?;
+        }
         let relay = me.relay.clone().unwrap_or_else(|| DEFAULT_RELAY.into());
         Ok(Arc::new(Phone {
             dir,
             signer,
             http,
-            me,
+            me: Mutex::new(me),
             enclave: std::sync::atomic::AtomicBool::new(true),
             state: Mutex::new(State {
                 ceremonies: HashMap::new(),
@@ -654,9 +745,11 @@ impl Phone {
     pub fn set_default_relay(&self, url: String) -> Result<(), PhoneError> {
         let url = chat::check_relay(&url)?;
         let mut st = self.lock();
-        let mut me = self.me.clone();
-        me.relay = Some(url.clone());
-        me.save(&self.dir)?;
+        let mut me = self.me();
+        let mut changed = me.clone();
+        changed.relay = Some(url.clone());
+        changed.save(&self.dir)?;
+        *me = changed;
         st.relay = url;
         Ok(())
     }
@@ -812,6 +905,7 @@ impl Phone {
             outbox: Vec::new(),
             journal: Vec::new(),
             pending_bump: None,
+            pending_card: None,
         };
         store::create_circle(
             &self.dir,
@@ -823,11 +917,16 @@ impl Phone {
                 settings: &SettingsRecord {
                     relay: p.relay.clone(),
                     unread: 0,
+                    face_override: None,
                 },
                 slices: r.params.slices(),
             },
         )?;
         st.ceremonies.remove(&id);
+        drop(st);
+        // The circle is kept whatever happens next: a card not published now (no name yet, a
+        // refused signature) is published with the next name or face change.
+        let _ = self.with_circle(&id_hex, |c, me| me.publish_my_card(c));
         Ok(id_hex)
     }
 
@@ -966,21 +1065,27 @@ impl Phone {
         std::fs::remove_dir_all(self.circle_dir(&circle)).map_err(store::io)
     }
 
-    /// Every seat of a circle with the tier it declared, in seat order.
+    /// Every seat of a circle with the tier it declared, in seat order, with the name, face
+    /// and device of its card when one has been read.
     pub fn circle_members(&self, circle: String) -> Result<Vec<Member>, PhoneError> {
         self.with_circle(&circle, |c, _| {
-            let unreadable = || PhoneError::Storage {
-                message: "The member list saved for this circle is damaged or cannot be read.".into(),
-            };
-            let sealed = cahoots_core::manifest::SealedManifest::decode(&c.record.manifest)
-                .map_err(|_| unreadable())?;
-            let m = cahoots_core::manifest::Manifest::decode(&sealed.body).map_err(|_| unreadable())?;
+            let m = manifest_of(c)?;
             Ok(m.seats
                 .iter()
-                .map(|s| Member {
-                    seat: s.seat,
-                    tier: s.tier,
-                    mine: s.seat == c.record.seat,
+                .map(|s| {
+                    let card = c.card(s.seat);
+                    Member {
+                        seat: s.seat,
+                        name: card.as_ref().map(|k| k.name.clone()).unwrap_or_default(),
+                        face_seed: card
+                            .as_ref()
+                            .and_then(|k| k.face)
+                            .map_or_else(|| face_seed(&s.key.0), |f| f.to_vec()),
+                        has_card: card.is_some(),
+                        device: card.as_ref().and_then(|k| k.device),
+                        tier: s.tier,
+                        mine: s.seat == c.record.seat,
+                    }
                 })
                 .collect())
         })
@@ -996,19 +1101,17 @@ impl Phone {
             .collect()
     }
 
-    /// The face seed of `seat` (from 0) in a circle, from its public key in the manifest.
+    /// The face seed of `seat` (from 0) in a circle: the face on the seat's card, else the
+    /// interim face from its public key in the manifest.
     ///
-    /// An interim rule until badges carry their own face into the manifest (M4i): the seed is
-    /// SHA-256 of `cahoots/face/v1` and the seat's public key, so a seat's face changes from
-    /// one circle to the next.
+    /// The interim seed is SHA-256 of `cahoots/face/v1` and the seat's public key, so it
+    /// changes from one circle to the next. It stands until the seat publishes a card.
     pub fn seat_face_seed(&self, circle: String, seat: u8) -> Result<Vec<u8>, PhoneError> {
         self.with_circle(&circle, |c, _| {
-            let unreadable = || PhoneError::Storage {
-                message: "The member list saved for this circle is damaged or cannot be read.".into(),
-            };
-            let sealed = cahoots_core::manifest::SealedManifest::decode(&c.record.manifest)
-                .map_err(|_| unreadable())?;
-            let m = cahoots_core::manifest::Manifest::decode(&sealed.body).map_err(|_| unreadable())?;
+            if let Some(face) = c.card(seat).and_then(|k| k.face) {
+                return Ok(face.to_vec());
+            }
+            let m = manifest_of(c)?;
             let s = m.seats.iter().find(|s| s.seat == seat).ok_or_else(|| PhoneError::NotFound {
                 message: format!("This circle has no seat {}.", u16::from(seat) + 1),
             })?;
@@ -1016,10 +1119,58 @@ impl Phone {
         })
     }
 
-    /// The face seed of this phone, from its own key, by the same interim rule as
-    /// `seat_face_seed`.
+    /// The face seed of this phone: 32 random bytes drawn on first open and kept. A circle
+    /// may use its own instead (`set_circle_face`).
     pub fn my_face_seed(&self) -> Vec<u8> {
-        face_seed(&self.me.public)
+        self.device_face().to_vec()
+    }
+
+    /// The name on this phone's cards, or the empty string before one is given.
+    pub fn my_name(&self) -> String {
+        self.me().name.clone().unwrap_or_default()
+    }
+
+    /// Set the name on this phone's cards and publish the card again in every circle. A name
+    /// is 1 to 64 bytes once trimmed. The name is kept even if a circle's card could not be
+    /// signed, and that error is returned.
+    pub fn set_my_name(&self, name: String) -> Result<(), PhoneError> {
+        let name = name.trim();
+        if name.is_empty() || name.len() > cahoots_objects::card::MAX_NAME {
+            return Err(PhoneError::Chat {
+                message: "A name is 1 to 64 characters.".into(),
+            });
+        }
+        {
+            let mut me = self.me();
+            let mut changed = me.clone();
+            changed.name = Some(name.to_string());
+            changed.save(&self.dir)?;
+            *me = changed;
+        }
+        self.publish_everywhere(|_| true)
+    }
+
+    /// Draw a new face for this phone and publish the card again in every circle that does
+    /// not have a face of its own.
+    pub fn redraw_face(&self) -> Result<(), PhoneError> {
+        {
+            let mut me = self.me();
+            let mut changed = me.clone();
+            changed.face_seed = Some(random_seed().to_vec().into());
+            changed.save(&self.dir)?;
+            *me = changed;
+        }
+        self.publish_everywhere(|c| c.settings.face_override.is_none())
+    }
+
+    /// Give a circle a face of its own, freshly drawn (`fresh`), or go back to the phone's
+    /// face (`!fresh`). The card is published again in that circle.
+    pub fn set_circle_face(&self, circle: String, fresh: bool) -> Result<(), PhoneError> {
+        self.with_circle(&circle, |c, me| {
+            c.settings.face_override = fresh.then(|| random_seed().to_vec().into());
+            c.settings.save(&c.dir)?;
+            me.publish_my_card(c)
+        })
     }
 
     /// The `Signer` label of a circle's seat key.
@@ -1038,9 +1189,26 @@ impl Phone {
         PhoneInfo {
             key_store: if enclave { KEY_STORE } else { KEY_STORE_NO_ENCLAVE }.into(),
             app_version: env!("CARGO_PKG_VERSION").into(),
-            fingerprint: self.me.fingerprint.clone(),
+            fingerprint: self.me().fingerprint.clone(),
         }
     }
+}
+
+/// The circle's manifest, from the sealed copy kept with it.
+fn manifest_of(c: &Circle) -> Result<cahoots_core::manifest::Manifest, PhoneError> {
+    let unreadable = || PhoneError::Storage {
+        message: "The member list saved for this circle is damaged or cannot be read.".into(),
+    };
+    let sealed = cahoots_core::manifest::SealedManifest::decode(&c.record.manifest)
+        .map_err(|_| unreadable())?;
+    cahoots_core::manifest::Manifest::decode(&sealed.body).map_err(|_| unreadable())
+}
+
+/// 32 bytes from the system's generator: a face seed.
+fn random_seed() -> [u8; 32] {
+    let mut seed = [0u8; 32];
+    rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut seed);
+    seed
 }
 
 /// What a face seed is hashed under, so it is not the fingerprint or any other hash of a key.

@@ -127,6 +127,8 @@ pub fn build(
         name: name.to_string(),
         handles: pairs(handles, "--handle")?,
         endpoints,
+        face: None,
+        device: None,
         log,
     };
     // The badge refuses what does not decode: say why here instead.

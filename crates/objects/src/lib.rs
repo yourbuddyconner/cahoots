@@ -123,8 +123,12 @@ pub(crate) fn check_seat_and_circle(
 pub(crate) struct Reader<'b> {
     d: Decoder<'b>,
     len: usize,
+    /// The keys this object knows: `0..n`.
     n: u64,
     next: u64,
+    /// The map's entries, and how many have been read.
+    entries: u64,
+    read: u64,
 }
 
 const M: ObjectError = ObjectError::Malformed;
@@ -132,17 +136,30 @@ const M: ObjectError = ObjectError::Malformed;
 impl<'b> Reader<'b> {
     /// Open the map and read key 0, the version.
     pub(crate) fn open(bytes: &'b [u8], n: u64) -> Result<Reader<'b>, ObjectError> {
+        Reader::open_between(bytes, n, n)
+    }
+
+    /// Open a map of `min` to `max` entries: keys `0..min` always, then the optional keys
+    /// `min..max`, each at most once and in order. Read the optional ones with
+    /// [`Reader::optional`].
+    pub(crate) fn open_between(
+        bytes: &'b [u8],
+        min: u64,
+        max: u64,
+    ) -> Result<Reader<'b>, ObjectError> {
         let mut d = Decoder::new(bytes);
-        match d.map() {
-            Ok(Some(len)) if len == n => {}
+        let entries = match d.map() {
+            Ok(Some(len)) if (min..=max).contains(&len) => len,
             Ok(None) => return Err(ObjectError::NotCanonical),
             _ => return Err(M),
-        }
+        };
         let mut r = Reader {
             d,
             len: bytes.len(),
-            n,
+            n: max,
             next: 0,
+            entries,
+            read: 0,
         };
         r.key()?;
         if r.d.u64().map_err(|_| M)? != u64::from(VERSION) {
@@ -162,7 +179,24 @@ impl<'b> Reader<'b> {
             });
         }
         self.next += 1;
+        self.read += 1;
         Ok(&mut self.d)
+    }
+
+    /// The optional key `k`: its value's decoder when the next entry has that key, `None` when
+    /// the map has ended or its next key is a later one.
+    pub(crate) fn optional(&mut self, k: u64) -> Result<Option<&mut Decoder<'b>>, ObjectError> {
+        if self.read == self.entries {
+            self.next = k + 1;
+            return Ok(None);
+        }
+        let peek = self.d.probe().u64().map_err(|_| M)?;
+        if peek > k {
+            self.next = k + 1;
+            return Ok(None);
+        }
+        self.next = k;
+        self.key().map(Some)
     }
 
     pub(crate) fn u64(&mut self) -> Result<u64, ObjectError> {
@@ -217,7 +251,7 @@ impl<'b> Reader<'b> {
 
     /// Every key read and nothing after the map.
     pub(crate) fn finish(self) -> Result<(), ObjectError> {
-        if self.next != self.n || self.d.position() != self.len {
+        if self.read != self.entries || self.next != self.n || self.d.position() != self.len {
             return Err(M);
         }
         Ok(())

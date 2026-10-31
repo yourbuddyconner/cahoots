@@ -1032,11 +1032,12 @@ fn faces_are_stable_and_differ_between_seats() {
     assert!(matches!(a.phone.seat_face_seed(id.clone(), 2), Err(PhoneError::NotFound { .. })));
     assert!(matches!(a.phone.seat_face_seed("gone".into(), 0), Err(PhoneError::NotFound { .. })));
 
-    // The phone's own seed comes from its own key, the same way.
+    // The phone's own seed is drawn at random and kept, not taken from its key.
     let mine = a.phone.my_face_seed();
+    assert_eq!(mine.len(), 32);
     let phone_key = a.signer.public("cahoots:phone").unwrap();
-    let want = Sha256::new().chain_update(b"cahoots/face/v1").chain_update(&phone_key).finalize();
-    assert_eq!(mine, want.to_vec());
+    let from_key = Sha256::new().chain_update(b"cahoots/face/v1").chain_update(&phone_key).finalize();
+    assert_ne!(mine, from_key.to_vec());
     assert_eq!(a.phone.my_face_seed(), mine);
     assert_ne!(mine, b.phone.my_face_seed());
 
@@ -1266,6 +1267,7 @@ fn history_saved_before_generations_still_opens() {
         outbox: Vec::new(),
         journal: Vec::new(),
         pending_bump: None,
+        pending_card: None,
     };
     cahoots_phone::store::create_circle(
         &d.path,
@@ -1277,6 +1279,7 @@ fn history_saved_before_generations_still_opens() {
             settings: &cahoots_phone::store::SettingsRecord {
                 relay: RELAY.into(),
                 unread: 0,
+                face_override: None,
             },
             slices: params.slices(),
         },
@@ -1299,4 +1302,207 @@ fn history_saved_before_generations_still_opens() {
     assert_eq!(got[0].epoch, 1);
     phone.send_chat(id.clone(), "new keys".into()).unwrap();
     assert_eq!(phone.history(id).last().unwrap().text, "new keys");
+}
+
+/// Two phones that read and post to the test relay from the ceremony on.
+fn named(r: &Arc<Mutex<MemRelay>>, names: [&str; 2]) -> (Device, Device) {
+    let (a, b) = (device(r), device(r));
+    for (d, n) in [(&a, names[0]), (&b, names[1])] {
+        d.phone.set_default_relay(RELAY.into()).unwrap();
+        if !n.is_empty() {
+            d.phone.set_my_name(n.into()).unwrap();
+        }
+    }
+    (a, b)
+}
+
+fn member(d: &Device, circle: &str, seat: u8) -> cahoots_phone::Member {
+    d.phone.circle_members(circle.into()).unwrap()[usize::from(seat)].clone()
+}
+
+#[test]
+fn after_a_ceremony_both_phones_publish_cards_and_see_each_other() {
+    let r = relay();
+    let (a, b) = named(&r, ["Ada", "Bea"]);
+    assert_eq!(a.phone.my_name(), "Ada");
+    let (id, _, _) = finish(&a, &b);
+    // A kept first and published before B's circle existed; each poll reads the other's card.
+    a.phone.poll(id.clone()).unwrap();
+    let got = b.phone.poll(id.clone()).unwrap();
+    assert!(got.is_empty(), "a card is not a message: {got:?}");
+    a.phone.poll(id.clone()).unwrap();
+
+    for (d, other, other_seat) in [(&a, &b, 1), (&b, &a, 0)] {
+        let m = member(d, &id, other_seat);
+        assert_eq!(m.name, other.phone.my_name());
+        assert!(m.has_card);
+        assert_eq!(m.device, Some(0), "a phone");
+        assert_eq!(m.face_seed, other.phone.my_face_seed());
+        assert_eq!(
+            d.phone.seat_face_seed(id.clone(), other_seat).unwrap(),
+            other.phone.my_face_seed()
+        );
+        // Its own seat shows the card it published.
+        let mine = member(d, &id, 1 - other_seat);
+        assert!(mine.mine && mine.has_card);
+        assert_eq!(mine.name, d.phone.my_name());
+        assert_eq!(mine.face_seed, d.phone.my_face_seed());
+        // No history line for a card.
+        assert!(d.phone.history(id.clone()).is_empty());
+    }
+    // The device's face seed is 32 random bytes, kept across opens.
+    let seed = a.phone.my_face_seed();
+    assert_eq!(seed.len(), 32);
+    assert_ne!(seed, b.phone.my_face_seed());
+    let again = Phone::open(
+        a.path.to_string_lossy().into_owned(),
+        Box::new(a.signer.clone()),
+        Box::new(a.http.clone()),
+    )
+    .unwrap();
+    assert_eq!(again.my_face_seed(), seed);
+    assert_eq!(again.my_name(), "Ada");
+    assert_eq!(again.circle_members(id.clone()).unwrap()[1].name, "Bea");
+}
+
+#[test]
+fn set_my_name_republishes_and_the_other_side_updates() {
+    let r = relay();
+    let (a, b) = named(&r, ["Ada", "Bea"]);
+    let (id, _, _) = finish(&a, &b);
+    b.phone.poll(id.clone()).unwrap();
+    assert_eq!(member(&b, &id, 0).name, "Ada");
+
+    a.phone.set_my_name("  Ada King  ".into()).unwrap();
+    assert_eq!(a.phone.my_name(), "Ada King");
+    b.phone.poll(id.clone()).unwrap();
+    assert_eq!(member(&b, &id, 0).name, "Ada King");
+
+    let before = a.phone.my_face_seed();
+    a.phone.redraw_face().unwrap();
+    assert_ne!(a.phone.my_face_seed(), before);
+    b.phone.poll(id.clone()).unwrap();
+    assert_eq!(member(&b, &id, 0).face_seed, a.phone.my_face_seed());
+    assert_eq!(member(&b, &id, 0).name, "Ada King");
+
+    // A name the relay could not take now waits, and goes with the next poll.
+    a.http.fail_posts.store(1, Ordering::SeqCst);
+    a.phone.set_my_name("Ada L".into()).unwrap();
+    b.phone.poll(id.clone()).unwrap();
+    assert_eq!(member(&b, &id, 0).name, "Ada King");
+    a.phone.poll(id.clone()).unwrap();
+    b.phone.poll(id.clone()).unwrap();
+    assert_eq!(member(&b, &id, 0).name, "Ada L");
+}
+
+#[test]
+fn without_cards_the_members_have_the_interim_face_and_no_name() {
+    use sha2::{Digest, Sha256};
+    let r = relay();
+    let (a, b) = named(&r, ["", ""]);
+    assert_eq!(a.phone.my_name(), "");
+    let (id, ida, _) = finish(&a, &b);
+    a.phone.poll(id.clone()).unwrap();
+    b.phone.poll(id.clone()).unwrap();
+    let key = a.signer.public(&format!("cahoots:seat:{ida}")).unwrap();
+    let interim = Sha256::new().chain_update(b"cahoots/face/v1").chain_update(&key).finalize().to_vec();
+    for d in [&a, &b] {
+        let m = member(d, &id, 0);
+        assert_eq!(m.name, "", "the app shows its own name for the seat");
+        assert!(!m.has_card);
+        assert_eq!(m.device, None);
+        assert_eq!(m.face_seed, interim);
+        assert_eq!(d.phone.seat_face_seed(id.clone(), 0).unwrap(), interim);
+    }
+    // Names are 1 to 64 bytes after trimming.
+    for bad in ["", "   ", &"x".repeat(65)] {
+        match a.phone.set_my_name(bad.to_string()) {
+            Err(e) => assert_eq!(e.to_string(), "A name is 1 to 64 characters."),
+            Ok(()) => panic!("{bad:?} was taken"),
+        }
+    }
+    assert_eq!(a.phone.my_name(), "");
+    a.phone.set_my_name("x".repeat(64)).unwrap();
+}
+
+#[test]
+fn a_circle_face_changes_that_circle_only() {
+    let r = relay();
+    let (a, b) = named(&r, ["Ada", "Bea"]);
+    let (one, _, _) = finish(&a, &b);
+    let (two, _, _) = finish(&a, &b);
+    assert_ne!(one, two);
+    let device_face = a.phone.my_face_seed();
+
+    a.phone.set_circle_face(one.clone(), true).unwrap();
+    assert_eq!(a.phone.my_face_seed(), device_face, "the device's face stays");
+    for id in [&one, &two] {
+        b.phone.poll(id.clone()).unwrap();
+    }
+    let in_one = member(&b, &one, 0).face_seed;
+    assert_ne!(in_one, device_face);
+    assert_eq!(member(&a, &one, 0).face_seed, in_one);
+    assert_eq!(member(&b, &two, 0).face_seed, device_face);
+
+    // Redrawing the device's face leaves the circle with its own face as it is.
+    a.phone.redraw_face().unwrap();
+    for id in [&one, &two] {
+        b.phone.poll(id.clone()).unwrap();
+    }
+    assert_eq!(member(&b, &one, 0).face_seed, in_one);
+    assert_eq!(member(&b, &two, 0).face_seed, a.phone.my_face_seed());
+
+    // Back to the device's face.
+    a.phone.set_circle_face(one.clone(), false).unwrap();
+    b.phone.poll(one.clone()).unwrap();
+    assert_eq!(member(&b, &one, 0).face_seed, a.phone.my_face_seed());
+}
+
+/// A `SeatSigner` over the test's soft signer, to sign a card as a seat would.
+struct Soft<'a>(&'a SoftSigner, String);
+
+impl cahoots_core::seat::SeatSigner for Soft<'_> {
+    fn public(&mut self) -> SeatPublic {
+        SeatPublic::parse(&self.0.public(&self.1).unwrap()).unwrap()
+    }
+    fn sign(&mut self, msg: &[u8]) -> cahoots_core::seat::Signature {
+        use cahoots_phone::Signer;
+        self.0.sign(self.1.clone(), msg.to_vec()).unwrap().try_into().unwrap()
+    }
+}
+
+#[test]
+fn a_card_for_another_seat_is_refused() {
+    use cahoots_objects::card::Card;
+    let r = relay();
+    let (a, b) = named(&r, ["Ada", "Bea"]);
+    let (id, _, idb) = finish(&a, &b);
+    b.phone.poll(id.clone()).unwrap();
+    assert_eq!(member(&b, &id, 0).name, "Ada");
+
+    // B's seat signs a card that names seat 1 (A's seat 0), and posts it in the chat.
+    let circle_id: [u8; 16] = hex::decode(&id).unwrap().try_into().unwrap();
+    let forged = Card {
+        circle_id,
+        seat: 0,
+        name: "Mallory".into(),
+        handles: vec![],
+        endpoints: vec![],
+        log: 99,
+        face: Some([1; 32]),
+        device: Some(0),
+    };
+    let label = format!("cahoots:seat:{idb}");
+    for kid in [[1u8], [0u8]] {
+        let signed = forged.sign(Soft(&b.signer, label.clone()), &kid).unwrap();
+        let dir = b.path.join("circles").join(&id);
+        let mut c = cahoots_phone::chat::Circle::load(&dir).unwrap();
+        c.publish_card(&b.http, signed).unwrap();
+        // A reads it, and keeps its own name and face for seat 0 on B's side as A published.
+        a.phone.poll(id.clone()).unwrap();
+        assert_eq!(member(&a, &id, 0).name, "Ada");
+        assert_eq!(member(&a, &id, 0).face_seed, a.phone.my_face_seed());
+    }
+    // A third phone joining later would read the same relay; A's view of B is unchanged too.
+    assert_eq!(member(&a, &id, 1).name, "Bea");
 }

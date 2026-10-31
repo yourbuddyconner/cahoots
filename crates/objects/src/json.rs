@@ -136,7 +136,7 @@ impl Card {
     /// The table's fields, flat; `circle_id` as `"circle"`, handles as `[kind, value]` and
     /// endpoints as `[purpose, value]` pairs.
     pub fn to_json(&self) -> Value {
-        json!({
+        let mut v = json!({
             "version": VERSION,
             "circle": hex(&self.circle_id),
             "seat": self.seat,
@@ -144,7 +144,15 @@ impl Card {
             "handles": self.handles.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
             "endpoints": self.endpoints.iter().map(|(p, v)| json!([p, v])).collect::<Vec<_>>(),
             "log": self.log,
-        })
+        });
+        // The optional keys appear only when the card has them.
+        if let Some(face) = &self.face {
+            v["face"] = json!(hex(face));
+        }
+        if let Some(device) = self.device {
+            v["device"] = json!(device);
+        }
+        v
     }
 }
 

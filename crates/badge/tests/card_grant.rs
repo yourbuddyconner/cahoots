@@ -240,6 +240,8 @@ fn my_card(id: CircleId) -> Card {
         ],
         endpoints: vec![(PURPOSE_SSH, "ada.example.com".into())],
         log: 3,
+        face: None,
+        device: None,
     }
 }
 

@@ -22,6 +22,8 @@ fn card() -> Card {
             (PURPOSE_CHAT, "cahoots:chat:ada".into()),
         ],
         log: 42,
+        face: None,
+        device: None,
     }
 }
 
@@ -158,6 +160,8 @@ fn a_card_over_the_length_cap_neither_encodes_nor_decodes() {
         handles: handles(10),
         endpoints: vec![],
         log: 3,
+        face: None,
+        device: None,
     };
     assert_eq!(
         small.encode().unwrap(),
@@ -189,4 +193,92 @@ fn a_card_over_the_length_cap_neither_encodes_nor_decodes() {
     };
     assert!(fits.1.len() <= card::MAX_CARD_LEN);
     assert_eq!(Card::decode(&fits.1).unwrap(), fits.0);
+}
+
+#[test]
+fn a_card_with_a_face_and_a_device_round_trips_and_verifies() {
+    let c = Card {
+        face: Some([0x3c; 32]),
+        device: Some(card::DEVICE_PHONE),
+        ..card()
+    };
+    let bytes = c.encode().unwrap();
+    assert_eq!(bytes[0], 0xa9, "a map of nine entries");
+    assert_eq!(Card::decode(&bytes).unwrap(), c);
+    let signed = c.sign(&seat_key(1), &[1]).unwrap();
+    assert_eq!(Card::verify(&signed, &manifest()).unwrap(), c);
+    // Either key alone.
+    for (face, device) in [(Some([7; 32]), None), (None, Some(card::DEVICE_BROWSER))] {
+        let c = Card {
+            face,
+            device,
+            ..card()
+        };
+        let bytes = c.encode().unwrap();
+        assert_eq!(bytes[0], 0xa8);
+        assert_eq!(Card::decode(&bytes).unwrap(), c);
+    }
+}
+
+#[test]
+fn a_card_without_a_face_still_decodes() {
+    // The old form: seven entries, ending at the log.
+    let bytes = raw_card(&CIRCLE, 1, "Ada", &[]);
+    assert_eq!(bytes[0], 0xa7);
+    let c = Card::decode(&bytes).unwrap();
+    assert_eq!((c.face, c.device), (None, None));
+    assert_eq!(c.encode().unwrap(), bytes);
+}
+
+#[test]
+fn the_optional_keys_are_refused_out_of_order_or_malformed() {
+    let base = raw_card(&CIRCLE, 1, "Ada", &[]);
+    let with = |tail: &[u8], entries: u8| {
+        let mut b = base.clone();
+        b[0] = 0xa0 + entries;
+        b.extend_from_slice(tail);
+        b
+    };
+    let mut face = vec![0x07, 0x58, 0x20];
+    face.extend_from_slice(&[1; 32]);
+    // Face then device: fine.
+    let mut good = face.clone();
+    good.extend_from_slice(&[0x08, 0x02]);
+    assert!(Card::decode(&with(&good, 9)).is_ok());
+    // Device then face: out of order.
+    let mut swapped = vec![0x08, 0x02];
+    swapped.extend_from_slice(&face);
+    assert!(Card::decode(&with(&swapped, 9)).is_err());
+    // A face of 31 bytes, a device that is not a small number, a key past the last.
+    let mut short = vec![0x07, 0x58, 0x1f];
+    short.extend_from_slice(&[1; 31]);
+    assert_eq!(Card::decode(&with(&short, 8)), Err(ObjectError::Malformed));
+    assert_eq!(
+        Card::decode(&with(&[0x08, 0x19, 0x01, 0x00], 8)),
+        Err(ObjectError::Malformed)
+    );
+    assert_eq!(
+        Card::decode(&with(&[0x09, 0x00], 8)),
+        Err(ObjectError::Malformed)
+    );
+    // The map says eight entries but holds seven, or nine but holds eight.
+    assert!(Card::decode(&with(&[], 8)).is_err());
+    assert!(Card::decode(&with(&[0x08, 0x02], 9)).is_err());
+    // A device given twice.
+    assert!(Card::decode(&with(&[0x08, 0x02, 0x08, 0x02], 9)).is_err());
+}
+
+#[test]
+fn verify_refuses_a_card_whose_seat_is_not_the_signers_kid() {
+    // Seat 2 signs, honestly under its own kid, a card that names seat 1 and carries a face.
+    let c = Card {
+        face: Some([9; 32]),
+        device: Some(card::DEVICE_PHONE),
+        ..card()
+    };
+    let signed = c.sign(&seat_key(2), &[2]).unwrap();
+    assert_eq!(
+        Card::verify(&signed, &manifest()),
+        Err(ObjectError::WrongKid)
+    );
 }

@@ -649,6 +649,7 @@ dependencies = [
  "cahoots-channel",
  "cahoots-chat",
  "cahoots-core",
+ "cahoots-objects",
  "cahoots-relay",
  "cahoots-station",
  "cahoots-wasm",
