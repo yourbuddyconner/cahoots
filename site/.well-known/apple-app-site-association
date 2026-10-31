@@ -1,0 +1,13 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["9Z585PW7QR.network.cahoots.app"],
+        "components": [
+          { "/": "/app/" },
+          { "/": "/app/*" }
+        ]
+      }
+    ]
+  }
+}

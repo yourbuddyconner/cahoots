@@ -50,6 +50,10 @@ The homepage's Open Graph and Twitter preview uses `assets/og-home.png`, a 1200 
 4. `cahoots.tools`: a forwarding rule at the registrar to `https://cahoots.network` (301), or the same records if it should also serve the site. Only one custom domain can be set on the Pages site.
 
 
+## Universal links
+
+`site/.well-known/apple-app-site-association` (no file extension) tells iOS which links the Cahoots app opens. An iPhone with the app installed reads it through Apple's CDN, not straight from this site. It covers `/app/`, so an installed app opens any browser-app link, and the app handles `#/ch/` channel links itself. It goes live when `main` deploys.
+
 ## Documentation reading path
 
 `site/docs/catalog.js` defines the sidebar and retained direct routes. Public guides live in `docs/overview.md`, `ceremony-guide.md`, `browser.md`, `relay.md`, `hardware.md`, `security.md`, and `status.md`. The Pages workflow already copies these with the other `docs/*.md` files. The overview is a reader guide rather than the repository README.
