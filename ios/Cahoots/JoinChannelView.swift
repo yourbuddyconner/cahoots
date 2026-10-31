@@ -23,41 +23,40 @@ struct JoinChannelView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xl) {
                 VStack(alignment: .leading, spacing: Space.s) {
-                    Text("Channel").font(.footnote.weight(.semibold)).foregroundStyle(Color.muted)
-                    Text(preview?.name ?? (reading ? "Reading \(host)" : "This channel cannot be opened."))
+                    Text("A channel on \(preview?.relay ?? host)")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.muted)
+                    Text(preview?.name ?? (reading ? "Reading the link" : "This channel cannot be opened."))
                         .serifTitle(.largeTitle)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
                 }
                 if let preview {
-                    VStack(alignment: .leading, spacing: Space.s) {
+                    VStack(alignment: .leading, spacing: Space.m) {
                         Text(preview.hasSecret ? ChannelCopy.sentence(preview.policyLine) : ChannelCopy.closed)
                             .font(.body).foregroundStyle(Color.ink)
-                        if !preview.hasSecret {
-                            Text(ChannelCopy.sentence(preview.policyLine))
+                        HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                            Image(systemName: "lock").accessibilityHidden(true)
+                            Text(ChannelCopy.label + ".")
+                        }
+                        .font(.subheadline).foregroundStyle(Color.muted)
+                        if preview.hasSecret, app.channel(preview.channelId) != nil {
+                            Text("This phone already reads this channel. Open takes this link, so a newer one keeps it working.")
                                 .font(.subheadline).foregroundStyle(Color.muted)
                         }
-                        Text("On \(preview.relay). \(ChannelCopy.label).")
-                            .font(.subheadline).foregroundStyle(Color.muted)
                     }
                     .fixedSize(horizontal: false, vertical: true)
-                    if preview.hasSecret {
-                        Text(app.channel(preview.channelId) == nil
-                             ? "Anyone with this link can read what is posted."
-                             : "This phone already reads this channel. Open takes this link, so a newer one keeps it working.")
-                            .font(.subheadline).foregroundStyle(Color.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
                 } else if reading {
                     ProgressView().frame(maxWidth: .infinity, alignment: .leading)
                 }
                 StatusLine(text: error)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Space.l)
             .padding(.top, Space.l)
         }
         .paperBackground()
-        .navigationTitle("Channel")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .actionBar(shown: preview?.hasSecret == true) {
             Button { Task { await open() } } label: { Working(busy: busy, title: "Open") }

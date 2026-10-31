@@ -217,21 +217,27 @@ struct ChannelView: View {
         }
     }
 
-    /// The label line: what the relay keeps, and who reads and posts.
+    /// "Anyone with the link can read and post. End-to-end encrypted; the relay keeps ciphertext only."
+    private var labelText: String {
+        let policy = summary?.policyLine ?? ""
+        let lead = policy.isEmpty ? "" : ChannelCopy.sentence(policy) + " "
+        return lead + ChannelCopy.label + "."
+    }
+
+    /// The label line: who reads and posts, and what the relay keeps. Quiet, since it heads
+    /// every channel; the lock is the only mark.
     private var labelLine: some View {
-        VStack(alignment: .leading, spacing: Space.xs) {
-            Label(ChannelCopy.label, systemImage: "lock")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(Color.ink)
-            if let line = summary?.policyLine, !line.isEmpty {
-                Text(ChannelCopy.sentence(line))
-                    .font(.footnote)
-                    .foregroundStyle(Color.muted)
-            }
+        HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+            Image(systemName: "lock")
+                .font(.footnote)
+                .accessibilityHidden(true)
+            Text(labelText)
         }
+        .font(.footnote)
+        .foregroundStyle(Color.muted)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.bottom, Space.s)
+        .padding(.bottom, Space.m)
         .accessibilityElement(children: .combine)
     }
 
@@ -364,7 +370,11 @@ struct ChannelBubble: View {
     let message: ChannelMessage
     let first: Bool
 
-    private var who: String { message.mine ? "You" : message.sender }
+    /// The phone crate names the owner's posts "owner" when it has no name for them.
+    private var who: String {
+        if message.mine { return "You" }
+        return message.sender == "owner" ? "The owner" : message.sender
+    }
     private var time: String {
         Date(timeIntervalSince1970: Double(message.time) / 1000).formatted(date: .omitted, time: .shortened)
     }
@@ -447,18 +457,30 @@ struct ChannelShareSheet: View {
                     }
                     if let note = shared.note { StatusLine(text: note, problem: false) }
                     if !shared.link.isEmpty {
-                        Text(shared.link)
-                            .font(.footnote.monospaced())
-                            .foregroundStyle(Color.ink)
-                            .textSelection(.enabled)
-                            .padding(Space.m)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.paper, in: RoundedRectangle(cornerRadius: Radius.control))
-                            .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Color.line))
-                            .accessibilityIdentifier("channel link")
+                        // One line, shortened in the middle: a link is for sending, not reading,
+                        // and wrapped over four lines it grows hyphens that are not in it.
+                        HStack(spacing: Space.s) {
+                            Image(systemName: "link")
+                                .foregroundStyle(Color.muted)
+                                .accessibilityHidden(true)
+                            Text(shared.link)
+                                .font(.footnote.monospaced())
+                                .foregroundStyle(Color.ink)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .padding(Space.m)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.paper, in: RoundedRectangle(cornerRadius: Radius.control))
+                        .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Color.line))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(shared.link)
+                        .accessibilityIdentifier("channel link")
                     }
                     if !policyLine.isEmpty {
-                        Text(ChannelCopy.sentence(policyLine)).font(.subheadline).foregroundStyle(Color.muted)
+                        Text(ChannelCopy.sentence(policyLine) + " " + ChannelCopy.label + ".")
+                            .font(.subheadline).foregroundStyle(Color.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .padding(Space.l)
@@ -498,21 +520,31 @@ private struct AskToPostSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: Space.xl) {
-                ScreenHeader(title: "Ask to post.",
-                             detail: "Your name is shown to the owner when you ask, and to members beside your posts.",
-                             style: .title2)
-                TextField("How the owner will know you", text: $name)
-                    .submitLabel(.send)
-                    .paperField()
-                    .onSubmit { Task { await ask() } }
+                Text("The owner sees your name when you ask, and members see it beside your posts.")
+                    .font(.body)
+                    .foregroundStyle(Color.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: Space.s) {
+                    Text("Your name")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.muted)
+                    TextField("How the owner knows you", text: $name)
+                        .textInputAutocapitalization(.words)
+                        .submitLabel(.send)
+                        .paperField()
+                        .onSubmit { Task { await ask() } }
+                }
                 StatusLine(text: model.status)
-                Spacer()
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Space.l)
+            .padding(.top, Space.s)
+            .paperBackground()
+            .actionBar {
                 Button { Task { await ask() } } label: { Working(busy: busy, title: "Ask to post") }
                     .buttonStyle(.filled)
                     .disabled(trimmed.isEmpty || busy)
             }
-            .padding(Space.l)
-            .paperBackground()
             .navigationTitle("Ask to post")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

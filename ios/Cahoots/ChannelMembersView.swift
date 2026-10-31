@@ -61,7 +61,7 @@ struct ChannelMembersView: View {
         HStack(alignment: .center, spacing: Space.m) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(m.name).font(.headline).foregroundStyle(Color.ink)
-                Text("Can \(ChannelRequestsView.words(m.actions)). Grant \(ChannelCopy.short(m.grantId)).")
+                Text("Can \(ChannelRequestsView.words(m.actions)).")
                     .font(.subheadline).foregroundStyle(Color.muted)
             }
             .accessibilityElement(children: .combine)

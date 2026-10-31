@@ -89,6 +89,31 @@ accessibility sizes.
   under Advanced options. The primary action becomes available after entering a name.
 - Settings: the phone's own face on cream at the top, the key-store sentence and fingerprint under
   it, then quiet sections: relay for new circles, checking for messages, circles.
+- Channels, in the circles list: a "Channels" section after the circles, each channel a row like a
+  circle's (serif name, the policy as a sentence, who owns it, the unread count), then a blue
+  "Start a channel" row and one footnote.
+- Start a channel, a sheet: inline title and Cancel, one muted sentence, the name field, then
+  "Who reads and posts" as four option rows whose detail is the one thing that sets each apart
+  ("Only you post."), with the whole policy spelled out under them. The keyboard is not raised
+  on arrival, and choosing a row puts it away, so the rows never sit under the bar. "Start the
+  channel" in the bottom bar. Announcements with approvals is not offered until the app can
+  collect approvals.
+- Share the link, a sheet that opens by itself once the start sheet has gone: "Share the link."
+  in serif, the one sentence on what forwarding means, the link on one line shortened in the
+  middle (a link is for sending, and wrapped over four lines it grows hyphens that are not in
+  it), the policy and the relay sentence in muted, Share filled and Copy outlined.
+- A channel: the name in serif over "Your channel" or the relay's host, one muted line with a
+  lock (the policy, then "End-to-end encrypted; the relay keeps ciphertext only"), then posts as
+  chat bubbles. The owner's posts read "The owner" to readers who have no name for them. The
+  bottom bar holds the composer, or "Ask to post", or nothing: a state with nothing to tap is
+  written in the content, not in a bar.
+- Join, from a link: "A channel on <host>" as the section label, the name large in serif, the
+  policy sentence in ink, the lock line in muted, Open in the bottom bar. No nav title, so the
+  name is said once.
+- Requests: each person's name and what they ask, "Allow to post" filled beside "Refuse"
+  outlined, and the narrower choice ("Let Bea read, but not post") as a text button under them,
+  never three buttons in a row.
+- Members: name and what they can do. Grant ids stay out of sight.
 
 ## Copy
 

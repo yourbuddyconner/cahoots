@@ -84,16 +84,13 @@ struct ChannelRequestsView: View {
             }
             .accessibilityElement(children: .combine)
             // The owner picks what to give: read, or read and post. Never admit or govern.
+            // Two buttons side by side, and the narrower choice as a quiet line under them.
             HStack(spacing: Space.s) {
                 if Self.asksToPost(r.actions) {
                     Button { Task { await allow(r, "read,post") } } label: {
                         Working(busy: working == r.id + "read,post", title: "Allow to post")
                     }
                     .buttonStyle(.filled)
-                    Button { Task { await allow(r, "read") } } label: {
-                        Working(busy: working == r.id + "read", title: "Allow to read")
-                    }
-                    .buttonStyle(.outlined)
                 } else {
                     Button { Task { await allow(r, "read") } } label: {
                         Working(busy: working == r.id + "read", title: "Allow to read")
@@ -104,6 +101,13 @@ struct ChannelRequestsView: View {
                     .buttonStyle(.outlined)
             }
             .disabled(working != nil)
+            if Self.asksToPost(r.actions) {
+                Button { Task { await allow(r, "read") } } label: {
+                    if working == r.id + "read" { ProgressView() } else { Text("Let \(r.name) read, but not post") }
+                }
+                .buttonStyle(.text)
+                .disabled(working != nil)
+            }
         }
         .padding(.vertical, Space.m)
     }

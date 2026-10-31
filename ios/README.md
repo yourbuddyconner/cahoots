@@ -15,7 +15,11 @@ cp ios/Signing.xcconfig.example ios/Signing.xcconfig   # then put your team id i
 scripts/ios-build.sh          # the Rust library, the Xcode project, the app for the simulator
 scripts/ios-build.sh test     # the same, then the XCTest suites against a local cahoots-station
 scripts/ios-walk.sh OUT       # two simulators hold a ceremony through a local relay, then chat
+scripts/ios-channel-walk.sh WALK OUT   # then one starts a channel and the other joins it by link
 ```
+
+A debug build also takes `-cahoots-link <url>` and treats it as a channel link tapped outside the
+app, which is how the channel walk hands the reader its link on a simulator.
 
 `ios/Cahoots.xcodeproj` is generated from `ios/project.yml` and is not checked in. The project
 reads the library and the generated Swift from `target/ios`, which `scripts/ios-build.sh` links
@@ -168,6 +172,14 @@ On 2026-10-30, Xcode 15.4, iOS 17.5, on a Mac with Apple silicon.
    sent "hello from the host", the joiner saw it from seat 1 in epoch 1 and answered "hello from
    the joiner", and the host saw that. The station's log held 10 entries. Both tests passed, in
    about 48 seconds each.
+4. On 2026-10-31, after that walk, `scripts/ios-channel-walk.sh WALK OUT` with WALK the folder
+   the relay walk wrote. It starts a station with the channel features on the same port, so the
+   circles' relay address still works, and runs `ChannelWalkUITests` on both simulators:
+   `testOwner` starts a "Garden news" group chat from the circle, shares the link (read off the
+   share screen and written to a file in OUT), posts, lets the reader in from Requests, reads the
+   reply and opens Members; `testReader` launches with `-cahoots-link` and the file's link, opens
+   the channel from the join screen, reads the first post, asks to post as "Bea", waits for the
+   grant, and posts. Each step is photographed into OUT.
 4. Not tried in the simulator: the camera (there is none), Face ID on a real enclave key, a
    ceremony with codes only between two screens, background refresh, and the icon badge. The
    unit tests cover the signer's keychain path, HTTP against a real station, and the phone crate

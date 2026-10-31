@@ -41,6 +41,6 @@ grep -hE "Test Case .*(passed|failed)|error:" "$OUT/testHost.log" "$OUT/testJoin
 echo "host:   $(cat "$OUT/host-words.txt" 2>/dev/null)"
 echo "joiner: $(cat "$OUT/joiner-words.txt" 2>/dev/null)"
 cmp -s "$OUT/host-words.txt" "$OUT/joiner-words.txt" && echo "the six words match" || { echo "the words differ"; ok=1; }
-echo "relay entries: $(wc -l <"$OUT/station.jsonl")"
+echo "relay entries: $(sqlite3 "$OUT/station.db" 'select count(*) from entries' 2>/dev/null || echo unknown)"
 echo "out: $OUT"
 exit $ok

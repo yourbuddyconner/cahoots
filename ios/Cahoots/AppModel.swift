@@ -28,6 +28,8 @@ final class AppModel: ObservableObject {
     @Published var channels: [ChannelSummary] = []
     /// A channel just started here: its screen opens with the share sheet.
     @Published var shareOnOpen: String?
+    /// A channel the start sheet made, waiting for that sheet to go before its screen opens.
+    @Published var justStarted: String?
     /// A link that arrived before the phone opened, followed once it has.
     private var waitingLink: URL?
     /// Each circle's faces, drawn, in seat order, by circle id.
@@ -78,6 +80,14 @@ final class AppModel: ObservableObject {
         if c != nil {
             await refresh()
             followWaitingLink()
+            #if DEBUG
+            // A debug build takes `-cahoots-link <url>` and treats it as a link tapped outside
+            // the app, so a UI test on a simulator can open a channel link.
+            let args = ProcessInfo.processInfo.arguments
+            if let i = args.firstIndex(of: "-cahoots-link"), i + 1 < args.count, let url = URL(string: args[i + 1]) {
+                openLink(url)
+            }
+            #endif
         }
         return c
     }
@@ -283,8 +293,16 @@ final class AppModel: ObservableObject {
         guard let core else { return }
         let summary = try await core.run { try $0.channelStart(circle: circle, name: name, preset: preset) }
         await refresh()
-        shareOnOpen = summary.id
-        path = [.channel(summary.id)]
+        justStarted = summary.id
+    }
+
+    /// A channel started in the start sheet, opened once that sheet has gone: a sheet that is
+    /// still dismissing stops the channel's share sheet from presenting.
+    func openStartedChannel() {
+        guard let id = justStarted else { return }
+        justStarted = nil
+        shareOnOpen = id
+        path = [.channel(id)]
     }
 
     /// Remove a channel from this phone, and its keys with it.

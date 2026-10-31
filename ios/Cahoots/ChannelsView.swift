@@ -11,13 +11,14 @@ enum ChannelCopy {
     static let readOnly = "You can read this channel. Only the owner posts."
     static let noLink = "This channel has no link. Only people you let in can read it."
 
-    /// The five policies a channel starts with: the preset number, its name, one line on it.
-    static let presets: [(UInt8, String, String)] = [
-        (0, "Announcements", "Anyone with the link reads. Only you post."),
-        (1, "Announcements with approvals", "Anyone with the link reads. A post goes out when enough seats of your circle approve it."),
-        (2, "Group chat", "Anyone with the link reads and can ask to post."),
-        (3, "Members post", "Anyone with the link reads. People you let in post."),
-        (4, "Closed", "Only people you let in read and post."),
+    /// The policies a channel starts with: the preset number, its name, the one thing that sets
+    /// it apart, and the whole policy as a sentence. Announcements with approvals (preset 1) is
+    /// left out: it needs approvals from the other seats, which this version cannot collect.
+    static let presets: [(number: UInt8, name: String, detail: String, policy: String)] = [
+        (0, "Announcements", "Only you post.", "Anyone with the link reads. Only you post."),
+        (2, "Group chat", "Anyone with the link can post.", "Anyone with the link reads, and can ask to post."),
+        (3, "Members post", "People you let in post.", "Anyone with the link reads. Only people you let in post."),
+        (4, "Closed", "Only people you let in can read.", "Only people you let in read and post. There is no link."),
     ]
 
     /// A policy line ("anyone with the link reads, only the owner posts") as a sentence.
@@ -76,7 +77,7 @@ struct ChannelsSection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.top, Space.xl)
-            .sheet(item: $starting) { c in
+            .sheet(item: $starting, onDismiss: { model.openStartedChannel() }) { c in
                 StartChannelSheet(circle: c) { starting = nil }
             }
         }
@@ -158,48 +159,66 @@ struct StartChannelSheet: View {
 
     private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
 
+    /// The chosen policy, spelled out under the rows.
+    private var policy: String {
+        ChannelCopy.presets.first { $0.number == preset }?.policy ?? ""
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: Space.xl) {
-                    ScreenHeader(title: "Start a channel.",
-                                 detail: "Post to everyone who has the link. \(circle.name) owns it, and this phone holds its keys.",
-                                 style: .title)
+                VStack(alignment: .leading, spacing: Space.xxl) {
+                    Text("Give the channel a name and say who may read and post. \(circle.name) owns it, and this phone holds its keys.")
+                        .font(.body)
+                        .foregroundStyle(Color.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+
                     VStack(alignment: .leading, spacing: Space.s) {
-                        Text("Name").font(.footnote.weight(.semibold)).foregroundStyle(Color.muted)
-                        TextField("Garden news", text: $name)
-                            .focused($naming)
+                        Text("Name")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Color.muted)
+                        TextField("garden news, the choir, street parking", text: $name)
+                            .textInputAutocapitalization(.words)
+                            .autocorrectionDisabled()
                             .submitLabel(.done)
+                            .focused($naming)
+                            .onSubmit { naming = false }
                             .paperField()
+                            .accessibilityLabel("Name")
                             .accessibilityIdentifier("channel name")
                     }
-                    PaperSection(title: "Who reads and posts",
-                                 footer: preset == 4
-                                    ? "The relay keeps encrypted messages only. Only people you let in can read."
-                                    : "The relay keeps encrypted messages only. Anyone with the link can read.") {
-                        ForEach(ChannelCopy.presets, id: \.0) { p in
-                            if p.0 > 0 { Hairline() }
-                            OptionRow(title: p.1, detail: p.2, chosen: preset == p.0) { preset = p.0 }
+
+                    PaperSection(title: "Who reads and posts", footer: policy + " The relay keeps encrypted messages only.") {
+                        ForEach(Array(ChannelCopy.presets.enumerated()), id: \.element.number) { i, p in
+                            if i > 0 { Hairline() }
+                            // Choosing a row puts the keyboard away, so the rows are not left under the bar.
+                            OptionRow(title: p.name, detail: p.detail, chosen: preset == p.number) {
+                                preset = p.number
+                                naming = false
+                            }
                         }
                     }
-                    StatusLine(text: error)
                 }
-                .padding(Space.l)
+                .padding(.horizontal, Space.l)
+                .padding(.top, Space.s)
+                .padding(.bottom, Space.xl)
             }
             .scrollDismissesKeyboard(.interactively)
+            .scrollBounceBehavior(.basedOnSize)
             .paperBackground()
-            .navigationTitle("New channel")
+            .navigationTitle("Start a channel")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { done() } }
             }
+            .sensoryFeedback(.selection, trigger: preset)
             .actionBar {
-                Button { Task { await start() } } label: { Working(busy: busy, title: "Start") }
+                StatusLine(text: error)
+                Button { Task { await start() } } label: { Working(busy: busy, title: "Start the channel") }
                     .buttonStyle(.filled)
                     .disabled(trimmed.isEmpty || busy)
                     .accessibilityIdentifier("Start")
             }
-            .onAppear { naming = true }
         }
     }
 
