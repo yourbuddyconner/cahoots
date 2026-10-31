@@ -150,6 +150,11 @@ struct ChannelView: View {
                         }
                         .id(m.id)
                     }
+                    // With nothing to tap, the state and any status read as plain text here, not in a
+                    // bottom bar: a bar holding one muted sentence looks like a text box nobody can use.
+                    if !showsBar {
+                        bar.padding(.top, Space.l)
+                    }
                 }
                 .padding(.horizontal, Space.l)
                 .padding(.vertical, Space.m)
@@ -174,7 +179,7 @@ struct ChannelView: View {
             }
             ToolbarItem(placement: .topBarTrailing) { menu }
         }
-        .actionBar { bar }
+        .actionBar(shown: showsBar) { bar }
         .task(id: model.id) { await model.run() }
         .onAppear {
             if app.shareOnOpen == model.id {
@@ -228,6 +233,12 @@ struct ChannelView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, Space.s)
         .accessibilityElement(children: .combine)
+    }
+
+    /// The bottom bar exists only when it holds a control: the composer, or the ask-to-post button.
+    private var showsBar: Bool {
+        guard let s = summary, !s.dead else { return false }
+        return s.canPost || (s.mayAskToPost && !s.waiting && !s.closed)
     }
 
     @ViewBuilder
