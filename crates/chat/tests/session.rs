@@ -1,7 +1,15 @@
-use cahoots_chat::{ChatError, ChatSession, EpochId, MAX_EPOCHS, MAX_SKIP, ROTATE_AFTER};
+use cahoots_chat::{
+    generation_tag, ChatError, ChatSession, EpochId, MAX_EPOCHS, MAX_SKIP, ROTATE_AFTER,
+};
+use cahoots_core::root::gen0_id;
 
 const ROOT: [u8; 32] = [0x42; 32];
 const CID: [u8; 16] = [0x0c; 16];
+
+/// Epoch `n` of generation 0.
+fn ep(n: u16) -> EpochId {
+    EpochId::generation(generation_tag(&gen0_id(&CID)), n)
+}
 
 /// `n` members of one circle, each already synced with an empty relay.
 fn circle(n: u8) -> Vec<ChatSession> {
@@ -33,13 +41,13 @@ fn three_members_round_trip() {
 }
 
 #[test]
-fn the_first_epoch_is_root_epoch_one_whoever_starts_it() {
+fn the_first_epoch_is_epoch_one_of_generation_zero_whoever_starts_it() {
     let mut s = circle(2);
     let w = s[1].send(b"x").unwrap();
     let h = cahoots_chat::parse(&w).unwrap().0;
-    assert_eq!(h.epoch, EpochId::root(1));
+    assert_eq!(h.epoch, ep(1));
     s[0].receive(&w).unwrap();
-    assert_eq!(s[0].current_epoch(), Some(EpochId::root(1)));
+    assert_eq!(s[0].current_epoch(), Some(ep(1)));
 }
 
 #[test]
@@ -60,7 +68,7 @@ fn rotates_after_rotate_after_own_messages() {
     let w = s[0].send(b"rotated").unwrap();
     let h = cahoots_chat::parse(&w).unwrap().0;
     assert_ne!(h.epoch, first);
-    assert_eq!(h.epoch, EpochId::root(2));
+    assert_eq!(h.epoch, ep(2));
     assert_eq!(h.counter, 0);
     assert_eq!(s[1].receive(&w).unwrap().1, b"rotated");
 }
@@ -74,7 +82,7 @@ fn members_switch_to_newest_epoch_seen() {
     s[1].start_epoch();
     let w1 = s[1].send(b"b").unwrap();
     let e1 = cahoots_chat::parse(&w1).unwrap().0.epoch;
-    assert_eq!(e1, EpochId::root(2));
+    assert_eq!(e1, ep(2));
     s[0].receive(&w1).unwrap();
     s[2].receive(&w1).unwrap();
     let w2 = s[2].send(b"c").unwrap();

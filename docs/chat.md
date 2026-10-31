@@ -1,30 +1,60 @@
-# Chat on root epochs, version 2
+# Chat by generation, version 3
 
 End-to-end encrypted group chat for circle members. The circle root (`docs/protocol.md` section 3.6) seeds the keys, and a standard AEAD encrypts the messages. The security claim is computational. The UI MUST NOT call it "unbreakable". Pure-pad text (`docs/protocol.md` section 4) stays available for the lines that deserve the strongest claim.
 
 All integers are little-endian unless a line says otherwise. HKDF is HKDF-SHA256 (RFC 5869). HMAC is HMAC-SHA256. AEAD is ChaCha20-Poly1305 (RFC 8439).
 
-## 1. Epochs
+## 1. Generations and epochs
 
-An **epoch** is a numbered period with its own key. Epochs are numbered from 1. Every member holds the circle root, so every member can derive the key of any epoch, and starting one spends nothing:
+A **generation** has a 32-byte id and a key. Generation 0's id is derived from the circle id, so every circle starts in it and no member has to do anything. Every later generation has a random id, named by a signed bump (below). A member who holds the root derives the key of any generation from its id:
+
+```
+gen0_id        = SHA-256("cahoots/chat/gen0" || circle_id)
+generation_key = HMAC-SHA256(root, "chat/gen" || circle_id || generation_id)
+```
+
+A device that holds one generation key and not the root can chat in that generation. It cannot derive the next one, so a bump leaves it behind until someone gives it the next key. This is how a device is revoked: bump, and do not give it the key.
+
+An **epoch** is a numbered period inside a generation, with its own key. Epochs are numbered from 1. Whoever holds the generation key derives the key of any of its epochs, and starting one spends nothing:
+
+```
+epoch_key = HMAC-SHA256(generation_key, "chat/epoch" || n as u32 big-endian)
+tag       = the first 2 bytes of SHA-256(generation_id)
+epoch_id  = 0xFE (u8) | tag (2 B) | n (u16)
+```
+
+The tag lets a receiver pick the generation without the id on the wire. Two generations a session holds could share a tag by chance, one time in 65536. A receiver then tries each, and the tag check of the message decides.
+
+**Bump.** A member moves the circle to a new generation by sending a message of type `2` (bump) in the current epoch. Its plaintext is:
+
+```
+payload = generation_id (32 B) || COSE_Sign1
+signed  = "cahoots/chat/bump/v1" || circle_id || generation_id
+```
+
+The COSE_Sign1 is a detached ES256 seat signature over `signed`, with kid `[seat]` and empty external AAD. A receiver MUST verify it against the seat keys of the circle's manifest before it moves. A bump that does not verify is ignored, and the chat continues in the generation it was in. A member who holds the root then derives the new key and moves. Its epoch 1 starts at once. A device without the root has to fetch the new key. Until it does, a message in the new generation is refused as `NeedsGeneration`, with the id.
+
+A receiver keeps the keys of the current generation and the one before it, so a message sent by a member who had not yet read the bump still opens. A message from two or more generations back is refused as `NeedsGeneration`. A session never moves back to a generation it has held.
+
+**Root epochs, the old form.** Before generations, the epoch key came from the root directly, and the epoch id began with `0xFF`:
 
 ```
 epoch_id  = 0xFF (u8) | n (u32)
 epoch_key = HMAC-SHA256(root, "chat" || circle_id || n as u64 big-endian)
 ```
 
-This is the chat key of `docs/protocol.md` section 3.6. The first byte of the epoch id is `0xFF` for every root epoch.
+This is the chat key of `docs/protocol.md` section 3.6. No new message uses a root epoch. A receiver that holds the root still opens them, so old history reads. A chat state saved before generations imports as generation 0, with its root epochs kept for reading.
 
-Pad epochs are retired as of 2026-10-30. In version 1 of this document, an epoch was keyed by 32 bytes spent from a member's slice, and its id was the slice and offset of that spend. A receiver MUST refuse an epoch id whose first byte is not `0xFF`, as `PadEpoch`, before it checks the tag. The pad is now spent only by pure-pad messages.
+Pad epochs are retired as of 2026-10-30. In version 1 of this document, an epoch was keyed by 32 bytes spent from a member's slice, and its id was the slice and offset of that spend. A receiver MUST refuse an epoch id whose first byte is not `0xFE` or `0xFF`, as `PadEpoch`, before it checks the tag. The pad is now spent only by pure-pad messages.
 
-There is no separate rotation message. Every chat message carries its `epoch_id` in the header. A member starts a new epoch by sending in epoch `h + 1`, where `h` is the highest epoch it has seen or started. A receiver that sees an unknown epoch `n`:
+There is no separate rotation message. Every chat message carries its `epoch_id` in the header. A member starts a new epoch by sending in epoch `h + 1` of the current generation, where `h` is the highest epoch of that generation it has seen or started. A receiver that sees an unknown epoch `n` of a generation it holds:
 
-1. refuses it as `UnknownEpoch` if `n` is 0, or if `n` is at or below an epoch whose state it has dropped;
+1. refuses it as `UnknownEpoch` if `n` is 0, or if `n` is at or below an epoch of that generation whose state it has dropped,
 2. derives `epoch_key` and the sender chains below, and keeps them only if the message decrypts.
 
 There is no bound on how far ahead `n` may be. Each attempt costs one HMAC, and a message whose tag fails installs nothing. A member who missed many epochs reads the latest one directly.
 
-A member SHOULD start a new epoch after `ROTATE_AFTER = 1000` of its own messages in the current epoch, or after 24 hours, whichever comes first. The time rule is not implemented. `cahoots-chat` rotates on count only. Members SHOULD switch to the newest epoch they have seen. Two epochs MAY be live at once while members switch. Messages from older epochs still open if their epoch is at or above the floor, that is, above every epoch whose state this member has dropped. A receiver keeps at most `MAX_EPOCHS = 4` epoch states and drops the lowest. It does not derive a dropped epoch again, because fresh chains would accept the old messages a second time.
+A member SHOULD start a new epoch after `ROTATE_AFTER = 1000` of its own messages in the current epoch, or after 24 hours, whichever comes first. The time rule is not implemented. `cahoots-chat` rotates on count only. Members SHOULD switch to the newest epoch they have seen. Two epochs MAY be live at once while members switch. Messages from older epochs still open if their epoch is above the floor, that is, above every epoch of that generation whose state this member has dropped. A receiver keeps at most `MAX_EPOCHS = 4` epoch states per generation and drops the lowest. It does not derive a dropped epoch again, because fresh chains would accept the old messages a second time.
 
 ## 2. Sender chains
 
@@ -43,19 +73,29 @@ Out-of-order delivery: a receiver that gets counter `n` while expecting `m < n` 
 ## 3. Message format
 
 ```
-header = version (u8 = 2) | circle_id (16 B) | epoch_id (5 B) | sender (u8) | counter (u32) | len (u32) | type (u8)
+header = 2 (u8) | circle_id (16 B) | epoch_id (5 B) | sender (u8) | counter (u32) | len (u32) | type (u8)
 nonce  = sender (u8) | counter (u32) | 0x00 * 7         // 12 bytes; unique per message key anyway
 ct     = ChaCha20-Poly1305(key = msg_key[sender][counter], nonce, aad = header, plaintext)
 message = header || ct                                  // ct includes the 16-byte AEAD tag
 ```
 
-Version `2` distinguishes chat messages from pure-pad messages (version `1`) on the same feed. `type`: `0` text, `1` control (reserved). `len` is the plaintext length. Plaintext SHOULD be bucket-padded to 64, 256, 1024, or 4096 bytes.
+The first byte is `2` in every chat message, the version the relay checks. It distinguishes chat messages from pure-pad messages (version `1`) and ceremony messages (version `3`) on the same feed. A client reads the chat version from the epoch id instead: `3` for a `0xFE` epoch, `2` for an old `0xFF` root epoch. Do not write `3` into the first byte. The relay would read the message as a ceremony message and refuse it.
+
+`type`:
+
+| Value | Type | Plaintext |
+|---|---|---|
+| `0` | text | The message text |
+| `1` | control | Reserved |
+| `2` | bump | `generation_id` and a seat's signature, section 1 |
+| `3` | card | A seat-signed contact card |
+ `len` is the plaintext length. Plaintext SHOULD be bucket-padded to 64, 256, 1024, or 4096 bytes.
 
 The `sender` field is a claim. Any member can compute any sender's chain. It identifies a chain, not a person, as slices do for pure-pad messages.
 
 ## 4. Your own sending position
 
-Every key depends only on the root, the epoch, the sender and the counter. A device that sent from a counter and then lost or rolled back its chat state would send from that counter again, under the same key and nonce. That leaks the XOR of two plaintexts and allows forgeries. Two rules prevent it:
+Every key depends only on the generation, the epoch, the sender and the counter. A device that sent from a counter and then lost or rolled back its chat state would send from that counter again, under the same key and nonce. That leaks the XOR of two plaintexts and allows forgeries. Two rules prevent it:
 
 - A device writes its chat state before it posts a message, and never rolls it back.
 - After a restart or a restore, a device reads the relay to the end before its first send. It feeds its own messages to its session too. The session does not decrypt them. It checks the tag and moves its own chain past each one. A session refuses to send with `NotSynced` until the caller marks a full read done (`mark_synced`).
@@ -75,8 +115,8 @@ An epoch costs nothing. The pad is not spent by chat.
 
 ## 7. The relay
 
-Chat messages travel over the Numbers Station: an append-only, hash-chained public log that stores ciphertext, orders it, and refuses pure-pad range reuse. It does not check the epoch id of a chat message. Replay protection lives in each member's chains. The relay's API and log format are in `crates/station/README.md`.
+Chat messages travel over the Numbers Station: an append-only, hash-chained public log that stores ciphertext, orders it, and refuses pure-pad range reuse. It does not check the epoch id of a chat message, so generations change nothing for it. Replay protection lives in each member's chains. The relay's API and log format are in `crates/station/README.md`.
 
 ## 8. Vectors
 
-`crates/vectors/chat.json` covers the key of root epoch 7 for the root and circle of `crates/vectors/root.json`, chain and message keys for two senders, three encrypted messages including one out of order, and a tampered message that MUST fail. Its epoch key equals the chat key `root.json` publishes for epoch 7.
+`crates/vectors/chat.json` covers epoch 7 of generation 0 for the root and circle of `crates/vectors/root.json`: the generation id and key, the epoch id and key, chain and message keys for two senders, three encrypted messages including one out of order, and a tampered message that MUST fail. Its generation key equals the one `root.json` publishes for generation 0. It covers a bump signed by seat 1 of the ceremony in `crates/vectors/ceremony.json`, with a tampered bump that MUST fail. Under `root_epochs` it keeps the same set for root epoch 7, the old form, whose epoch key equals the chat key `root.json` publishes for epoch 7.

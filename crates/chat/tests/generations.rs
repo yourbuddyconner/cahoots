@@ -79,7 +79,10 @@ fn three_sessions_chat_in_generation_zero_and_rotate_for_free() {
         if i != 2 {
             assert_eq!(m.receive(&w3).unwrap().1, b"three");
         }
-        assert_eq!(m.current_epoch().unwrap().generation_parts(), Some((tag, 3)));
+        assert_eq!(
+            m.current_epoch().unwrap().generation_parts(),
+            Some((tag, 3))
+        );
     }
 }
 
@@ -114,10 +117,7 @@ fn a_bump_moves_every_root_holder_and_locks_out_a_device_without_the_key() {
     assert_eq!(d.generation_id(), gen0_id(&CID));
 
     let w = a.send(b"after").unwrap();
-    assert_eq!(
-        epoch_of(&w),
-        EpochId::generation(generation_tag(&ID1), 1)
-    );
+    assert_eq!(epoch_of(&w), EpochId::generation(generation_tag(&ID1), 1));
     assert_eq!(b.receive(&w).unwrap().1, b"after");
     assert_eq!(d.receive(&w), Err(ChatError::NeedsGeneration(ID1)));
 
@@ -230,7 +230,9 @@ fn the_last_two_generations_stay_open() {
     let mut c = member(2);
     // c sends in generation 0 before it reads the bump.
     let straggler0 = c.send(b"late in gen 0").unwrap();
-    let wire = a.send_bump(ID1, &sign_bump(&seat_key(0), 0, &CID, &ID1).unwrap()).unwrap();
+    let wire = a
+        .send_bump(ID1, &sign_bump(&seat_key(0), 0, &CID, &ID1).unwrap())
+        .unwrap();
     b.receive(&wire).unwrap();
     b.bump(ID1).unwrap();
     assert_eq!(b.receive(&straggler0).unwrap().1, b"late in gen 0");
@@ -244,7 +246,9 @@ fn the_last_two_generations_stay_open() {
         late.send(b"also late").unwrap()
     };
     let straggler1 = c.send(b"late in gen 1").unwrap();
-    let wire2 = a.send_bump(ID2, &sign_bump(&seat_key(0), 0, &CID, &ID2).unwrap()).unwrap();
+    let wire2 = a
+        .send_bump(ID2, &sign_bump(&seat_key(0), 0, &CID, &ID2).unwrap())
+        .unwrap();
     b.receive(&wire2).unwrap();
     b.bump(ID2).unwrap();
     assert_eq!(b.generation_id(), ID2);

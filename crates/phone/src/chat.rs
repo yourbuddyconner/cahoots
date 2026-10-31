@@ -165,7 +165,7 @@ impl Circle {
                             sender: h.sender,
                             mine: false,
                             text,
-                            epoch: h.epoch.number().unwrap_or(0),
+                            epoch: epoch_number(h.epoch),
                             seq: Some(seq),
                         };
                         self.settings.unread = self.settings.unread.saturating_add(1);
@@ -227,8 +227,7 @@ impl Circle {
             epoch: self
                 .session
                 .current_epoch()
-                .and_then(|e| e.number())
-                .unwrap_or(0),
+                .map_or(0, epoch_number),
             seq: None,
         };
         // The chain step, the ciphertext and the history line are on disk in one write
@@ -320,4 +319,12 @@ pub(crate) fn parse_entries(body: &[u8]) -> Result<Vec<(u64, Vec<u8>)>, PhoneErr
         out.push((seq, msg));
     }
     Ok(out)
+}
+
+/// The number of an epoch: `n` in a generation, or an old root epoch's number. 0 for neither.
+fn epoch_number(id: cahoots_chat::EpochId) -> u32 {
+    id.generation_parts()
+        .map(|(_, n)| u32::from(n))
+        .or(id.number())
+        .unwrap_or(0)
 }

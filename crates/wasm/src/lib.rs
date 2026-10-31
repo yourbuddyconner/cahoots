@@ -746,12 +746,15 @@ fn chat_err(e: ChatError) -> String {
         ChatError::NotSynced => "not-synced".into(),
         ChatError::PadEpoch => "pad-epoch".into(),
         ChatError::State => "state".into(),
+        ChatError::NeedsGeneration(_) => "needs-generation".into(),
+        ChatError::BadSignature => "bad-signature".into(),
     }
 }
 
-/// A root epoch as its number, `"3"`. A retired pad epoch id never gets this far.
+/// An epoch as its number, `"3"`: `n` in a generation, or an old root epoch's number. A retired
+/// pad epoch id never gets this far.
 fn epoch_str(id: EpochId) -> String {
-    match id.number() {
+    match id.generation_parts().map(|(_, n)| u32::from(n)).or(id.number()) {
         Some(n) => n.to_string(),
         None => format!("{}:{}", id.slice, id.offset),
     }

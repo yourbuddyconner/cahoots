@@ -10,9 +10,9 @@ Generated from `cahoots-core` and `cahoots-objects`. Regenerate with `cargo run 
 | `spend.json` | Two sends, sender erasure, receiver replay rejection, ledger contents |
 | `frames.json` | Touch-link framing with CRC-32 |
 | `objects.json` | The four signed objects: a root grant and a delegated grant, an approval, a fact and a receipt, and a sign grant with an agent's proof, each with its inputs, canonical CBOR payload, COSE_Sign1 and JSON projection, against a three-seat manifest |
-| `chat.json` | Chat on root epochs: the key of root epoch 7 for the root and circle of `root.json`, chain and message keys for two senders, three messages, and a tampered message. Written by `crates/chat/tests/vectors.rs`, not by this crate |
+| `chat.json` | Chat by generation: generation 0's id and key for the root and circle of `root.json`, the key of its epoch 7, chain and message keys for two senders, three messages, and a tampered message. A bump signed by seat 1 of `ceremony.json`, and a tampered one. The same set for root epoch 7, the old form, which still opens. Written by `crates/chat/tests/vectors.rs`, not by this crate |
 | `channels.json` | Channels (protocol section 8.9): a link and its derived keys, an epoch's keys and chains, a channel object, the policy presets and one signed policy, a grant chain of depth 2, a link deposit and a key deposit, and a text message, a rotation, a revocation and an announcement with approvals. Reproduced by `crates/channel/tests/vectors.rs`. Not to be confused with `channel.json`, the ceremony channel of section 3.7 |
-| `root.json` | The circle root from the content keys of the ceremony in `ceremony.json`, chat keys for four epochs, and seal keys for two labels, among them the card seal key |
+| `root.json` | The circle root from the content keys of the ceremony in `ceremony.json`, chat keys for four old root epochs, generation 0's id, two generation keys, and seal keys for two labels, among them the card seal key |
 | `ssh.json` | Requests to sign for ssh and git: four logins (bound to a P-256 host key, host-bound, unbound, bound to another session) and a git commit, each with the badge's screen lines and the signature it returns |
 
 All byte strings are lowercase hex.
@@ -27,7 +27,7 @@ Per-member fields are arrays with one entry per member, in seat order: `seat_see
 
 ## `root.json` fields
 
-`content_keys` are the three reveal content keys of the ceremony in `ceremony.json`, in seat order, and `circle_id` is that ceremony's circle id. `root` is HKDF-SHA256 over the content keys concatenated, with the circle id as salt and `cahoots/root/v1` as info. `chat_keys` gives HMAC-SHA256(root, `chat` || circle_id || epoch as 8 bytes big-endian) for each `epoch`, and `seal_keys` gives HMAC-SHA256(root, label || circle_id) for each `label`. The test `the_root_vectors_are_reproduced` in `crates/core/tests/root.rs` rebuilds them.
+`content_keys` are the three reveal content keys of the ceremony in `ceremony.json`, in seat order, and `circle_id` is that ceremony's circle id. `root` is HKDF-SHA256 over the content keys concatenated, with the circle id as salt and `cahoots/root/v1` as info. `chat_keys` gives HMAC-SHA256(root, `chat` || circle_id || epoch as 8 bytes big-endian) for each `epoch`, the key of an old root epoch. `gen0_id` is SHA-256(`cahoots/chat/gen0` || circle_id), and `generation_keys` gives HMAC-SHA256(root, `chat/gen` || circle_id || generation_id) for each `generation_id`. and `seal_keys` gives HMAC-SHA256(root, label || circle_id) for each `label`. The test `the_root_vectors_are_reproduced` in `crates/core/tests/root.rs` rebuilds them.
 
 ## `ssh.json` fields
 

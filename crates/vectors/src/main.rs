@@ -807,6 +807,16 @@ fn root_vectors(case: &RootCase) -> Value {
             })
         })
         .collect();
+    let gen0 = root::gen0_id(&case.circle_id);
+    let generations: Vec<Value> = [gen0, [0xb1; 32]]
+        .iter()
+        .map(|id| {
+            json!({
+                "generation_id": hex::encode(id),
+                "key": hex::encode(root::chat_gen_key(&case.root, &case.circle_id, id)),
+            })
+        })
+        .collect();
     let seal: Vec<Value> = [root::SEAL_CARD, b"seal/notes".as_slice()]
         .iter()
         .map(|label| {
@@ -817,12 +827,14 @@ fn root_vectors(case: &RootCase) -> Value {
         })
         .collect();
     json!({
-        "description": "The circle root and the keys derived from it (crates/core/src/root.rs, docs/superpowers/specs/2026-10-28-chip-apps-design.md section 2). content_keys are the reveal content keys of the ceremony in ceremony.json, in seat order, and circle_id is that ceremony's circle id. root = HKDF-SHA256(ikm = content_keys concatenated in seat order, salt = circle_id, info = \"cahoots/root/v1\"), 32 bytes. A chat key is HMAC-SHA256(root, \"chat\" || circle_id || epoch as 8 bytes big-endian). A seal key is HMAC-SHA256(root, label || circle_id); the card seal key is the one labelled seal/card.",
+        "description": "The circle root and the keys derived from it (crates/core/src/root.rs, docs/superpowers/specs/2026-10-28-chip-apps-design.md section 2). content_keys are the reveal content keys of the ceremony in ceremony.json, in seat order, and circle_id is that ceremony's circle id. root = HKDF-SHA256(ikm = content_keys concatenated in seat order, salt = circle_id, info = \"cahoots/root/v1\"), 32 bytes. gen0_id is the id of chat generation 0, SHA-256(\"cahoots/chat/gen0\" || circle_id). A generation key is HMAC-SHA256(root, \"chat/gen\" || circle_id || generation_id), given for generation 0 and for the id the bump in chat.json names. A chat key is HMAC-SHA256(root, \"chat\" || circle_id || epoch as 8 bytes big-endian), the key of an old root epoch, which no new message uses. A seal key is HMAC-SHA256(root, label || circle_id); the card seal key is the one labelled seal/card.",
         "source": "ceremony.json",
         "circle_id": hex::encode(case.circle_id),
         "content_keys": case.content_keys.iter().map(hex::encode).collect::<Vec<_>>(),
         "root": hex::encode(case.root),
         "chat_keys": chat,
+        "gen0_id": hex::encode(gen0),
+        "generation_keys": generations,
         "seal_keys": seal,
     })
 }

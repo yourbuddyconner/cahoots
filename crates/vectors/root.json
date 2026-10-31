@@ -23,7 +23,18 @@
     "7087acf0185097783655de05993f0b4d4204280ca1c79b699735781695a62309",
     "349e9960410b824f20f0b26619601129fa6ea844140160ddcb39c6b054b69992"
   ],
-  "description": "The circle root and the keys derived from it (crates/core/src/root.rs, docs/superpowers/specs/2026-10-28-chip-apps-design.md section 2). content_keys are the reveal content keys of the ceremony in ceremony.json, in seat order, and circle_id is that ceremony's circle id. root = HKDF-SHA256(ikm = content_keys concatenated in seat order, salt = circle_id, info = \"cahoots/root/v1\"), 32 bytes. A chat key is HMAC-SHA256(root, \"chat\" || circle_id || epoch as 8 bytes big-endian). A seal key is HMAC-SHA256(root, label || circle_id); the card seal key is the one labelled seal/card.",
+  "description": "The circle root and the keys derived from it (crates/core/src/root.rs, docs/superpowers/specs/2026-10-28-chip-apps-design.md section 2). content_keys are the reveal content keys of the ceremony in ceremony.json, in seat order, and circle_id is that ceremony's circle id. root = HKDF-SHA256(ikm = content_keys concatenated in seat order, salt = circle_id, info = \"cahoots/root/v1\"), 32 bytes. gen0_id is the id of chat generation 0, SHA-256(\"cahoots/chat/gen0\" || circle_id). A generation key is HMAC-SHA256(root, \"chat/gen\" || circle_id || generation_id), given for generation 0 and for the id the bump in chat.json names. A chat key is HMAC-SHA256(root, \"chat\" || circle_id || epoch as 8 bytes big-endian), the key of an old root epoch, which no new message uses. A seal key is HMAC-SHA256(root, label || circle_id); the card seal key is the one labelled seal/card.",
+  "gen0_id": "c29a2d181acd420b24ae8839f576e6c23c9b029c8c3b69c2db2f61735ac10e18",
+  "generation_keys": [
+    {
+      "generation_id": "c29a2d181acd420b24ae8839f576e6c23c9b029c8c3b69c2db2f61735ac10e18",
+      "key": "53c1910e00121dd5e9a4b0f807b05cb912d7e27a56f04e107bd22d5af166228b"
+    },
+    {
+      "generation_id": "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+      "key": "a7d3f3f1b9e8bcd26b5ee5e41e980e08aed7dd42f243e1aa4c7e103cb7e4a2b7"
+    }
+  ],
   "root": "46698fd55ab2a5a50e36dbb17f6fe7bc394a77928305cb194e5cae0b2da9ea2a",
   "seal_keys": [
     {

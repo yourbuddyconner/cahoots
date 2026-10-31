@@ -448,6 +448,31 @@ fn the_root_vectors_are_reproduced() {
         let epoch = c["epoch"].as_u64().unwrap();
         assert_eq!(root::chat_key(&root, &circle_id, epoch).to_vec(), bytes(&c["key"]));
     }
+    let gen0 = root::gen0_id(&circle_id);
+    assert_eq!(gen0.to_vec(), bytes(&v["gen0_id"]));
+    // Both derivations, written out with the hash and the MAC directly.
+    use sha2::Digest;
+    let mut h = Sha256::new();
+    h.update(b"cahoots/chat/gen0");
+    h.update(circle_id);
+    assert_eq!(gen0, <[u8; 32]>::from(h.finalize()));
+    let mut m = <Hmac<Sha256> as Mac>::new_from_slice(&root).unwrap();
+    m.update(b"chat/gen");
+    m.update(&circle_id);
+    m.update(&gen0);
+    assert_eq!(
+        root::chat_gen_key(&root, &circle_id, &gen0),
+        <[u8; 32]>::from(m.finalize().into_bytes())
+    );
+    let gens = v["generation_keys"].as_array().unwrap();
+    assert_eq!(gens[0]["generation_id"], v["gen0_id"]);
+    for g in gens {
+        let id: [u8; 32] = bytes(&g["generation_id"]).try_into().unwrap();
+        assert_eq!(
+            root::chat_gen_key(&root, &circle_id, &id).to_vec(),
+            bytes(&g["key"])
+        );
+    }
     let seal = v["seal_keys"].as_array().unwrap();
     assert_eq!(seal[0]["label"], "seal/card");
     for c in seal {
