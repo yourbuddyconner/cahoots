@@ -13,3 +13,9 @@ ureq = { version = "2.12", default-features = false, features = ["json"] }
 serde_json = "1"
 base64 = "0.22"
 hex = "0.4"
+
+[dev-dependencies]
+cahoots-station = { path = "../station", features = ["objects", "channels"] }
+tokio = { version = "1.44", features = ["rt-multi-thread", "macros", "net"] }
+axum = { version = "0.7.9", default-features = false, features = ["http1", "tokio"] }
+tempfile = "3.10"
