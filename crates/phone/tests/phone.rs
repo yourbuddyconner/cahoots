@@ -688,7 +688,7 @@ fn two_phones_hold_a_ceremony_through_the_relay() {
     assert!(a.phone.set_default_relay("relay.test".into()).is_err());
     let ida = a.phone.start_ceremony("park".into(), 2, PAD, true).unwrap();
     let offer = a.phone.offer_code(ida.clone()).unwrap();
-    assert!(offer.starts_with("cahoots:ceremony:v1:"), "{offer}");
+    assert!(offer.starts_with("cahoots:ceremony:v2:"), "{offer}");
     // The offer fits one small code.
     assert!(a.phone.qr_matrix(offer.clone()).unwrap().size <= 49, "{} characters", offer.len());
     // Scanned before joining: the circle and its size, to pick a seat.

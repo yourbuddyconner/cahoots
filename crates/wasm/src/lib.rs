@@ -171,7 +171,7 @@ fn offer_err(e: ChannelError) -> String {
     }
 }
 
-/// The circle's parameter bytes in a host's offer (`cahoots:ceremony:v1:...`), to show the seat
+/// The circle's parameter bytes in a host's offer (`cahoots:ceremony:v2:...`), to show the seat
 /// picker before joining. Errors: `"not-an-offer"`, `"offer"` (an offer that does not read).
 #[wasm_bindgen]
 pub fn offer_params(text: &str) -> Result<Vec<u8>, String> {
@@ -300,7 +300,7 @@ impl WasmCeremony {
         let host = commitment_hash(&self.commitment());
         let channel = Channel::new(&mut OsRng);
         let text = channel
-            .offer(self.inner.params(), relay, &host)
+            .offer(self.inner.params(), relay, &host, 0)
             .map_err(|_| "relay-too-long".to_string())?;
         self.mailbox = Some(Mailbox::for_host(channel));
         self.gate = Some(Gate::new());

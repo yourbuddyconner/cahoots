@@ -44,7 +44,7 @@ fn params() -> CircleParams {
 #[test]
 fn offer_round_trips() {
     let ch = Channel::new(&mut rng(1));
-    let text = ch.offer(&params(), RELAY, &HOST).unwrap();
+    let text = ch.offer(&params(), RELAY, &HOST, 0).unwrap();
     assert!(text.starts_with(OFFER_PREFIX), "{text}");
     // One small static code: well under what a version 10 QR code holds at low correction.
     assert!(text.len() < 200, "{} characters", text.len());
@@ -68,7 +68,7 @@ fn offer_round_trips() {
     );
     // Parameters that do not read are refused.
     // A relay address longer than its one-byte length is refused.
-    assert_eq!(ch.offer(&params(), &"x".repeat(256), &HOST).unwrap_err(), ChannelError::Malformed);
+    assert_eq!(ch.offer(&params(), &"x".repeat(256), &HOST, 0).unwrap_err(), ChannelError::Malformed);
     let mut bad = text.clone();
     bad.truncate(text.len() - 2);
     assert!(Channel::from_offer(&bad).is_err());
@@ -238,7 +238,7 @@ fn reproduces_the_channel_vector() {
     let relay = v["relay"].as_str().unwrap();
     let host: [u8; 32] = h(&v["host_commitment_hash"]).try_into().unwrap();
     assert_eq!(host, cahoots_core::channel::commitment_hash(&h(&v["host_commitment"])));
-    assert_eq!(ch.offer(&params, relay, &host).unwrap(), v["offer"].as_str().unwrap());
+    assert_eq!(ch.offer(&params, relay, &host, 0).unwrap(), v["offer"].as_str().unwrap());
     let o = Channel::from_offer(v["offer"].as_str().unwrap()).unwrap();
     assert_eq!((o.relay.as_str(), o.host), (relay, host));
     let j = &v["join"];
@@ -284,4 +284,44 @@ fn the_host_takes_only_a_scanned_commitment() {
     // Once taken, later commitments for the seat are ignored.
     g.commitment(2, intruder);
     assert!(g.ready().is_empty() && g.unscanned().is_empty());
+}
+
+#[test]
+fn an_offer_round_trips_its_badge_count() {
+    let p = CircleParams::new(4, 65536, "park", false).unwrap();
+    let ch = Channel::new(&mut rng(10));
+    let text = ch.offer(&p, RELAY, &HOST, 2).unwrap();
+    assert!(text.starts_with("cahoots:ceremony:v2:"), "{text}");
+    let o = Channel::from_offer(&text).unwrap();
+    assert_eq!(o.badges, 2);
+    assert_eq!(o.params, p);
+    assert_eq!(o.relay, RELAY);
+    assert!(!o.is_badge_seat(0));
+    assert!(o.is_badge_seat(1) && o.is_badge_seat(2));
+    assert!(!o.is_badge_seat(3));
+}
+
+#[test]
+fn a_v1_offer_is_refused_as_older() {
+    assert_eq!(
+        Channel::from_offer("cahoots:ceremony:v1:AAAA").unwrap_err(),
+        ChannelError::OlderOffer
+    );
+}
+
+#[test]
+fn a_v3_offer_is_refused_as_newer() {
+    assert_eq!(
+        Channel::from_offer("cahoots:ceremony:v3:AAAA").unwrap_err(),
+        ChannelError::NewerOffer
+    );
+}
+
+#[test]
+fn a_badge_count_at_or_above_n_is_malformed() {
+    let ch = Channel::new(&mut rng(11));
+    assert_eq!(
+        ch.offer(&params(), RELAY, &HOST, 3).unwrap_err(),
+        ChannelError::Malformed
+    );
 }

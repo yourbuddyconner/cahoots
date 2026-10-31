@@ -51,7 +51,7 @@ fn three_browsers_hold_a_ceremony_through_a_mem_relay() {
     let mut host = member(0, None);
     assert!(!host.through_relay());
     let offer = host.offer(RELAY).unwrap();
-    assert!(offer.starts_with("cahoots:ceremony:v1:"), "{offer}");
+    assert!(offer.starts_with("cahoots:ceremony:v2:"), "{offer}");
     assert!(host.through_relay());
     // The offer is the same each time it is shown.
     assert_eq!(host.offer("https://elsewhere.test").unwrap(), offer);

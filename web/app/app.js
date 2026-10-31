@@ -64,7 +64,7 @@ const CEREMONY_POLL_MS = 2000; // a ceremony through the relay reads the relay e
 const LOST = 'Setup couldn’t be restored after Cahoots closed. Ask everyone to start a new ceremony and scan the new code.';
 /** A ceremony in memory is gone after a reload or a close. Joining it again cannot work. */
 const ceremonyLost = () => screen({ title: 'Ceremony lost', body: [h('div', {}, h('h1', {}, 'This setup session has ended'), h('p', { class: 'lead' }, LOST), h('p', { class: 'muted' }, 'Nothing was kept.'))], actions: [btn('Back to start', () => go('#/'), 'primary')] });
-const OFFER_PREFIX = 'cahoots:ceremony:v1:';
+const OFFER_PREFIX = 'cahoots:ceremony:v2:';
 const JOINED_PREFIX = 'cahoots:joined:v1:';
 const QR_PACKET = 300;   // payload bytes per animated frame: ~77 modules per side, readable by phone cameras
 const QR_FPS = 10;
@@ -536,9 +536,9 @@ function screenJoin() {
   const take = (text) => (text.trim().startsWith(OFFER_PREFIX) ? acceptOffer(text) : accept(parseTagged(text)));
   screen({
     title: 'Join a ceremony', back: '#/',
-    menu: () => sheet(h('h2', {}, 'No camera?'), btn('Paste a code', () => pasteSheet('cahoots:ceremony:v1:…', take)), fileBtn('Load a file', take)),
+    menu: () => sheet(h('h2', {}, 'No camera?'), btn('Paste a code', () => pasteSheet('cahoots:ceremony:v2:…', take)), fileBtn('Load a file', take)),
     body: [next('Scan the host\'s code.'), h('p', { class: 'muted' }, 'For a ceremony with codes only, scan anyone who has joined. Their code is a short animation.'), fountainReceiver((bytes) => accept(parsePacked(bytes)), 'Fill the frame with the code', take).el, err],
-    actions: [link('No camera? Paste a code', () => pasteSheet('cahoots:ceremony:v1:…', take))],
+    actions: [link('No camera? Paste a code', () => pasteSheet('cahoots:ceremony:v2:…', take))],
   });
 }
 

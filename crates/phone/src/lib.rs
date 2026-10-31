@@ -575,7 +575,7 @@ impl Phone {
     }
 
     /// Join a ceremony held through the relay as `seat` (from 0), from the host's code
-    /// (`cahoots:ceremony:v1:...`). Seat 0 is the host's. Returns the ceremony id. The
+    /// (`cahoots:ceremony:v2:...`). Seat 0 is the host's. Returns the ceremony id. The
     /// ceremony, and the circle it makes, use the host's relay from the code, whatever this
     /// phone's default is. Of two devices on one seat, the one whose setup reached the relay
     /// second is told (`seat_lost`) and posts nothing more.
