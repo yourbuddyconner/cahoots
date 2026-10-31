@@ -17,7 +17,7 @@ use cahoots_channel::link::{Link, LinkSecret};
 use cahoots_channel::message::{self, MessageType};
 use cahoots_channel::object::channel_id_for;
 use cahoots_channel::policy::{self, kind, Rule};
-use cahoots_channel::quorum::{check_quorum, PROFILE_POST};
+use cahoots_channel::quorum::{approval_for, check_quorum, PROFILE_POST};
 use cahoots_channel::session::ChannelSession;
 use cahoots_channel::{Action, ChannelError, ChannelId, ChannelObject, Policy, Preset, Refusal};
 use cahoots_core::cose;
@@ -25,6 +25,7 @@ use cahoots_core::manifest::{Manifest, SealedManifest};
 use cahoots_core::seat::{SeatKey, SeatPublic};
 use cahoots_core::CircleId;
 use cahoots_hpke::Suite;
+use cahoots_objects::assurance;
 use cahoots_objects::authz::proof_sign;
 use minicbor::{Decoder, Encoder};
 use rand_core::{OsRng, RngCore};
@@ -403,6 +404,9 @@ struct MemberState {
     policy: Option<Vec<u8>>,
     /// Grant ids revoked by control messages this member has read.
     revoked: Vec<[u8; 16]>,
+    /// An announcement sealed by `propose_announcement` and not yet signed: its body
+    /// (header and ciphertext), whose counter is already spent.
+    pending: Option<Vec<u8>>,
 }
 
 impl Drop for MemberState {
@@ -428,6 +432,7 @@ impl MemberState {
             grant: Vec::new(),
             policy: None,
             revoked: Vec::new(),
+            pending: None,
         }
     }
 
@@ -455,7 +460,7 @@ impl MemberState {
         ))));
         let _ = (|| -> Result<(), minicbor::encode::Error<Infallible>> {
             let e = &mut e;
-            e.map(11)?.u8(0)?.u8(STATE_VERSION)?;
+            e.map(12)?.u8(0)?.u8(STATE_VERSION)?;
             e.u8(1)?.str(&self.relay)?;
             e.u8(2)?.bytes(&self.channel_id)?;
             e.u8(3)?;
@@ -474,13 +479,15 @@ impl MemberState {
             for r in &self.revoked {
                 e.bytes(r)?;
             }
+            e.u8(11)?;
+            opt_bytes(e, self.pending.as_deref())?;
             Ok(())
         })();
         e.into_writer().0
     }
 
     fn import(bytes: &[u8]) -> Result<MemberState, String> {
-        let mut r = StateReader::open(bytes, 11)?;
+        let mut r = StateReader::open(bytes, 12)?;
         let relay = r.key()?.str().map_err(|_| s(STATE))?.to_string();
         let channel_id: ChannelId = r.array()?;
         let secret = match r.opt_bytes()? {
@@ -502,6 +509,7 @@ impl MemberState {
             .into_iter()
             .map(|b| b.try_into().map_err(|_| s(STATE)))
             .collect::<Result<Vec<[u8; 16]>, String>>()?;
+        let pending = r.opt_bytes()?.map(<[u8]>::to_vec);
         r.finish()?;
         let state = MemberState {
             relay,
@@ -514,6 +522,7 @@ impl MemberState {
             grant,
             policy,
             revoked,
+            pending,
         };
         if *state.export() != *bytes {
             return Err(s(STATE));
@@ -792,6 +801,52 @@ impl ChannelMember {
         Ok(b64_encode(&wire))
     }
 
+    /// Seal an announcement in the current epoch and keep it unsigned, for seats to approve.
+    /// Returns the body (header and ciphertext). The counter is spent now, so the body is the
+    /// one the relay will see: get its digest with `announcement_digest`, collect seat
+    /// approvals of it (`ChannelOwner::approve_post`), then `send_proposed`. A new proposal
+    /// replaces one not yet sent. The text is sent as given: pad it first.
+    /// Error: `unknown-epoch`.
+    pub fn propose_announcement(&mut self, text: &[u8]) -> Result<Vec<u8>, String> {
+        let mut st = self.inner.borrow_mut();
+        // The session seals and signs in one step; the signature over no approvals is
+        // dropped, and `send_proposed` signs the same body again with the approvals.
+        let wire = st
+            .session
+            .send(MessageType::Announcement, text, &[])
+            .map_err(err)?;
+        let (body, _, _) = message::split(&wire).map_err(err)?;
+        let body = body.to_vec();
+        st.pending = Some(body.clone());
+        Ok(body)
+    }
+
+    /// `SHA-256` of the pending announcement's body, hex: the `request_digest` its approvals
+    /// sign. Error: `no-proposal`.
+    pub fn announcement_digest(&self) -> Result<String, String> {
+        let st = self.inner.borrow();
+        let body = st.pending.as_ref().ok_or_else(|| s("no-proposal"))?;
+        Ok(hex(&message::body_digest(body)))
+    }
+
+    /// Sign the pending announcement with `approvals` (a CBOR array of signed approvals) and
+    /// return its base64url wire; the proposal is then gone. Errors: `no-proposal`,
+    /// `malformed`.
+    pub fn send_proposed(&mut self, approvals: &[u8]) -> Result<String, String> {
+        let approvals = read_bytes_array(approvals)?;
+        let refs: Vec<&[u8]> = approvals.iter().map(Vec::as_slice).collect();
+        let mut st = self.inner.borrow_mut();
+        let body = st.pending.take().ok_or_else(|| s("no-proposal"))?;
+        let mut aad = Vec::with_capacity(message::DOMAIN.len() + body.len());
+        aad.extend_from_slice(message::DOMAIN);
+        aad.extend_from_slice(&body);
+        let kid = st.session.my_kid();
+        let signature = cose::sign1(&st.key(), &kid, &bytes_array(&refs), &aad, false);
+        let mut wire = body;
+        wire.extend_from_slice(&signature);
+        Ok(b64_encode(&wire))
+    }
+
     /// Verify and open one message.
     ///
     /// `signer_chain` is the sender's grant chain (a CBOR array of signed grants, root first,
@@ -805,7 +860,9 @@ impl ChannelMember {
     /// `posts_used = 0`, and the relay enforces both.
     ///
     /// A revocation control message is remembered: grants it names, and their children, are
-    /// refused from then on. Errors: `base64url`, `manifest`, `no-grant`, `malformed`,
+    /// refused from then on. A control message is decoded only after it is opened, and the
+    /// session commits its receiving chain on opening, so a control whose plaintext does not
+    /// decode (`malformed`) still uses up its counter: only a granted sender can make one. Errors: `base64url`, `manifest`, `no-grant`, `malformed`,
     /// `signature`, `grant:<reason>`, `no-admit`, `wrong-channel`, `refused:<reason>`
     /// (`revoked`, `action`, ...), `unknown-epoch`, `reuse`, `too-far-ahead`, `tag`.
     pub fn receive(
@@ -899,7 +956,7 @@ impl ChannelMember {
     ///
     /// `{0: 1, 1: relay tstr, 2: channel_id, 3: link secret or nil, 4: member key seed,
     ///   5: xwing_sk, 6: xwing_pk, 7: session state, 8: [grant...], 9: policy or nil,
-    ///   10: [revoked grant id...]}`
+    ///   10: [revoked grant id...], 11: pending announcement body or nil}`
     pub fn export(&self) -> Vec<u8> {
         self.inner.borrow().export().to_vec()
     }
@@ -1199,7 +1256,12 @@ impl ChannelOwner {
 
     /// Start the next epoch: draw a root, derive its key, seal it to the live link and to every
     /// admitted member, install it in the owner's member, and return the rotation control
-    /// message sealed under it (wire bytes). Post `deposits()` first, then this.
+    /// message (wire bytes). Post `deposits()` first, then this.
+    ///
+    /// The control is sealed under the previous epoch, so every member who held it, a member
+    /// being shut out included, reads which deposits to fetch; the control carries only the
+    /// epoch id and deposit ids. The new epoch is installed after it is sent. The first
+    /// rotation has no previous epoch and seals the control under the new one.
     /// Errors: `hpke` (a member's X-Wing key is bad), `reuse`.
     pub fn rotate(&mut self) -> Result<Vec<u8>, String> {
         let next = self.epoch.checked_add(1).ok_or_else(|| s("reuse"))?;
@@ -1217,17 +1279,25 @@ impl ChannelOwner {
                 deposit::seal_for_key(&key, &id, m.kid, &m.xwing_pk, &mut Rng10).map_err(err)?,
             );
         }
-        self.member
-            .inner
-            .borrow_mut()
-            .install(id, Zeroizing::new(*key))?;
+        let control = Control::Rotation {
+            epoch_id: id,
+            deposits: deposits.iter().map(Deposit::id).collect(),
+        };
+        let wire = {
+            let mut member = self.member.inner.borrow_mut();
+            if self.epoch_key.is_some() {
+                let wire = member.send_control(&control)?;
+                member.install(id, Zeroizing::new(*key))?;
+                wire
+            } else {
+                member.install(id, Zeroizing::new(*key))?;
+                member.send_control(&control)?
+            }
+        };
         self.epoch = next;
         self.epoch_key = Some(key);
         self.deposits = deposits.iter().map(Deposit::encode).collect();
-        self.send_control(&Control::Rotation {
-            epoch_id: id,
-            deposits: deposits.iter().map(Deposit::id).collect(),
-        })
+        Ok(wire)
     }
 
     /// The deposits made for the current epoch, a CBOR array of encoded deposits, each the
@@ -1450,6 +1520,36 @@ impl ChannelOwner {
         Ok(e.into_writer())
     }
 
+    /// This seat's approval of an announcement, the signed bytes to put in the array given to
+    /// `ChannelMember::send_proposed`: `profile` `channel-post`, `request_digest` the
+    /// proposal's `announcement_digest`, fields `[["channel", channel_name], ["text",
+    /// first_line]]`, the current policy's id, `log` the channel position the proposer named,
+    /// assurance present (2), a fresh nonce. Error: `digest`.
+    pub fn approve_post(
+        &self,
+        digest_hex: &str,
+        channel_name: &str,
+        first_line: &str,
+        log: u64,
+    ) -> Result<Vec<u8>, String> {
+        let digest: [u8; 32] = unhex_n(digest_hex, "digest")?;
+        Ok(approval_for(
+            &self.seat_key(),
+            self.seat,
+            &self.circle_id,
+            PROFILE_POST,
+            vec![
+                (s("channel"), channel_name.to_string()),
+                (s("text"), first_line.to_string()),
+            ],
+            digest,
+            &policy::id(&self.policy),
+            log,
+            assurance::PRESENT,
+            random::<16>(),
+        ))
+    }
+
     /// The policy change control message for the current policy (wire bytes).
     /// Error: `unknown-epoch`.
     pub fn policy_change_control(&mut self) -> Result<Vec<u8>, String> {
@@ -1473,6 +1573,11 @@ impl ChannelOwner {
     ///   7: link secret or nil, 8: epoch number, 9: epoch key or nil, 10: [deposit...],
     ///   11: [[grant_id, kid, xwing_pk, name tstr]...], 12: self grant, 13: member state}`
     pub fn export(&self) -> Vec<u8> {
+        self.export_secret().to_vec()
+    }
+
+    /// `export`, in a buffer zeroized on drop.
+    fn export_secret(&self) -> Zeroizing<Vec<u8>> {
         let member = self.member.inner.borrow().export();
         let mut e = Encoder::new(SecretBuf(Zeroizing::new(Vec::with_capacity(
             member.len() + self.manifest.len() + 8192,
@@ -1507,7 +1612,7 @@ impl ChannelOwner {
             e.u8(13)?.bytes(&member)?;
             Ok(())
         })();
-        e.into_writer().0.to_vec()
+        e.into_writer().0
     }
 
     /// Read back what `export` wrote. The channel object is verified against the manifest and
@@ -1589,7 +1694,7 @@ impl ChannelOwner {
             self_grant,
             member: ChannelMember::from_state(member),
         };
-        if owner.export() != state {
+        if *owner.export_secret() != *state {
             return Err(bad());
         }
         Ok(owner)

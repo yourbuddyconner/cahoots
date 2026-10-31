@@ -15,6 +15,11 @@ fn contribution(i: u8, len: usize) -> Vec<u8> {
 
 /// A two-seat circle; seat 0 is returned.
 fn circle() -> Circle {
+    circles().0
+}
+
+/// Both seats of a two-seat circle.
+fn circles() -> (Circle, Circle) {
     let l = 4096;
     let mut a = WasmCeremony::new(
         2,
@@ -54,7 +59,10 @@ fn circle() -> Circle {
     let (aa, ab) = (a.attestation().unwrap(), b.attestation().unwrap());
     a.add_attestation(1, &ab).unwrap();
     b.add_attestation(0, &aa).unwrap();
-    a.finish("CSPRNG").unwrap().into_circle()
+    (
+        a.finish("CSPRNG").unwrap().into_circle(),
+        b.finish("CSPRNG").unwrap().into_circle(),
+    )
 }
 
 /// Split a CBOR array of byte strings.
@@ -273,13 +281,29 @@ fn a_rotation_after_revoke_leaves_the_revoked_member_out() {
     assert_eq!(b.current_epoch_hex(), owner.member().current_epoch_hex());
     assert_ne!(a.current_epoch_hex(), b.current_epoch_hex());
     assert_eq!(a.current_epoch_hex(), before);
-    assert!(b
+    // The rotation control goes out under the old epoch: both read it, and it names only the
+    // new epoch and B's deposit.
+    let epoch_before = before.clone().unwrap();
+    let for_b = b
         .receive(&b64_encode(&rotation), &owner.self_grant(), &manifest)
-        .unwrap()
-        .control_json()
-        .starts_with("{\"kind\":\"rotation\""));
+        .unwrap();
+    assert_eq!(for_b.epoch_hex(), epoch_before);
+    assert!(for_b.control_json().starts_with("{\"kind\":\"rotation\""));
+    let for_a = a
+        .receive(&b64_encode(&rotation), &owner.self_grant(), &manifest)
+        .unwrap();
+    assert_eq!(for_a.control_json(), for_b.control_json());
+    assert_eq!(a.current_epoch_hex(), before);
+    // The next text is in the new epoch: B reads it, A cannot.
+    let next = owner.member().send(b"after the rotation").unwrap();
     assert_eq!(
-        a.receive(&b64_encode(&rotation), &owner.self_grant(), &manifest)
+        b.receive(&next, &owner.self_grant(), &manifest)
+            .unwrap()
+            .text(),
+        b"after the rotation"
+    );
+    assert_eq!(
+        a.receive(&next, &owner.self_grant(), &manifest)
             .unwrap_err(),
         "unknown-epoch"
     );
@@ -531,4 +555,83 @@ fn an_announcements_channel_admits_readers_but_no_posters() {
         }
         assert_eq!(split(&owner.admit(&request, "read").unwrap()).len(), 3);
     }
+}
+
+/// A CBOR array of byte strings.
+fn array(items: &[&[u8]]) -> Vec<u8> {
+    let mut e = minicbor::Encoder::new(Vec::new());
+    e.array(items.len() as u64).unwrap();
+    for item in items {
+        e.bytes(item).unwrap();
+    }
+    e.into_writer()
+}
+
+#[test]
+fn an_announcement_is_ok_with_the_quorum_of_seat_approvals() {
+    let (a, b) = circles();
+    // Announcements with approvals, sized by two seats: each announcement needs two.
+    let mut owner = a.channel_owner("News", 1, 2).unwrap();
+    let other_seat = b.channel_owner("Other", 1, 2).unwrap();
+    let manifest = owner.manifest();
+    assert_eq!(
+        policy_summary(&owner.policy()).unwrap(),
+        "anyone with the link can read; the owner can post, with 2 approvals"
+    );
+    let link = owner.link_url("relay.example").unwrap();
+    owner.rotate().unwrap();
+    let mut member = joined(&owner, &link);
+    member.set_policy(&owner.policy()).unwrap();
+    let mut no_policy = joined(&owner, &link);
+    let mut poster = owner.member();
+    assert_eq!(poster.announcement_digest().unwrap_err(), "no-proposal");
+    assert_eq!(
+        poster.send_proposed(&array(&[])).unwrap_err(),
+        "no-proposal"
+    );
+
+    let mut announce = |text: &[u8], seats: &[&ChannelOwner]| {
+        let body = poster.propose_announcement(text).unwrap();
+        let digest = poster.announcement_digest().unwrap();
+        assert_eq!(digest, hex::encode(Sha256::digest(&body)));
+        let approvals: Vec<Vec<u8>> = seats
+            .iter()
+            .map(|o| o.approve_post(&digest, "News", "first line", 0).unwrap())
+            .collect();
+        let refs: Vec<&[u8]> = approvals.iter().map(Vec::as_slice).collect();
+        let wire = poster.send_proposed(&array(&refs)).unwrap();
+        assert_eq!(poster.announcement_digest().unwrap_err(), "no-proposal");
+        wire
+    };
+
+    let two = announce(b"market on sunday", &[&owner, &other_seat]);
+    let got = member
+        .receive(&two, &owner.self_grant(), &manifest)
+        .unwrap();
+    assert_eq!(got.msg_type(), 2);
+    assert_eq!(got.text(), b"market on sunday");
+    assert!(got.announcement_ok());
+    // A member without the policy does not count approvals.
+    let got = no_policy
+        .receive(&two, &owner.self_grant(), &manifest)
+        .unwrap();
+    assert!(!got.announcement_ok());
+
+    let one = announce(b"one seat only", &[&owner]);
+    let got = member
+        .receive(&one, &owner.self_grant(), &manifest)
+        .unwrap();
+    assert_eq!(got.text(), b"one seat only");
+    assert!(!got.announcement_ok());
+
+    let same_seat_twice = announce(b"same seat twice", &[&owner, &owner]);
+    let got = member
+        .receive(&same_seat_twice, &owner.self_grant(), &manifest)
+        .unwrap();
+    assert!(!got.announcement_ok());
+
+    assert_eq!(
+        owner.approve_post("00", "News", "x", 0).unwrap_err(),
+        "digest"
+    );
 }
