@@ -6,7 +6,7 @@
 // UI rules: one job per screen. A top bar, one stage element, one primary action. Every screen says
 // what to do next in one line. Nothing the person needs is behind a scroll.
 import init, {
-  Ceremony, Circle, FountainEncoder, FountainDecoder, offer_params,
+  Ceremony, Circle, FountainEncoder, FountainDecoder, offer_params, offer_badges,
   b64_encode, b64_decode, bucket_pad, bucket_unpad, chat_bucket_pad, chat_bucket_unpad, qr_svg, qr_decode_rgba,
 } from './pkg/cahoots_wasm.js';
 import { setupChannels, routeChannels, loadChannels } from './channels.js';
@@ -37,6 +37,8 @@ const ERRORS = {
   aborted: 'This ceremony was stopped.',
   'not-an-offer': 'That is not a host\'s code.',
   offer: 'The host’s code could not be read. Scan it again.',
+  'offer-older': 'This code is from an older version of Cahoots. Ask the host to update.',
+  'offer-newer': 'This code is from a newer version of Cahoots. Update the app.',
   'host-seat': 'Seat 1 is the host\'s. Pick another seat.',
   'not-a-join-code': 'That is not a joiner\'s code.',
   'other-ceremony': 'That code is for another ceremony.',
@@ -548,12 +550,14 @@ function screenPick(params) {
   if (params.join && !pendingOffer) { ceremonyLost(); return; }
   // Joining through the relay: seat 1 is the host's.
   const joining = params.via === 'relay' && pendingOffer;
-  const taken = new Set(joining ? [0] : pendingCommits.map((p) => p.index));
+  // Seats 2 to badges + 1 are cards in the pile, which the host's offer counts.
+  const cards = joining ? offer_badges(pendingOffer) : 0;
+  const taken = new Set(joining ? [0, ...Array.from({ length: cards }, (_, i) => i + 1)] : pendingCommits.map((p) => p.index));
   let idx = [...Array(params.n).keys()].find((i) => !taken.has(i)) ?? 0;
   let src = 'csprng', extra = null;
   const err = status();
   const srcLine = h('span', { class: 'hint' }, 'Randomness: this device. The circle is labelled CSPRNG.');
-  const seats = seg(Array.from({ length: params.n }, (_, i) => [i, i === 0 ? '1 · host' : String(i + 1), taken.has(i)]), idx, (v) => { idx = Number(v); });
+  const seats = seg(Array.from({ length: params.n }, (_, i) => [i, i === 0 ? '1 · host' : i <= cards ? `${i + 1} · card` : String(i + 1), taken.has(i)]), idx, (v) => { idx = Number(v); });
   const hardwareSheet = () => sheet((close) => {
     const file = h('input', { type: 'file', style: 'display:none', onchange: async (e) => {
       if (!e.target.files[0]) return;
@@ -574,7 +578,7 @@ function screenPick(params) {
     body: [
       h('div', {},
         h('h1', {}, 'Which seat are you?'),
-        h('p', { class: 'lead' }, joining ? 'Seat 1 is the host\'s. Pick a free one, and make sure nobody else picks the same.' : taken.size ? `Seat ${[...taken].map((i) => i + 1).join(', ')} is taken by the person you scanned. Pick a free one, and make sure nobody else picks the same.` : 'Each person takes a different seat. The person who set this up is seat 1.'),
+        h('p', { class: 'lead' }, joining ? `Seat 1 is the host\'s.${cards ? ` ${cards === 1 ? 'Seat 2 is a card in the pile.' : `Seats 2 to ${cards + 1} are cards in the pile.`}` : ''} Pick a free one, and make sure nobody else picks the same.` : taken.size ? `Seat ${[...taken].map((i) => i + 1).join(', ')} is taken by the person you scanned. Pick a free one, and make sure nobody else picks the same.` : 'Each person takes a different seat. The person who set this up is seat 1.'),
         field('Your seat', seats),
         params.agent_seat ? notice('This circle invites a hosted software member. It will hold a copy of the secret in a secure enclave.') : null,
         srcLine, err),

@@ -260,3 +260,23 @@ fn a_seat_0_commitment_not_in_the_offer_is_not_fed() {
     assert_eq!(words[0], words[1]);
     assert_eq!(words[0], words[2]);
 }
+
+#[test]
+fn offer_badges_reads_the_count_and_names_a_code_from_another_version() {
+    use cahoots_core::channel::Channel;
+    use cahoots_core::params::CircleParams;
+    use cahoots_wasm::offer_badges;
+
+    let params = CircleParams::new(3, L as u32, "trio", false).unwrap();
+    let channel = Channel::new(&mut rand_core::OsRng);
+    let with_cards = channel.offer(&params, RELAY, &[7; 32], 2).unwrap();
+    assert_eq!(offer_badges(&with_cards).unwrap(), 2);
+    let none = channel.offer(&params, RELAY, &[7; 32], 0).unwrap();
+    assert_eq!(offer_badges(&none).unwrap(), 0);
+
+    let older = offer_badges("cahoots:ceremony:v1:AAAA").unwrap_err();
+    assert!(older.contains("older"), "{older}");
+    let newer = offer_badges("cahoots:ceremony:v3:AAAA").unwrap_err();
+    assert!(newer.contains("newer"), "{newer}");
+    assert_eq!(offer_badges("hello").unwrap_err(), "not-an-offer");
+}

@@ -167,16 +167,28 @@ const EARLY_PER_SEAT: usize = 4;
 fn offer_err(e: ChannelError) -> String {
     match e {
         ChannelError::NotAnOffer => "not-an-offer".into(),
+        ChannelError::OlderOffer => "offer-older".into(),
+        ChannelError::NewerOffer => "offer-newer".into(),
         _ => "offer".into(),
     }
 }
 
 /// The circle's parameter bytes in a host's offer (`cahoots:ceremony:v2:...`), to show the seat
-/// picker before joining. Errors: `"not-an-offer"`, `"offer"` (an offer that does not read).
+/// picker before joining. Errors: `"not-an-offer"`, `"offer-older"` and `"offer-newer"` (a code from
+/// another version), `"offer"` (an offer that does not read).
 #[wasm_bindgen]
 pub fn offer_params(text: &str) -> Result<Vec<u8>, String> {
     Channel::from_offer(text)
         .map(|o| o.params.encode())
+        .map_err(offer_err)
+}
+
+/// How many badges the host's offer says are in the pile: the seats after the host's, indexes `1` to `badges`, are cards.
+/// Same errors as [`offer_params`].
+#[wasm_bindgen]
+pub fn offer_badges(text: &str) -> Result<u8, String> {
+    Channel::from_offer(text)
+        .map(|o| o.badges)
         .map_err(offer_err)
 }
 

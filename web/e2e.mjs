@@ -389,11 +389,11 @@ for (const p of group) {
 }
 await receive(group[0], reveals[1]);
 if (!(await group[0].page.getByRole('button', { name: 'Scan the remaining step 2 codes to continue', exact: true }).isDisabled())) throw new Error('Three-member ceremony advanced with one reveal missing');
-await group[0].page.waitForSelector('text=Received 1 of 2 reveals');
+await group[0].page.waitForSelector('text=Received 1 of 2 step 2 codes');
 await receive(group[0], reveals[2]);
 for (let i = 1; i < 3; i++) for (let j = 0; j < 3; j++) if (i !== j) await receive(group[i], reveals[j]);
 for (const p of group) {
-  await p.page.waitForSelector('text=Received 2 of 2 reveals');
+  await p.page.waitForSelector('text=Received 2 of 2 step 2 codes');
   await p.page.waitForSelector('button:text-is("Everyone has scanned my step 2 code"):enabled');
   await p.page.waitForSelector('text=Step 2 of 4');
   const layout = await p.page.evaluate(() => {
