@@ -737,15 +737,21 @@ name = "cahoots-wasm"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "cahoots-channel",
  "cahoots-chat",
  "cahoots-core",
+ "cahoots-hpke",
+ "cahoots-objects",
  "cahoots-relay",
  "getrandom 0.2.17",
  "hex",
+ "minicbor",
  "qrcode",
+ "rand_core 0.10.1",
  "rand_core 0.6.4",
  "raptorq",
  "rqrr",
+ "sha2 0.10.9",
  "wasm-bindgen",
  "zeroize",
 ]
