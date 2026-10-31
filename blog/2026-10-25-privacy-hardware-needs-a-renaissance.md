@@ -43,7 +43,7 @@ Why is it still so much work to carry that relationship into a computer?
 
 Every service asks us to establish it again on its terms. Make an account. Find the right person. Invite them. Do it again in the next app. Eventually a group of people who know each other becomes a collection of accounts whose connection is maintained by a dozen unrelated companies.
 
-### A check we already know
+### A check you already understand
 
 There are good tools here. I use Signal and Tailscale. Signal’s [safety numbers](https://support.signal.org/hc/en-us/articles/360007060632-What-is-a-safety-number-and-why-do-I-see-that-it-changed) and Apple’s [iMessage Contact Key Verification](https://security.apple.com/blog/imessage-contact-key-verification) already give people a way to compare codes and check the keys behind a conversation. Meeting someone and checking what appears on both screens is an established pattern. Cahoots builds on it.
 
