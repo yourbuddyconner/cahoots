@@ -49,7 +49,7 @@ There are good tools here. I use Signal and Tailscale. Signal’s [safety number
 
 When you sit down with a friend to compare codes, you already know who you're looking at. The software doesn't. Checking the codes together gives you a way to connect the friend you recognize, and the device they're holding, to the keys your software will use afterward.
 
-What if you could take that trust with you into the next app? You and your friends could meet once, agree on who's in the group, and create a secret held only on your devices. Then, whether you wanted to chat, exchange files, or give each other access to a machine, you could start with the group you already formed. You'd still decide what each tool could access, but you wouldn't have to find and verify everyone all over again.
+What if you could take that trust with you into the next app? A family, a close-knit team, or any group of people who know and trust one another could meet once, agree on who belongs, and create a secret held only on their devices. Then, whether they wanted to chat, exchange files, or give each other access to a machine, they could start with the group they already formed. They'd still decide what each tool could access, but they wouldn't have to find and verify everyone all over again.
 
 > The people you'd hand a house key to, you have already met. That should count for more.
 
