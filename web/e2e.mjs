@@ -320,6 +320,39 @@ await J.page.fill('input[placeholder="Message"]', "new keys here");
 await J.page.keyboard.press("Enter");
 await L.page.waitForSelector('.bubble.in:has-text("new keys here")', { timeout: 15000 });
 if ((await L.page.$$(".bubble.rejected")).length || (await J.page.$$(".bubble.rejected")).length) throw new Error("a chat message was rejected after the reset");
+// Names and faces: each sets a name in Settings, its card goes out in the chat, and each sees
+// the other's name on the people screen. A card's name wins over the name saved on this device.
+const setMyName = async (p, name) => {
+  await p.page.getByRole('link', { name: 'People', exact: true }).click();
+  await p.page.getByRole('link', { name: 'Your name and face ↗', exact: true }).click();
+  await p.page.getByText('People in your circles see this name and this face.', { exact: true }).waitFor();
+  await p.page.getByLabel('Your name', { exact: true }).fill('   ');
+  await p.page.getByRole('button', { name: 'Save name', exact: true }).click();
+  await p.page.waitForSelector('.status:has-text("A name is 1 to 64 characters.")');
+  await p.page.getByLabel('Your name', { exact: true }).fill(name);
+  await p.page.getByRole('button', { name: 'Save name', exact: true }).click();
+  await p.page.waitForSelector('text=Name saved');
+  await p.snap('settings');
+  await p.page.getByRole('button', { name: 'Back', exact: true }).click();
+  await p.page.getByRole('heading', { name: `You · ${name}`, exact: true }).waitFor();
+  await p.page.getByRole('link', { name: 'Conversation', exact: true }).click();
+  await p.page.waitForSelector('.status:has-text("Connected")');
+};
+await setMyName(L, 'Lena'); await setMyName(J, 'Jordan Lee');
+for (const [p, other] of [[L, 'Jordan Lee'], [J, 'Lena']]) {
+  await p.page.waitForSelector(`.dashboard-members b:text-is("${other}")`, { state: 'attached', timeout: 15000 });
+  await p.page.getByRole('link', { name: 'People', exact: true }).click();
+  await p.page.getByRole('heading', { name: other, exact: true }).waitFor();
+  await p.page.getByText('Seat ' + (p === L ? 2 : 1) + ' · browser', { exact: true }).waitFor();
+  if ((await p.page.$$('.person-card canvas.face')).length !== 2) throw new Error(`${p.name}: every member should have a face`);
+  await p.snap('people-cards');
+  await p.page.reload();
+  await p.page.getByRole('heading', { name: other, exact: true }).waitFor();
+  await p.page.getByRole('link', { name: 'Conversation', exact: true }).click();
+  await p.page.waitForSelector('.status:has-text("Connected")');
+}
+if ((await L.page.$$(".bubble.rejected")).length || (await J.page.$$(".bubble.rejected")).length) throw new Error("a card was shown as a rejected message");
+if ((await L.page.$$(".bubble")).length !== (await J.page.$$(".bubble")).length) throw new Error("a card was shown as a message");
 // Leader sends a one-time-pad message as text; joiner reads it.
 await L.page.getByRole('button', { name: 'Circle tools', exact: true }).click();
 await L.page.getByRole('link', { name: 'Send a message', exact: true }).click();
@@ -554,4 +587,4 @@ await browser.close();
 server.close();
 station.kill();
 if (errors.length) { console.error("page errors:\n" + errors.join("\n")); process.exit(1); }
-console.log(process.argv.includes("--ceremony-only") ? "e2e ok: three-member ceremony and compact QR/camera layouts." : "e2e ok: two- and three-member ceremonies, a ceremony through the relay, chat through a relay, OTP message, replay refused.", "Screenshots in", out);
+console.log(process.argv.includes("--ceremony-only") ? "e2e ok: three-member ceremony and compact QR/camera layouts." : "e2e ok: two- and three-member ceremonies, a ceremony through the relay, chat through a relay, names and faces from cards, OTP message, replay refused.", "Screenshots in", out);

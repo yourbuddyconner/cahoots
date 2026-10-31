@@ -1,5 +1,5 @@
 use cahoots_wasm::{
-    b64_decode, b64_encode, chat_bucket_pad, chat_bucket_unpad, Circle, WasmCeremony,
+    b64_decode, b64_encode, chat_bucket_pad, chat_bucket_unpad, face_pixels, Circle, WasmCeremony,
 };
 
 fn contribution(i: u8, len: usize) -> Vec<u8> {
@@ -286,4 +286,62 @@ fn an_old_bump_read_again_moves_nothing() {
     // The older bump's wire again is sealed in a generation b has dropped: refused, nothing moves.
     assert_eq!(b.chat_receive(&w0).unwrap_err(), "needs-generation");
     assert_eq!(b.generation_id_hex(), newest);
+}
+
+#[test]
+fn a_card_travels_in_the_chat_with_a_name_a_face_and_a_device() {
+    let (mut a, mut b) = pair();
+    let face = [0x5a; 32];
+    let wire = a.publish_card("  Ada Lovelace ", &face, 2).unwrap();
+    // Padded as a text is: the length of the name does not show on the wire.
+    let short = a.publish_card("A", &face, 2).unwrap();
+    assert_eq!(b64_decode(&wire).unwrap().len(), b64_decode(&short).unwrap().len());
+    let got = b.chat_receive(&wire).unwrap();
+    assert_eq!(got.kind(), "card");
+    assert!(!got.ignored());
+    assert_eq!(got.sender(), 0);
+    assert_eq!(got.card_name(), "Ada Lovelace");
+    assert_eq!(got.card_face(), face.to_vec());
+    assert_eq!(got.card_device(), Some(2));
+    // Our own copy carries nothing to keep.
+    assert!(a.chat_receive(&wire).unwrap().ignored());
+
+    // A seat posting another seat's genuine card is refused.
+    let signed = got.text();
+    let again = b.send_signed_card(&signed).unwrap();
+    let refused = a.chat_receive(&again).unwrap();
+    assert_eq!(refused.kind(), "card");
+    assert!(refused.ignored());
+    assert_eq!(refused.card_name(), "");
+
+    // A card is not text, and a text has no card.
+    let t = a.chat_send(b"hi").unwrap();
+    let text = b.chat_receive(&t).unwrap();
+    assert_eq!(text.card_name(), "");
+    assert!(text.card_device().is_none());
+}
+
+#[test]
+fn a_card_name_is_1_to_64_characters_and_the_face_32_bytes() {
+    let (mut a, _) = pair();
+    assert_eq!(a.publish_card("   ", &[1; 32], 2).unwrap_err(), "name");
+    assert_eq!(a.publish_card(&"x".repeat(65), &[1; 32], 2).unwrap_err(), "name");
+    assert!(a.publish_card(&"\u{1F600}".repeat(64), &[1; 32], 2).is_ok());
+    assert_eq!(a.publish_card("Ada", &[1; 31], 2).unwrap_err(), "face");
+}
+
+#[test]
+fn faces_are_576_pixels_and_each_seat_has_an_interim_face() {
+    for seed in [[0u8; 32], [0xff; 32], [7; 32]] {
+        let px = face_pixels(&seed);
+        assert_eq!(px.len(), 576);
+        assert!(px.iter().all(|&p| p <= 1));
+        assert!(px.contains(&1));
+    }
+    let (a, b) = pair();
+    let (a0, a1) = (a.interim_face_seed(0).unwrap(), a.interim_face_seed(1).unwrap());
+    assert_eq!(a0.len(), 32);
+    assert_ne!(a0, a1);
+    assert_eq!(b.interim_face_seed(0).unwrap(), a0);
+    assert!(a.interim_face_seed(2).is_none());
 }

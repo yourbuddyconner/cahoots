@@ -15,6 +15,9 @@ cahoots-core = { workspace = true, features = ["std"] }
 cahoots-chat = { path = "../chat", default-features = false }
 # `std` for the owner and member cores and their HPKE key deposits; the wasm target has std.
 cahoots-channel = { workspace = true, features = ["std"] }
+# The signed card a seat publishes in its circle's chat.
+cahoots-objects = { workspace = true }
+sha2 = { workspace = true }
 wasm-bindgen = "0.2.100"
 raptorq = "2.0.0"
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
@@ -26,11 +29,9 @@ getrandom = { version = "0.2", features = ["js"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 
 [dev-dependencies]
-cahoots-objects = { workspace = true, features = ["std"] }
 cahoots-relay = { path = "../relay" }
 hex = { workspace = true, features = ["std"] }
 minicbor = { version = "2.3", default-features = false, features = ["alloc"] }
-sha2 = { workspace = true }
 
 
 [package.metadata.wasm-pack.profile.release]

@@ -24,7 +24,7 @@ The choices come from a hash of a seed: the same seed always produces the same p
 
 ## What works today
 
-The face generator and the examples above are implemented. The generator is also written in Rust, in [`crates/core`](../crates/core/src/faces.rs), and it draws the same face as the Python for every seed. The phone app shows a face for each seat in a circle. For now that face comes from the seat’s public key, so a person’s face is different in each circle.
+The face generator and the examples above are implemented. The generator is also written in Rust, in [`crates/core`](../crates/core/src/faces.rs), and it draws the same face as the Python for every seed. The phone app and the browser app show a face for each device in a circle. Each device draws its own face seed once and keeps it. It puts the seed on its card with the person’s name, and the card travels in the circle’s chat. Until a member’s card arrives, the app shows an interim face made from that seat’s public key, which is different in each circle.
 
 Generating and saving a badge’s own cahoot, showing it while idle, and carrying it into the app are still to be built. A badge does not yet have a permanent face waiting to be displayed.
 

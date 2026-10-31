@@ -7,7 +7,7 @@
 // what to do next in one line. Nothing the person needs is behind a scroll.
 import init, {
   Ceremony, Circle, FountainEncoder, FountainDecoder, offer_params, offer_badges,
-  b64_encode, b64_decode, bucket_pad, bucket_unpad, chat_bucket_pad, chat_bucket_unpad, qr_svg, qr_decode_rgba,
+  b64_encode, b64_decode, bucket_pad, bucket_unpad, chat_bucket_pad, chat_bucket_unpad, qr_svg, qr_decode_rgba, face_pixels,
 } from './pkg/cahoots_wasm.js';
 import { setupChannels, routeChannels, loadChannels } from './channels.js';
 import { showWelcome } from './welcome.js';
@@ -125,7 +125,36 @@ const loadChat = (id) => tx('chat', 'readonly', (s) => s.index('circle').getAll(
 // A circle saved before the app shipped a default relay has an empty address; it gets the default.
 const loadSettings = async (id) => { const s = (await tx('settings', 'readonly', (s) => s.get(id))) || { id }; if (!s.relay) s.relay = DEFAULT_RELAY; return s; };
 const saveSettings = (row) => tx('settings', 'readwrite', (s) => s.put(row));
-const nameOf = (settings, seat) => settings.names?.[seat] || `Seat ${seat + 1}`;
+// A member's name: the name on their card, else the name this browser gave them, else the seat.
+const nameOf = (settings, seat, cards) => cards?.seats?.[seat]?.name || settings.names?.[seat] || `Seat ${seat + 1}`;
+
+// This browser's name and face, kept beside the circles. The face seed is drawn once and kept.
+const DEVICE_BROWSER = 2;
+const DEVICES = ['phone', 'badge', 'browser', 'laptop'];
+const loadMe = async () => {
+  const row = (await tx('settings', 'readonly', (s) => s.get('me'))) || { id: 'me' };
+  if (!(row.face instanceof Uint8Array) || row.face.length !== 32) {
+    row.face = crypto.getRandomValues(new Uint8Array(32));
+    await tx('settings', 'readwrite', (s) => s.put(row));
+  }
+  return row;
+};
+const saveMe = (row) => tx('settings', 'readwrite', (s) => s.put(row));
+// The cards read from a circle's chat, per seat, and whether this browser's own card is due.
+const cardsKey = (id) => `cards:${id}`;
+const loadCards = async (id) => (await tx('settings', 'readonly', (s) => s.get(cardsKey(id)))) || { id: cardsKey(id), seats: {} };
+/** Change a circle's cards row in one transaction, so two writers never undo each other. */
+const updateCards = (id, fn) => new Promise((resolve, reject) => {
+  const t = db.transaction('settings', 'readwrite');
+  const store = t.objectStore('settings');
+  let row;
+  const get = store.get(cardsKey(id));
+  get.onsuccess = () => { row = get.result || { id: cardsKey(id), seats: {} }; row.seats ||= {}; fn(row); store.put(row); };
+  t.oncomplete = () => resolve(row);
+  t.onerror = () => reject(t.error);
+});
+/** Ask every circle to publish this browser's card again, the next time its chat is open. */
+const markCardsDue = async () => { const due = Date.now(); for (const c of await loadCircles()) await updateCards(c.id, (r) => { r.due = due; }); };
 
 const live = new Map(); // circle id -> Circle (WASM object)
 async function openCircle(id) {
@@ -250,6 +279,7 @@ const aboutSheet = () => sheet(close => h('div', { class: 'stack' },
   h('h2', {}, 'A home for your circles'),
   h('p', { class: 'muted' }, 'Meet in person to create a circle, then come back here to chat, check someone on a call, or exchange a private note. No account is needed.'),
   btn('How Cahoots works', () => { close(); openGuide(); }),
+  h('a', { class: 'btn', href: '#/settings' }, 'Your name and face'),
   h('p', { class: 'muted' }, 'Your circles, keys, and message history are saved in this browser. A relay delivers encrypted chat without receiving the keys. Clearing browser data can remove your circles.'),
   h('a', { class: 'btn', href: SITE, target: '_blank', rel: 'noopener' }, 'Read more at cahoots.network')));
 
@@ -396,6 +426,31 @@ let pendingOffer = null;   // the host's code, read before this device picks a s
 let ceremony = null;       // in-memory only: { c, params, label, mode, attests }
 
 // ================================================================ screens
+/** A cahoot: the 24 by 24 face a seed draws, ink on paper, scaled up without smoothing. */
+function faceCanvas(seed, className = '') {
+  const c = h('canvas', { class: `face ${className}`, width: 24, height: 24, 'aria-hidden': 'true' });
+  const px = face_pixels(seed);
+  const ctx = c.getContext('2d');
+  const css = getComputedStyle(document.documentElement);
+  ctx.fillStyle = css.getPropertyValue('--paper').trim() || '#ffffff';
+  ctx.fillRect(0, 0, 24, 24);
+  ctx.fillStyle = css.getPropertyValue('--ink').trim() || '#17181b';
+  for (let i = 0; i < px.length; i++) if (px[i]) ctx.fillRect(i % 24, Math.floor(i / 24), 1, 1);
+  return c;
+}
+/** A member's face: their card's, this browser's own for its seat, else the interim face from the seat key. */
+function memberFace(circle, cards, mine, seat, className = '') {
+  const card = cards?.seats?.[seat];
+  const seed = seat === circle.my_slice() ? mine?.face
+    : card?.face?.length === 32 ? card.face : circle.interim_face_seed(seat);
+  return seed ? faceCanvas(seed, className) : circleMark(circle.circle_id_hex().slice(seat * 2) || circle.circle_id_hex(), String(seat + 1), className);
+}
+/** "Seat 2 · browser", or "Seat 1 · this device". */
+const seatLine = (circle, cards, seat) => {
+  if (seat === circle.my_slice()) return `Seat ${seat + 1} · this device`;
+  const device = DEVICES[cards?.seats?.[seat]?.device];
+  return device ? `Seat ${seat + 1} · ${device}` : `Seat ${seat + 1}`;
+};
 // Public circle IDs provide a decorative mark, never a personal identity or credential.
 function circleMark(id, name, className = '') {
   const turn = parseInt(id.slice(0, 2), 16) || 0;
@@ -450,7 +505,7 @@ async function workspaceScreen(circle, settings, { view = 'conversation', title,
   const navigation = className => h('nav', { class: className, 'aria-label': 'Circle sections' }, ...pages.map(([key, path, name]) => h('a', { href: `#/c/${id}${path}`, 'aria-current': key === view ? 'page' : null }, name)));
   const details = () => sheet(close => h('div', { class: 'stack' }, h('h2', {}, 'Circle details'), h('p', { class: 'muted' }, `${circle.name()} · ${circle.members()} people · your seat: ${circle.my_slice() + 1}`), budget(circle), h('p', { class: 'muted' }, 'Your circle’s keys and history are saved in this browser. Clearing browser data can remove access. Deleting a circle may leave traces in browser storage.'), copyBtn(id, 'Copy circle ID'), btn('Remove circle from this browser', async () => {
     if (!confirm('Remove this circle from this browser? Other members keep theirs.')) return;
-    live.delete(id); chatDrafts.delete(id); await deleteCircle(id); close(); go('#/');
+    live.delete(id); chatDrafts.delete(id); await deleteCircle(id); await tx('settings', 'readwrite', (s) => s.delete(cardsKey(id))); close(); go('#/');
   }, 'danger')));
   const tools = () => sheet(close => h('div', { class: 'stack' }, h('h2', {}, 'Circle tools'), ...circleTools(circle), btn('Storage & security', () => { close(); details(); }), h('a', { class: 'link', href: `${SITE}/docs/#/apps`, target: '_blank', rel: 'noopener' }, 'More about circle tools ↗')));
   const rail = h('aside', { class: 'dashboard-rail' },
@@ -942,6 +997,8 @@ function screenWords() {
     actions: [
       btn('They match', async () => {
         const circle = out.into_circle(); live.set(id, circle); await saveCircle(circle);
+        // This browser's card goes out in the new circle's chat once it has read the relay.
+        await updateCards(id, (r) => { r.due = Date.now(); });
         // The circle chats through the relay its ceremony used.
         if (ceremonyRelay && ceremonyRelay !== DEFAULT_RELAY) await saveSettings({ ...(await loadSettings(id)), id, relay: ceremonyRelay });
         toast('Your circle is ready.', 'ok'); go(`#/c/${id}`); }, 'primary'),
@@ -965,6 +1022,8 @@ async function screenPeople(id) {
   const circle = await openCircle(id);
   if (!circle) return go('#/');
   const settings = await loadSettings(id);
+  const cards = await loadCards(id);
+  const mine = await loadMe();
   const me = circle.my_slice();
   const rename = seat => sheet(close => {
     const name = input({ type: 'text', value: settings.names?.[seat] || '', maxlength: '24', autocomplete: 'off', 'aria-label': 'Name on this device', placeholder: `Seat ${seat + 1}` });
@@ -977,12 +1036,13 @@ async function screenPeople(id) {
       }, 'primary'));
   });
   await workspaceScreen(circle, settings, { view: 'people', title: 'People', isCurrent: () => generation === routeGeneration,
-    content: [h('header', { class: 'wallet-heading' }, h('p', { class: 'eyebrow' }, circle.name()), h('h1', {}, 'The people in this circle.'), h('p', { class: 'lead' }, 'Put a familiar name to each seat. Names are saved on your device only.')),
+    content: [h('header', { class: 'wallet-heading' }, h('p', { class: 'eyebrow' }, circle.name()), h('h1', {}, 'The people in this circle.'), h('p', { class: 'lead' }, 'Each person’s name and face come from their own device. A name you give a seat here is saved on this device only, and shows until theirs arrives.')),
       h('div', { class: 'people-grid' }, ...Array.from({ length: circle.members() }, (_, seat) => h('article', { class: 'person-card' },
-        circleMark(id.slice(seat * 2) || id, settings.names?.[seat] || String(seat + 1)),
-        h('div', {}, h('h2', {}, seat === me ? 'You' : nameOf(settings, seat)), h('p', {}, `Seat ${seat + 1}${seat === me ? ' · this device' : ''}`)),
-        seat === me ? h('span', { class: 'person-local' }, 'Your place in the circle') : h('div', { class: 'person-actions' }, btn(settings.names?.[seat] ? 'Edit name' : 'Name this person', () => rename(seat)), h('a', { href: `#/c/${id}/hello/${seat}` }, 'Compare hello words ↗'))))),
-      h('p', { class: 'device-note' }, 'Seat labels identify devices in the ceremony. A saved name or decorative mark is not proof of identity.')],
+        memberFace(circle, cards, mine, seat),
+        h('div', {}, h('h2', {}, seat === me ? (mine.name ? `You · ${mine.name}` : 'You') : nameOf(settings, seat, cards)), h('p', {}, seatLine(circle, cards, seat))),
+        seat === me ? h('div', { class: 'person-actions' }, h('a', { href: '#/settings' }, 'Your name and face ↗'))
+          : h('div', { class: 'person-actions' }, btn(settings.names?.[seat] ? 'Edit name' : 'Name this person', () => rename(seat)), h('a', { href: `#/c/${id}/hello/${seat}` }, 'Compare hello words ↗'))))),
+      h('p', { class: 'device-note' }, 'A name or a face is not proof of identity. Compare hello words to check who you are talking to.')],
   });
 }
 
@@ -1082,6 +1142,7 @@ async function screenHello(id, peerStr) {
   if (!circle) return go('#/');
   const me = circle.my_slice();
   const settings = await loadSettings(id);
+  const cards = await loadCards(id);
   if (generation !== routeGeneration) return;
   const others = [...Array(circle.members()).keys()].filter((s) => s !== me);
   const tooOld = () => screen({
@@ -1097,7 +1158,7 @@ async function screenHello(id, peerStr) {
       body: [
         next('Who are you talking to?'),
         h('div', { class: 'rows' }, ...others.map((s) => h('a', { class: 'row-item', href: `#/c/${id}/hello/${s}` },
-          h('div', {}, h('b', {}, nameOf(settings, s)), h('span', {}, circle.has_pair_key(s) ? `hello #${circle.pair_counter(s) + 1}` : 'Hello words unavailable')),
+          h('div', {}, h('b', {}, nameOf(settings, s, cards)), h('span', {}, circle.has_pair_key(s) ? `hello #${circle.pair_counter(s) + 1}` : 'Hello words unavailable')),
           h('span', { class: 'arrow' }, '›')))),
       ],
     });
@@ -1105,7 +1166,7 @@ async function screenHello(id, peerStr) {
   }
   const peer = Number(peerStr);
   if (!circle.has_pair_key(peer)) return tooOld();
-  const who = () => nameOf(settings, peer);
+  const who = () => nameOf(settings, peer, cards);
   const render = () => {
     const w = circle.hello_words(peer);
     const n = w.counter() + 1;
@@ -1159,6 +1220,8 @@ async function screenChat(id) {
   if (!circle) return go('#/');
   const me = circle.my_slice();
   const settings = await loadSettings(id);
+  let cards = await loadCards(id);
+  const mine = await loadMe();
   if (location.hash !== requestedHash || generation !== routeGeneration) return;
   const run = ++chatRun;
   const relayBase = () => (settings.relay || '').trim().replace(/\/$/, '');
@@ -1172,7 +1235,7 @@ async function screenChat(id) {
   const epoch = () => { const e = circle.current_epoch(); return e ? `epoch ${e}` : 'no epoch yet'; };
   const bubble = (m) => m.dir === 'rejected'
     ? h('div', { class: 'bubble rejected' }, `rejected · ${friendly(m.reason)} · seq ${m.seq}`)
-    : h('div', { class: `bubble ${m.dir}` }, h('div', { class: 'meta' }, `${m.dir === 'out' ? 'you' : nameOf(settings, m.sender)} · ${new Date(m.ts).toLocaleTimeString()}`), h('div', {}, m.text));
+    : h('div', { class: `bubble ${m.dir}` }, h('div', { class: 'meta' }, `${m.dir === 'out' ? 'you' : nameOf(settings, m.sender, cards)} · ${new Date(m.ts).toLocaleTimeString()}`), h('div', {}, m.text));
   const empty = h('div', { class: 'chat-empty' }, h('p', { class: 'eyebrow' }, 'A little space for your people'), h('h1', {}, 'Keep the conversation going.'), h('p', {}, 'Start with a hello. Messages are encrypted on your device before the relay delivers them.'));
   const append = (m) => { empty.remove(); list.append(bubble(m)); list.scrollTop = list.scrollHeight; };
   const history = await loadChat(id);
@@ -1186,10 +1249,13 @@ async function screenChat(id) {
       h('h2', {}, 'Relay'),
       h('p', { class: 'muted' }, `A relay is the server that delivers your encrypted messages. It cannot read them. Cahoots uses ${DEFAULT_RELAY.replace('https://', '')} by default. If you change this address, everyone in the circle must switch to the same address.`),
       field('Relay address', relayIn),
-      btn('Save and connect', async () => { settings.relay = relayIn.value.trim() || DEFAULT_RELAY; await saveSettings({ ...settings, id }); close(); chatRun++; screenChat(id); }, 'primary'),
-      settings.relay !== DEFAULT_RELAY ? btn('Use the default relay', async () => { settings.relay = DEFAULT_RELAY; await saveSettings({ ...settings, id }); close(); chatRun++; screenChat(id); }) : null);
+      btn('Save and connect', async () => { settings.relay = relayIn.value.trim() || DEFAULT_RELAY; await saveSettings({ ...settings, id }); await relayMoved(); close(); chatRun++; screenChat(id); }, 'primary'),
+      settings.relay !== DEFAULT_RELAY ? btn('Use the default relay', async () => { settings.relay = DEFAULT_RELAY; await saveSettings({ ...settings, id }); await relayMoved(); close(); chatRun++; screenChat(id); }) : null);
   });
 
+  // On a new relay the cards read on the old one may be followed by older positions, and the
+  // others have not seen this browser's card there yet.
+  const relayMoved = () => updateCards(id, (r) => { for (const c of Object.values(r.seats)) c.seq = null; r.due = Date.now(); });
   const post = async (bytes) => {
     const res = await fetch(`${relayBase()}/v1/circles/${id}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes });
     if (!res.ok) throw `relay ${res.status}: ${await res.text()}`;
@@ -1211,6 +1277,29 @@ async function screenChat(id) {
     })().finally(() => bumpFlights.delete(id));
     bumpFlights.set(id, flight);
     return flight;
+  };
+  // This browser's card, sent once the relay has been read to the end. It stays due until the
+  // relay takes it, and a name or face changed meanwhile makes it due again.
+  const publishCard = async () => {
+    if (!circle.chat_synced() || !circle.has_root() || !circle.has_seat_key()) return;
+    const due = (await loadCards(id)).due;
+    if (!due) return;
+    const self = await loadMe();
+    if (!self.name) return;
+    const wire = circle.publish_card(self.name, self.face, DEVICE_BROWSER);
+    await saveCircle(circle);
+    await post(b64_decode(wire));
+    await updateCards(id, (r) => { if (r.due === due) r.due = 0; });
+  };
+  // A card from another seat that verified: kept unless the one held was read later on the relay.
+  const keepCard = async (r, seq) => {
+    const face = r.card_face();
+    cards = await updateCards(id, (row) => {
+      const held = row.seats[r.sender()];
+      if (held && held.seq != null && held.seq > seq) return;
+      row.seats[r.sender()] = { name: r.card_name(), face: face.length === 32 ? face : null, device: r.card_device() ?? null, seq };
+    });
+    drawMembers();
   };
   const doSend = async () => {
     const text = inp.value;
@@ -1281,6 +1370,7 @@ async function screenChat(id) {
             const r = circle.chat_receive(entry.message);
             // A bump has already moved this device when its signature held. Cards and control
             // messages are not text and are not shown as text.
+            if (r.kind() === 'card' && !r.ignored()) await keepCard(r, entry.seq);
             if (r.kind() !== 'text') { circle.set_relay_seq(BigInt(entry.seq)); changed = true; continue; }
             const un = chat_bucket_unpad(r.text());
             const m = { circle: id, dir: 'in', sender: r.sender(), epoch: r.epoch(), text: utf8d.decode(un ?? r.text()), ts: entry.received_at, seq: entry.seq };
@@ -1294,15 +1384,25 @@ async function screenChat(id) {
         changed = true;
       }
       if (changed) { await saveCircle(circle); titleSub.textContent = `${circle.members()} people · End-to-end encrypted`; }
+      try { await publishCard(); } catch (e) { /* still due: tried again on the next poll */ }
     }
   };
 
+  // The members, beside the chat and as faces in its header, drawn again when a card arrives.
+  const members = h('div', { class: 'dashboard-members' });
+  const headFaces = h('div', { class: 'conversation-faces', 'aria-hidden': 'true' });
+  function drawMembers() {
+    const seats = Array.from({ length: circle.members() }, (_, seat) => seat);
+    members.replaceChildren(...seats.map((seat) => h('a', { href: `#/c/${id}/people` }, memberFace(circle, cards, mine, seat), h('div', {}, h('b', {}, seat === me ? 'You' : nameOf(settings, seat, cards)), h('span', {}, seatLine(circle, cards, seat))))));
+    headFaces.replaceChildren(...seats.map((seat) => memberFace(circle, cards, mine, seat, 'face-small')));
+  }
+  drawMembers();
   const noRelay = h('div', { class: 'empty' },
     h('h1', {}, 'Chat needs a relay.'),
     h('p', { class: 'lead' }, 'A relay is a small server any member can run. It carries encrypted messages between you and cannot read them. Set its address to start.'),
     btn('Set the relay address', relaySheet, 'primary'));
   const conversation = h('div', { class: 'dashboard-conversation' },
-    h('header', { class: 'conversation-heading' }, h('div', {}, h('h1', {}, 'Conversation'), titleSub),
+    h('header', { class: 'conversation-heading' }, h('div', {}, h('h1', {}, 'Conversation'), titleSub, headFaces),
       btn('Circle tools', () => workspace.tools(), 'dashboard-tools-trigger')),
     h('div', { class: 'conversation-thread' }, ...(relayBase() ? [history.length ? null : empty, list] : [noRelay])),
     st,
@@ -1310,7 +1410,7 @@ async function screenChat(id) {
       : circle.has_root() ? h('div', { class: 'dashboard-composer composer' }, inp, sendBtn)
       : h('p', { class: 'muted' }, 'This circle uses an older format that doesn’t support chat. Create a new circle together to start chatting.'));
   const aside = h('aside', { class: 'dashboard-aside' }, h('header', {}, h('h2', {}, 'People'), h('span', {}, String(circle.members()))),
-    h('div', { class: 'dashboard-members' }, ...Array.from({ length: circle.members() }, (_, seat) => h('a', { href: `#/c/${id}/people` }, circleMark(id.slice(seat * 2) || id, String(seat + 1)), h('div', {}, h('b', {}, seat === me ? 'You' : nameOf(settings, seat)), h('span', {}, `Seat ${seat + 1}${seat === me ? ' · this device' : ''}`))))),
+    members,
     h('a', { class: 'manage-people', href: `#/c/${id}/people` }, 'Manage names ↗'),
     h('div', { class: 'dashboard-context' }, h('h2', {}, 'About this circle'), h('p', {}, 'Created together in person. Your keys and history are stored in this browser.'), h('a', { href: `${SITE}/docs/#/security`, target: '_blank', rel: 'noopener' }, 'Security & limits ↗')));
   const workspace = await workspaceScreen(circle, settings, { content: [conversation], aside, isCurrent: () => run === chatRun,
@@ -1328,6 +1428,41 @@ async function screenChat(id) {
   if (relayBase()) poll();
 }
 
+// ---------------------------------------------------------------- settings: your name and face
+async function screenSettings() {
+  const generation = routeGeneration;
+  const mine = await loadMe();
+  if (generation !== routeGeneration) return;
+  const st = status();
+  const nameIn = input({ type: 'text', value: mine.name || '', maxlength: '64', autocomplete: 'off', placeholder: 'Your name' });
+  const faceBox = h('div', { class: 'settings-face' }, faceCanvas(mine.face, 'face-large'));
+  screen({
+    title: 'Settings', back: () => (history.length > 1 ? history.back() : go('#/')),
+    body: [
+      h('div', { class: 'stack' },
+        field('Your name', nameIn, 'People in your circles see this name and this face.'),
+        faceBox,
+        btn('Draw a new face', async () => {
+          mine.face = crypto.getRandomValues(new Uint8Array(32));
+          await saveMe(mine);
+          faceBox.replaceChildren(faceCanvas(mine.face, 'face-large'));
+          if (mine.name) await markCardsDue();
+          toast('New face saved', 'ok');
+        })),
+      st,
+    ],
+    actions: [btn('Save name', async () => {
+      const name = nameIn.value.trim();
+      if ([...name].length < 1 || [...name].length > 64) { st.textContent = 'A name is 1 to 64 characters.'; return; }
+      mine.name = name;
+      await saveMe(mine);
+      await markCardsDue();
+      st.textContent = '';
+      toast('Name saved', 'ok');
+    }, 'primary')],
+  });
+}
+
 // ---------------------------------------------------------------- router
 async function route() {
   routeGeneration++;
@@ -1343,6 +1478,7 @@ async function route() {
     if (parts[0] === 'new') screenNew();
     else if (parts[0] === 'join') screenJoin();
     else if (parts[0] === 'explore') go('#/');
+    else if (parts[0] === 'settings') await screenSettings();
     else if (parts[0] === 'ceremony') {
       const params = JSON.parse(utf8d.decode(b64_decode(parts[1])));
       if (parts[2] === 'run') screenRun(params); else screenPick(params);

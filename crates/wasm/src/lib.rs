@@ -61,6 +61,20 @@ pub fn chat_bucket_unpad(padded: &[u8]) -> Option<Vec<u8>> {
     chat::bucket_unpad(padded).map(<[u8]>::to_vec)
 }
 
+/// A cahoot, the 24 by 24 face `seed` gives: 576 bytes, row by row from the top left, 1 for
+/// ink and 0 for paper.
+#[wasm_bindgen]
+pub fn face_pixels(seed: &[u8]) -> Vec<u8> {
+    cahoots_core::faces::pixels(seed)
+        .iter()
+        .flatten()
+        .map(|&ink| u8::from(ink))
+        .collect()
+}
+
+/// What an interim face seed is hashed under, the same as the phone's.
+const FACE_DOMAIN: &[u8] = b"cahoots/face/v1";
+
 /// Render `data` as a QR code SVG (byte mode, low error correction for density).
 #[wasm_bindgen]
 pub fn qr_svg(data: &[u8]) -> Result<String, String> {
@@ -802,6 +816,8 @@ pub struct ChatReceived {
     sender: u8,
     counter: u32,
     epoch: String,
+    /// A card that verified and names its sender's seat.
+    card: Option<cahoots_objects::Card>,
 }
 
 #[wasm_bindgen]
@@ -827,6 +843,22 @@ impl ChatReceived {
     /// The root epoch number, as text.
     pub fn epoch(&self) -> String {
         self.epoch.clone()
+    }
+    /// The name on a card that verified, or the empty string.
+    pub fn card_name(&self) -> String {
+        self.card.as_ref().map(|c| c.name.clone()).unwrap_or_default()
+    }
+    /// The 32-byte face seed on a card that verified, or empty when it has none.
+    pub fn card_face(&self) -> Vec<u8> {
+        self.card
+            .as_ref()
+            .and_then(|c| c.face)
+            .map(|f| f.to_vec())
+            .unwrap_or_default()
+    }
+    /// The device kind on a card that verified: 0 phone, 1 badge, 2 browser, 3 laptop.
+    pub fn card_device(&self) -> Option<u8> {
+        self.card.as_ref().and_then(|c| c.device)
     }
 }
 
@@ -1005,12 +1037,23 @@ impl Circle {
             .ok()
             .and_then(|s| Manifest::decode(&s.body).ok());
         let chat = self.chat_mut()?;
-        let (hdr, text) = chat.receive(&wire).map_err(chat_err)?;
+        let (hdr, mut text) = chat.receive(&wire).map_err(chat_err)?;
         let mut ignored = false;
+        let mut card = None;
         let kind = match hdr.msg_type {
             chat::MessageType::Text => "text",
             chat::MessageType::Control => "control",
-            chat::MessageType::Card => "card",
+            chat::MessageType::Card => {
+                // A card counts when a seat of the manifest signed it for this circle and it
+                // names the seat that sent the message. Our own copy is empty.
+                text = chat::bucket_unpad(&text).map(<[u8]>::to_vec).unwrap_or_default();
+                card = manifest
+                    .as_ref()
+                    .and_then(|m| cahoots_objects::Card::verify(&text, m).ok())
+                    .filter(|c| c.seat == hdr.sender);
+                ignored = card.is_none();
+                "card"
+            }
             chat::MessageType::Bump => {
                 // Our own copy is empty and moves nothing: we moved when we sent it.
                 let verified = manifest
@@ -1031,7 +1074,65 @@ impl Circle {
             sender: hdr.sender,
             counter: hdr.counter,
             epoch: epoch_str(hdr.epoch),
+            card,
         })
+    }
+
+    /// Sign this seat's card and seal it as a card message, bucket-padded like a text. Returns
+    /// the wire bytes in base64url for the relay. `name` is trimmed and must then be 1 to 64
+    /// characters; `face` is a 32-byte face seed; `device` is the kind of this device (2 for a
+    /// browser). Errors: `name`, `face`, `state` without a seat key or a manifest, `no-root`,
+    /// `not-synced`, `length` when the card is too long.
+    pub fn publish_card(&mut self, name: &str, face: &[u8], device: u8) -> Result<String, String> {
+        let name = name.trim();
+        let chars = name.chars().count();
+        if !(1..=64).contains(&chars) || name.len() > cahoots_objects::card::MAX_NAME {
+            return Err("name".into());
+        }
+        let face: [u8; 32] = face.try_into().map_err(|_| "face".to_string())?;
+        let seed = self.seat_key.as_ref().ok_or("state")?;
+        let key = cahoots_core::seat::SeatKey::from_seed(seed).map_err(|_| "state".to_string())?;
+        let seat = self.pad().my_slice();
+        let card = cahoots_objects::Card {
+            circle_id: self.pad().circle_id(),
+            seat,
+            name: name.into(),
+            handles: Vec::new(),
+            endpoints: Vec::new(),
+            log: self.relay_seq.unwrap_or(0),
+            face: Some(face),
+            device: Some(device),
+        };
+        let signed = card.sign(&key, &[seat]).map_err(|_| "length".to_string())?;
+        self.send_signed_card(&signed)
+    }
+
+    /// Seal an already signed card as a card message, bucket-padded like a text, and return the
+    /// wire bytes in base64url. Errors: `length`, `no-root`, `not-synced`.
+    pub fn send_signed_card(&mut self, signed: &[u8]) -> Result<String, String> {
+        let padded = chat::bucket_pad(signed).ok_or("length")?;
+        let wire = self
+            .chat_mut()?
+            .send_typed(chat::MessageType::Card, &padded)
+            .map_err(chat_err)?;
+        Ok(b64_encode(&wire))
+    }
+
+    /// The interim face seed of `seat` (from 0), for a seat whose card has not arrived:
+    /// SHA-256 of `cahoots/face/v1` and the seat's public key in the manifest, as the phone
+    /// draws it. `None` for a seat the circle does not have or a circle without a manifest.
+    pub fn interim_face_seed(&self, seat: u8) -> Option<Vec<u8>> {
+        use sha2::{Digest, Sha256};
+        let sealed = SealedManifest::decode(&self.manifest).ok()?;
+        let manifest = Manifest::decode(&sealed.body).ok()?;
+        let s = manifest.seats.iter().find(|s| s.seat == seat)?;
+        Some(
+            Sha256::new()
+                .chain_update(FACE_DOMAIN)
+                .chain_update(s.key.0)
+                .finalize()
+                .to_vec(),
+        )
     }
 
     /// The current chat generation's id, in hex. `None` without a root.
