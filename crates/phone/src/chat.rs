@@ -188,11 +188,11 @@ impl Circle {
                         }
                     }
                     // A card is kept for its seat when it verifies, and is never history.
-                    if h.msg_type == MessageType::Card
-                        && h.sender != me
-                        && self.verify_card(&pt, h.sender)
-                    {
-                        cards |= self.cards.put(h.sender, pt.clone(), Some(seq));
+                    if h.msg_type == MessageType::Card && h.sender != me {
+                        let signed = bucket_unpad(&pt).unwrap_or(&[]);
+                        if self.verify_card(signed, h.sender) {
+                            cards |= self.cards.put(h.sender, signed.to_vec(), Some(seq));
+                        }
                     }
                     // Only text is history. Bumps and cards are handled above.
                     if h.sender != me && h.msg_type == MessageType::Text {
@@ -287,9 +287,15 @@ impl Circle {
     /// card message once the relay has been read to the end, and post it through the outbox.
     /// A relay that cannot be read or posted to now leaves it waiting for the next poll.
     pub fn publish_card(&mut self, http: &dyn Http, card: Vec<u8>) -> Result<(), PhoneError> {
+        if bucket_pad(&card).is_none() {
+            return Err(PhoneError::Chat {
+                message: "The card is too long.".into(),
+            });
+        }
         self.cards.put(self.record.seat, card.clone(), None);
         self.cards.save(&self.dir)?;
         self.chat.pending_card = Some(card.into());
+        self.chat.card_due = false;
         self.save_chat()?;
         if self.session.synced() {
             self.queue_card()?;
@@ -306,9 +312,13 @@ impl Circle {
             return Ok(());
         };
         let id = random_id()?;
+        // Padded as a text is, so the length of the name does not show.
+        let padded = bucket_pad(&card).ok_or_else(|| PhoneError::Chat {
+            message: "The card is too long.".into(),
+        })?;
         let wire = self
             .session
-            .send_typed(MessageType::Card, &card)
+            .send_typed(MessageType::Card, &padded)
             .map_err(chat_err)?;
         self.chat.outbox.push(OutboxEntry {
             id,
@@ -329,6 +339,15 @@ impl Circle {
             return false;
         };
         cahoots_objects::Card::verify(signed, &manifest).is_ok_and(|c| c.seat == sender)
+    }
+
+    /// Mark this seat's card as due to be signed and published again, or no longer due.
+    pub fn set_card_due(&mut self, due: bool) -> Result<(), PhoneError> {
+        if self.chat.card_due != due {
+            self.chat.card_due = due;
+            self.save_chat()?;
+        }
+        Ok(())
     }
 
     /// The card held for `seat`, decoded. It verified when it was kept.
@@ -429,6 +448,17 @@ impl Circle {
             self.settings.save(&self.dir)?;
             self.cursor = CursorRecord::default();
             self.cursor.save(&self.dir)?;
+            // The cards held were read at the old relay's positions, which mean nothing on the
+            // new one: any card read there replaces them.
+            for c in &mut self.cards.cards {
+                c.seq = None;
+            }
+            self.cards.save(&self.dir)?;
+            // The new relay has not seen this seat's card: post it again with the next poll.
+            if let Some(own) = self.cards.get(self.record.seat) {
+                self.chat.pending_card = Some(own.card.clone());
+                self.save_chat()?;
+            }
         }
         Ok(())
     }

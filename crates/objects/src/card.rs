@@ -6,7 +6,7 @@
 //! | 0 | version 1 |
 //! | 1 | circle_id bstr 16 |
 //! | 2 | seat uint |
-//! | 3 | name tstr, 1 to 64 bytes |
+//! | 3 | name tstr, 1 to 256 bytes |
 //! | 4 | handles: array of [kind tstr, value tstr], at most 16 |
 //! | 5 | endpoints: array of [purpose uint, value tstr], at most 16 |
 //! | 6 | log uint, the log position the laptop names |
@@ -55,7 +55,9 @@ pub const DEVICE_BADGE: u8 = 1;
 pub const DEVICE_BROWSER: u8 = 2;
 pub const DEVICE_LAPTOP: u8 = 3;
 
-pub const MAX_NAME: usize = 64;
+/// The longest name in bytes. A phone asks for 1 to 64 characters, and 64 characters of
+/// four bytes each fit.
+pub const MAX_NAME: usize = 256;
 pub const MAX_KIND: usize = 16;
 pub const MAX_VALUE: usize = 256;
 pub const MAX_ENTRIES: usize = 16;

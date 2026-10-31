@@ -456,18 +456,24 @@ impl Phone {
             .unwrap_or([0; 32])
     }
 
+    /// The face this seat shows in `c`: the circle's own face, else the device's.
+    fn my_face_in(&self, c: &Circle) -> [u8; 32] {
+        c.settings
+            .face_override
+            .as_ref()
+            .and_then(|f| f[..].try_into().ok())
+            .unwrap_or_else(|| self.device_face())
+    }
+
     /// Sign this seat's card for `c` and publish it in the chat. Nothing is published before
-    /// the person has given a name. A relay that cannot be reached leaves the card waiting.
+    /// the person has given a name. A relay that cannot be reached leaves the card waiting,
+    /// and a refused signature leaves the card due, for the next poll to try again.
     fn publish_my_card(&self, c: &mut Circle) -> Result<(), PhoneError> {
         let Some(name) = self.me().name.clone() else {
             return Ok(());
         };
-        let face = c
-            .settings
-            .face_override
-            .as_ref()
-            .and_then(|f| f[..].try_into().ok())
-            .unwrap_or_else(|| self.device_face());
+        c.set_card_due(true)?;
+        let face = self.my_face_in(c);
         let card = cahoots_objects::Card {
             circle_id: c.circle_id,
             seat: c.record.seat,
@@ -498,21 +504,29 @@ impl Phone {
         c.publish_card(self.http.as_ref(), signed)
     }
 
-    /// Publish this seat's card in every circle `pick` chooses. Every circle is tried, and
-    /// the first error is returned.
+    /// Publish this seat's card in every circle `pick` chooses, and return the first error.
+    /// After a refused Face ID nothing more is asked: the circles left are marked due, the
+    /// next poll of each tries again, and `Locked` is returned.
     fn publish_everywhere(&self, pick: impl Fn(&Circle) -> bool) -> Result<(), PhoneError> {
         let mut first = None;
+        let mut locked = false;
         for id in store::circle_ids(&self.dir) {
             let r = self.with_circle(&id, |c, me| {
-                if pick(c) {
-                    me.publish_my_card(c)
-                } else {
+                if !pick(c) {
                     Ok(())
+                } else if locked {
+                    c.set_card_due(true)
+                } else {
+                    me.publish_my_card(c)
                 }
             });
             if let Err(e) = r {
+                locked |= matches!(e, PhoneError::Locked);
                 first.get_or_insert(e);
             }
+        }
+        if locked {
+            return Err(PhoneError::Locked);
         }
         first.map_or(Ok(()), Err)
     }
@@ -906,6 +920,7 @@ impl Phone {
             journal: Vec::new(),
             pending_bump: None,
             pending_card: None,
+            card_due: false,
         };
         store::create_circle(
             &self.dir,
@@ -924,8 +939,8 @@ impl Phone {
         )?;
         st.ceremonies.remove(&id);
         drop(st);
-        // The circle is kept whatever happens next: a card not published now (no name yet, a
-        // refused signature) is published with the next name or face change.
+        // The circle is kept whatever happens next. A card not signed now (a refused
+        // signature) stays due, and the next poll tries again. Without a name there is none.
         let _ = self.with_circle(&id_hex, |c, me| me.publish_my_card(c));
         Ok(id_hex)
     }
@@ -974,8 +989,15 @@ impl Phone {
     }
 
     /// Read the relay after the cursor, keep and return what others sent, then send what waits.
+    /// A card left due by a refused signature is signed and published again here.
     pub fn poll(&self, circle: String) -> Result<Vec<ChatMessage>, PhoneError> {
-        self.with_circle(&circle, |c, me| c.poll(me.http.as_ref()))
+        self.with_circle(&circle, |c, me| {
+            let got = c.poll(me.http.as_ref())?;
+            if c.chat.card_due {
+                let _ = me.publish_my_card(c);
+            }
+            Ok(got)
+        })
     }
 
     /// Every message kept, oldest first. Clears the unread count.
@@ -1068,7 +1090,7 @@ impl Phone {
     /// Every seat of a circle with the tier it declared, in seat order, with the name, face
     /// and device of its card when one has been read.
     pub fn circle_members(&self, circle: String) -> Result<Vec<Member>, PhoneError> {
-        self.with_circle(&circle, |c, _| {
+        self.with_circle(&circle, |c, phone| {
             let m = manifest_of(c)?;
             Ok(m.seats
                 .iter()
@@ -1077,10 +1099,7 @@ impl Phone {
                     Member {
                         seat: s.seat,
                         name: card.as_ref().map(|k| k.name.clone()).unwrap_or_default(),
-                        face_seed: card
-                            .as_ref()
-                            .and_then(|k| k.face)
-                            .map_or_else(|| face_seed(&s.key.0), |f| f.to_vec()),
+                        face_seed: seat_face(phone, c, s.seat, card.as_ref(), &s.key.0),
                         has_card: card.is_some(),
                         device: card.as_ref().and_then(|k| k.device),
                         tier: s.tier,
@@ -1101,21 +1120,19 @@ impl Phone {
             .collect()
     }
 
-    /// The face seed of `seat` (from 0) in a circle: the face on the seat's card, else the
-    /// interim face from its public key in the manifest.
+    /// The face seed of `seat` (from 0) in a circle: the face on the seat's card, else, for
+    /// this phone's seat, the face it will publish (the circle's own or the device's), else the
+    /// interim face from the seat's public key in the manifest.
     ///
     /// The interim seed is SHA-256 of `cahoots/face/v1` and the seat's public key, so it
     /// changes from one circle to the next. It stands until the seat publishes a card.
     pub fn seat_face_seed(&self, circle: String, seat: u8) -> Result<Vec<u8>, PhoneError> {
-        self.with_circle(&circle, |c, _| {
-            if let Some(face) = c.card(seat).and_then(|k| k.face) {
-                return Ok(face.to_vec());
-            }
+        self.with_circle(&circle, |c, me| {
             let m = manifest_of(c)?;
             let s = m.seats.iter().find(|s| s.seat == seat).ok_or_else(|| PhoneError::NotFound {
                 message: format!("This circle has no seat {}.", u16::from(seat) + 1),
             })?;
-            Ok(face_seed(&s.key.0))
+            Ok(seat_face(me, c, seat, c.card(seat).as_ref(), &s.key.0))
         })
     }
 
@@ -1131,11 +1148,14 @@ impl Phone {
     }
 
     /// Set the name on this phone's cards and publish the card again in every circle. A name
-    /// is 1 to 64 bytes once trimmed. The name is kept even if a circle's card could not be
-    /// signed, and that error is returned.
+    /// is 1 to 64 characters once trimmed. The name is kept even if a circle's card could not
+    /// be signed: `Locked` then says it is saved but not yet shared, and the next poll of each
+    /// circle tries again.
     pub fn set_my_name(&self, name: String) -> Result<(), PhoneError> {
         let name = name.trim();
-        if name.is_empty() || name.len() > cahoots_objects::card::MAX_NAME {
+        let chars = name.chars().count();
+        // 64 characters. The card holds at most 256 bytes, which 64 characters always fit.
+        if chars == 0 || chars > 64 || name.len() > cahoots_objects::card::MAX_NAME {
             return Err(PhoneError::Chat {
                 message: "A name is 1 to 64 characters.".into(),
             });
@@ -1192,6 +1212,24 @@ impl Phone {
             fingerprint: self.me().fingerprint.clone(),
         }
     }
+}
+
+/// The face of `seat` in `c`: its card's face, else this phone's face for its own seat, else
+/// the interim face from the seat's key.
+fn seat_face(
+    phone: &Phone,
+    c: &Circle,
+    seat: u8,
+    card: Option<&cahoots_objects::Card>,
+    key: &[u8],
+) -> Vec<u8> {
+    if let Some(face) = card.and_then(|k| k.face) {
+        return face.to_vec();
+    }
+    if seat == c.record.seat {
+        return phone.my_face_in(c).to_vec();
+    }
+    face_seed(key)
 }
 
 /// The circle's manifest, from the sealed copy kept with it.

@@ -13,20 +13,25 @@ use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 
 const RELAY: &str = "https://relay.test";
+/// A second relay, for a circle that moves.
+const RELAY2: &str = "https://relay2.test";
 const PAD: u32 = 1024;
 
 /// An HTTP relay in process: the URLs and bodies the station speaks, over `MemRelay`.
 #[derive(Clone)]
 struct FakeHttp {
     relay: Arc<Mutex<MemRelay>>,
+    /// The store behind `RELAY2`.
+    other: Arc<Mutex<MemRelay>>,
     /// The next this many posts fail as if the network were down.
     fail_posts: Arc<AtomicU32>,
 }
 
 impl FakeHttp {
-    fn new(relay: &Arc<Mutex<MemRelay>>) -> Self {
+    fn new(relay: &Arc<Mutex<MemRelay>>, other: &Arc<Mutex<MemRelay>>) -> Self {
         FakeHttp {
             relay: relay.clone(),
+            other: other.clone(),
             fail_posts: Arc::new(AtomicU32::new(0)),
         }
     }
@@ -35,10 +40,21 @@ impl FakeHttp {
 fn circle_of(url: &str) -> [u8; 16] {
     let rest = url
         .strip_prefix(&format!("{RELAY}/v1/circles/"))
+        .or_else(|| url.strip_prefix(&format!("{RELAY2}/v1/circles/")))
         .expect("relay url");
     let hex_id = &rest[..32];
     assert!(rest[32..].starts_with("/messages"), "{url}");
     hex::decode(hex_id).unwrap().try_into().unwrap()
+}
+
+impl FakeHttp {
+    fn store(&self, url: &str) -> &Arc<Mutex<MemRelay>> {
+        if url.starts_with(RELAY2) {
+            &self.other
+        } else {
+            &self.relay
+        }
+    }
 }
 
 impl Http for FakeHttp {
@@ -48,7 +64,7 @@ impl Http for FakeHttp {
             .split(['?', '&'])
             .find_map(|p| p.strip_prefix("after="))
             .map(|a| a.parse::<u64>().unwrap());
-        let entries = self.relay.lock().unwrap().poll(&circle, after, 0).unwrap();
+        let entries = self.store(&url).lock().unwrap().poll(&circle, after, 0).unwrap();
         let entries: Vec<_> = entries
             .into_iter()
             .map(|(seq, m)| serde_json::json!({ "seq": seq, "message": URL_SAFE_NO_PAD.encode(m), "received_at": 0 }))
@@ -65,7 +81,7 @@ impl Http for FakeHttp {
                 message: "offline".into(),
             });
         }
-        let seq = self.relay.lock().unwrap().post(&circle, &body).unwrap();
+        let seq = self.store(&url).lock().unwrap().post(&circle, &body).unwrap();
         Ok(serde_json::to_vec(&serde_json::json!({ "seq": seq })).unwrap())
     }
 
@@ -93,10 +109,15 @@ struct Device {
 }
 
 fn device(relay: &Arc<Mutex<MemRelay>>) -> Device {
+    device_on(relay, &self::relay())
+}
+
+/// A device that reaches `relay` at `RELAY` and `other` at `RELAY2`.
+fn device_on(relay: &Arc<Mutex<MemRelay>>, other: &Arc<Mutex<MemRelay>>) -> Device {
     let dir = TempDir::new().unwrap();
     let path = dir.path().to_path_buf();
     let signer = SoftSigner::new();
-    let http = FakeHttp::new(relay);
+    let http = FakeHttp::new(relay, other);
     let phone = Phone::open(
         path.to_string_lossy().into_owned(),
         Box::new(signer.clone()),
@@ -1019,13 +1040,14 @@ fn faces_are_stable_and_differ_between_seats() {
     let (a, b) = (device(&r), device(&r));
     let (id, ida, _) = finish(&a, &b);
 
-    // Each seat's seed is SHA-256 of the domain and that seat's key, the same on both phones.
-    let seat0 = a.phone.seat_face_seed(id.clone(), 0).unwrap();
+    // Without cards, another seat's seed is SHA-256 of the domain and that seat's key. A
+    // phone's own seat shows the face it will publish.
+    let seat0 = b.phone.seat_face_seed(id.clone(), 0).unwrap();
     let seat1 = a.phone.seat_face_seed(id.clone(), 1).unwrap();
     assert_eq!(seat0.len(), 32);
     assert_ne!(seat0, seat1);
-    assert_eq!(b.phone.seat_face_seed(id.clone(), 0).unwrap(), seat0);
-    assert_eq!(b.phone.seat_face_seed(id.clone(), 1).unwrap(), seat1);
+    assert_eq!(a.phone.seat_face_seed(id.clone(), 0).unwrap(), a.phone.my_face_seed());
+    assert_eq!(b.phone.seat_face_seed(id.clone(), 1).unwrap(), b.phone.my_face_seed());
     let key = a.signer.public(&format!("cahoots:seat:{ida}")).unwrap();
     let want = Sha256::new().chain_update(b"cahoots/face/v1").chain_update(&key).finalize();
     assert_eq!(seat0, want.to_vec());
@@ -1268,6 +1290,7 @@ fn history_saved_before_generations_still_opens() {
         journal: Vec::new(),
         pending_bump: None,
         pending_card: None,
+        card_due: false,
     };
     cahoots_phone::store::create_circle(
         &d.path,
@@ -1306,7 +1329,16 @@ fn history_saved_before_generations_still_opens() {
 
 /// Two phones that read and post to the test relay from the ceremony on.
 fn named(r: &Arc<Mutex<MemRelay>>, names: [&str; 2]) -> (Device, Device) {
-    let (a, b) = (device(r), device(r));
+    named_on(r, &relay(), names)
+}
+
+/// The same, with `other` behind `RELAY2` for both.
+fn named_on(
+    r: &Arc<Mutex<MemRelay>>,
+    other: &Arc<Mutex<MemRelay>>,
+    names: [&str; 2],
+) -> (Device, Device) {
+    let (a, b) = (device_on(r, other), device_on(r, other));
     for (d, n) in [(&a, names[0]), (&b, names[1])] {
         d.phone.set_default_relay(RELAY.into()).unwrap();
         if !n.is_empty() {
@@ -1411,18 +1443,37 @@ fn without_cards_the_members_have_the_interim_face_and_no_name() {
         assert_eq!(m.name, "", "the app shows its own name for the seat");
         assert!(!m.has_card);
         assert_eq!(m.device, None);
-        assert_eq!(m.face_seed, interim);
-        assert_eq!(d.phone.seat_face_seed(id.clone(), 0).unwrap(), interim);
     }
-    // Names are 1 to 64 bytes after trimming.
-    for bad in ["", "   ", &"x".repeat(65)] {
+    // B sees the interim face. A, on its own seat, sees the face it will publish, the same
+    // in the roster and in Settings.
+    assert_eq!(member(&b, &id, 0).face_seed, interim);
+    assert_eq!(b.phone.seat_face_seed(id.clone(), 0).unwrap(), interim);
+    assert_eq!(member(&a, &id, 0).face_seed, a.phone.my_face_seed());
+    assert_eq!(a.phone.seat_face_seed(id.clone(), 0).unwrap(), a.phone.my_face_seed());
+    // A circle's own face shows on the seat before any card.
+    a.phone.set_circle_face(id.clone(), true).unwrap();
+    let own = a.phone.seat_face_seed(id.clone(), 0).unwrap();
+    assert_ne!(own, a.phone.my_face_seed());
+    assert_eq!(member(&a, &id, 0).face_seed, own);
+    assert!(!member(&a, &id, 0).has_card, "no name, so no card");
+
+    // Names are 1 to 64 characters after trimming.
+    for bad in ["", "   ", &"x".repeat(65), &"é".repeat(65)] {
         match a.phone.set_my_name(bad.to_string()) {
             Err(e) => assert_eq!(e.to_string(), "A name is 1 to 64 characters."),
             Ok(()) => panic!("{bad:?} was taken"),
         }
     }
     assert_eq!(a.phone.my_name(), "");
-    a.phone.set_my_name("x".repeat(64)).unwrap();
+    // 64 characters of four bytes each: 256 bytes, and the card carries it.
+    let wide = "\u{1F600}".repeat(64);
+    assert_eq!(wide.len(), 256);
+    for good in ["x".repeat(64), "é".repeat(64), wide.clone()] {
+        a.phone.set_my_name(good.clone()).unwrap();
+        assert_eq!(a.phone.my_name(), good);
+    }
+    b.phone.poll(id.clone()).unwrap();
+    assert_eq!(member(&b, &id, 0).name, wide);
 }
 
 #[test]
@@ -1477,10 +1528,14 @@ fn a_card_for_another_seat_is_refused() {
     let r = relay();
     let (a, b) = named(&r, ["Ada", "Bea"]);
     let (id, _, idb) = finish(&a, &b);
-    b.phone.poll(id.clone()).unwrap();
-    assert_eq!(member(&b, &id, 0).name, "Ada");
+    a.phone.poll(id.clone()).unwrap();
+    assert_eq!(member(&a, &id, 1).name, "Bea");
+    let bea_face = b.phone.my_face_seed();
 
-    // B's seat signs a card that names seat 1 (A's seat 0), and posts it in the chat.
+    // B's seat signs a card that names seat 1 (index 0, A's seat) and posts it in the chat:
+    // under its own kid [1], where the kid and the card disagree, and under kid [0], where
+    // the signature is not seat 0's. A would keep an accepted card under the sender, seat 2
+    // (index 1), so B's name and face there must stay as B published them.
     let circle_id: [u8; 16] = hex::decode(&id).unwrap().try_into().unwrap();
     let forged = Card {
         circle_id,
@@ -1493,16 +1548,111 @@ fn a_card_for_another_seat_is_refused() {
         device: Some(0),
     };
     let label = format!("cahoots:seat:{idb}");
+    let dir = b.path.join("circles").join(&id);
     for kid in [[1u8], [0u8]] {
         let signed = forged.sign(Soft(&b.signer, label.clone()), &kid).unwrap();
-        let dir = b.path.join("circles").join(&id);
         let mut c = cahoots_phone::chat::Circle::load(&dir).unwrap();
         c.publish_card(&b.http, signed).unwrap();
-        // A reads it, and keeps its own name and face for seat 0 on B's side as A published.
         a.phone.poll(id.clone()).unwrap();
+        let m = member(&a, &id, 1);
+        assert_eq!(m.name, "Bea");
+        assert_eq!(m.face_seed, bea_face);
         assert_eq!(member(&a, &id, 0).name, "Ada");
-        assert_eq!(member(&a, &id, 0).face_seed, a.phone.my_face_seed());
     }
-    // A third phone joining later would read the same relay; A's view of B is unchanged too.
+}
+
+#[test]
+fn a_seat_posting_another_seats_genuine_card_is_refused() {
+    let r = relay();
+    let (a, b) = named(&r, ["Ada", "Bea"]);
+    let (id, _, _) = finish(&a, &b);
+    a.phone.poll(id.clone()).unwrap();
+    b.phone.poll(id.clone()).unwrap();
     assert_eq!(member(&a, &id, 1).name, "Bea");
+
+    // B holds A's card, signed by A's seat and verifying. B posts it as its own message.
+    let dir = b.path.join("circles").join(&id);
+    let ada = cahoots_phone::store::CardsRecord::load(&dir)
+        .unwrap()
+        .get(0)
+        .unwrap()
+        .card
+        .to_vec();
+    let mut c = cahoots_phone::chat::Circle::load(&dir).unwrap();
+    c.publish_card(&b.http, ada).unwrap();
+    // A reads it from sender seat 2 (index 1): the card names seat 1, so it is not kept.
+    a.phone.poll(id.clone()).unwrap();
+    let m = member(&a, &id, 1);
+    assert_eq!(m.name, "Bea");
+    assert_eq!(m.face_seed, b.phone.my_face_seed());
+}
+
+#[test]
+fn cards_follow_a_circle_to_a_new_relay() {
+    let (r, r2) = (relay(), relay());
+    let (a, b) = named_on(&r, &r2, ["Ada", "Bea"]);
+    let (id, _, _) = finish(&a, &b);
+    // Enough traffic on the first relay that its positions run past the new one's.
+    for i in 0..5 {
+        a.phone.send_chat(id.clone(), format!("old {i}")).unwrap();
+    }
+    a.phone.set_my_name("Ada One".into()).unwrap();
+    b.phone.poll(id.clone()).unwrap();
+    a.phone.poll(id.clone()).unwrap();
+    assert_eq!(member(&b, &id, 0).name, "Ada One");
+
+    for d in [&a, &b] {
+        d.phone.set_relay(id.clone(), RELAY2.into()).unwrap();
+    }
+    let circle_id: [u8; 16] = hex::decode(&id).unwrap().try_into().unwrap();
+    // Each phone's next poll posts its own card on the new relay.
+    a.phone.poll(id.clone()).unwrap();
+    b.phone.poll(id.clone()).unwrap();
+    assert_eq!(r2.lock().unwrap().poll(&circle_id, None, 0).unwrap().len(), 2);
+    a.phone.poll(id.clone()).unwrap();
+    assert_eq!(member(&a, &id, 1).name, "Bea");
+    assert!(member(&a, &id, 1).has_card);
+
+    // A name changed on the new relay is read at a low position, and still kept.
+    a.phone.set_my_name("Ada Two".into()).unwrap();
+    b.phone.poll(id.clone()).unwrap();
+    assert_eq!(member(&b, &id, 0).name, "Ada Two");
+}
+
+#[test]
+fn a_refused_face_id_asks_once_and_the_next_poll_shares_the_name() {
+    let r = relay();
+    let (a, b) = named(&r, ["Ada", "Bea"]);
+    let (one, _, _) = finish(&a, &b);
+    let (two, _, _) = finish(&a, &b);
+    for id in [&one, &two] {
+        b.phone.poll(id.clone()).unwrap();
+    }
+
+    a.signer.set_locked(true);
+    let signs = a.signer.sign_calls().len();
+    assert!(matches!(a.phone.set_my_name("Ada King".into()), Err(PhoneError::Locked)));
+    // The name is saved, nothing was signed, and nothing reached B.
+    assert_eq!(a.phone.my_name(), "Ada King");
+    assert_eq!(a.signer.sign_calls().len(), signs);
+    for id in [&one, &two] {
+        b.phone.poll(id.clone()).unwrap();
+        assert_eq!(member(&b, id, 0).name, "Ada");
+    }
+    // A poll while still locked changes nothing.
+    a.phone.poll(one.clone()).unwrap();
+
+    // Once the signer allows, each circle's next poll signs and posts the card.
+    a.signer.set_locked(false);
+    for id in [&one, &two] {
+        a.phone.poll(id.clone()).unwrap();
+        b.phone.poll(id.clone()).unwrap();
+        assert_eq!(member(&b, id, 0).name, "Ada King");
+    }
+    // And it is not signed again after that.
+    let signs = a.signer.sign_calls().len();
+    for id in [&one, &two] {
+        a.phone.poll(id.clone()).unwrap();
+    }
+    assert_eq!(a.signer.sign_calls().len(), signs);
 }

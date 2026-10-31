@@ -477,7 +477,7 @@ Domain `cahoots/card/v1`. A seat's profile for its circle: a name, handles, and 
 | 0 | version, 1 |
 | 1 | circle_id, bstr 16 |
 | 2 | seat, uint |
-| 3 | name, tstr, 1 to 64 bytes |
+| 3 | name, tstr, 1 to 256 bytes |
 | 4 | handles: array of `[kind tstr, value tstr]`, at most 16 |
 | 5 | endpoints: array of `[purpose uint, value tstr]`, at most 16 |
 | 6 | log, uint, the log position the laptop names |
@@ -488,7 +488,7 @@ Keys 7 and 8 are optional. A card without them leaves them out, and the map has 
 
 A handle's kind is a short text such as `email`, `github`, `nostr` or `x`, 1 to 16 bytes. An endpoint's purpose is a purpose byte 0 to 5, 6 for ssh, or 7 for chat. Its value is a text the laptop knows how to use: an address, a host, a chat address. Values are 1 to 256 bytes. The whole encoded card is at most 4000 bytes, so the request that carries it stays under 4 KiB; a longer one is `Malformed`. Signed by the seat with kid `[seat]`.
 
-A phone publishes its signed card in the circle's chat as a message of type card (3), with the signed card as the whole plaintext, after the ceremony and after each change of its name or face. A reader verifies it against the manifest, refuses a card whose seat is not the message's sender, and keeps the newest card for each seat by the relay sequence number it was read at. A card message is never shown as text.
+A phone publishes its signed card in the circle's chat as a message of type card (3). The plaintext is the signed card padded to a bucket as a text is (`docs/chat.md`), so the length of the name does not show on the wire. It is published after the ceremony, after each change of its name or face, and on a new relay when the circle moves to one. A reader verifies it against the manifest, refuses a card whose seat is not the message's sender, and keeps the newest card for each seat by the relay sequence number it was read at. A card message is never shown as text.
 
 A signed card can also travel sealed for the circle, as a file. The sealed form is a random 12-byte nonce, then AES-256-GCM of the signed card under the card seal key, with additional data `cahoots/card/v1`. The card seal key is `HMAC-SHA256(root, "seal/card" || circle_id)`. The badge computes it from the circle root, in the chip when the root is there, and gives it to the laptop only after its holder presses both buttons. The screen shows "key for seal/card". The badge never seals. Before it signs a card, the badge checks that the card names the requested circle and the badge's own seat. Its screen then shows the name and how many handles and endpoints the card has.
 

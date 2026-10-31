@@ -211,6 +211,11 @@ pub struct ChatRecord {
     /// read to the end. Once sealed it moves to the outbox.
     #[n(4)]
     pub pending_card: Option<ByteVec>,
+    /// This seat's card should be signed and published again: a signature was refused, or
+    /// the card was never made. Each poll tries again.
+    #[n(5)]
+    #[cbor(default)]
+    pub card_due: bool,
 }
 
 impl Drop for ChatRecord {
