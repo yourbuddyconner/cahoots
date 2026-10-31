@@ -125,7 +125,7 @@ pub struct Bridge {
     started: bool,
     /// When the pile started, to give the top card [`PILE_DEADLINE`].
     started_at: Option<Instant>,
-    /// How long the top card's parameters may take. [`PILE_DEADLINE`] but in tests.
+    /// How long the top card's parameters may take: [`PILE_DEADLINE`], or shorter in tests.
     pile_deadline: Duration,
     /// The top card's parameters came down: the pile is as tall as the offer says.
     pile_whole: bool,

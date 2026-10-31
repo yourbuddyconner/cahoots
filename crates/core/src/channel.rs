@@ -14,8 +14,8 @@
 //! number of badges in the pile, one byte, above zero and below the circle's size (badges take
 //! seats 1 through `badges`). A v1 code reads as no badges, so a circle without badges reads
 //! the same in a version of the app from before badges. `host` is SHA-256 of the host's
-//! commitment payload, so joiners take seat 0's commitment only if it is the host's; `relay` is
-//! the relay address the host uses, at most 255 bytes of UTF-8 after its one-byte length; and
+//! commitment payload, so joiners take seat 0's commitment only if it is the host's. `relay` is
+//! the relay address the host uses, at most 255 bytes of UTF-8 after its one-byte length.
 //! `params` are the parameters in their canonical encoding ([`CircleParams::encode`]).
 //! Everyone joining uses the host's relay.
 //!
