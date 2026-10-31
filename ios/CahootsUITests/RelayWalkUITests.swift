@@ -6,10 +6,13 @@ import XCTest
 /// offer and join codes through files in `CAHOOTS_WALK_DIR`: each side reads the other's code
 /// off its own screen (a screenshot of the code, decoded) and the other side pastes it, since a
 /// simulator has no camera. Skipped unless `CAHOOTS_WALK_DIR` and `CAHOOTS_STATION` are set;
-/// `ios/README.md` has the commands.
+/// `ios/README.md` has the commands. With `CAHOOTS_CARDS` set, the host makes that many seats
+/// for cards in a pile behind the bridge, after its own, and pastes each card's join code from
+/// `card-<seat>.txt`, which `scripts/bridge-bench.sh` writes from the bridge's output.
 final class RelayWalkUITests: XCTestCase {
     private var dir: URL!
     private var station = ""
+    private var cards = 0
     private let app = XCUIApplication()
 
     override func setUpWithError() throws {
@@ -19,6 +22,7 @@ final class RelayWalkUITests: XCTestCase {
         }
         dir = URL(fileURLWithPath: d)
         station = s
+        cards = Int(env["CAHOOTS_CARDS"] ?? "") ?? 0
         continueAfterFailure = false
     }
 
@@ -42,18 +46,47 @@ final class RelayWalkUITests: XCTestCase {
         XCTAssertTrue(name.waitForExistence(timeout: 10))
         name.tap()
         name.typeText("park")
+        if cards > 0 {
+            // The host, the cards, and one joiner on the other simulator.
+            name.typeText("\n")
+            let people = element("people")
+            for _ in 0..<cards { plus(people) }
+            XCTAssertEqual(people.value as? String, "\(cards + 2)")
+            let pile = element("cards")
+            for _ in 0..<cards { plus(pile) }
+            XCTAssertEqual(pile.value as? String, "\(cards)")
+        }
         shot("host-2-new-circle")
         app.buttons["start-ceremony"].tap()
 
         let offer = try readCode()
         XCTAssertTrue(offer.hasPrefix("cahoots:ceremony:v2:"), offer)
         shot("host-3-offer")
+        if cards > 0 {
+            // Each card's seat row says it comes through the bridge.
+            for seat in 2...(cards + 1) {
+                let row = app.descendants(matching: .any).matching(NSPredicate(
+                    format: "label BEGINSWITH %@ AND label CONTAINS 'card, through the bridge'", "Seat \(seat)"))
+                XCTAssertTrue(row.firstMatch.exists, "seat \(seat) is not shown as a card")
+            }
+            app.swipeUp()
+            shot("host-3-seats")
+        }
         try write("offer.txt", offer)
 
+        if cards > 0 {
+            for seat in 2...(cards + 1) {
+                let code = try wait(for: "card-\(seat).txt")
+                app.buttons["scan-joiner"].tap()
+                paste(code)
+                XCTAssertTrue(app.staticTexts["Scanned seat \(seat)"].waitForExistence(timeout: 20))
+                shot("host-4-scanned-card-\(seat)")
+            }
+        }
         let join = try wait(for: "join.txt")
         app.buttons["scan-joiner"].tap()
         paste(join)
-        XCTAssertTrue(app.staticTexts["Scanned seat 2"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Scanned seat \(cards + 2)"].waitForExistence(timeout: 20))
         shot("host-4-scanned")
         let proceed = app.buttons["continue"]
         XCTAssertTrue(proceed.waitForExistence(timeout: 60))
@@ -103,7 +136,8 @@ final class RelayWalkUITests: XCTestCase {
     /// After the chat: the roster, hello words, the list of circles and settings, for the record.
     private func tour(side: String) {
         app.buttons["People in park"].tap()
-        let seat = side == "host" ? 1 : 0
+        // The other phone's seat, whose message is in the chat: after the cards for the host.
+        let seat = side == "host" ? cards + 1 : 0
         let other = element("hello-seat-\(seat)")
         XCTAssertTrue(other.waitForExistence(timeout: 10))
         shot("\(side)-8-people")
@@ -153,6 +187,14 @@ final class RelayWalkUITests: XCTestCase {
 
     private func element(_ id: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
+    }
+
+    /// The plus button of a stepper: the last 44 points of its row. The row is one element, so
+    /// the button has no element of its own.
+    private func plus(_ stepper: XCUIElement) {
+        XCTAssertTrue(stepper.waitForExistence(timeout: 10))
+        stepper.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.5))
+            .withOffset(CGVector(dx: stepper.frame.width - 22, dy: 0)).tap()
     }
 
     private func paste(_ code: String) {

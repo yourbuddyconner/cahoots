@@ -180,7 +180,19 @@ On 2026-10-30, Xcode 15.4, iOS 17.5, on a Mac with Apple silicon.
    reply and opens Members; `testReader` launches with `-cahoots-link` and the file's link, opens
    the channel from the join screen, reads the first post, asks to post as "Bea", waits for the
    grant, and posts. Each step is photographed into OUT.
-4. Not tried in the simulator: the camera (there is none), Face ID on a real enclave key, a
+4. On 2026-10-31, a ceremony a phone hosts with a badge through the bridge:
+   `scripts/bridge-bench.sh --sim`. The host simulator ran `testHost` with
+   `TEST_RUNNER_CAHOOTS_CARDS=1`: it made "park" for 3 people with 1 card in the pile, and its
+   seat list showed "Seat 2, card, through the bridge". The script started a simulated badge
+   (`cahoots-host badge`, the badge crate on a laptop) and `cahoots-host bridge --sim` on its
+   socket with the host's code. The bridge printed the badge's join code, and the script wrote
+   it to `card-2.txt` for the host to paste. The host saw "Scanned seat 2", pasted the joiner's
+   code from the other simulator and saw "Scanned seat 3", then chose Continue. The badge took
+   seat 2 of 3. The host, the badge and the joiner showed the same six words (that run: night
+   vanish sound capable clean emerge), the badge kept the circle, and the host and joiner chatted.
+   The station held 14 entries. With the board on `/dev/cu.usbmodempico21` in place of the
+   simulated badge, the same script without `--sim` has not run yet.
+5. Not tried in the simulator: the camera (there is none), Face ID on a real enclave key, a
    ceremony with codes only between two screens, background refresh, and the icon badge. The
    unit tests cover the signer's keychain path, HTTP against a real station, and the phone crate
    through the bindings.

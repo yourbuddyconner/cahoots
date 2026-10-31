@@ -7,7 +7,7 @@
 //! cahoots-host recv --state /tmp/dev3 --message <base64url>
 //! cahoots-host status --state /tmp/dev0
 //! cahoots-host pile --cards 3 --state /tmp/pile [--serial /dev/cu.usbmodem...] [--name sf] [--pad-len 16384]
-//! cahoots-host bridge --serial <port> (--offer <text> | --offer-file <path>) [--badges N]
+//! cahoots-host bridge (--serial <port> | --sim <socket>) (--offer <text> | --offer-file <path>) [--badges N]
 //! cahoots-host badge --state /tmp/b0 --listen - --next /tmp/b1.sock --name sf --pad-len 16384 [--seed 1] [--chip soft]
 //! cahoots-host agent (--serial <port> | --sim <socket>) --circle <name>... [--socket <path>] [--known-hosts <path>]
 //! cahoots-host git-sign -Y sign -n git -f <key file> <file>
@@ -32,6 +32,7 @@
 //! a phone hosts through the relay. `--offer` is the host's code (`--offer-file` reads it from
 //! a file), and `--badges` the cards in the pile, by default the number the code was made for.
 //! It prints a code for each card for the host's phone to scan. See [`cahoots_host::bridge`].
+//! With `--sim` the bottom card is a simulated badge listening on that socket.
 //!
 //! `badge` runs one card through the badge crate on a [`HostBoard`]: boot, then a pile pass
 //! while it has no circle, then the idle menu. `--listen` is the down link and `--next` the
@@ -163,14 +164,23 @@ fn run_bridge(args: &Args) -> Result<(), String> {
         Some(b) => b.parse().map_err(|_| "--badges: a number of cards")?,
         None => offer.badges,
     };
-    let port = args.get("--serial").ok_or("name the bottom card's port with --serial <port>")?;
     let mut poster = cahoots_relay::HttpRelay::new(&offer.relay);
     let mut poller = cahoots_relay::HttpRelay::new(&offer.relay);
     let mut bridge = Bridge::new(offer, badges).map_err(|e| e.to_string())?;
-    let mut link = cahoots_host::link::SerialLink::open(port, "pile").map_err(|e| format!("{port}: {e}"))?;
+    let mut link: Box<dyn cahoots_hal::Link> = match (args.get("--serial"), args.get("--sim")) {
+        (Some(port), None) => Box::new(
+            cahoots_host::link::SerialLink::open(port, "pile").map_err(|e| format!("{port}: {e}"))?,
+        ),
+        // A simulated card's down link, its `--listen` socket.
+        (None, Some(sock)) => {
+            let stream = UnixStream::connect(sock).map_err(|e| format!("{sock}: {e}"))?;
+            Box::new(SocketLink::new(stream).map_err(|e| format!("{sock}: {e}"))?)
+        }
+        _ => return Err("name the bottom card with --serial <port> or --sim <socket>".into()),
+    };
     println!("Waiting for the cards. Each card's code appears here for the host's phone to scan.");
     bridge
-        .run(&mut link, &mut poster, &mut poller, &mut |seat, code| {
+        .run(link.as_mut(), &mut poster, &mut poller, &mut |seat, code| {
             println!();
             match qrcode::QrCode::new(code.as_bytes()) {
                 Ok(qr) => println!(
