@@ -18,6 +18,11 @@ struct NewCircleView: View {
         (65536, "Medium"),
         (262144, "Large"),
     ]
+    /// The largest secret a circle with cards keeps: Small.
+    static let cardSize: UInt32 = 16384
+
+    /// Cards take part: the secret must be Small.
+    private var withCards: Bool { throughRelay && badges > 0 }
 
     var body: some View {
         ScrollView {
@@ -53,6 +58,7 @@ struct NewCircleView: View {
                                  footer: "Badges stacked on a laptop running the bridge. They take the seats right after yours.") {
                         PeopleStepper(value: $badges, range: 0...(members - 1), noun: "card", label: "Cards in the pile")
                     }
+                    .onChange(of: badges) { _, b in if b > 0 { size = Self.cardSize } }
                 }
 
                 PaperSection(title: "How to connect") {
@@ -66,10 +72,16 @@ struct NewCircleView: View {
                 }
 
                 DisclosureGroup("Advanced options", isExpanded: $advanced) {
-                    PaperSection(title: "Shared secret size", footer: "Larger secrets take longer to exchange with codes only.") {
+                    PaperSection(title: "Shared secret size",
+                                 footer: withCards
+                                    ? "Cards keep a small secret. Medium and Large are for circles without cards."
+                                    : "Larger secrets take longer to exchange with codes only.") {
                         ForEach(Array(Self.sizes.enumerated()), id: \.offset) { i, s in
                             if i > 0 { Hairline() }
+                            let off = withCards && s.bytes > Self.cardSize
                             OptionRow(title: s.label, chosen: size == s.bytes) { size = s.bytes }
+                                .disabled(off)
+                                .opacity(off ? 0.4 : 1)
                         }
                     }
                     .padding(.top, Space.m)

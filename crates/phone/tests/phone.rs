@@ -1083,8 +1083,31 @@ fn a_joiner_cannot_take_a_badge_seat() {
     let id = a.phone.start_ceremony("pile".into(), 4, 2, 16384, true).unwrap();
     let code = a.phone.offer_code(id).unwrap();
     let e = b.phone.join_offer(code.clone(), 1).unwrap_err();
-    assert!(message(e).contains("cards in the pile"));
+    assert_eq!(message(e), "Seats 2 to 3 are cards in the pile. Pick a seat above them.");
     b.phone.join_offer(code, 3).unwrap();
+}
+
+#[test]
+fn one_card_is_named_as_one_seat() {
+    let r = relay();
+    let a = device(&r);
+    let b = device(&r);
+    let id = a.phone.start_ceremony("pile".into(), 3, 1, 16384, true).unwrap();
+    let code = a.phone.offer_code(id).unwrap();
+    let e = b.phone.join_offer(code.clone(), 1).unwrap_err();
+    assert_eq!(message(e), "Seat 2 is a card in the pile. Pick a seat above it.");
+    b.phone.join_offer(code, 2).unwrap();
+}
+
+#[test]
+fn a_circle_with_cards_keeps_a_small_secret() {
+    let r = relay();
+    let a = device(&r);
+    let e = a.phone.start_ceremony("x".into(), 3, 1, 65536, true).unwrap_err();
+    assert_eq!(message(e), "A circle with cards keeps a small secret, 16 KiB. Choose Small.");
+    a.phone.start_ceremony("x".into(), 3, 1, 16384, true).unwrap();
+    // Without cards, a larger secret is fine.
+    a.phone.start_ceremony("x".into(), 3, 0, 65536, true).unwrap();
 }
 
 #[test]

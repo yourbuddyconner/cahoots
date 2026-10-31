@@ -39,6 +39,9 @@ pub const KEY_STORE: &str = "seat key in the Secure Enclave, secret protected by
 pub const KEY_STORE_NO_ENCLAVE: &str = "seat key in the keychain of this simulator, secret protected by iOS";
 /// The longest circle name, in bytes, so the name fits in the step-one code.
 pub const MAX_NAME: usize = 200;
+/// The largest secret a circle with cards keeps, in bytes: Small. A badge that already holds
+/// a circle has room for no more.
+pub const MAX_CARD_PAD: u32 = 16384;
 /// The `Signer` label of this phone's own key.
 pub const PHONE_KEY: &str = "cahoots:phone";
 
@@ -581,6 +584,12 @@ impl Phone {
                 message: "Cards in a pile join through the relay. Turn the relay on.".into(),
             });
         }
+        // A badge that already holds a circle has room for a small secret only.
+        if badges > 0 && pad_len > MAX_CARD_PAD {
+            return Err(PhoneError::Ceremony {
+                message: "A circle with cards keeps a small secret, 16 KiB. Choose Small.".into(),
+            });
+        }
         let params = CircleParams::new(members, pad_len, name, false).map_err(params_err)?;
         let channel = through_relay.then(|| Channel::new(&mut rand_core::OsRng));
         let (id, p) = self.begin(params, 0, channel, None, badges)?;
@@ -1040,6 +1049,9 @@ fn check_seat(params: &CircleParams, badges: u8, seat: u8) -> Result<(), PhoneEr
         ));
     }
     if seat <= badges {
+        if badges == 1 {
+            return refuse("Seat 2 is a card in the pile. Pick a seat above it.".into());
+        }
         return refuse(format!(
             "Seats 2 to {} are cards in the pile. Pick a seat above them.",
             u16::from(badges) + 1
