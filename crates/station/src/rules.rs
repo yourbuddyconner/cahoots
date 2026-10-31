@@ -24,6 +24,8 @@ pub enum RuleError {
     Length,
     #[error("message names a different circle than the path")]
     CircleMismatch,
+    #[error("message names a different channel than the path")]
+    ChannelMismatch,
     #[error("malformed pure-pad message: {0:?}")]
     Message(MessageError),
 }
@@ -31,7 +33,8 @@ pub enum RuleError {
 /// A parsed, rule-checked body ready to append.
 #[derive(Clone, Debug)]
 pub struct Submission {
-    circle_id: CircleId,
+    /// The stream the entry joins: the circle id, or for version 3 the channel id.
+    stream: [u8; 16],
     bytes: Vec<u8>,
     /// `(slice, start, end)` for pure-pad messages. `None` for chat.
     pad_range: Option<(u8, u32, u32)>,
@@ -80,14 +83,47 @@ impl Submission {
             return Err(RuleError::CircleMismatch);
         }
         Ok(Submission {
-            circle_id,
+            stream: circle_id,
             bytes: body.to_vec(),
             pad_range,
         })
     }
 
+    /// A version 3 message for the channel route: the version byte is 3, the message splits
+    /// into body and signature, and its header names `path_channel`. The relay holds no
+    /// channel key, so this is all it can check; it never refuses for reuse.
+    #[cfg(feature = "channels")]
+    pub fn parse_channel(
+        path_channel: &cahoots_channel::ChannelId,
+        body: &[u8],
+    ) -> Result<Self, RuleError> {
+        use cahoots_channel::message;
+        if body.len() > MAX_BODY {
+            return Err(RuleError::TooLarge);
+        }
+        match body.first() {
+            None => return Err(RuleError::Length),
+            Some(&message::VERSION) => {}
+            Some(_) => return Err(RuleError::Version),
+        }
+        let (_, _, header) = message::split(body).map_err(|_| RuleError::Length)?;
+        if &header.channel_id != path_channel {
+            return Err(RuleError::ChannelMismatch);
+        }
+        Ok(Submission {
+            stream: header.channel_id,
+            bytes: body.to_vec(),
+            pad_range: None,
+        })
+    }
+
+    /// The stream id: the circle for versions 1 and 2, the channel for version 3.
+    pub fn stream(&self) -> [u8; 16] {
+        self.stream
+    }
+    /// The same as [`Submission::stream`]; for versions 1 and 2 the stream is the circle.
     pub fn circle_id(&self) -> CircleId {
-        self.circle_id
+        self.stream
     }
     pub fn bytes(&self) -> &[u8] {
         &self.bytes

@@ -1,7 +1,9 @@
 //! What a public relay needs before it faces the internet: a per-client rate limit and a cap
 //! on the database size. Both are plain and in-process, so a single station needs no proxy to be
 //! safe to expose. The limit is a token bucket per client address: a client gets `per_minute`
-//! requests of each kind in a burst and then that many per minute.
+//! requests of each kind in a burst and then that many per minute. With `channels`, posts to a
+//! channel's messages also take from a bucket per channel, so one busy channel cannot starve
+//! the relay whatever addresses its posts come from.
 
 use axum::extract::{ConnectInfo, Request, State as AxState};
 use axum::http::{HeaderMap, Method, StatusCode};
@@ -10,6 +12,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -24,6 +27,9 @@ pub struct Limits {
     /// Take the client address from `Fly-Client-IP` or the first `X-Forwarded-For` entry.
     /// Only behind a proxy that sets them; otherwise any client can pick its own bucket.
     pub trust_forwarded: bool,
+    /// Accepted message posts per channel per minute, whoever sends them. Checked by the
+    /// channel post handler under the `channels` feature.
+    pub channel_posts_per_minute: Option<u32>,
 }
 
 impl Default for Limits {
@@ -32,6 +38,7 @@ impl Default for Limits {
             posts_per_minute: Some(120),
             reads_per_minute: Some(600),
             trust_forwarded: false,
+            channel_posts_per_minute: Some(300),
         }
     }
 }
@@ -46,6 +53,7 @@ pub struct Limiter {
     limits: Limits,
     posts: Arc<Mutex<HashMap<IpAddr, Bucket>>>,
     reads: Arc<Mutex<HashMap<IpAddr, Bucket>>>,
+    channel_posts: Arc<Mutex<HashMap<[u8; 16], Bucket>>>,
 }
 
 const PRUNE_ABOVE: usize = 10_000;
@@ -56,6 +64,7 @@ impl Limiter {
             limits,
             posts: Arc::new(Mutex::new(HashMap::new())),
             reads: Arc::new(Mutex::new(HashMap::new())),
+            channel_posts: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -63,15 +72,15 @@ impl Limiter {
         self.limits
     }
 
-    /// Spend one token for `ip` from a bucket of `per_minute`. `true` when the request may go on.
-    fn take(buckets: &Mutex<HashMap<IpAddr, Bucket>>, ip: IpAddr, per_minute: u32) -> bool {
+    /// Spend one token for `key` from a bucket of `per_minute`. `true` when the request may go on.
+    fn take<K: Hash + Eq>(buckets: &Mutex<HashMap<K, Bucket>>, key: K, per_minute: u32) -> bool {
         let cap = per_minute as f64;
         let now = Instant::now();
         let mut map = buckets.lock().unwrap();
         if map.len() > PRUNE_ABOVE {
             map.retain(|_, b| now.duration_since(b.last).as_secs() < 120);
         }
-        let b = map.entry(ip).or_insert(Bucket {
+        let b = map.entry(key).or_insert(Bucket {
             tokens: cap,
             last: now,
         });
@@ -84,6 +93,13 @@ impl Limiter {
         } else {
             false
         }
+    }
+
+    /// Spend one token from `channel`'s post bucket. `true` when the post may go on.
+    pub fn take_channel_post(&self, channel: &[u8; 16]) -> bool {
+        self.limits
+            .channel_posts_per_minute
+            .is_none_or(|n| Self::take(&self.channel_posts, *channel, n))
     }
 
     fn client_ip(&self, headers: &HeaderMap, peer: Option<SocketAddr>) -> IpAddr {
@@ -130,12 +146,17 @@ pub async fn limit(AxState(limiter): AxState<Limiter>, req: Request, next: Next)
         _ => true,
     };
     if !allowed {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            [("retry-after", "10")],
-            Json(json!({ "error": "rate", "detail": "too many requests from this client; try again in a few seconds" })),
-        )
-            .into_response();
+        return rate_limited("too many requests from this client; try again in a few seconds");
     }
     next.run(req).await
+}
+
+/// `429 {"error":"rate"}` with `Retry-After: 10`.
+pub fn rate_limited(detail: &str) -> Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        [("retry-after", "10")],
+        Json(json!({ "error": "rate", "detail": detail })),
+    )
+        .into_response()
 }

@@ -134,6 +134,19 @@ pub fn channel(conn: &Connection, channel: &[u8; 16]) -> Result<Option<ChannelRo
     .optional()
 }
 
+/// Every channel id the relay holds, in id order. Rows with a malformed id are skipped.
+pub fn channel_ids(conn: &Connection) -> Result<Vec<[u8; 16]>> {
+    let mut stmt = conn.prepare("SELECT channel FROM channels ORDER BY channel")?;
+    let rows = stmt.query_map([], |r| r.get::<_, Vec<u8>>(0))?;
+    let mut ids = Vec::new();
+    for row in rows {
+        if let Ok(id) = row?.try_into() {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
 /// Store a verified channel object. A later one replaces the held one only when its
 /// `created_log` is greater.
 pub fn put_channel(conn: &Connection, channel_id: &[u8; 16], row: &ChannelRow) -> Result<Put> {

@@ -134,6 +134,7 @@ async fn start() -> (String, tempfile::TempDir) {
             posts_per_minute: None,
             reads_per_minute: None,
             trust_forwarded: false,
+            channel_posts_per_minute: None,
         },
         None,
     )
@@ -696,6 +697,7 @@ async fn puts_and_deletes_count_as_posts() {
             posts_per_minute: Some(1),
             reads_per_minute: Some(1),
             trust_forwarded: false,
+            channel_posts_per_minute: None,
         },
         None,
     )

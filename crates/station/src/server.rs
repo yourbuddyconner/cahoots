@@ -2,7 +2,7 @@
 //! append; pollers re-check the log and return as soon as something new exists.
 
 use crate::limits::{self, Limiter, Limits};
-use crate::log::{EntryRecord, Log, LogError};
+use crate::log::{Entry, EntryRecord, Log, LogError};
 use crate::rules::{RuleError, Submission, MAX_BODY};
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State as AxState};
@@ -13,7 +13,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use cahoots_core::circle_id::CircleId;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -25,8 +25,8 @@ const PAGE_LIMIT: usize = 500;
 #[derive(Clone)]
 pub struct State {
     pub(crate) log: Arc<Mutex<Log>>,
-    notify: Arc<Notify>,
-    limiter: Limiter,
+    pub(crate) notify: Arc<Notify>,
+    pub(crate) limiter: Limiter,
     /// Refuse posts once the database is this large. `None` for no cap.
     max_log_bytes: Option<u64>,
 }
@@ -74,6 +74,8 @@ pub fn app(state: State) -> Router {
     let router = router.route("/", get(index));
     #[cfg(feature = "objects")]
     let router = crate::objects::routes(router);
+    #[cfg(feature = "channels")]
+    let router = crate::channels::routes(router);
     router
         .route("/healthz", get(|| async { "ok" }))
         .route("/v1/info", get(info))
@@ -106,7 +108,7 @@ fn cors_methods() -> Vec<http::Method> {
     methods
 }
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -161,28 +163,35 @@ async fn post_message(
         }
         log.append(sub, now_ms())
     };
-    match result {
-        Ok(entry) => {
-            st.notify.notify_waiters();
-            (
-                StatusCode::CREATED,
-                Json(json!({ "seq": entry.seq, "hash": hex::encode(entry.hash) })),
+    st.appended(result)
+}
+
+impl State {
+    /// Answer an append: wake the pollers and `201 {"seq","hash"}`, or the refusal.
+    pub(crate) fn appended(&self, result: Result<Entry, LogError>) -> Response {
+        match result {
+            Ok(entry) => {
+                self.notify.notify_waiters();
+                (
+                    StatusCode::CREATED,
+                    Json(json!({ "seq": entry.seq, "hash": hex::encode(entry.hash) })),
+                )
+                    .into_response()
+            }
+            Err(e @ LogError::Reuse { prior_seq, .. }) => (
+                StatusCode::CONFLICT,
+                Json(json!({ "error": "reuse", "prior_seq": prior_seq, "detail": e.to_string() })),
             )
-                .into_response()
+                .into_response(),
+            Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, "log", e),
         }
-        Err(e @ LogError::Reuse { prior_seq, .. }) => (
-            StatusCode::CONFLICT,
-            Json(json!({ "error": "reuse", "prior_seq": prior_seq, "detail": e.to_string() })),
-        )
-            .into_response(),
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, "log", e),
     }
 }
 
 #[derive(Deserialize)]
 pub struct PollQuery {
-    after: Option<u64>,
-    wait: Option<u64>,
+    pub(crate) after: Option<u64>,
+    pub(crate) wait: Option<u64>,
 }
 
 async fn get_messages(
@@ -194,6 +203,17 @@ async fn get_messages(
         Ok(c) => c,
         Err(r) => return *r,
     };
+    poll_stream(&st, &circle, &q, |e| EntryRecord::from(e)).await
+}
+
+/// `{"entries", "head_seq"}` for `stream` after `q.after`, waiting up to `q.wait` ms (at most
+/// [`MAX_WAIT_MS`]) for the first one. `record` gives each entry its wire form.
+pub(crate) async fn poll_stream<R: Serialize>(
+    st: &State,
+    stream: &[u8; 16],
+    q: &PollQuery,
+    record: fn(&Entry) -> R,
+) -> Response {
     let deadline =
         tokio::time::Instant::now() + Duration::from_millis(q.wait.unwrap_or(0).min(MAX_WAIT_MS));
     loop {
@@ -201,13 +221,13 @@ async fn get_messages(
         let notified = st.notify.notified();
         tokio::pin!(notified);
         notified.as_mut().enable();
-        let (entries, head): (Vec<EntryRecord>, _) = {
+        let (entries, head): (Vec<R>, _) = {
             let log = st.log.lock().unwrap();
             let e = log
-                .entries_after(&circle, q.after)
+                .entries_after_stream(stream, q.after)
                 .into_iter()
                 .take(PAGE_LIMIT)
-                .map(EntryRecord::from)
+                .map(record)
                 .collect();
             (e, log.head().seq)
         };
@@ -231,7 +251,7 @@ async fn feed(AxState(st): AxState<State>, Query(q): Query<PollQuery>) -> Respon
     Json(json!({ "entries": entries, "head_seq": log.head().seq })).into_response()
 }
 
-fn head_json(h: crate::log::Head) -> Response {
+pub(crate) fn head_json(h: crate::log::Head) -> Response {
     Json(json!({ "seq": h.seq, "hash": hex::encode(h.hash) })).into_response()
 }
 
@@ -250,7 +270,16 @@ async fn circle_head(AxState(st): AxState<State>, Path(circle): Path<String>) ->
 }
 
 async fn circles(AxState(st): AxState<State>) -> Response {
-    let c = st.log.lock().unwrap().circles();
+    #[allow(unused_mut)]
+    let mut log = st.log.lock().unwrap();
+    #[allow(unused_mut)]
+    let mut c = log.circles();
+    // A channel's stream is not a circle: leave out the ids the channels table holds.
+    #[cfg(feature = "channels")]
+    match crate::objects::store::channel_ids(log.conn()) {
+        Ok(channels) => c.retain(|s| !channels.contains(&s.circle_id)),
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, "db", e),
+    }
     Json(json!({ "circles": c })).into_response()
 }
 
@@ -271,14 +300,20 @@ pub fn features() -> Vec<&'static str> {
 
 async fn info(AxState(st): AxState<State>) -> Response {
     let limits = st.limits();
+    #[allow(unused_mut)]
+    let mut shown = json!({
+        "max_body": MAX_BODY,
+        "posts_per_minute": limits.posts_per_minute,
+        "reads_per_minute": limits.reads_per_minute,
+    });
+    #[cfg(feature = "channels")]
+    {
+        shown["channel_posts_per_minute"] = json!(limits.channel_posts_per_minute);
+    }
     Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "features": features(),
-        "limits": {
-            "max_body": MAX_BODY,
-            "posts_per_minute": limits.posts_per_minute,
-            "reads_per_minute": limits.reads_per_minute,
-        },
+        "limits": shown,
     }))
     .into_response()
 }

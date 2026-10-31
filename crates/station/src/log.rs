@@ -30,6 +30,7 @@ pub fn entry_hash(prev: &Hash, seq: u64, received_at: u64, message: &[u8]) -> Ha
 pub struct Entry {
     pub seq: u64,
     pub received_at: u64,
+    /// The entry's stream: a circle id, or a channel id for a version 3 message.
     pub circle_id: CircleId,
     pub message: Vec<u8>,
     pub hash: Hash,
@@ -68,6 +69,14 @@ pub struct Head {
 pub struct CircleSummary {
     #[serde(serialize_with = "hex_cid")]
     pub circle_id: CircleId,
+    pub count: u64,
+    pub last_seq: u64,
+}
+
+/// One stream's count and last `seq`, before it is told apart as a circle or a channel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StreamSummary {
+    pub stream: [u8; 16],
     pub count: u64,
     pub last_seq: u64,
 }
@@ -229,7 +238,7 @@ impl Log {
         }
         let seq = self.entries.len() as u64;
         let prev = self.head().hash;
-        let circle_id = sub.circle_id();
+        let circle_id = sub.stream();
         let range = sub.pad_range();
         let message = sub.into_bytes();
         let hash = entry_hash(&prev, seq, received_at, &message);
@@ -278,8 +287,9 @@ impl Log {
         }
     }
 
-    pub fn circle_head(&self, circle: &CircleId) -> Head {
-        match self.entries.iter().rev().find(|e| &e.circle_id == circle) {
+    /// The last entry of `stream`, a circle or a channel; the genesis hash when it has none.
+    pub fn stream_head(&self, stream: &[u8; 16]) -> Head {
+        match self.entries.iter().rev().find(|e| &e.circle_id == stream) {
             Some(e) => Head {
                 seq: Some(e.seq),
                 hash: e.hash,
@@ -291,14 +301,23 @@ impl Log {
         }
     }
 
-    /// Entries for `circle` with `seq > after` (all of them when `after` is `None`).
-    pub fn entries_after(&self, circle: &CircleId, after: Option<u64>) -> Vec<&Entry> {
+    /// Entries of `stream` with `seq > after` (all of them when `after` is `None`).
+    pub fn entries_after_stream(&self, stream: &[u8; 16], after: Option<u64>) -> Vec<&Entry> {
         let from = after.map(|a| a as usize + 1).unwrap_or(0);
         self.entries
             .iter()
             .skip(from)
-            .filter(|e| &e.circle_id == circle)
+            .filter(|e| &e.circle_id == stream)
             .collect()
+    }
+
+    pub fn circle_head(&self, circle: &CircleId) -> Head {
+        self.stream_head(circle)
+    }
+
+    /// Entries for `circle` with `seq > after` (all of them when `after` is `None`).
+    pub fn entries_after(&self, circle: &CircleId, after: Option<u64>) -> Vec<&Entry> {
+        self.entries_after_stream(circle, after)
     }
 
     pub fn all_after(&self, after: Option<u64>, limit: usize) -> Vec<&Entry> {
@@ -313,11 +332,12 @@ impl Log {
         self.entries.is_empty()
     }
 
-    pub fn circles(&self) -> Vec<CircleSummary> {
-        let mut map: HashMap<CircleId, CircleSummary> = HashMap::new();
+    /// Every stream with its count and last `seq`, the most recently written first.
+    pub fn streams(&self) -> Vec<StreamSummary> {
+        let mut map: HashMap<[u8; 16], StreamSummary> = HashMap::new();
         for e in &self.entries {
-            let s = map.entry(e.circle_id).or_insert(CircleSummary {
-                circle_id: e.circle_id,
+            let s = map.entry(e.circle_id).or_insert(StreamSummary {
+                stream: e.circle_id,
                 count: 0,
                 last_seq: e.seq,
             });
@@ -327,5 +347,17 @@ impl Log {
         let mut v: Vec<_> = map.into_values().collect();
         v.sort_by_key(|s| std::cmp::Reverse(s.last_seq));
         v
+    }
+
+    /// Every stream as a circle. With `channels`, the server leaves out the channel streams.
+    pub fn circles(&self) -> Vec<CircleSummary> {
+        self.streams()
+            .into_iter()
+            .map(|s| CircleSummary {
+                circle_id: s.stream,
+                count: s.count,
+                last_seq: s.last_seq,
+            })
+            .collect()
     }
 }

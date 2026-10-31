@@ -213,6 +213,7 @@ async fn rate_limit_answers_429_after_the_burst_and_reads_have_their_own_bucket(
         posts_per_minute: Some(3),
         reads_per_minute: Some(2),
         trust_forwarded: false,
+        channel_posts_per_minute: None,
     };
     let (base, _dir) = start_with(limits, None).await;
     let cid = [9u8; 16];
@@ -259,6 +260,7 @@ async fn forwarded_address_is_ignored_unless_trusted() {
         posts_per_minute: Some(1),
         reads_per_minute: None,
         trust_forwarded: false,
+        channel_posts_per_minute: None,
     };
     let (base, _dir) = start_with(limits, None).await;
     let cid = [8u8; 16];
@@ -330,6 +332,7 @@ async fn info_reports_version_and_default_features() {
         posts_per_minute: Some(5),
         reads_per_minute: None,
         trust_forwarded: false,
+        channel_posts_per_minute: None,
     };
     let (base, _dir) = start_with(limits, None).await;
     let r = reqwest::get(format!("{base}/v1/info")).await.unwrap();

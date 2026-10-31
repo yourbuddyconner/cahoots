@@ -28,6 +28,10 @@ struct Args {
     /// 0 for no cap.
     #[arg(long, default_value_t = 0)]
     max_log_bytes: u64,
+    /// Message posts accepted per channel per minute, whoever sends them. 0 for no limit.
+    #[cfg(feature = "channels")]
+    #[arg(long, default_value_t = 300)]
+    channel_posts_per_minute: u32,
 }
 
 #[tokio::main]
@@ -37,6 +41,11 @@ async fn main() {
         posts_per_minute: (args.posts_per_minute > 0).then_some(args.posts_per_minute),
         reads_per_minute: (args.reads_per_minute > 0).then_some(args.reads_per_minute),
         trust_forwarded: args.trust_forwarded,
+        #[cfg(feature = "channels")]
+        channel_posts_per_minute: (args.channel_posts_per_minute > 0)
+            .then_some(args.channel_posts_per_minute),
+        #[cfg(not(feature = "channels"))]
+        channel_posts_per_minute: None,
     };
     let state = match State::open_with(
         &args.db,
