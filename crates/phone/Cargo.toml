@@ -19,6 +19,8 @@ path = "src/bin/uniffi-bindgen.rs"
 [dependencies]
 cahoots-core = { workspace = true, features = ["std"] }
 cahoots-chat = { workspace = true, features = ["std"] }
+# The channel owner and member cores, shared with the browser.
+cahoots-channel = { workspace = true, features = ["std"] }
 uniffi = { version = "0.29", features = ["cli"] }
 thiserror = "2"
 minicbor = { version = "2.3", features = ["alloc", "derive", "std"] }
@@ -38,3 +40,8 @@ url = "2.5"
 cahoots-relay = { path = "../relay" }
 cahoots-wasm = { path = "../wasm" }
 tempfile = "3.10"
+# The channel tests run a real station in process and reach it over HTTP.
+cahoots-station = { path = "../station", features = ["objects", "channels", "gate"] }
+tokio = { version = "1.44", features = ["rt-multi-thread", "macros", "net"] }
+axum = { version = "0.7.9", default-features = false, features = ["http1", "tokio"] }
+ureq = { version = "2.12", default-features = false }

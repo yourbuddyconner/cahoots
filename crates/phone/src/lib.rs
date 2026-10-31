@@ -12,6 +12,7 @@
 uniffi::setup_scaffolding!();
 
 pub mod ceremony;
+pub mod channel;
 pub mod chat;
 pub mod signer;
 pub mod store;
@@ -62,6 +63,10 @@ pub enum PhoneError {
     Chat { message: String },
     #[error("{message}")]
     Signer { message: String },
+    /// A channel refused what was asked: no link, not allowed to post, a link that does not
+    /// read, and the like.
+    #[error("{message}")]
+    Channel { message: String },
 }
 
 impl From<uniffi::UnexpectedUniFFICallbackError> for PhoneError {
@@ -77,6 +82,107 @@ pub trait Http: Send + Sync {
     fn get(&self, url: String) -> Result<Vec<u8>, PhoneError>;
     /// `body` is sent as `application/octet-stream`.
     fn post(&self, url: String, body: Vec<u8>) -> Result<Vec<u8>, PhoneError>;
+    /// Any request, for the channel calls: `method` is `GET`, `POST`, `PUT` or `DELETE`;
+    /// every header in `headers` is set as given (`Content-Type`, `Cahoots-Gate`,
+    /// `Cahoots-Proof`, `Cahoots-Kid`); `body`, when there is one, is sent as is. Every answer
+    /// comes back with its status and body, a 4xx or 5xx included: the channel code reads 401,
+    /// 404 and 409 itself. An error (`PhoneError::Network`) only when no answer came at all.
+    fn request(
+        &self,
+        method: String,
+        url: String,
+        headers: Vec<HttpHeader>,
+        body: Option<Vec<u8>>,
+    ) -> Result<HttpResponse, PhoneError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct HttpHeader {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct HttpResponse {
+    pub status: u16,
+    pub body: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ChannelRole {
+    /// This phone runs the channel for one of its circles.
+    Owner,
+    /// This phone reads it from a link.
+    Member,
+}
+
+/// A channel on this phone.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ChannelSummary {
+    /// The channel id, 32 hex characters.
+    pub id: String,
+    pub name: String,
+    pub role: ChannelRole,
+    /// Who reads and posts, in one line: "anyone with the link can read and post".
+    pub policy_line: String,
+    /// The relay's host, as the link names it: `relay.cahoots.network`.
+    pub relay: String,
+    /// The link no longer works (retired, or this member was removed). Say "This link no
+    /// longer works. Ask for a new one." Nothing more is read or sent.
+    pub dead: bool,
+    /// This phone may post now: the owner, or a member the owner let in.
+    pub can_post: bool,
+    /// A member asked to post and the owner has not answered: "Waiting for the owner to let
+    /// you post."
+    pub waiting: bool,
+    /// Messages from others read since the history was last shown.
+    pub unread: u32,
+    /// The owner circle's id when this phone holds that circle (always for an owner).
+    pub circle: Option<String>,
+}
+
+/// One line of a channel's history.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ChannelMessage {
+    pub id: String,
+    /// Who sent it: the name an admitted member asked under, "owner", or the first 8 hex
+    /// characters of the sender's key id. "you" for this phone's own.
+    pub sender: String,
+    pub mine: bool,
+    pub text: String,
+    /// Milliseconds since 1970: when the relay took it, or when this phone sent it.
+    pub time: u64,
+    /// An announcement (a post the owner's seats approve).
+    pub announcement: bool,
+    /// For an announcement, its approvals reached the quorum; true for every other line.
+    pub approved: bool,
+    /// A line from the app, not a person: "The owner removed a member and will start new keys."
+    pub note: bool,
+    /// A message that did not check out when read; `text` says why.
+    pub refused: bool,
+    /// The relay's sequence number, when known.
+    pub seq: Option<u64>,
+}
+
+/// Someone asking to post in a channel this phone owns.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ChannelRequest {
+    /// The relay's id of the request: hand it to `channel_allow` or `channel_refuse`.
+    pub id: String,
+    /// The name they typed.
+    pub name: String,
+    /// What they ask for: "read,post".
+    pub actions: String,
+}
+
+/// Someone the owner let in.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ChannelMemberInfo {
+    /// Hand it to `channel_revoke`.
+    pub grant_id: String,
+    pub name: String,
+    /// What they were given: "read,post" or "read".
+    pub actions: String,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]

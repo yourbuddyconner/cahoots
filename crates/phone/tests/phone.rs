@@ -68,6 +68,20 @@ impl Http for FakeHttp {
         let seq = self.relay.lock().unwrap().post(&circle, &body).unwrap();
         Ok(serde_json::to_vec(&serde_json::json!({ "seq": seq })).unwrap())
     }
+
+    /// The channel calls; these tests make none (`tests/channel.rs` runs a real station).
+    fn request(
+        &self,
+        _method: String,
+        _url: String,
+        _headers: Vec<cahoots_phone::HttpHeader>,
+        _body: Option<Vec<u8>>,
+    ) -> Result<cahoots_phone::HttpResponse, PhoneError> {
+        Ok(cahoots_phone::HttpResponse {
+            status: 404,
+            body: Vec::new(),
+        })
+    }
 }
 
 struct Device {

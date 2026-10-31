@@ -9,6 +9,10 @@
 //! circles/<id>/messages.log      one CBOR message record after another, plaintext
 //! circles/<id>/cursor.cbor       the last relay sequence number read
 //! circles/<id>/settings.cbor     the relay address and the unread count
+//! channels/<id>/owner.cbor       a channel this phone owns: the owner core's export (secrets)
+//! channels/<id>/member.cbor      a channel this phone reads: the member core's export (secrets)
+//! channels/<id>/meta.cbor        the channel's app record: relay, name, policy, cursor, flags
+//! channels/<id>/messages.cbor    the channel's messages, plaintext
 //! ```
 //!
 //! Swift opens the container with complete file protection. `cursor.cbor` and `settings.cbor`
@@ -35,6 +39,11 @@ pub const CHAT: &str = "chat.cbor";
 pub const MESSAGES: &str = "messages.log";
 pub const CURSOR: &str = "cursor.cbor";
 pub const SETTINGS: &str = "settings.cbor";
+pub const CHANNELS: &str = "channels";
+pub const OWNER: &str = "owner.cbor";
+pub const MEMBER: &str = "member.cbor";
+pub const META: &str = "meta.cbor";
+pub const CHANNEL_MESSAGES: &str = "messages.cbor";
 
 /// Load `path`, or `None` when the file does not exist. Any other failure is an error, so a
 /// file that cannot be read now (iOS protection while locked) is never replaced by defaults.
@@ -346,4 +355,163 @@ pub fn circle_ids(root: &Path) -> Vec<String> {
         .collect();
     ids.sort();
     ids
+}
+
+pub fn channels_dir(root: &Path) -> PathBuf {
+    root.join(CHANNELS)
+}
+
+/// The ids of the channels held, in name order of their directories.
+pub fn channel_ids(root: &Path) -> Vec<String> {
+    let Ok(rd) = fs::read_dir(channels_dir(root)) else {
+        return Vec::new();
+    };
+    let mut ids: Vec<String> = rd
+        .filter_map(Result::ok)
+        .filter(|e| e.path().join(META).is_file())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| n.len() == 32 && n.bytes().all(|b| b.is_ascii_hexdigit()))
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// A channel's app record, beside the core's exported state: what `web/app/channels.js` keeps
+/// in its channel record, and the poll loop's flags, which the phone keeps across calls.
+#[derive(Encode, Decode, Clone, Debug, Default)]
+pub struct ChannelMeta {
+    /// This phone owns the channel (`owner.cbor`), or reads it (`member.cbor`).
+    #[n(0)]
+    pub owner: bool,
+    /// The owner circle's id, hex.
+    #[n(1)]
+    pub circle: String,
+    /// The relay's address: the circle's relay for an owner, `https://` and the link's host
+    /// for a member.
+    #[n(2)]
+    pub relay: String,
+    #[n(3)]
+    pub name: String,
+    /// The preset the owner picked; `None` for a member.
+    #[n(4)]
+    pub preset: Option<u8>,
+    /// The approvals preset 1 asks for; 0 otherwise.
+    #[n(5)]
+    pub quorum: u8,
+    /// The current signed policy.
+    #[n(6)]
+    #[cbor(with = "minicbor::bytes")]
+    pub policy: Vec<u8>,
+    #[n(7)]
+    pub policy_line: String,
+    /// This member's grant chain once the owner let it post; the self grant for an owner.
+    #[n(8)]
+    pub grant_chain: Option<ByteVec>,
+    /// The owner circle's encoded `SealedManifest`.
+    #[n(9)]
+    #[cbor(with = "minicbor::bytes")]
+    pub manifest: Vec<u8>,
+    /// The last relay sequence number read.
+    #[n(10)]
+    pub seq: Option<u64>,
+    /// This phone's member key id, hex.
+    #[n(11)]
+    pub kid: String,
+    /// Join requests the owner allowed or refused.
+    #[n(12)]
+    pub handled: Vec<String>,
+    /// What each admitted grant (hex id) was given: `"read,post"`.
+    #[n(13)]
+    pub actions: Vec<(String, String)>,
+    /// SHA-256 of the gate token registered with the relay, hex.
+    #[n(14)]
+    pub gate_hash: Option<String>,
+    /// The name this member asked to post under.
+    #[n(15)]
+    pub my_name: String,
+    #[n(16)]
+    pub wants_post: bool,
+    /// A join request was posted; each poll looks for the grant.
+    #[n(17)]
+    pub requested: bool,
+    /// The link no longer reads: retired, or this member was removed.
+    #[n(18)]
+    pub dead: bool,
+    /// Key ids that sent control messages: the owner's.
+    #[n(19)]
+    pub owner_kids: Vec<String>,
+    #[n(20)]
+    pub unread: u32,
+    /// Read with a proof by the member key instead of the link's gate token.
+    #[n(21)]
+    pub use_proof: bool,
+    /// A rotation came with no deposit this member can open.
+    #[n(22)]
+    pub behind: bool,
+    /// The highest epoch number of any entry read.
+    #[n(23)]
+    pub max_epoch: u32,
+    /// An epoch whose deposit could not be fetched, tried again after the next sync.
+    #[n(24)]
+    pub retry_epoch: Option<ByteVec>,
+    /// The owner's `Signer` label for its seat key.
+    #[n(25)]
+    pub seat_label: String,
+    /// The owner's seat key, SEC1 compressed.
+    #[n(26)]
+    #[cbor(with = "minicbor::bytes")]
+    pub seat_public: Vec<u8>,
+}
+
+impl ChannelMeta {
+    pub fn load(dir: &Path) -> Result<Self, PhoneError> {
+        load(&dir.join(META))
+    }
+    pub fn save(&self, dir: &Path) -> Result<(), PhoneError> {
+        save(&dir.join(META), self)
+    }
+}
+
+/// One line of a channel's history. `kind`: 0 text, 1 announcement, 2 a note from the app
+/// (a member removed, a policy change), 3 a message refused on reading.
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct ChannelMessageRecord {
+    #[n(0)]
+    pub id: String,
+    /// The sender's member key id, hex.
+    #[n(1)]
+    pub kid: String,
+    /// The name shown: an admitted member's name, "owner", or a short key id.
+    #[n(2)]
+    pub sender: String,
+    #[n(3)]
+    pub mine: bool,
+    #[n(4)]
+    pub text: String,
+    #[n(5)]
+    pub kind: u8,
+    /// For an announcement: its approvals reached the quorum.
+    #[n(6)]
+    pub ok: bool,
+    #[n(7)]
+    pub seq: Option<u64>,
+    /// Milliseconds since 1970: when the relay took it, or when this phone sent it.
+    #[n(8)]
+    pub time: u64,
+}
+
+/// A channel's history, oldest first.
+#[derive(Encode, Decode, Clone, Debug, Default)]
+pub struct ChannelMessages {
+    #[n(0)]
+    pub messages: Vec<ChannelMessageRecord>,
+}
+
+impl ChannelMessages {
+    pub fn load(dir: &Path) -> Result<Self, PhoneError> {
+        Ok(load_if_present(&dir.join(CHANNEL_MESSAGES))?.unwrap_or_default())
+    }
+    pub fn save(&self, dir: &Path) -> Result<(), PhoneError> {
+        save(&dir.join(CHANNEL_MESSAGES), self)
+    }
 }
