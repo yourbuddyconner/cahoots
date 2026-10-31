@@ -9,10 +9,17 @@
 //! frame. Each card's commitment makes a join code for the host's phone to scan, so the
 //! host takes the cards as it takes a phone that joins.
 //!
-//! The bridge checks two things the cards cannot: seat 0's commitment on the relay must be
-//! the one the offer names, and every card must propose the offer's parameters. A seat 0
-//! commitment that is not the host's is a stray, as it is for a joiner: it is dropped, and
-//! the bridge waits for the real one.
+//! The bridge checks what the cards cannot: seat 0's commitment on the relay must be the one
+//! the offer names, every card must propose the offer's parameters, and the pile must have
+//! the offer's number of cards. A seat 0 commitment that is not the host's is a stray, as it
+//! is for a joiner: it is dropped, and the bridge waits for the real one. A ring frame from a
+//! seat above the cards means the pile is bigger (nothing the bridge sends up comes back
+//! down), and no parameters from the top card's seat within [`PILE_DEADLINE`] means it is
+//! smaller. An abort from a card ends the run.
+//!
+//! From the relay, only the first commitment for a seat goes up the cable. Every new reveal
+//! and signature goes up, so one forged copy cannot keep the real one from the cards: the
+//! ring keeps a few copies per seat and drops the ones that do not open or check.
 //!
 //! [`Bridge::run`] keeps the relay off the cable's loop. One thread posts, one long-polls, and
 //! the loop that reads the cable never waits on either, so a board that takes two seconds
@@ -43,11 +50,17 @@ pub const POLL_WAIT_MS: u64 = 2000;
 const EMPTY_POLL_EVERY: Duration = Duration::from_millis(500);
 /// Between passes of the cable's loop.
 const LINK_EVERY: Duration = Duration::from_millis(20);
+/// How long after the pile starts the top card's parameters may take to come down. A pile
+/// with fewer cards than the offer never sends them.
+pub const PILE_DEADLINE: Duration = Duration::from_secs(60);
 
 #[derive(Debug)]
 pub enum BridgeError {
-    /// The pile has `pile` cards and the host's offer counts `offer`.
+    /// The pile has at least `pile` cards, or no more than `pile`, and the host's offer counts
+    /// `offer`.
     Count { pile: u8, offer: u8 },
+    /// The card in `seat` stopped the ceremony.
+    Aborted { seat: u8, reason: u8 },
     /// The card in `seat` proposed parameters that differ from the host's.
     Params { seat: u8 },
     /// The cable to the pile was unplugged.
@@ -60,7 +73,12 @@ impl fmt::Display for BridgeError {
         match self {
             BridgeError::Count { pile, offer } => write!(
                 f,
-                "the pile has {pile} cards and the host's code is for {offer}. Start again on the phone with {pile} cards, or change the pile"
+                "the pile has at least {pile} cards and the host said {offer}. Restack and start again."
+            ),
+            BridgeError::Aborted { seat, reason } => write!(
+                f,
+                "card {} left the ceremony (reason {reason}).",
+                u16::from(*seat) + 1
             ),
             BridgeError::Params { seat } => write!(
                 f,
@@ -105,8 +123,18 @@ pub struct Bridge {
     /// pile frames goes up, so a `Seat` sent again for a late `Hello` is never stuck behind
     /// a ring frame the card's pile layer will not read past.
     started: bool,
+    /// When the pile started, to give the top card [`PILE_DEADLINE`].
+    started_at: Option<Instant>,
+    /// How long the top card's parameters may take. [`PILE_DEADLINE`] but in tests.
+    pile_deadline: Duration,
+    /// The top card's parameters came down: the pile is as tall as the offer says.
+    pile_whole: bool,
+    /// The highest card seat a frame came down from.
+    highest_card: u8,
     /// (kind, index, SHA-256 of the body) of each card frame taken from the cable.
     seen: HashSet<(u8, u8, [u8; 32])>,
+    /// (round, seat, SHA-256 of the payload) of each relay reveal and signature sent up.
+    sent_up: HashSet<(u8, u8, [u8; 32])>,
     /// Seat 0 commitments on the relay that are not the host's, already reported.
     strays: HashSet<[u8; 32]>,
     /// Per seat: its signature has gone where it was going (a card's to the outbox, a
@@ -137,10 +165,21 @@ impl Bridge {
             seq: 0,
             was_present: false,
             started: false,
+            started_at: None,
+            pile_deadline: PILE_DEADLINE,
+            pile_whole: false,
+            highest_card: 0,
             seen: HashSet::new(),
+            sent_up: HashSet::new(),
             strays: HashSet::new(),
             attested: vec![false; n],
         })
+    }
+
+    /// Give the top card `deadline` in place of [`PILE_DEADLINE`], for tests.
+    pub fn with_pile_deadline(mut self, deadline: Duration) -> Bridge {
+        self.pile_deadline = deadline;
+        self
     }
 
     pub fn offer(&self) -> &Offer {
@@ -180,6 +219,7 @@ impl Bridge {
     /// not a card, as each of those seats would on a cable.
     fn start(&mut self, link: &mut dyn Link) {
         self.started = true;
+        self.started_at = Some(Instant::now());
         let params = self.params_bytes.clone();
         for seat in 0..self.offer.params.n {
             if !self.offer.is_badge_seat(seat) {
@@ -196,7 +236,9 @@ impl Bridge {
         }
     }
 
-    /// One card frame from the cable. Frames for seats that are not cards are dropped.
+    /// One card frame from the cable. A frame from a seat above the cards means the pile is
+    /// bigger than the offer, and an abort ends the run. Other frames for seats that are not
+    /// cards are dropped.
     fn take_card_frame(
         &mut self,
         on_join_code: &mut dyn FnMut(u8, &str),
@@ -206,9 +248,23 @@ impl Bridge {
         let Some((&index, body)) = payload.split_first() else {
             return Ok(());
         };
-        if !self.offer.is_badge_seat(index) || index >= self.offer.params.n {
+        let badges = self.offer.badges;
+        if index > badges && index < self.offer.params.n {
+            return Err(BridgeError::Count {
+                pile: index,
+                offer: badges,
+            });
+        }
+        if kind == Frame::Abort as u8 {
+            return Err(BridgeError::Aborted {
+                seat: index,
+                reason: body.first().copied().unwrap_or(0),
+            });
+        }
+        if !self.offer.is_badge_seat(index) {
             return Ok(());
         }
+        self.highest_card = self.highest_card.max(index);
         let key = (kind, index, Sha256::digest(body).into());
         if !self.seen.insert(key) {
             return Ok(());
@@ -217,6 +273,9 @@ impl Bridge {
             k if k == Frame::Params as u8 => {
                 if body != self.params_bytes {
                     return Err(BridgeError::Params { seat: index });
+                }
+                if index == badges {
+                    self.pile_whole = true;
                 }
             }
             k if k == Frame::Commit as u8 => {
@@ -228,8 +287,7 @@ impl Bridge {
                 self.queue(index, Round::Attest, body);
                 self.attested[usize::from(index)] = true;
             }
-            // An abort, or a kind the ring does not have: the cards tell each other, and the
-            // phones see the ceremony stop.
+            // A kind the ring does not have.
             _ => {}
         }
         Ok(())
@@ -302,8 +360,16 @@ impl Bridge {
                 Round::Reveal => Frame::Reveal,
                 Round::Attest => Frame::Attest,
             };
+            if round == Round::Commit {
+                // The first commitment for a seat takes it, as it does for every member.
+                self.mailbox.hold(seat, round);
+            } else if !self
+                .sent_up
+                .insert((round as u8, seat, Sha256::digest(&payload).into()))
+            {
+                continue;
+            }
             self.send_ring(link, kind as u8, seat, &payload);
-            self.mailbox.hold(seat, round);
             if round == Round::Attest {
                 self.attested[usize::from(seat)] = true;
             }
@@ -329,6 +395,14 @@ impl Bridge {
         self.read_link(link, on_join_code)?;
         if self.started {
             self.read_inbox(link);
+        }
+        if let Some(at) = self.started_at {
+            if !self.pile_whole && at.elapsed() >= self.pile_deadline {
+                return Err(BridgeError::Count {
+                    pile: self.highest_card,
+                    offer: self.offer.badges,
+                });
+            }
         }
         Ok(if self.attested.iter().all(|&a| a) {
             BridgeStep::Done

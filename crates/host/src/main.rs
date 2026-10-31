@@ -30,8 +30,10 @@
 //!
 //! `bridge` puts a pile of cards on `--serial`, bottom card on the cable, into a ceremony
 //! a phone hosts through the relay. `--offer` is the host's code (`--offer-file` reads it from
-//! a file), and `--badges` the cards in the pile, by default the number the code was made for.
-//! It prints a code for each card for the host's phone to scan. See [`cahoots_host::bridge`].
+//! a file). The host's code says how many cards are in the pile, and the bridge stops if the
+//! pile has more or fewer. `--badges` overrides that count. It is only needed when the pile
+//! differs from the host's count on purpose, which it never should. The bridge prints a code
+//! for each card for the host's phone to scan. See [`cahoots_host::bridge`].
 //! With `--sim` the bottom card is a simulated badge listening on that socket.
 //!
 //! `badge` runs one card through the badge crate on a [`HostBoard`]: boot, then a pile pass

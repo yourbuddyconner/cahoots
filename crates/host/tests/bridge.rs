@@ -229,9 +229,13 @@ fn the_bridge_refuses_a_pile_that_does_not_match_the_offer() {
 /// A bridge and the far end of its cable, with a card's first ring frame already read so
 /// the bridge reads the relay.
 fn started_bridge(text: &str) -> (Bridge, SocketLink, UnixStream) {
-    let offer = Channel::from_offer(text).unwrap();
-    let params = offer.params.clone();
-    let bridge = Bridge::new(offer, 2).unwrap();
+    let bridge = Bridge::new(Channel::from_offer(text).unwrap(), 2).unwrap();
+    start(bridge)
+}
+
+/// `bridge` and the far end of its cable, with card 1's `Params` frame waiting on the cable.
+fn start(bridge: Bridge) -> (Bridge, SocketLink, UnixStream) {
+    let params = bridge.offer().params.clone();
     let (near, mut far) = UnixStream::pair().unwrap();
     let link = SocketLink::new(near).unwrap();
     let mut payload = vec![1u8];
@@ -245,6 +249,114 @@ fn started_bridge(text: &str) -> (Bridge, SocketLink, UnixStream) {
     far.write_all(&f).unwrap();
     far.set_nonblocking(true).unwrap();
     (bridge, link, far)
+}
+
+/// A ring frame from the pile: `kind`, from the card in `index`, with `body`.
+fn from_pile(far: &mut UnixStream, kind: u8, index: u8, body: &[u8]) {
+    use std::io::Write;
+    let mut payload = vec![index];
+    payload.extend_from_slice(body);
+    far.write_all(&frame::encode(&frame::Frame {
+        kind,
+        seq: 7,
+        payload: &payload,
+    }))
+    .unwrap();
+}
+
+/// Step until the bridge stops, or panic after `within`.
+fn step_until_error(bridge: &mut Bridge, link: &mut SocketLink, within: Duration) -> BridgeError {
+    let deadline = Instant::now() + within;
+    loop {
+        assert!(Instant::now() < deadline, "the bridge kept going");
+        if let Err(e) = bridge.step(link, &mut |_, _| {}) {
+            return e;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn a_frame_from_a_seat_above_the_cards_means_the_pile_is_bigger() {
+    let (_, text) = offer_text(5, 2, b"host");
+    let (mut bridge, mut link, mut far) = started_bridge(&text);
+    assert_eq!(bridge.step(&mut link, &mut |_, _| {}).unwrap(), BridgeStep::Working);
+    // Seat 3 is a phone's. Nothing the bridge sends up comes back down, so a card holds it.
+    from_pile(&mut far, 1, 3, &bridge.offer().params.encode());
+    let e = step_until_error(&mut bridge, &mut link, Duration::from_secs(5));
+    assert!(matches!(e, BridgeError::Count { pile: 3, offer: 2 }), "{e:?}");
+    assert_eq!(
+        e.to_string(),
+        "the pile has at least 3 cards and the host said 2. Restack and start again."
+    );
+}
+
+#[test]
+fn an_abort_from_the_pile_ends_the_run() {
+    let (_, text) = offer_text(4, 2, b"host");
+    let (mut bridge, mut link, mut far) = started_bridge(&text);
+    assert_eq!(bridge.step(&mut link, &mut |_, _| {}).unwrap(), BridgeStep::Working);
+    from_pile(&mut far, 4, 2, &[7]);
+    let e = step_until_error(&mut bridge, &mut link, Duration::from_secs(5));
+    assert!(matches!(e, BridgeError::Aborted { seat: 2, reason: 7 }), "{e:?}");
+    assert_eq!(e.to_string(), "card 3 left the ceremony (reason 7).");
+}
+
+#[test]
+fn a_pile_with_too_few_cards_is_named_after_a_while() {
+    let (_, text) = offer_text(4, 2, b"host");
+    let bridge = Bridge::new(Channel::from_offer(&text).unwrap(), 2)
+        .unwrap()
+        .with_pile_deadline(Duration::from_millis(300));
+    // Only card 1 is there: seat 2's parameters never come down.
+    let (mut bridge, mut link, _far) = start(bridge);
+    let begun = Instant::now();
+    let e = step_until_error(&mut bridge, &mut link, Duration::from_secs(5));
+    assert!(begun.elapsed() >= Duration::from_millis(300));
+    assert!(matches!(e, BridgeError::Count { pile: 1, offer: 2 }), "{e:?}");
+    assert_eq!(
+        e.to_string(),
+        "the pile has at least 1 cards and the host said 2. Restack and start again."
+    );
+}
+
+#[test]
+fn a_whole_pile_is_not_named_too_small() {
+    let (_, text) = offer_text(4, 2, b"host");
+    let bridge = Bridge::new(Channel::from_offer(&text).unwrap(), 2)
+        .unwrap()
+        .with_pile_deadline(Duration::from_millis(100));
+    let (mut bridge, mut link, mut far) = start(bridge);
+    from_pile(&mut far, 1, 2, &bridge.offer().params.encode());
+    let until = Instant::now() + Duration::from_millis(400);
+    while Instant::now() < until {
+        assert_eq!(bridge.step(&mut link, &mut |_, _| {}).unwrap(), BridgeStep::Working);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn every_new_reveal_and_signature_goes_up_and_only_the_first_commitment() {
+    let (channel, text) = offer_text(4, 2, b"host");
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    post(&relay, &channel, 3, Round::Commit, b"first");
+    post(&relay, &channel, 3, Round::Commit, b"second");
+    post(&relay, &channel, 3, Round::Reveal, b"forged");
+    post(&relay, &channel, 3, Round::Reveal, b"real");
+    post(&relay, &channel, 3, Round::Attest, b"forged");
+    post(&relay, &channel, 3, Round::Attest, b"real");
+    let (mut bridge, mut link, mut far) = started_bridge(&text);
+    step_with(&mut bridge, &mut link, &relay, &channel.id);
+    // The same reveal posted again, and read again, goes up once.
+    post(&relay, &channel, 3, Round::Reveal, b"real");
+    step_with(&mut bridge, &mut link, &relay, &channel.id);
+    let by_kind = |kind: u8, frames: &[(u8, u8, Vec<u8>)]| -> Vec<Vec<u8>> {
+        frames.iter().filter(|(k, i, _)| (*k, *i) == (kind, 3)).map(|(_, _, b)| b.clone()).collect()
+    };
+    let frames = ring_frames(&mut far);
+    assert_eq!(by_kind(2, &frames), [b"first".to_vec()]);
+    assert_eq!(by_kind(3, &frames), [b"forged".to_vec(), b"real".to_vec()]);
+    assert_eq!(by_kind(5, &frames), [b"forged".to_vec(), b"real".to_vec()]);
 }
 
 /// Every ring frame (kind below 16) the bridge sent up the cable: (kind, index, body).
