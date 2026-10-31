@@ -47,7 +47,7 @@ Cargo features choose what the station serves. The default features reproduce th
 | (base) | circles, messages, hash chain, rate limits, size cap, `/v1/head`, `/v1/info`, `/healthz` | |
 | `feed-page` | the live feed page at `/` | base. On by default |
 | `objects` | manifests, channel objects, policies, grants, revocations, deposits, join requests: stored, served, listed by channel | base |
-| `channels` | version 3 messages chained per channel, per-channel heads, long-poll by channel | `objects` |
+| `channels` | version 4 messages chained per channel, per-channel heads, long-poll by channel | `objects` |
 | `gate` | read and post checks: a gate token or a verified grant to read a channel; a verified post grant, signature, budget and quorum to post | `channels` |
 | `issuer` | the relay checks evidence and issues grants and deposits under its own key | `gate`, and the TVC build only |
 | `anchor` | periodic head anchoring to the TVC log | base |

@@ -86,7 +86,7 @@ fn message_key(channel: &[u8; 16], h: &message::Header) -> MessageKey {
 }
 
 impl Gate {
-    /// Count every version 3 entry in the log by its stream and header kid, and note its
+    /// Count every version 4 entry in the log by its stream and header kid, and note its
     /// `(kid, epoch_id, counter)`.
     pub(crate) fn from_log(log: &Log) -> Gate {
         let mut posts = HashMap::new();

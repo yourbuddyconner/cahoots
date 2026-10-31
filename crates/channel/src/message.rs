@@ -1,7 +1,7 @@
-//! The version 3 message (channels spec §5).
+//! The version 4 message (channels spec §5).
 //!
 //! ```text
-//! header  = version (u8 = 3) | channel_id (16) | epoch_id (20) | kid (32) | counter (u32 LE)
+//! header  = version (u8 = 4) | channel_id (16) | epoch_id (20) | kid (32) | counter (u32 LE)
 //!           | len (u32 LE) | type (u8)
 //! nonce   = counter (u32 LE) | 0x00 * 8
 //! ct      = ChaCha20-Poly1305(msg_key, nonce, aad = header, plaintext)
@@ -25,7 +25,7 @@ use crate::cbor::{array_len, canonical, encode_with};
 use crate::keys::{kid_of, EpochId, EPOCH_ID_LEN};
 use crate::{ChannelError, ChannelId};
 
-pub const VERSION: u8 = 3;
+pub const VERSION: u8 = 4;
 pub const HEADER_LEN: usize = 78;
 /// The external AAD prefix of a message's COSE_Sign1.
 pub const DOMAIN: &[u8] = b"cahoots/channel-msg/v1";

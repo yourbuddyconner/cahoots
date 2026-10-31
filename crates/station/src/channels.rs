@@ -1,4 +1,4 @@
-//! The `channels` feature: version 3 messages, each appended to its channel's stream. `seq` is
+//! The `channels` feature: version 4 messages, each appended to its channel's stream. `seq` is
 //! global, as for circles, and the hash chain runs through every entry; a channel's head is its
 //! stream's last entry. Posts take from the channel's own rate bucket as well as the client's.
 
@@ -65,7 +65,7 @@ fn parse_channel(hex_id: &str) -> Result<[u8; 16], Box<Response>> {
         })
 }
 
-/// `POST /v1/channels/{channel}/messages`: the body must be a version 3
+/// `POST /v1/channels/{channel}/messages`: the body must be a version 4
 /// message for the channel and the channel must be held; then the size cap, with `gate` the
 /// grant checks ([`crate::gate::check_post`]), the channel's rate bucket, and the append.
 async fn post_message(

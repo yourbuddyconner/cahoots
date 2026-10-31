@@ -38,7 +38,7 @@ pub enum RuleError {
 /// A parsed, rule-checked body ready to append.
 #[derive(Clone, Debug)]
 pub struct Submission {
-    /// The stream the entry joins: the circle id, or for version 3 the channel id.
+    /// The stream the entry joins: the circle id, or for versions 3 and 4 the ceremony channel or channel id.
     stream: [u8; 16],
     bytes: Vec<u8>,
     /// `(slice, start, end)` for pure-pad messages. `None` for chat and ceremony messages.
@@ -106,7 +106,7 @@ impl Submission {
         })
     }
 
-    /// A version 3 message for the channel route: the version byte is 3, the message splits
+    /// A version 4 message for the channel route: the version byte is 4, the message splits
     /// into body and signature, and its header names `path_channel`. The relay holds no
     /// channel key, so this is all it can check; it never refuses for reuse.
     #[cfg(feature = "channels")]
@@ -134,7 +134,8 @@ impl Submission {
         })
     }
 
-    /// The stream id: the circle for versions 1 and 2, the channel for version 3.
+    /// The stream id: the circle for versions 1 and 2, the ceremony channel for version 3,
+    /// the channel for version 4.
     pub fn stream(&self) -> [u8; 16] {
         self.stream
     }

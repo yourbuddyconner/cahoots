@@ -30,7 +30,8 @@ pub fn entry_hash(prev: &Hash, seq: u64, received_at: u64, message: &[u8]) -> Ha
 pub struct Entry {
     pub seq: u64,
     pub received_at: u64,
-    /// The entry's stream: a circle id, or a channel id for a version 3 message.
+    /// The entry's stream: a circle id, a ceremony channel id for a version 3 message, or a
+    /// channel id for a version 4 message.
     pub circle_id: CircleId,
     pub message: Vec<u8>,
     pub hash: Hash,

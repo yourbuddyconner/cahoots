@@ -35,7 +35,7 @@ default = ["feed-page"]
 feed-page = []
 # Manifests, channel objects, policies, grants, revocations, deposits, join requests.
 objects = ["dep:cahoots-objects", "dep:cahoots-channel", "dep:minicbor"]
-# Version 3 messages chained per channel.
+# Version 4 messages chained per channel.
 channels = ["objects"]
 # Read and post checks on channels.
 gate = ["channels", "dep:getrandom"]

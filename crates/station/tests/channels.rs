@@ -1,4 +1,4 @@
-//! The `channels` feature: version 3 messages chained in each channel's stream, per-channel
+//! The `channels` feature: version 4 messages chained in each channel's stream, per-channel
 //! heads and long-poll, and the per-channel post limit.
 #![cfg(feature = "channels")]
 // With `gate`, the tests of the ungated relay are left out, and their helpers go unused.
@@ -304,7 +304,7 @@ async fn refusals() {
     let mut alice = member(channel, 0);
     let w = text(&mut alice, b"hello");
 
-    // A version 3 body on a circle route is malformed.
+    // A version 4 body on a circle route is malformed.
     let (s, v) = send(
         c.post(format!(
             "{base}/v1/circles/{}/messages",
@@ -484,9 +484,20 @@ fn parse_channel_rules() {
         Submission::parse_channel(&channel, &w[..BODY_LEN]),
         Err(RuleError::Length)
     ));
-    // The circle rules keep refusing version 3.
+    // The circle rules keep refusing version 4.
     assert!(matches!(
         Submission::parse(&channel, &w),
+        Err(RuleError::Version)
+    ));
+    // The channel rules refuse a ceremony channel message (version 3).
+    let ceremony = cahoots_core::channel::Channel::from_key(channel, [5; 32]).seal_with_nonce(
+        1,
+        cahoots_core::channel::Round::Commit,
+        b"a commitment",
+        [9; 12],
+    );
+    assert!(matches!(
+        Submission::parse_channel(&channel, &ceremony),
         Err(RuleError::Version)
     ));
 }

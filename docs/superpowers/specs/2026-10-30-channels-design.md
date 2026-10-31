@@ -155,10 +155,10 @@ A link deposit is `ChaCha20-Poly1305(seal_key, nonce = epoch (u32) || 0x00 * 8, 
 
 ### 5. Messages
 
-A channel message is a version 3 message on the relay's log, so the relay tells it from pad messages (1) and chat messages (2) by its first byte.
+A channel message is a version 4 message on the relay's log, so the relay tells it from pad messages (1), chat messages (2) and ceremony channel messages (3) by its first byte.
 
 ```
-header   = version (u8 = 3) | channel_id (16) | epoch_id (20) | kid (32) | counter (u32) | len (u32) | type (u8)
+header   = version (u8 = 4) | channel_id (16) | epoch_id (20) | kid (32) | counter (u32) | len (u32) | type (u8)
 nonce    = counter (u32) | 0x00 * 8
 ct       = ChaCha20-Poly1305(msg_key[kid][counter], nonce, aad = header, plaintext)
 body     = header || ct
@@ -229,7 +229,7 @@ The station becomes a workspace crate with Cargo features. Default features repr
 | (base) | circles, messages, hash chain, rate limits, size cap, `/v1/head`, `/healthz` | |
 | `feed-page` | the live feed page at `/` | base. On by default |
 | `objects` | manifests, channel objects, policies, grants, revocations, deposits, join requests: stored, served, listed by channel | base |
-| `channels` | version 3 messages chained per channel, per-channel heads, long-poll by channel | `objects` |
+| `channels` | version 4 messages chained per channel, per-channel heads, long-poll by channel | `objects` |
 | `gate` | read and post checks: a gate token or a verified grant to read a channel; a verified post grant, signature, budget and quorum to post | `channels` |
 | `issuer` | the relay checks evidence and issues grants and deposits under its own key | `gate`, and the TVC build only: the feature refuses to compile outside the enclave target profile, since a relay that issues holds keys |
 | `anchor` | periodic head anchoring to the TVC log (C5) | base |
@@ -302,7 +302,7 @@ Universal links, when the native app exists: the site gains an `apple-app-site-a
 
 ## Left to the builder
 
-- Whether the version 3 message schedule lives in `crates/chat` behind a feature or in a new `crates/channel`. The latter seems cleaner given the different sender id and the signature.
+- Whether the version 4 message schedule lives in `crates/chat` behind a feature or in a new `crates/channel`. The latter seems cleaner given the different sender id and the signature.
 - The SQLite schema's indexes.
 - The exact UniFFI surface for channels in `crates/phone`, following the iOS design's pattern.
 - Nothing in this design needs the owner circle's own log or relay. Every position named here (`created_log`, a policy's `log`, a grant's `cahoots-log`, an approval's `log`) is a `seq` in the channel's stream on the channel's relay, which the relay, the owner and every reader share. The owner circle may chat elsewhere or never.

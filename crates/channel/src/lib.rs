@@ -6,7 +6,7 @@
 //! - [`keys`]: epoch ids, epoch keys and chain starts.
 //! - [`policy::Policy`]: who may read, post, admit and govern, and what each needs.
 //! - [`deposit`]: an epoch key sealed to a link or to a member's X-Wing key.
-//! - [`message`]: the version 3 message, encrypted under a sender chain and signed by the sender.
+//! - [`message`]: the version 4 message, encrypted under a sender chain and signed by the sender.
 //! - [`grant`]: channel grants, their chains, and the evaluator that decides a request.
 //! - [`control`]: what a control message says: rotation, policy change, revocation, join, leave.
 //! - [`quorum`]: seat approvals and the quorum check.
