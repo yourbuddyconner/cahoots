@@ -4,7 +4,7 @@ mod common;
 
 use cahoots_core::checkwords::check_words;
 use cahoots_core::params::CircleParams;
-use cahoots_hal::pile::{Pile, PileError, Ready};
+use cahoots_hal::pile::{bridged_seat_frame, count_frame, Pile, PileError, Ready};
 use common::{cable, contribution, drive, open_end, Det, End};
 
 /// `n` cards stacked: card 0 at the bottom. Each proposes its own name; only the bottom's counts.
@@ -164,4 +164,102 @@ fn a_pile_can_be_built_from_boxed_links() {
     }
     assert_eq!(cards[0].seat(), Some(0));
     assert_eq!(cards[1].seat(), Some(1));
+}
+
+/// Two cards with a bare end below card 0 standing in for the bridge. Returns the cards and
+/// the queue that feeds card 0 from below, and the one card 0 writes down to the bridge.
+fn bridged_stack() -> (Vec<Pile<End>>, common::Queue, common::Queue) {
+    let (bridge_end, card0_down) = cable();
+    let (lower, upper) = cable();
+    let to_card0 = card0_down.rx.clone();
+    let from_card0 = card0_down.tx.clone();
+    let cards = vec![
+        Pile::new(card0_down, lower, "card0", 4096, false),
+        Pile::new(upper, open_end(), "card1", 4096, false),
+    ];
+    drop(bridge_end);
+    (cards, to_card0, from_card0)
+}
+
+#[test]
+fn a_bridged_seat_from_below_sets_the_seat_the_params_and_the_flag() {
+    let (mut cards, to_card0, _) = bridged_stack();
+    let params = CircleParams::new(4, 8192, "host", true).unwrap();
+    to_card0.borrow_mut().extend(bridged_seat_frame(0, &params));
+    settle(&mut cards);
+    assert_eq!(cards[0].seat(), Some(1));
+    assert_eq!(cards[1].seat(), Some(2));
+    assert!(cards.iter().all(|c| c.is_bridged()));
+    to_card0.borrow_mut().extend(count_frame(4));
+    let ready = settle(&mut cards);
+    for (i, r) in ready.iter().enumerate() {
+        let r = r.as_ref().expect("ready");
+        assert_eq!(r.seat, 1 + i as u8);
+        assert!(r.bridged);
+        assert_eq!(r.params.name, "host");
+        assert_eq!(r.params.pad_len, 8192);
+        assert!(r.params.agent_seat);
+    }
+}
+
+#[test]
+fn a_bridged_pile_takes_the_count_from_below_and_refuses_the_top_cards_start() {
+    let (mut cards, to_card0, _) = bridged_stack();
+    let params = CircleParams::new(4, 4096, "host", false).unwrap();
+    to_card0.borrow_mut().extend(bridged_seat_frame(0, &params));
+    settle(&mut cards);
+    assert_eq!(cards[1].start().unwrap_err(), PileError::Bridged);
+    assert!(cards.iter().all(|c| c.count().is_none()));
+    to_card0.borrow_mut().extend(count_frame(4));
+    let ready = settle(&mut cards);
+    for (i, r) in ready.iter().enumerate() {
+        let r = r.as_ref().expect("ready");
+        assert_eq!((r.seat, r.bridged, r.params.n), (1 + i as u8, true, 4));
+    }
+}
+
+#[test]
+fn a_bridged_seat_is_forwarded_up_with_the_flag_set() {
+    let (lower, upper) = cable();
+    let (bridge_end, card0_down) = cable();
+    let to_card0 = card0_down.rx.clone();
+    let seen_by_card1 = upper.rx.clone();
+    let mut cards = vec![
+        Pile::new(card0_down, lower, "card0", 4096, false),
+        Pile::new(upper, open_end(), "card1", 4096, false),
+    ];
+    let params = CircleParams::new(3, 4096, "host", false).unwrap();
+    to_card0.borrow_mut().extend(bridged_seat_frame(0, &params));
+    // Stop card 1 reading so its queue still holds what card 0 sent.
+    cards[0].poll().unwrap();
+    let bytes: Vec<u8> = seen_by_card1.borrow().iter().copied().collect();
+    let (f, _) = cahoots_core::frame::decode(&bytes).unwrap();
+    assert_eq!(f.kind, cahoots_hal::pile::KIND_SEAT);
+    assert_eq!(f.payload[0], 1);
+    assert_eq!(f.payload[5] & 2, 2);
+    drop(bridge_end);
+}
+
+#[test]
+fn an_unbridged_pile_ignores_a_count_from_below() {
+    let (mut cards, to_card0, _) = bridged_stack();
+    // A plain Seat from below, flags 0, so the pile is not bridged.
+    let mut payload = vec![0u8];
+    payload.extend_from_slice(&4096u32.to_le_bytes());
+    payload.push(0);
+    payload.extend_from_slice(b"below");
+    to_card0
+        .borrow_mut()
+        .extend(cahoots_core::frame::encode(&cahoots_core::frame::Frame {
+            kind: cahoots_hal::pile::KIND_SEAT,
+            seq: 0,
+            payload: &payload,
+        }));
+    settle(&mut cards);
+    assert_eq!(cards[0].seat(), Some(1));
+    assert!(!cards[0].is_bridged());
+    to_card0.borrow_mut().extend(count_frame(4));
+    let ready = settle(&mut cards);
+    assert!(cards.iter().all(|c| c.count().is_none()));
+    assert!(ready.iter().all(|r| r.is_none()));
 }

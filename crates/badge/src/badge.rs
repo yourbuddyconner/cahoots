@@ -712,6 +712,9 @@ impl<B: Board> Badge<B> {
                         self.board.log(&format!("seat {s}"));
                         let screen = self.pile_screen(Some(s));
                         show(&mut self.board, screen);
+                        if pile.is_bridged() {
+                            show_status(&mut self.board, "waiting for the host to start");
+                        }
                     }
                 }
                 // Both on the top card starts the count. On a badge that holds circles, Left
@@ -728,6 +731,9 @@ impl<B: Board> Badge<B> {
                         Ok(()) => {
                             self.board.log("Both: counting the pile");
                             show_status(&mut self.board, "counting the pile...");
+                        }
+                        Err(PileError::Bridged) => {
+                            show_status(&mut self.board, "the host starts this one")
                         }
                         Err(PileError::NoSeat) => show_status(&mut self.board, "nothing below yet"),
                         Err(e) => self.board.log(&format!("start: {e:?}")),

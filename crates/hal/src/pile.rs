@@ -16,7 +16,7 @@
 //! | kind | payload |
 //! |---|---|
 //! | `Hello` 16 | none |
-//! | `Seat` 17 | `seat u8 \| pad_len u32 LE \| agent u8 \| name` |
+//! | `Seat` 17 | `seat u8 \| pad_len u32 LE \| flags u8 \| name`. Flags bit 0 is the agent seat, bit 1 says the pile is bridged: a laptop at the bottom named the circle and will give the count, so no card's button starts it. |
 //! | `Count` 18 | `n u8` |
 //! | `Ping` 30 | none. A presence beacon for links with no detect line, such as a USB serial port: the side that can see the port is open sends one now and then, and the other side treats a recent `Ping` as "plugged in". Both layers ignore it. |
 //! | `Log` 31 | UTF-8 text. A line of the sender's log, for a host on the other end of the cable to print. Both layers ignore it. |
@@ -55,6 +55,8 @@ pub enum PileError {
     /// A frame had an impossible payload.
     Protocol,
     Params(ParamsError),
+    /// The pile is bridged: the host starts it, not a card's button.
+    Bridged,
 }
 
 /// What a card knows once the pile has been counted.
@@ -62,6 +64,8 @@ pub enum PileError {
 pub struct Ready {
     pub params: CircleParams,
     pub seat: u8,
+    /// The pile has a laptop bridge at the bottom, which started it.
+    pub bridged: bool,
 }
 
 #[derive(Clone)]
@@ -69,6 +73,7 @@ struct Proposal {
     name: String,
     pad_len: u32,
     agent: bool,
+    bridged: bool,
 }
 
 pub struct Pile<L: Link> {
@@ -93,6 +98,7 @@ impl<L: Link> Pile<L> {
                 name: String::from(name),
                 pad_len,
                 agent,
+                bridged: false,
             },
             proposal: None,
             seat: None,
@@ -109,6 +115,10 @@ impl<L: Link> Pile<L> {
     }
     pub fn count(&self) -> Option<u8> {
         self.count
+    }
+    /// True once a bridge below has said this pile is bridged.
+    pub fn is_bridged(&self) -> bool {
+        self.proposal.as_ref().is_some_and(|p| p.bridged)
     }
     pub fn is_bottom(&self) -> bool {
         !self.links[DOWN].peer_present()
@@ -142,13 +152,16 @@ impl<L: Link> Pile<L> {
         let mut payload = Vec::with_capacity(6 + p.name.len());
         payload.push(seat);
         payload.extend_from_slice(&p.pad_len.to_le_bytes());
-        payload.push(p.agent as u8);
+        payload.push(p.agent as u8 | (p.bridged as u8) << 1);
         payload.extend_from_slice(p.name.as_bytes());
         self.send(UP, KIND_SEAT, &payload);
     }
 
     /// The top card's button: announce how many cards are in the pile.
     pub fn start(&mut self) -> Result<(), PileError> {
+        if self.is_bridged() {
+            return Err(PileError::Bridged);
+        }
         if !self.is_top() {
             return Err(PileError::NotTop);
         }
@@ -236,7 +249,8 @@ impl<L: Link> Pile<L> {
                 self.proposal = Some(Proposal {
                     name: String::from(name),
                     pad_len: u32::from_le_bytes(payload[1..5].try_into().expect("4 bytes")),
-                    agent: payload[5] != 0,
+                    agent: payload[5] & 1 != 0,
+                    bridged: payload[5] & 2 != 0,
                 });
                 self.send_seat_up();
             }
@@ -245,6 +259,12 @@ impl<L: Link> Pile<L> {
                 let n = *payload.first().ok_or(PileError::Protocol)?;
                 self.count = Some(n);
                 self.send(DOWN, KIND_COUNT, &[n]);
+            }
+            // A bridged pile takes its count from the host below.
+            (DOWN, KIND_COUNT) if self.is_bridged() => {
+                let n = *payload.first().ok_or(PileError::Protocol)?;
+                self.count = Some(n);
+                self.send(UP, KIND_COUNT, &[n]);
             }
             // A Hello from below or a Seat from above cannot happen in a consistent pile; a
             // Count from below is an echo. Ignore them all.
@@ -259,7 +279,11 @@ impl<L: Link> Pile<L> {
         };
         CircleParams::new(n, p.pad_len, &p.name, p.agent)
             .ok()
-            .map(|params| Ready { params, seat })
+            .map(|params| Ready {
+                params,
+                seat,
+                bridged: p.bridged,
+            })
     }
 
     /// Hand the links, and any ceremony bytes that already arrived on them, to the ceremony.
@@ -304,4 +328,29 @@ impl<L: Link> Pile<L> {
             tier,
         )
     }
+}
+
+/// The `Seat` frame a bridge sends up its link: `first_seat_below` is the seat the bridge
+/// holds, so the card on it takes the next one. It carries the host's circle parameters and
+/// marks the pile as bridged.
+pub fn bridged_seat_frame(first_seat_below: u8, params: &CircleParams) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(6 + params.name.len());
+    payload.push(first_seat_below);
+    payload.extend_from_slice(&params.pad_len.to_le_bytes());
+    payload.push(params.agent_seat as u8 | 2);
+    payload.extend_from_slice(params.name.as_bytes());
+    frame::encode(&frame::Frame {
+        kind: KIND_SEAT,
+        seq: 0,
+        payload: &payload,
+    })
+}
+
+/// The `Count` frame a bridge sends up its link to start the ceremony with `n` members.
+pub fn count_frame(n: u8) -> Vec<u8> {
+    frame::encode(&frame::Frame {
+        kind: KIND_COUNT,
+        seq: 0,
+        payload: &[n],
+    })
 }
