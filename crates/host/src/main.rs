@@ -164,12 +164,13 @@ fn run_bridge(args: &Args) -> Result<(), String> {
         None => offer.badges,
     };
     let port = args.get("--serial").ok_or("name the bottom card's port with --serial <port>")?;
-    let mut relay = cahoots_relay::HttpRelay::new(&offer.relay);
+    let mut poster = cahoots_relay::HttpRelay::new(&offer.relay);
+    let mut poller = cahoots_relay::HttpRelay::new(&offer.relay);
     let mut bridge = Bridge::new(offer, badges).map_err(|e| e.to_string())?;
     let mut link = cahoots_host::link::SerialLink::open(port, "pile").map_err(|e| format!("{port}: {e}"))?;
     println!("Waiting for the cards. Each card's code appears here for the host's phone to scan.");
     bridge
-        .run(&mut link, &mut relay, &mut |seat, code| {
+        .run(&mut link, &mut poster, &mut poller, &mut |seat, code| {
             println!();
             match qrcode::QrCode::new(code.as_bytes()) {
                 Ok(qr) => println!(

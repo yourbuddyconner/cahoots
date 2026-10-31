@@ -143,10 +143,11 @@ fn a_phone_hosts_two_cards_through_the_bridge_and_a_phone_joiner() {
     let stop = Arc::new(AtomicBool::new(false));
     let bridge_thread = {
         let stop = stop.clone();
-        let mut relay = MemRelay::shared(relay.clone());
+        let mut poster = MemRelay::shared(relay.clone());
+        let mut poller = MemRelay::shared(relay.clone());
         std::thread::spawn(move || {
             let mut link = SocketLink::new(bridge_end).unwrap();
-            let r = bridge.run(&mut link, &mut relay, &mut |seat, code: &str| {
+            let r = bridge.run(&mut link, &mut poster, &mut poller, &mut |seat, code: &str| {
                 codes_tx.send((seat, code.to_string())).unwrap();
             });
             // Keep the cable in until the cards are done with it.
@@ -246,8 +247,8 @@ fn started_bridge(text: &str) -> (Bridge, SocketLink, UnixStream) {
     (bridge, link, far)
 }
 
-/// Every ring frame (kind below 16) the bridge sent up the cable: (kind, index).
-fn ring_frames(far: &mut UnixStream) -> Vec<(u8, u8)> {
+/// Every ring frame (kind below 16) the bridge sent up the cable: (kind, index, body).
+fn ring_frames(far: &mut UnixStream) -> Vec<(u8, u8, Vec<u8>)> {
     let mut bytes = Vec::new();
     let mut buf = [0u8; 4096];
     while let Ok(n) = far.read(&mut buf) {
@@ -260,7 +261,7 @@ fn ring_frames(far: &mut UnixStream) -> Vec<(u8, u8)> {
     let mut at = 0;
     while let Ok((f, used)) = frame::decode(&bytes[at..]) {
         if f.kind < 16 {
-            out.push((f.kind, f.payload[0]));
+            out.push((f.kind, f.payload[0], f.payload[1..].to_vec()));
         }
         at += used;
     }
@@ -274,6 +275,15 @@ fn post(relay: &Arc<Mutex<MemRelay>>, channel: &Channel, seat: u8, round: Round,
     }
 }
 
+/// Hand the bridge everything on the relay, then step it a few times.
+fn step_with(bridge: &mut Bridge, link: &mut SocketLink, relay: &Arc<Mutex<MemRelay>>, id: &[u8; 16]) {
+    let entries = relay.lock().unwrap().poll(id, None, 0).unwrap();
+    bridge.deliver(entries);
+    for _ in 0..4 {
+        assert_eq!(bridge.step(link, &mut |_, _| {}).unwrap(), BridgeStep::Working);
+    }
+}
+
 #[test]
 fn a_relay_message_for_a_badge_seat_never_enters_the_pile() {
     let (channel, text) = offer_text(4, 2, b"host");
@@ -281,32 +291,85 @@ fn a_relay_message_for_a_badge_seat_never_enters_the_pile() {
     post(&relay, &channel, 1, Round::Commit, b"a card's seat, from someone else");
     post(&relay, &channel, 0, Round::Commit, b"host");
     let (mut bridge, mut link, mut far) = started_bridge(&text);
-    let mut r = MemRelay::shared(relay.clone());
-    for _ in 0..4 {
-        assert_eq!(
-            bridge.step(&mut link, &mut r, &mut |_, _| {}).unwrap(),
-            BridgeStep::Working
-        );
-    }
+    step_with(&mut bridge, &mut link, &relay, &channel.id);
     let frames = ring_frames(&mut far);
-    assert!(frames.contains(&(2, 0)), "the host's commitment went up: {frames:?}");
-    assert!(!frames.iter().any(|&(_, i)| i == 1), "{frames:?}");
+    assert!(frames.iter().any(|(k, i, _)| (*k, *i) == (2, 0)), "the host's commitment went up: {frames:?}");
+    assert!(!frames.iter().any(|(_, i, _)| *i == 1), "{frames:?}");
 }
 
 #[test]
-fn a_host_commitment_that_does_not_match_the_offer_stops_the_bridge() {
+fn a_host_commitment_that_does_not_match_the_offer_is_skipped() {
     let (channel, text) = offer_text(4, 2, b"host");
     let relay = Arc::new(Mutex::new(MemRelay::default()));
     post(&relay, &channel, 0, Round::Commit, b"not the host");
     let (mut bridge, mut link, mut far) = started_bridge(&text);
-    let mut r = MemRelay::shared(relay.clone());
-    let mut result = Ok(BridgeStep::Working);
-    for _ in 0..4 {
-        result = bridge.step(&mut link, &mut r, &mut |_, _| {});
-        if result.is_err() {
-            break;
-        }
+    step_with(&mut bridge, &mut link, &relay, &channel.id);
+    assert!(!ring_frames(&mut far).iter().any(|(k, _, _)| *k == 2), "the stray stayed out");
+    // The real one, posted after the stray, still goes up.
+    post(&relay, &channel, 0, Round::Commit, b"host");
+    step_with(&mut bridge, &mut link, &relay, &channel.id);
+    let commits: Vec<_> = ring_frames(&mut far)
+        .into_iter()
+        .filter(|(k, _, _)| *k == 2)
+        .collect();
+    assert_eq!(commits, [(2, 0, b"host".to_vec())]);
+}
+
+/// A cable to a card that is always there and never says anything, which notes when it
+/// was read. It is unplugged after `for_how_long`.
+struct WatchedLink {
+    reads: Arc<Mutex<Vec<Instant>>>,
+    until: Instant,
+}
+
+impl Link for WatchedLink {
+    fn send(&mut self, _frame: &[u8]) {}
+    fn recv(&mut self, _buf: &mut [u8]) -> usize {
+        self.reads.lock().unwrap().push(Instant::now());
+        0
     }
-    assert!(matches!(result, Err(BridgeError::HostMismatch)), "{result:?}");
-    assert!(!ring_frames(&mut far).iter().any(|&(k, i)| (k, i) == (2, 0)));
+    fn peer_present(&self) -> bool {
+        Instant::now() < self.until
+    }
+}
+
+/// A relay whose every read takes three seconds.
+struct SlowRelay;
+
+impl Relay for SlowRelay {
+    fn post(&mut self, _circle: &[u8; 16], _message: &[u8]) -> Result<u64, cahoots_relay::RelayError> {
+        Ok(0)
+    }
+    fn poll(
+        &mut self,
+        _circle: &[u8; 16],
+        _after: Option<u64>,
+        _wait_ms: u64,
+    ) -> Result<Vec<(u64, Vec<u8>)>, cahoots_relay::RelayError> {
+        std::thread::sleep(Duration::from_secs(3));
+        Ok(Vec::new())
+    }
+}
+
+#[test]
+fn a_slow_relay_never_stops_the_bridge_reading_the_cable() {
+    let (_, text) = offer_text(4, 2, b"host");
+    let mut bridge = Bridge::new(Channel::from_offer(&text).unwrap(), 2).unwrap();
+    let reads = Arc::new(Mutex::new(Vec::new()));
+    let begun = Instant::now();
+    let mut link = WatchedLink {
+        reads: reads.clone(),
+        until: begun + Duration::from_millis(4500),
+    };
+    let r = bridge.run(&mut link, &mut SlowRelay, &mut SlowRelay, &mut |_, _| {});
+    assert!(matches!(r, Err(BridgeError::Link)), "{r:?}");
+    let reads = reads.lock().unwrap();
+    assert!(reads.len() > 10, "{} reads", reads.len());
+    let gap = reads
+        .windows(2)
+        .map(|w| w[1] - w[0])
+        .max()
+        .unwrap();
+    assert!(gap < Duration::from_secs(1), "the cable went {gap:?} without a read");
+    assert!(reads.last().unwrap().duration_since(begun) > Duration::from_secs(4));
 }

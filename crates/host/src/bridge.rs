@@ -10,7 +10,13 @@
 //! host takes the cards as it takes a phone that joins.
 //!
 //! The bridge checks two things the cards cannot: seat 0's commitment on the relay must be
-//! the one the offer names, and every card must propose the offer's parameters.
+//! the one the offer names, and every card must propose the offer's parameters. A seat 0
+//! commitment that is not the host's is a stray, as it is for a joiner: it is dropped, and
+//! the bridge waits for the real one.
+//!
+//! [`Bridge::run`] keeps the relay off the cable's loop. One thread posts, one long-polls, and
+//! the loop that reads the cable never waits on either, so a board that takes two seconds
+//! without bytes for an unplugged laptop never sees a slow relay that way.
 
 use cahoots_core::channel::{commitment_hash, join_code, parts, Mailbox, Offer, Round};
 use cahoots_core::frame::{self, FrameError};
@@ -20,22 +26,28 @@ use cahoots_hal::Link;
 use cahoots_relay::{Relay, RelayError};
 use rand_core::OsRng;
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fmt;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 /// The bridge's mailbox seat. No real seat has it, so the mailbox hands up every seat's
 /// messages.
 const NO_SEAT: u8 = u8::MAX;
 /// Relay failures in a row that [`Bridge::run`] waits out before it gives up.
 const RELAY_RETRIES: u32 = 30;
+/// How long the relay holds a read open when it has nothing new.
+pub const POLL_WAIT_MS: u64 = 2000;
+/// The least time between two reads that came back empty, for a relay that does not wait.
+const EMPTY_POLL_EVERY: Duration = Duration::from_millis(500);
+/// Between passes of the cable's loop.
+const LINK_EVERY: Duration = Duration::from_millis(20);
 
 #[derive(Debug)]
 pub enum BridgeError {
     /// The pile has `pile` cards and the host's offer counts `offer`.
     Count { pile: u8, offer: u8 },
-    /// Seat 0's commitment on the relay is not the host's the offer names.
-    HostMismatch,
     /// The card in `seat` proposed parameters that differ from the host's.
     Params { seat: u8 },
     /// The cable to the pile was unplugged.
@@ -49,10 +61,6 @@ impl fmt::Display for BridgeError {
             BridgeError::Count { pile, offer } => write!(
                 f,
                 "the pile has {pile} cards and the host's code is for {offer}. Start again on the phone with {pile} cards, or change the pile"
-            ),
-            BridgeError::HostMismatch => write!(
-                f,
-                "seat 1 on the relay is not the phone whose code you gave. Stop and start again"
             ),
             BridgeError::Params { seat } => write!(
                 f,
@@ -79,12 +87,16 @@ pub enum BridgeStep {
     Done,
 }
 
+/// The cable's side of the bridge. It makes no relay calls: [`deliver`](Self::deliver)
+/// hands it what the relay read, and [`take_posts`](Self::take_posts) what to post.
 pub struct Bridge {
     offer: Offer,
     params_bytes: Vec<u8>,
     mailbox: Mailbox,
-    /// The last relay entry read.
-    cursor: Option<u64>,
+    /// Relay entries read and not yet handled. They wait until the pile has started.
+    inbox: VecDeque<Vec<u8>>,
+    /// Station messages to post, in order.
+    outbox: Vec<Vec<u8>>,
     /// Bytes from the cable not yet decoded.
     rx: Vec<u8>,
     seq: u32,
@@ -95,7 +107,9 @@ pub struct Bridge {
     started: bool,
     /// (kind, index, SHA-256 of the body) of each card frame taken from the cable.
     seen: HashSet<(u8, u8, [u8; 32])>,
-    /// Per seat: its signature has gone where it was going (a card's to the relay, a
+    /// Seat 0 commitments on the relay that are not the host's, already reported.
+    strays: HashSet<[u8; 32]>,
+    /// Per seat: its signature has gone where it was going (a card's to the outbox, a
     /// phone's up the cable).
     attested: Vec<bool>,
 }
@@ -117,18 +131,30 @@ impl Bridge {
             offer,
             params_bytes,
             mailbox,
-            cursor: None,
+            inbox: VecDeque::new(),
+            outbox: Vec::new(),
             rx: Vec::new(),
             seq: 0,
             was_present: false,
             started: false,
             seen: HashSet::new(),
+            strays: HashSet::new(),
             attested: vec![false; n],
         })
     }
 
     pub fn offer(&self) -> &Offer {
         &self.offer
+    }
+
+    /// Entries the relay returned for the offer's channel, in the relay's order.
+    pub fn deliver(&mut self, entries: Vec<(u64, Vec<u8>)>) {
+        self.inbox.extend(entries.into_iter().map(|(_, wire)| wire));
+    }
+
+    /// The station messages to post now, in order. Each is taken once.
+    pub fn take_posts(&mut self) -> Vec<Vec<u8>> {
+        std::mem::take(&mut self.outbox)
     }
 
     /// Tell the card on the cable where it is and how many seats there are.
@@ -162,25 +188,17 @@ impl Bridge {
         }
     }
 
-    /// Post a card's payload as its seat's channel message, in parts.
-    fn post(
-        &self,
-        relay: &mut dyn Relay,
-        seat: u8,
-        round: Round,
-        payload: &[u8],
-    ) -> Result<(), RelayError> {
+    /// Seal a card's payload as its seat's channel message, in parts, for the poster.
+    fn queue(&mut self, seat: u8, round: Round, payload: &[u8]) {
         for part in parts(payload) {
             let wire = self.offer.channel.seal(seat, round, &part, &mut OsRng);
-            relay.post(&self.offer.channel.id, &wire)?;
+            self.outbox.push(wire);
         }
-        Ok(())
     }
 
     /// One card frame from the cable. Frames for seats that are not cards are dropped.
     fn take_card_frame(
         &mut self,
-        relay: &mut dyn Relay,
         on_join_code: &mut dyn FnMut(u8, &str),
         kind: u8,
         payload: &[u8],
@@ -192,7 +210,7 @@ impl Bridge {
             return Ok(());
         }
         let key = (kind, index, Sha256::digest(body).into());
-        if self.seen.contains(&key) {
+        if !self.seen.insert(key) {
             return Ok(());
         }
         match kind {
@@ -202,28 +220,25 @@ impl Bridge {
                 }
             }
             k if k == Frame::Commit as u8 => {
-                self.post(relay, index, Round::Commit, body)?;
+                self.queue(index, Round::Commit, body);
                 on_join_code(index, &join_code(&self.offer.channel.id, index, body));
             }
-            k if k == Frame::Reveal as u8 => self.post(relay, index, Round::Reveal, body)?,
+            k if k == Frame::Reveal as u8 => self.queue(index, Round::Reveal, body),
             k if k == Frame::Attest as u8 => {
-                self.post(relay, index, Round::Attest, body)?;
+                self.queue(index, Round::Attest, body);
                 self.attested[usize::from(index)] = true;
             }
             // An abort, or a kind the ring does not have: the cards tell each other, and the
             // phones see the ceremony stop.
             _ => {}
         }
-        self.seen.insert(key);
         Ok(())
     }
 
-    /// Read the cable and hand on each whole frame. A frame leaves the buffer only once it
-    /// was handled, so a relay failure loses nothing.
+    /// Read the cable and hand on each whole frame.
     fn read_link(
         &mut self,
         link: &mut dyn Link,
-        relay: &mut dyn Relay,
         on_join_code: &mut dyn FnMut(u8, &str),
     ) -> Result<(), BridgeError> {
         let mut buf = [0u8; 4096];
@@ -243,6 +258,7 @@ impl Bridge {
                     continue;
                 }
             };
+            self.rx.drain(..used);
             if kind == KIND_HELLO {
                 // A card that came on late, or restarted, asks where it is.
                 self.greet(link);
@@ -250,18 +266,15 @@ impl Bridge {
                 if !self.started {
                     self.start(link);
                 }
-                self.take_card_frame(relay, on_join_code, kind, &payload)?;
+                self.take_card_frame(on_join_code, kind, &payload)?;
             }
-            self.rx.drain(..used);
         }
         Ok(())
     }
 
-    /// Read the relay and send each message from a seat that is not a card up the cable.
-    fn read_relay(&mut self, link: &mut dyn Link, relay: &mut dyn Relay) -> Result<(), BridgeError> {
-        let entries = relay.poll(&self.offer.channel.id, self.cursor, 0)?;
-        for (seq, wire) in entries {
-            self.cursor = Some(seq);
+    /// Send each relay message from a seat that is not a card up the cable.
+    fn read_inbox(&mut self, link: &mut dyn Link) {
+        while let Some(wire) = self.inbox.pop_front() {
             // The seat is in the associated data, so a message that claims a card's seat
             // opens only as that seat's. A card's own messages come back this way too.
             if wire.len() > 21 && self.offer.is_badge_seat(wire[21]) {
@@ -273,8 +286,16 @@ impl Bridge {
             if self.offer.is_badge_seat(seat) || seat >= self.offer.params.n {
                 continue;
             }
-            if seat == 0 && round == Round::Commit && commitment_hash(&payload) != self.offer.host {
-                return Err(BridgeError::HostMismatch);
+            if seat == 0 && round == Round::Commit {
+                let hash = commitment_hash(&payload);
+                if hash != self.offer.host {
+                    // Not the host whose code was given: someone else has the code. Skip it
+                    // and wait for the real one, as a joining phone does.
+                    if self.strays.insert(hash) {
+                        eprintln!("A seat 1 setup on the relay is not the host's. It is ignored.");
+                    }
+                    continue;
+                }
             }
             let kind = match round {
                 Round::Commit => Frame::Commit,
@@ -287,15 +308,14 @@ impl Bridge {
                 self.attested[usize::from(seat)] = true;
             }
         }
-        Ok(())
     }
 
-    /// One pass: greet a card that appeared, carry what the cable and the relay hold, and
-    /// say whether every seat's signature has gone across.
+    /// One pass over the cable: greet a card that appeared, carry what the cable and the
+    /// delivered relay entries hold, and say whether every seat's signature has gone across.
+    /// Relay entries wait until the pile has started.
     pub fn step(
         &mut self,
         link: &mut dyn Link,
-        relay: &mut dyn Relay,
         on_join_code: &mut dyn FnMut(u8, &str),
     ) -> Result<BridgeStep, BridgeError> {
         let present = link.peer_present();
@@ -306,9 +326,9 @@ impl Bridge {
             return Err(BridgeError::Link);
         }
         self.was_present = present;
-        self.read_link(link, relay, on_join_code)?;
+        self.read_link(link, on_join_code)?;
         if self.started {
-            self.read_relay(link, relay)?;
+            self.read_inbox(link);
         }
         Ok(if self.attested.iter().all(|&a| a) {
             BridgeStep::Done
@@ -317,35 +337,102 @@ impl Bridge {
         })
     }
 
-    /// Step until every seat's signature has gone across, then push the last frames down the
-    /// cable. A relay that fails is tried again for a while before the bridge gives up.
+    /// Carry the pile into the ceremony until every seat's signature has gone across, then
+    /// push the last frames down the cable. `poster` posts and `poller` reads, each on its own
+    /// thread, and this thread only reads and writes the cable. A relay that fails is tried
+    /// again for a while before the bridge gives up.
     pub fn run(
         &mut self,
         link: &mut dyn Link,
-        relay: &mut dyn Relay,
+        poster: &mut (dyn Relay + Send),
+        poller: &mut (dyn Relay + Send),
         on_join_code: &mut dyn FnMut(u8, &str),
     ) -> Result<(), BridgeError> {
-        let mut failures = 0;
-        loop {
-            match self.step(link, relay, on_join_code) {
-                Ok(BridgeStep::Done) => break,
-                Ok(BridgeStep::Working) => failures = 0,
-                Err(BridgeError::Relay(_)) if failures < RELAY_RETRIES => {
-                    failures += 1;
-                    std::thread::sleep(Duration::from_secs(1));
+        let id = self.offer.channel.id;
+        let stop = AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            let (post_tx, post_rx) = mpsc::channel::<Vec<u8>>();
+            let (read_tx, read_rx) = mpsc::channel::<Vec<(u64, Vec<u8>)>>();
+            let (err_tx, err_rx) = mpsc::channel::<RelayError>();
+            let post_err = err_tx.clone();
+            let posting = scope.spawn(move || {
+                for wire in post_rx {
+                    let mut failures = 0;
+                    while let Err(e) = poster.post(&id, &wire) {
+                        failures += 1;
+                        if failures > RELAY_RETRIES {
+                            let _ = post_err.send(e);
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_secs(1));
+                    }
                 }
-                Err(e) => return Err(e),
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        let mut buf = [0u8; 4096];
-        while !link.flush() {
-            if !link.peer_present() {
-                return Err(BridgeError::Link);
-            }
-            while link.recv(&mut buf) > 0 {}
-            std::thread::sleep(Duration::from_millis(2));
-        }
-        Ok(())
+            });
+            let stop = &stop;
+            scope.spawn(move || {
+                let mut cursor = None;
+                let mut failures = 0;
+                while !stop.load(Ordering::SeqCst) {
+                    let began = Instant::now();
+                    match poller.poll(&id, cursor, POLL_WAIT_MS) {
+                        Ok(entries) => {
+                            failures = 0;
+                            if let Some(&(seq, _)) = entries.last() {
+                                cursor = Some(seq);
+                            }
+                            if entries.is_empty() {
+                                if let Some(rest) = EMPTY_POLL_EVERY.checked_sub(began.elapsed()) {
+                                    std::thread::sleep(rest);
+                                }
+                            } else if read_tx.send(entries).is_err() {
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            failures += 1;
+                            if failures > RELAY_RETRIES {
+                                let _ = err_tx.send(e);
+                                return;
+                            }
+                            std::thread::sleep(Duration::from_secs(1));
+                        }
+                    }
+                }
+            });
+            let result = (|| {
+                loop {
+                    while let Ok(entries) = read_rx.try_recv() {
+                        self.deliver(entries);
+                    }
+                    let step = self.step(link, on_join_code)?;
+                    for wire in self.take_posts() {
+                        let _ = post_tx.send(wire);
+                    }
+                    if let Ok(e) = err_rx.try_recv() {
+                        return Err(BridgeError::Relay(e));
+                    }
+                    if step == BridgeStep::Done {
+                        break;
+                    }
+                    std::thread::sleep(LINK_EVERY);
+                }
+                // The last signatures: wait for the poster while the cable keeps moving.
+                drop(post_tx);
+                let mut buf = [0u8; 4096];
+                while !posting.is_finished() || !link.flush() {
+                    if !link.peer_present() {
+                        return Err(BridgeError::Link);
+                    }
+                    while link.recv(&mut buf) > 0 {}
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                if let Ok(e) = err_rx.try_recv() {
+                    return Err(BridgeError::Relay(e));
+                }
+                Ok(())
+            })();
+            stop.store(true, Ordering::SeqCst);
+            result
+        })
     }
 }

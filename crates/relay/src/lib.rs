@@ -362,6 +362,7 @@ impl HttpRelay {
         HttpRelay {
             base: base.trim_end_matches('/').to_string(),
             agent: ureq::AgentBuilder::new()
+                .timeout_connect(core::time::Duration::from_secs(5))
                 .timeout_read(core::time::Duration::from_secs(40))
                 .build(),
         }
