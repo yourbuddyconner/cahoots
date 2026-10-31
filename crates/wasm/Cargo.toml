@@ -13,26 +13,24 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 cahoots-core = { workspace = true, features = ["std"] }
 cahoots-chat = { path = "../chat", default-features = false }
-# `std` for the HPKE key deposits; the wasm target has std.
+# `std` for the owner and member cores and their HPKE key deposits; the wasm target has std.
 cahoots-channel = { workspace = true, features = ["std"] }
-cahoots-objects = { workspace = true, features = ["std"] }
-cahoots-hpke = { path = "../hpke" }
-minicbor = { version = "2.3", default-features = false, features = ["alloc"] }
-sha2 = { workspace = true }
 wasm-bindgen = "0.2.100"
 raptorq = "2.0.0"
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 rqrr = "0.11"
 base64 = "0.22.1"
 zeroize = "1.8"
+# `js` also serves the channel crate's draws, which use the same `getrandom`.
 getrandom = { version = "0.2", features = ["js"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
-# The RNG traits `cahoots-hpke` takes; filled from `getrandom` above.
-rand_core_10 = { package = "rand_core", version = "0.10" }
 
 [dev-dependencies]
+cahoots-objects = { workspace = true, features = ["std"] }
 cahoots-relay = { path = "../relay" }
 hex = { workspace = true, features = ["std"] }
+minicbor = { version = "2.3", default-features = false, features = ["alloc"] }
+sha2 = { workspace = true }
 
 
 [package.metadata.wasm-pack.profile.release]

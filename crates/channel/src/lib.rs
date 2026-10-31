@@ -11,6 +11,8 @@
 //! - [`control`]: what a control message says: rotation, policy change, revocation, join, leave.
 //! - [`quorum`]: seat approvals and the quorum check.
 //! - [`session::ChannelSession`]: a member's epoch keys and sender chains; sends and receives.
+//! - `member::ChannelMember` and `owner::ChannelOwner` (with `std`): a member and an owner as
+//!   the apps run them, shared by the browser's wasm bindings and the phone.
 //!
 //! Every object is a canonical CBOR map (definite lengths, shortest integers, integer keys in
 //! ascending order) signed as a COSE_Sign1 with the payload embedded, kid `[seat]`, and the
@@ -26,8 +28,12 @@ pub mod deposit;
 pub mod grant;
 pub mod keys;
 pub mod link;
+#[cfg(feature = "std")]
+pub mod member;
 pub mod message;
 pub mod object;
+#[cfg(feature = "std")]
+pub mod owner;
 pub mod policy;
 pub mod quorum;
 pub mod session;
