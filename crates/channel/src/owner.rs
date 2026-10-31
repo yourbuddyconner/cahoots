@@ -30,8 +30,8 @@ use crate::grant;
 use crate::keys::{epoch_key, EpochId, Key};
 use crate::link::{Link, LinkSecret};
 use crate::member::{
-    bytes_array, check_name, code, has_link, open_manifest, opt_bytes, parse_actions, random,
-    random_key, read_policy, s, ChannelMember, JoinRequest, Rng10, SecretBuf, StateReader, STATE,
+    bytes_array, check_name, code, open_manifest, opt_bytes, parse_actions, random, random_key,
+    read_policy, s, ChannelMember, JoinRequest, Rng10, SecretBuf, StateReader, STATE,
     STATE_VERSION,
 };
 use crate::object::channel_id_for;
@@ -105,7 +105,7 @@ pub struct Admission {
     pub kid: [u8; 32],
     /// The grant chain, a CBOR array of one signed root grant.
     pub chain: Vec<u8>,
-    /// The key deposit of the current epoch for the new member.
+    /// The key deposit of the current epoch for the new member, signed.
     pub deposit: Vec<u8>,
     /// The join control message, wire bytes.
     pub control: Vec<u8>,
@@ -178,11 +178,14 @@ pub struct ChannelOwner {
     /// The last epoch number issued; 0 before the first rotation. Only this device issues.
     epoch: u32,
     epoch_key: Option<Key>,
-    /// The deposits made for the current epoch, encoded.
+    /// The deposits made for the current epoch, signed.
     deposits: Vec<Vec<u8>>,
     members: Vec<Admitted>,
     self_grant: Vec<u8>,
     member: ChannelMember,
+    /// Links retired here whose removal the relay has not confirmed: each gate token's hash
+    /// and the signed retire statement, sent again until the relay answers.
+    pending_retire: Vec<([u8; 32], Vec<u8>)>,
 }
 
 impl core::fmt::Debug for ChannelOwner {
@@ -324,6 +327,7 @@ impl ChannelOwner {
             members: Vec::new(),
             self_grant,
             member,
+            pending_retire: Vec::new(),
         })
     }
 
@@ -452,8 +456,10 @@ impl ChannelOwner {
     }
 
     /// The seat-signed `cahoots/gate-retire/v1` statement for the current link (the body of
-    /// `DELETE …/gates/{hash}`), and forget its secret: later rotations make no link deposit.
-    /// Errors: `no-link`, `seat`.
+    /// `DELETE …/gates/{hash}`), and forget its secret at once: no later admission can use it
+    /// and later rotations make no link deposit. The statement and the token's hash are kept
+    /// in `pending_retire` until `retire_confirmed`, so an app whose `DELETE` did not reach the
+    /// relay sends it again. Errors: `no-link`, `seat`.
     pub fn retire_link<S: SeatSigner>(&mut self, mut signer: S) -> Result<Vec<u8>, String> {
         let token = self.link_secret()?.gate_token(&self.channel_id);
         self.check_signer(&mut signer)?;
@@ -465,6 +471,9 @@ impl ChannelOwner {
             &token,
             None,
         );
+        let hash: [u8; 32] = Sha256::digest(token).into();
+        self.pending_retire.retain(|(h, _)| *h != hash);
+        self.pending_retire.push((hash, signed.clone()));
         if let Some(mut secret) = self.secret.take() {
             secret.0.zeroize();
         }
@@ -472,6 +481,18 @@ impl ChannelOwner {
             secret.0.zeroize();
         }
         Ok(signed)
+    }
+
+    /// Retired links the relay has not yet confirmed removing: each gate token's hash (the
+    /// path of `DELETE …/gates/{hash}`) and the signed statement (its body), oldest first.
+    pub fn pending_retire(&self) -> &[([u8; 32], Vec<u8>)] {
+        &self.pending_retire
+    }
+
+    /// The relay answered the `DELETE` for `hash` (204, or 404 when it no longer holds the
+    /// token): stop sending it. An unknown hash changes nothing.
+    pub fn retire_confirmed(&mut self, hash: &[u8; 32]) {
+        self.pending_retire.retain(|(h, _)| h != hash);
     }
 
     /// The owner member's grant chain: a CBOR array of one signed root grant for read, post,
@@ -510,6 +531,7 @@ impl ChannelOwner {
             epoch_id: id,
             deposits: deposits.iter().map(Deposit::id).collect(),
         };
+        let signed: Vec<Vec<u8>> = deposits.iter().map(|d| self.sign_deposit(d)).collect();
         let wire = if self.epoch_key.is_some() {
             let wire = self.member.send_control(&control)?;
             self.member.install(id, Zeroizing::new(*key))?;
@@ -520,34 +542,102 @@ impl ChannelOwner {
         };
         self.epoch = next;
         self.epoch_key = Some(key);
-        self.deposits = deposits.iter().map(Deposit::encode).collect();
+        self.deposits = signed;
         Ok(wire)
     }
 
-    /// The deposits made for the current epoch, each the body of one `POST …/deposits`: one
-    /// for the live link, then one per admitted member.
+    /// Sign a deposit with the owner's member key, whose self-grant carries `govern`.
+    fn sign_deposit(&self, d: &Deposit) -> Vec<u8> {
+        d.sign(&self.member.key())
+    }
+
+    /// The deposits made for the current epoch, signed (`Deposit::sign` by the owner's member
+    /// key), each the body of one `POST …/deposits`: one for the live link, then one per
+    /// admitted member.
     pub fn deposits(&self) -> &[Vec<u8>] {
         &self.deposits
     }
 
-    /// A key deposit of the current epoch for one more key (`kid` its signing key's id),
-    /// outside the admitted list: it is not repeated at the next rotation.
+    /// A signed key deposit of the current epoch for one more key (`kid` its signing key's
+    /// id), outside the admitted list: it is not repeated at the next rotation.
     /// Errors: `unknown-epoch`, `hpke`.
     pub fn deposit_for_key(&self, kid: &[u8; 32], xwing_pk: &[u8]) -> Result<Vec<u8>, String> {
         let (id, key) = self.current()?;
         let d = deposit::seal_for_key(key, &id, *kid, xwing_pk, &mut Rng10).map_err(code)?;
-        Ok(d.encode())
+        Ok(self.sign_deposit(&d))
+    }
+
+    /// Whether `e`, one evidence of a rule, is shown by a request with gate token `token` from
+    /// `member_key`. Link evidence (an empty ref, the owner's current link, or the live link's
+    /// id) needs the live link's gate token. Key evidence counts only when the owner admits by
+    /// hand (`by_hand`): an empty ref is any key, a named one must be the request's. The later
+    /// kinds need an issuer this version does not have.
+    fn shows(
+        &self,
+        e: &policy::Evidence,
+        token: &[u8],
+        member_key: &cahoots_core::seat::SeatPublic,
+        by_hand: bool,
+    ) -> bool {
+        match e.kind {
+            kind::LINK => self.secret.as_ref().is_some_and(|sec| {
+                (e.r#ref.is_empty() || e.r#ref[..] == sec.id())
+                    && token == sec.gate_token(&self.channel_id)
+            }),
+            kind::KEY => by_hand && (e.r#ref.is_empty() || e.r#ref[..] == member_key.0),
+            _ => false,
+        }
+    }
+
+    /// The actions a join request may be granted without the owner choosing: those it asks
+    /// for whose rule takes link evidence that the request's gate token proves against the
+    /// live link, and that needs no quorum. Key evidence (an empty ref included) is never
+    /// automatic, and an action no one but the owner's seats holds (no rule, no evidence:
+    /// `admit` and `govern`) is left out.
+    ///
+    /// A request that also asks for an action the owner gives by hand (a rule with key
+    /// evidence and no link the token proves, as `post` in members post) yields nothing: it
+    /// waits for the owner, who sees the whole request. So the result is empty for a closed
+    /// channel, for members post, and for an old link. What auto-allow passes to `admit`.
+    /// Errors: `malformed`, `signature`, `wrong-channel`, `actions`.
+    pub fn permitted(&self, request: &[u8]) -> Result<Vec<Action>, String> {
+        let r = JoinRequest::parse(request)?;
+        if r.channel != self.channel_id {
+            return Err(s("wrong-channel"));
+        }
+        let wanted = parse_actions(&r.wanted)?;
+        let policy = read_policy(&self.policy)?;
+        let mut out = Vec::new();
+        for a in wanted {
+            let Some(rule) = policy.rule(a).filter(|r| !r.evidence.is_empty()) else {
+                continue;
+            };
+            let by_link = rule.quorum == 0
+                && rule
+                    .evidence
+                    .iter()
+                    .any(|e| self.shows(e, &r.token, &r.member_key, false));
+            if by_link {
+                out.push(a);
+            } else if rule.evidence.iter().any(|e| e.kind == kind::KEY) {
+                return Ok(Vec::new());
+            }
+        }
+        Ok(out)
     }
 
     /// Admit a join request (as `ChannelMember::join_request` makes it), granting `actions`
-    /// ("read,post"), which must be among those requested. For each granted action whose rule
-    /// names a link, the request's gate token must be the live link's.
+    /// ("read,post"), which must be among those requested.
+    ///
+    /// Each granted action needs a rule with evidence: a missing rule or one with no evidence
+    /// (only the owner's seats, as `admit` and `govern` in every preset, and `post` in an
+    /// announcements channel) is refused with `policy`. The request must then show one of the
+    /// rule's evidence: link evidence needs the live link's gate token; key evidence is the
+    /// owner admitting by hand (an empty ref) or the request's own key; otherwise `evidence`.
     ///
     /// Issues a root grant (depth 0, no budget, `not_after = u64::MAX`), seals the current
-    /// epoch to the member's X-Wing key, keeps the member for later rotations, and returns
-    /// the chain, the deposit and the join control.
-    /// A request for `post` is refused with `policy` when the post rule has no evidence (only
-    /// the owner's seats post, as in an announcements channel).
+    /// epoch to the member's X-Wing key (signed, as `deposits`), keeps the member for later
+    /// rotations, and returns the chain, the deposit and the join control.
     /// Errors: `malformed`, `signature`, `wrong-channel`, `actions`, `name`, `policy`,
     /// `evidence`, `unknown-epoch`, `hpke`, `seat`.
     pub fn admit<S: SeatSigner>(
@@ -575,37 +665,24 @@ impl ChannelOwner {
             return Err(s("actions"));
         }
         let policy = read_policy(&self.policy)?;
-        // A post rule with no evidence is only the owner's seats: nobody is admitted to post.
-        if granted.contains(&Action::Post)
-            && policy
-                .rule(Action::Post)
-                .is_none_or(|r| r.evidence.is_empty())
-        {
-            return Err(s("policy"));
-        }
         for action in &granted {
-            let Some(rule) = policy.rule(*action) else {
-                continue;
-            };
-            if !has_link(rule) {
-                continue;
-            }
-            let shown = self.secret.as_ref().is_some_and(|sec| {
-                rule.evidence
-                    .iter()
-                    // An empty ref is the owner's current link; a named one must be it.
-                    .any(|e| {
-                        e.kind == kind::LINK && (e.r#ref.is_empty() || e.r#ref[..] == sec.id())
-                    })
-                    && token[..] == sec.gate_token(&self.channel_id)
-            });
-            if !shown {
+            // No rule, or no evidence: only the owner's seats hold the action.
+            let rule = policy
+                .rule(*action)
+                .filter(|r| !r.evidence.is_empty())
+                .ok_or_else(|| s("policy"))?;
+            if !rule
+                .evidence
+                .iter()
+                .any(|e| self.shows(e, &token, &member_key, true))
+            {
                 return Err(s("evidence"));
             }
         }
         let (id, epoch_key) = self.current()?;
         let deposit =
             deposit::seal_for_key(epoch_key, &id, kid, &xwing_pk, &mut Rng10).map_err(code)?;
+        let deposit = self.sign_deposit(&deposit);
         self.check_signer(&mut signer)?;
         let grant_id = random::<16>();
         let claims = grant::issue_root(
@@ -636,7 +713,7 @@ impl ChannelOwner {
             grant_id,
             kid,
             chain: bytes_array(&[&signed]),
-            deposit: deposit.encode(),
+            deposit,
             control: wire,
         })
     }
@@ -791,7 +868,7 @@ impl ChannelOwner {
     /// `{0: 1, 1: seat, 2: seat seed or nil, 3: manifest, 4: seats, 5: channel object,
     ///   6: policy, 7: link secret or nil, 8: epoch number, 9: epoch key or nil,
     ///   10: [deposit...], 11: [[grant_id, kid, xwing_pk, name tstr]...], 12: self grant,
-    ///   13: member state}`
+    ///   13: member state, 14: [[token hash, retire statement]...]}`
     pub fn export(&self) -> Zeroizing<Vec<u8>> {
         let member = self.member.export();
         let mut e = Encoder::new(SecretBuf(Zeroizing::new(Vec::with_capacity(
@@ -799,7 +876,7 @@ impl ChannelOwner {
         ))));
         let _ = (|| -> Result<(), minicbor::encode::Error<Infallible>> {
             let e = &mut e;
-            e.map(14)?.u8(0)?.u8(STATE_VERSION)?;
+            e.map(15)?.u8(0)?.u8(STATE_VERSION)?;
             e.u8(1)?.u8(self.seat)?;
             e.u8(2)?;
             opt_bytes(e, self.seat_seed.as_ref().map(|s| &s[..]))?;
@@ -826,6 +903,10 @@ impl ChannelOwner {
             }
             e.u8(12)?.bytes(&self.self_grant)?;
             e.u8(13)?.bytes(&member)?;
+            e.u8(14)?.array(self.pending_retire.len() as u64)?;
+            for (hash, statement) in &self.pending_retire {
+                e.array(2)?.bytes(hash)?.bytes(statement)?;
+            }
             Ok(())
         })();
         e.into_writer().0
@@ -835,7 +916,7 @@ impl ChannelOwner {
     /// a kept seat seed against the manifest's seat key. Error: `state`.
     pub fn import(state: &[u8]) -> Result<ChannelOwner, String> {
         let bad = || s(STATE);
-        let mut r = StateReader::open(state, 14)?;
+        let mut r = StateReader::open(state, 15)?;
         let seat = r.key()?.u8().map_err(|_| bad())?;
         let seat_seed = match r.opt_bytes()? {
             Some(b) => Some(Zeroizing::new(<[u8; 32]>::try_from(b).map_err(|_| bad())?)),
@@ -896,6 +977,23 @@ impl ChannelOwner {
         };
         let self_grant = r.bytes()?.to_vec();
         let member = ChannelMember::import(r.bytes()?)?;
+        let pending_retire = {
+            let d = r.key()?;
+            let n = d.array().ok().flatten().ok_or_else(bad)?;
+            let mut list = Vec::new();
+            for _ in 0..n {
+                if d.array().ok().flatten() != Some(2) {
+                    return Err(bad());
+                }
+                let hash: [u8; 32] = d
+                    .bytes()
+                    .map_err(|_| bad())?
+                    .try_into()
+                    .map_err(|_| bad())?;
+                list.push((hash, d.bytes().map_err(|_| bad())?.to_vec()));
+            }
+            list
+        };
         r.finish()?;
         if member.channel_id != obj.channel_id {
             return Err(bad());
@@ -916,6 +1014,7 @@ impl ChannelOwner {
             members,
             self_grant,
             member,
+            pending_retire,
         };
         if *owner.export() != *state {
             return Err(bad());

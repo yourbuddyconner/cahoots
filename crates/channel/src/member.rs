@@ -386,7 +386,7 @@ impl ChannelMember {
         }
     }
 
-    fn key(&self) -> SeatKey {
+    pub(crate) fn key(&self) -> SeatKey {
         SeatKey::from_seed(&self.seed).expect("the seed was checked when it was made or loaded")
     }
 
@@ -487,26 +487,78 @@ impl ChannelMember {
         self.session.current_epoch()
     }
 
-    /// Open a link deposit with the link's secret and install its epoch. An epoch already held
-    /// is left as it is. Errors: `no-link`, `wrong-channel`, `tag`, `malformed`, `reuse`.
-    pub fn install_from_link_deposit(&mut self, deposit: &[u8]) -> Result<(), String> {
-        let d = Deposit::decode(deposit).map_err(code)?;
+    /// Check a signed deposit (as `ChannelOwner` makes them) and return what it carries.
+    ///
+    /// `signer_chain` is the signer's grant chain (a CBOR array of signed grants, root first,
+    /// as the relay lists them by the deposit's COSE kid), `manifest` the owner circle's encoded
+    /// `SealedManifest`. The chain must verify against the manifest, its leaf must carry
+    /// `govern` and not be revoked by a control this member has read, the deposit's COSE kid
+    /// must be the key id of the leaf's grantee, and the signature must verify under that key.
+    fn verified_deposit(
+        &self,
+        signed: &[u8],
+        signer_chain: &[u8],
+        manifest: &[u8],
+    ) -> Result<Deposit, String> {
+        let manifest = open_manifest(manifest)?;
+        let chain = read_bytes_array(signer_chain)?;
+        if chain.is_empty() {
+            return Err(s("no-grant"));
+        }
+        let refs: Vec<&[u8]> = chain.iter().map(Vec::as_slice).collect();
+        let channel_id = self.channel_id;
+        let leaf = grant::verify_chain(&refs, &manifest, &channel_id).map_err(code)?;
+        let ids = grant::chain_ids(&refs).map_err(code)?;
+        let is_revoked = |id: &[u8; 16]| self.revoked.contains(id);
+        grant::evaluate(
+            &leaf,
+            &ids,
+            &EvalRequest {
+                action: Action::Govern,
+                channel_id: &channel_id,
+                log: 0,
+                posts_used: 0,
+                revoked: &is_revoked,
+                signer: &leaf.grantee,
+            },
+        )
+        .map_err(refusal)?;
+        let d = deposit::verify_signed(signed, &leaf.grantee).map_err(code)?;
         if d.channel_id != self.channel_id {
             return Err(s("wrong-channel"));
         }
+        Ok(d)
+    }
+
+    /// Open a signed link deposit with the link's secret and install its epoch, once its
+    /// signer checks out: `signer_chain` and `manifest` as for `receive`, never empty here;
+    /// the signer's grant must carry `govern` and its key id must be the deposit's COSE kid.
+    /// An epoch already held is left as it is. Errors: `manifest`, `malformed`, `no-grant`,
+    /// `grant:<reason>`, `no-admit`, `refused:<reason>` (`refused:action` for a signer without
+    /// `govern`), `signature`, `no-link`, `wrong-channel`, `tag`, `reuse`.
+    pub fn install_from_link_deposit(
+        &mut self,
+        signed: &[u8],
+        signer_chain: &[u8],
+        manifest: &[u8],
+    ) -> Result<(), String> {
+        let d = self.verified_deposit(signed, signer_chain, manifest)?;
         let secret = self.secret.as_ref().ok_or_else(|| s("no-link"))?;
         let key = deposit::open_with_link(&d, secret).map_err(code)?;
         self.install(d.epoch_id, key)
     }
 
-    /// Open a key deposit with this member's X-Wing secret key and install its epoch. An epoch
-    /// already held is left as it is. Errors: `not-mine` (sealed to another key id),
-    /// `wrong-channel`, `hpke`, `malformed`, `reuse`.
-    pub fn install_from_key_deposit(&mut self, deposit: &[u8]) -> Result<(), String> {
-        let d = Deposit::decode(deposit).map_err(code)?;
-        if d.channel_id != self.channel_id {
-            return Err(s("wrong-channel"));
-        }
+    /// Open a signed key deposit with this member's X-Wing secret key and install its epoch,
+    /// once its signer checks out, as for `install_from_link_deposit`. An epoch already held
+    /// is left as it is. Errors: those of `install_from_link_deposit` but `no-link` and `tag`;
+    /// `not-mine` (sealed to another key id), `hpke`.
+    pub fn install_from_key_deposit(
+        &mut self,
+        signed: &[u8],
+        signer_chain: &[u8],
+        manifest: &[u8],
+    ) -> Result<(), String> {
+        let d = self.verified_deposit(signed, signer_chain, manifest)?;
         if d.kind == deposit::KIND_KEY && d.to != self.session.my_kid() {
             return Err(s("not-mine"));
         }

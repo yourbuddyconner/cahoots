@@ -184,6 +184,7 @@ fn deposits_reproduce() {
     assert_eq!(*deposit::open_with_link(&dep, &secret).unwrap(), ekey);
     // The link deposit is deterministic: sealing again gives the same bytes.
     assert_eq!(deposit::seal_for_link(&ekey, &secret, &dep.epoch_id), dep);
+    signed_reproduces(d, &dep);
 
     // The key deposit is randomized, so it is checked by opening it.
     let k = &v["deposit_key"];
@@ -199,6 +200,25 @@ fn deposits_reproduce() {
     let opened = deposit::open_with_key(&dep, &bytes(&k["recipient_secret_key"])).unwrap();
     assert_eq!(*opened, ekey);
     assert_eq!(*opened, arr::<32>(&k["epoch_key"]));
+    signed_reproduces(d, &dep);
+}
+
+/// The signed form: the signature verifies under the signer's key and carries the deposit,
+/// its kid is the signer's key id, and signing again gives the same bytes (RFC 6979).
+fn signed_reproduces(d: &Value, dep: &Deposit) {
+    let signer = key(&d["signer_seed"]);
+    let signed = bytes(&d["signed"]);
+    assert_eq!(
+        &deposit::verify_signed(&signed, &signer.public()).unwrap(),
+        dep
+    );
+    let (kid, peeked) = deposit::peek_signed(&signed).unwrap();
+    assert_eq!(kid, kid_of(&signer.public()));
+    assert_eq!(&peeked, dep);
+    assert_eq!(dep.sign(&signer), signed);
+    // Another key does not verify it.
+    let other = SeatKey::from_seed(&[0x5c; 32]).unwrap();
+    assert!(deposit::verify_signed(&signed, &other.public()).is_err());
 }
 
 #[test]

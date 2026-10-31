@@ -1092,9 +1092,12 @@ fn channels_vectors() -> Value {
     let (xsk, xpk) = cahoots_hpke::gen_keypair(cahoots_hpke::Suite::XWing, &mut rng);
     let member_kid = kid_of(&member.public());
     let dep_key = deposit::seal_for_key(&ekey, &epoch_id, member_kid, &xpk, &mut rng).unwrap();
+    // Every deposit is signed by the issuing member key: here the owner's (owner_seed).
     let dep_json = |d: &Deposit| {
         json!({
             "deposit": h(d.encode()),
+            "signer_seed": h(owner_seed),
+            "signed": h(d.sign(&SeatKey::from_seed(&owner_seed).unwrap())),
             "channel_id": h(d.channel_id),
             "epoch_id": h(d.epoch_id.encode()),
             "to": h(d.to),
@@ -1256,7 +1259,7 @@ fn channels_vectors() -> Value {
     revocation_case["reason"] = json!("left");
 
     json!({
-        "description": "Channels (crates/channel). Every object is built over the objects vectors' three-seat circle: seat_seeds are the seat seeds, seat 1 signs every object and root grant, and circle_id is the circle. All signed hex reproduces exactly: ECDSA P-256 is RFC 6979 deterministic. channel_object, policy_signed and grant_chain are COSE_Sign1 with the payload embedded. policy_presets lists the payload of Policy::preset for each preset with 3 seats and log 5. link is the invite link and the keys derived from its secret. epoch gives the epoch key from the root and the first chain key of two senders. deposit_link is deterministic. deposit_key is sealed to a fixed X-Wing key with a seeded random generator, so its sealed bytes are recorded, but X-Wing encapsulation is randomized and a client checks it by opening it with recipient_secret_key. Each message case is sent by a member key from member_seed after installing epoch_key as epoch epoch_id. The owner's three messages (control_rotation, announcement, revocation) share one sender chain and must be opened in that order. The announcement carries two seat approvals (seats 0 and 1) over body_digest, the SHA-256 of the header and ciphertext.",
+        "description": "Channels (crates/channel). Every object is built over the objects vectors' three-seat circle: seat_seeds are the seat seeds, seat 1 signs every object and root grant, and circle_id is the circle. All signed hex reproduces exactly: ECDSA P-256 is RFC 6979 deterministic. channel_object, policy_signed and grant_chain are COSE_Sign1 with the payload embedded. policy_presets lists the payload of Policy::preset for each preset with 3 seats and log 5. link is the invite link and the keys derived from its secret. epoch gives the epoch key from the root and the first chain key of two senders. Each deposit case gives the unsigned deposit (whose SHA-256 is its id) and signed, the COSE_Sign1 over it under cahoots/deposit/v1 with kid the key id of the key from signer_seed (the owner's member key, which holds govern) and the deposit embedded; a reader installs a deposit only once the signer's grant chain verifies and carries govern. deposit_link is deterministic. deposit_key is sealed to a fixed X-Wing key with a seeded random generator, so its sealed bytes are recorded, but X-Wing encapsulation is randomized and a client checks it by opening it with recipient_secret_key. Each message case is sent by a member key from member_seed after installing epoch_key as epoch epoch_id. The owner's three messages (control_rotation, announcement, revocation) share one sender chain and must be opened in that order. The announcement carries two seat approvals (seats 0 and 1) over body_digest, the SHA-256 of the header and ciphertext.",
         "seat_seeds": seat_seeds.iter().map(h).collect::<Vec<_>>(),
         "circle_id": h(circle),
         "seat": seat,

@@ -13,15 +13,24 @@
 //! A link deposit is ChaCha20-Poly1305 under the link's seal key. A key deposit is HPKE base mode
 //! to the member's X-Wing key, `sealed = enc || ct` (needs the `hpke` feature, which `std`
 //! turns on). Both use the same AAD, [`aad`].
+//!
+//! Every deposit is signed ([`Deposit::sign`]): a COSE_Sign1 with the canonical map as the
+//! embedded payload, kid the key id of the signing member key, external AAD [`DOMAIN`]. The
+//! signer is the member key of the seat that issued the epoch, whose grant carries `govern`; a
+//! reader installs a deposit only once that grant chain verifies ([`verify_signed`] checks the
+//! signature, the member core the chain). The deposit's id stays the SHA-256 of the unsigned
+//! map, so a rotation's ids do not depend on the signature.
 
 use alloc::vec::Vec;
+use cahoots_core::cose;
+use cahoots_core::seat::{SeatPublic, SeatSigner};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::ChaCha20Poly1305;
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 use crate::cbor::{canonical, encode_with, Enc, EncResult, Reader, VERSION};
-use crate::keys::{EpochId, Key};
+use crate::keys::{kid_of, EpochId, Key};
 use crate::link::LinkSecret;
 use crate::{ChannelError, ChannelId};
 
@@ -87,14 +96,48 @@ impl Deposit {
         canonical(deposit, encoded, bytes)
     }
 
-    /// The deposit id, `SHA-256(encode())`, that a rotation names.
+    /// The deposit id, `SHA-256(encode())`, that a rotation names: the unsigned map's hash.
     pub fn id(&self) -> [u8; 32] {
         Sha256::digest(self.encode()).into()
+    }
+
+    /// Sign the deposit with the issuing member key: a COSE_Sign1 over [`Deposit::encode`]
+    /// (embedded), kid `kid_of(signer)`, external AAD [`DOMAIN`]. These are the bytes the relay
+    /// stores and serves.
+    pub fn sign<S: SeatSigner>(&self, mut signer: S) -> Vec<u8> {
+        let kid = kid_of(&signer.public());
+        cose::sign1(signer, &kid, &self.encode(), DOMAIN, false)
     }
 
     fn aad(&self) -> Vec<u8> {
         aad(&self.channel_id, &self.epoch_id, &self.to)
     }
+}
+
+/// A signed deposit's signer kid and the deposit it carries, read without checking the
+/// signature: for finding the signer's grant chain, and for the relay's index. A kid that is not
+/// 32 bytes is [`ChannelError::Signature`].
+pub fn peek_signed(bytes: &[u8]) -> Result<([u8; 32], Deposit), ChannelError> {
+    let kid: [u8; 32] = cose::kid1(bytes)
+        .map_err(ChannelError::Cose)?
+        .try_into()
+        .map_err(|_| ChannelError::Signature)?;
+    let payload = cose::payload1(bytes).map_err(ChannelError::Cose)?;
+    Ok((kid, Deposit::decode(&payload)?))
+}
+
+/// Verify a signed deposit under `signer_key` and return the deposit. The COSE kid must be
+/// `kid_of(signer_key)` and the signature must verify with external AAD [`DOMAIN`]
+/// ([`ChannelError::Signature`] otherwise). Whether the key may issue deposits (its grant holds
+/// `govern`) is the caller's check.
+pub fn verify_signed(bytes: &[u8], signer_key: &SeatPublic) -> Result<Deposit, ChannelError> {
+    let kid = cose::kid1(bytes).map_err(ChannelError::Cose)?;
+    if kid[..] != kid_of(signer_key) {
+        return Err(ChannelError::Signature);
+    }
+    let payload =
+        cose::verify1(signer_key, bytes, None, DOMAIN).map_err(|_| ChannelError::Signature)?;
+    Deposit::decode(&payload)
 }
 
 /// `DOMAIN || channel_id || epoch_id || to`.
