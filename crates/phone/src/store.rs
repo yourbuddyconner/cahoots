@@ -194,6 +194,10 @@ pub struct ChatRecord {
     /// lacks: no line is lost and none is written twice.
     #[n(2)]
     pub journal: Vec<MessageRecord>,
+    /// The wire of a bump this phone sent that the relay has not accepted. It is posted again,
+    /// byte for byte, before the outbox, until the relay answers or the poll reads it back.
+    #[n(3)]
+    pub pending_bump: Option<ByteVec>,
 }
 
 impl Drop for ChatRecord {
@@ -267,6 +271,9 @@ pub struct MessageRecord {
     pub epoch: u32,
     #[n(5)]
     pub seq: Option<u64>,
+    /// `None` or "text" for a message, "bump" for a note that the keys were reset.
+    #[n(6)]
+    pub kind: Option<String>,
 }
 
 /// Append one record to `messages.log`.

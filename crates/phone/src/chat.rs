@@ -16,6 +16,7 @@ use crate::store::{
 use crate::{ChatMessage, Http, PhoneError};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use cahoots_chat::bump::{sign_bump, verify_bump};
 use cahoots_chat::{bucket_pad, bucket_unpad, ChatError, ChatSession, MessageType};
 use cahoots_core::params::CircleParams;
 use std::path::{Path, PathBuf};
@@ -27,6 +28,7 @@ pub(crate) fn chat_err(e: ChatError) -> PhoneError {
     PhoneError::Chat {
         message: match e {
             ChatError::NotSynced => "Still reading the relay. Try again in a moment.".into(),
+            ChatError::CannotBump => "This phone cannot reset the keys.".into(),
             ChatError::State => "The saved chat data for this circle is damaged or cannot be read.".into(),
             other => format!("The message could not be read ({other:?})."),
         },
@@ -154,9 +156,30 @@ impl Circle {
                 if let Some(i) = self.chat.outbox.iter().position(|e| e.wire[..] == bytes[..]) {
                     self.chat.outbox.remove(i);
                 }
+                // Our own bump, read back: the relay has it, so it is not posted again.
+                if self.chat.pending_bump.as_ref().is_some_and(|w| w[..] == bytes[..]) {
+                    self.chat.pending_bump = None;
+                }
                 // Our own messages move our sending position; a message that does not open
                 // (damaged, replayed, another kind) is passed over.
                 if let Ok((h, pt)) = self.session.receive(&bytes) {
+                    if h.msg_type == MessageType::Bump && h.sender != me {
+                        // A bump counts only with a seat's signature from the manifest; a
+                        // bad one is passed over without a word.
+                        if let Some(seat) = self.apply_bump(&pt) {
+                            let m = MessageRecord {
+                                id: format!("relay-{seq}"),
+                                sender: seat,
+                                mine: false,
+                                text: bump_text(seat),
+                                epoch: 0,
+                                seq: Some(seq),
+                                kind: Some("bump".into()),
+                            };
+                            new.push(to_message(&m, false));
+                            lines.push(m);
+                        }
+                    }
                     // Only text is history. Bumps and cards are handled elsewhere.
                     if h.sender != me && h.msg_type == MessageType::Text {
                         let text = String::from_utf8_lossy(bucket_unpad(&pt).unwrap_or(&pt))
@@ -168,6 +191,7 @@ impl Circle {
                             text,
                             epoch: epoch_number(h.epoch),
                             seq: Some(seq),
+                            kind: None,
                         };
                         self.settings.unread = self.settings.unread.saturating_add(1);
                         new.push(to_message(&m, false));
@@ -192,13 +216,14 @@ impl Circle {
     /// Post the outbox in order. An entry leaves it only when the relay answers with its
     /// sequence number.
     pub fn flush(&mut self, http: &dyn Http) -> Result<(), PhoneError> {
+        // A reset goes first: what follows it is sealed in the generation it makes.
+        if let Some(wire) = self.chat.pending_bump.clone() {
+            post(http, self.messages_url(), wire.to_vec())?;
+            self.chat.pending_bump = None;
+            self.save_chat()?;
+        }
         while let Some(entry) = self.chat.outbox.first().cloned() {
-            let body = http.post(self.messages_url(), entry.wire.to_vec())?;
-            let v: serde_json::Value = serde_json::from_slice(&body)
-                .map_err(|_| network("The relay returned an unreadable response. Try again in a moment."))?;
-            v["seq"]
-                .as_u64()
-                .ok_or_else(|| network("The relay did not confirm that the message was saved."))?;
+            post(http, self.messages_url(), entry.wire.to_vec())?;
             self.chat.outbox.retain(|e| e.id != entry.id);
             self.save_chat()?;
         }
@@ -230,9 +255,74 @@ impl Circle {
                 .current_epoch()
                 .map_or(0, epoch_number),
             seq: None,
+            kind: None,
         };
         // The chain step, the ciphertext and the history line are on disk in one write
         // before anything leaves.
+        self.save_with(vec![m])?;
+        let _ = self.flush(http);
+        Ok(())
+    }
+
+    /// Verify a bump read from the relay against the manifest and move to its generation.
+    /// Returns the seat that signed it, or `None` when it does not verify.
+    fn apply_bump(&mut self, payload: &[u8]) -> Option<u8> {
+        let sealed = cahoots_core::manifest::SealedManifest::decode(&self.record.manifest).ok()?;
+        let manifest = cahoots_core::manifest::Manifest::decode(&sealed.body).ok()?;
+        let (id, seat) = verify_bump(payload, &self.circle_id, &manifest).ok()?;
+        self.session.bump(id).ok()?;
+        Some(seat)
+    }
+
+    /// Move everyone in the circle to new keys: sign a bump with this seat's key, apply it,
+    /// keep its wire and post it. A relay that does not answer leaves it waiting.
+    pub fn bump_generation(
+        &mut self,
+        http: &dyn Http,
+        signer: &dyn crate::Signer,
+    ) -> Result<(), PhoneError> {
+        if self.chat.pending_bump.is_some() {
+            let _ = self.flush(http);
+            if self.chat.pending_bump.is_some() {
+                return Err(PhoneError::Chat {
+                    message: "A reset is still waiting for the relay.".into(),
+                });
+            }
+        }
+        if !self.session.synced() {
+            self.poll(http)?;
+        }
+        let mut id = [0u8; 32];
+        getrandom::getrandom(&mut id).map_err(|e| PhoneError::Storage {
+            message: format!("No randomness: {e}"),
+        })?;
+        let public = cahoots_core::seat::SeatPublic::parse(&self.record.seat_public).map_err(|_| {
+            PhoneError::Storage {
+                message: "The saved data for this circle is damaged or cannot be read.".into(),
+            }
+        })?;
+        let mut seat = crate::signer::Seat {
+            signer,
+            label: self.record.seat_label.clone(),
+            public,
+            error: None,
+        };
+        let payload = sign_bump(&mut seat, self.record.seat, &self.circle_id, &id).map_err(chat_err)?;
+        if let Some(e) = seat.error.take() {
+            return Err(e);
+        }
+        let wire = self.session.send_bump(id, &payload).map_err(chat_err)?;
+        self.chat.pending_bump = Some(wire.into());
+        let seat_no = self.record.seat;
+        let m = MessageRecord {
+            id: random_id()?,
+            sender: seat_no,
+            mine: true,
+            text: bump_text(seat_no),
+            epoch: 0,
+            seq: None,
+            kind: Some("bump".into()),
+        };
         self.save_with(vec![m])?;
         let _ = self.flush(http);
         Ok(())
@@ -295,7 +385,23 @@ fn to_message(m: &MessageRecord, pending: bool) -> ChatMessage {
         text: m.text.clone(),
         epoch: m.epoch,
         pending,
+        kind: m.kind.clone().unwrap_or_else(|| "text".into()),
     }
+}
+
+fn bump_text(seat: u8) -> String {
+    format!("Keys were reset by seat {}.", u16::from(seat) + 1)
+}
+
+/// Post `body` and check the relay answered with a sequence number.
+fn post(http: &dyn Http, url: String, body: Vec<u8>) -> Result<(), PhoneError> {
+    let answer = http.post(url, body)?;
+    let v: serde_json::Value = serde_json::from_slice(&answer)
+        .map_err(|_| network("The relay returned an unreadable response. Try again in a moment."))?;
+    v["seq"]
+        .as_u64()
+        .ok_or_else(|| network("The relay did not confirm that the message was saved."))?;
+    Ok(())
 }
 
 pub(crate) fn random_id() -> Result<String, PhoneError> {

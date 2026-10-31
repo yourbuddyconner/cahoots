@@ -66,6 +66,21 @@ final class ChatModel: ObservableObject {
         await load()
     }
 
+    /// Move everyone to new keys. Returns what to tell the person, or nil when it failed.
+    func reset() async -> String? {
+        do {
+            try await core.run { [circle] in try $0.bumpChatGeneration(circle: circle) }
+            let waiting = (try? await core.run { [circle] in $0.chatResetWaiting(circle: circle) }) ?? false
+            await load()
+            return waiting
+                ? "Reset saved. It reaches the others when the relay answers."
+                : "Keys were reset for everyone."
+        } catch {
+            status = plain(error)
+            return nil
+        }
+    }
+
     func rotate() async -> Bool {
         do {
             try await core.run { [circle] in try $0.rotate(circle: circle) }
@@ -104,7 +119,10 @@ struct ChatView: View {
                     ForEach(Array(model.messages.enumerated()), id: \.element.id) { i, m in
                         let prev = i > 0 ? model.messages[i - 1] : nil
                         let next = i + 1 < model.messages.count ? model.messages[i + 1] : nil
-                        if let prev, prev.epoch != m.epoch {
+                        if m.kind == "bump" {
+                            BumpLine(text: m.text).id(m.id)
+                        } else {
+                        if let prev, prev.epoch != m.epoch, prev.kind != "bump" {
                             EpochDivider()
                         }
                         Bubble(message: m,
@@ -113,6 +131,7 @@ struct ChatView: View {
                                first: prev.map { !Self.sameRun($0, m) } ?? true,
                                last: next.map { !Self.sameRun(m, $0) } ?? true)
                             .id(m.id)
+                        }
                     }
                 }
                 .padding(.horizontal, Space.l)
@@ -170,6 +189,7 @@ struct ChatView: View {
                 showSettings = false
                 if done == "people" { app.path.append(.people(model.circle)) }
                 if done == "relay" { showRelay = true }
+                if done.hasPrefix("reset:") { notice = String(done.dropFirst(6)) }
                 if done == "rotated" { notice = "Future messages will use new encryption keys." }
             }
             .presentationDetents([.medium, .large])
@@ -186,7 +206,7 @@ struct ChatView: View {
     }
 
     static func sameRun(_ a: ChatMessage, _ b: ChatMessage) -> Bool {
-        a.mine == b.mine && a.sender == b.sender && a.epoch == b.epoch
+        a.kind != "bump" && b.kind != "bump" && a.mine == b.mine && a.sender == b.sender && a.epoch == b.epoch
     }
 
     private var composer: some View {
@@ -253,6 +273,20 @@ private struct ChatEmpty: View {
         }
         .padding(.top, Space.xxl)
         .padding(.bottom, Space.xl)
+    }
+}
+
+/// A note in the transcript that a seat reset the keys, centred in the muted style.
+private struct BumpLine: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(Color.muted)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Space.l)
     }
 }
 
@@ -336,6 +370,7 @@ struct ConversationSettings: View {
     let epoch: UInt32?
     let done: (String) -> Void
     @State private var confirmRotate = false
+    @State private var confirmReset = false
 
     var body: some View {
         NavigationStack {
@@ -368,6 +403,11 @@ struct ConversationSettings: View {
                             .buttonStyle(TextButtonStyle(full: true))
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    PaperSection(footer: "Every member moves to new keys. A device that cannot reach its card reads nothing new until it taps.") {
+                        Button("Reset keys for everyone") { confirmReset = true }
+                            .buttonStyle(TextButtonStyle(full: true))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                     PaperSection(footer: "Sender names help you follow a conversation. They do not independently verify who typed a message.") {
                         Button {
                             done("relay")
@@ -389,6 +429,11 @@ struct ConversationSettings: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { done("") } }
+            }
+            .confirmationDialog("Reset keys for everyone?", isPresented: $confirmReset, titleVisibility: .visible) {
+                Button("Reset keys for everyone") {
+                    Task { if let note = await model.reset() { done("reset:" + note) } }
+                }
             }
             .confirmationDialog("Renew encryption keys?", isPresented: $confirmRotate, titleVisibility: .visible) {
                 Button("Renew encryption keys") {

@@ -310,6 +310,9 @@ pub struct ChatMessage {
     pub epoch: u32,
     /// Ours, and the relay has not taken it yet.
     pub pending: bool,
+    /// "text" for a message, "bump" for a note that the keys were reset. The text of a bump
+    /// is the sentence to show.
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -808,6 +811,7 @@ impl Phone {
             state: session.export_state().to_vec().into(),
             outbox: Vec::new(),
             journal: Vec::new(),
+            pending_bump: None,
         };
         store::create_circle(
             &self.dir,
@@ -879,6 +883,21 @@ impl Phone {
     pub fn history(&self, circle: String) -> Vec<ChatMessage> {
         self.with_circle(&circle, |c, _| Ok(c.history()))
             .unwrap_or_default()
+    }
+
+    /// Move every member of the circle to new keys. The bump is signed with this seat's key
+    /// (the `Signer` may ask for Face ID), kept with the circle, and posted. If the relay does
+    /// not take it now, it is posted again by the next poll or send.
+    pub fn bump_chat_generation(&self, circle: String) -> Result<(), PhoneError> {
+        self.with_circle(&circle, |c, me| {
+            c.bump_generation(me.http.as_ref(), me.signer.as_ref())
+        })
+    }
+
+    /// Whether a reset this phone sent still waits for the relay.
+    pub fn chat_reset_waiting(&self, circle: String) -> bool {
+        self.with_circle(&circle, |c, _| Ok(c.chat.pending_bump.is_some()))
+            .unwrap_or(false)
     }
 
     /// Send from the next epoch on.

@@ -1149,3 +1149,154 @@ fn a_newer_offer_is_explained() {
     let e = a.phone.join_offer("cahoots:ceremony:v9:AAAA".into(), 1).unwrap_err();
     assert!(message(e).contains("newer version"));
 }
+
+#[test]
+fn a_reset_by_one_phone_moves_the_other() {
+    let r = relay();
+    let (a, b) = (device(&r), device(&r));
+    let (id, _, _) = finish(&a, &b);
+    for d in [&a, &b] {
+        d.phone.set_relay(id.clone(), RELAY.into()).unwrap();
+    }
+    a.phone.send_chat(id.clone(), "before".into()).unwrap();
+    assert_eq!(texts(&b.phone.poll(id.clone()).unwrap()), ["before"]);
+
+    a.phone.bump_chat_generation(id.clone()).unwrap();
+    assert!(!a.phone.chat_reset_waiting(id.clone()));
+    let mine = a.phone.history(id.clone());
+    assert_eq!(mine.last().unwrap().kind, "bump");
+    assert_eq!(mine.last().unwrap().text, "Keys were reset by seat 1.");
+
+    a.phone.send_chat(id.clone(), "after".into()).unwrap();
+    let got = b.phone.poll(id.clone()).unwrap();
+    assert_eq!(texts(&got), ["Keys were reset by seat 1.", "after"]);
+    assert_eq!(got[0].kind, "bump");
+    assert_eq!(got[1].kind, "text");
+    // And the other way, in the new keys.
+    b.phone.send_chat(id.clone(), "back".into()).unwrap();
+    assert_eq!(texts(&a.phone.poll(id.clone()).unwrap()), ["back"]);
+    // The history keeps the line in its place, after a restart too.
+    let again = Phone::open(
+        b.path.to_string_lossy().into_owned(),
+        Box::new(b.signer.clone()),
+        Box::new(b.http.clone()),
+    )
+    .unwrap();
+    assert_eq!(
+        texts(&again.history(id)),
+        ["before", "Keys were reset by seat 1.", "after", "back"]
+    );
+}
+
+#[test]
+fn a_reset_the_relay_has_not_taken_is_posted_again_and_not_doubled() {
+    let r = relay();
+    let (a, b) = (device(&r), device(&r));
+    let (id, _, _) = finish(&a, &b);
+    for d in [&a, &b] {
+        d.phone.set_relay(id.clone(), RELAY.into()).unwrap();
+    }
+    a.phone.send_chat(id.clone(), "before".into()).unwrap();
+    b.phone.poll(id.clone()).unwrap();
+
+    a.http.fail_posts.store(2, Ordering::SeqCst);
+    a.phone.bump_chat_generation(id.clone()).unwrap();
+    assert!(a.phone.chat_reset_waiting(id.clone()));
+    // A message sent now waits behind the reset. The one failed post left is the retry here.
+    a.phone.send_chat(id.clone(), "after".into()).unwrap();
+    assert!(a.phone.chat_reset_waiting(id.clone()));
+    // A second reset is refused while the first waits (and the relay is still failing).
+    a.http.fail_posts.store(1, Ordering::SeqCst);
+    let e = a.phone.bump_chat_generation(id.clone()).unwrap_err();
+    assert!(matches!(&e, PhoneError::Chat { message } if message == "A reset is still waiting for the relay."), "{e:?}");
+    // The relay answers: the reset goes, then the message after it.
+    a.phone.poll(id.clone()).unwrap();
+    assert!(!a.phone.chat_reset_waiting(id.clone()));
+    let circle: [u8; 16] = hex::decode(&id).unwrap().try_into().unwrap();
+    assert_eq!(r.lock().unwrap().poll(&circle, None, 0).unwrap().len(), 3);
+    assert_eq!(
+        texts(&b.phone.poll(id.clone()).unwrap()),
+        ["Keys were reset by seat 1.", "after"]
+    );
+    // Reading its own copy back does not post it again.
+    a.phone.poll(id).unwrap();
+    assert_eq!(r.lock().unwrap().poll(&circle, None, 0).unwrap().len(), 3);
+}
+
+#[test]
+fn history_saved_before_generations_still_opens() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../chat/tests/fixtures");
+    let state = std::fs::read(fixtures.join("chat-v5.bin")).unwrap();
+    let blob = std::fs::read(fixtures.join("chat-v5-wires.bin")).unwrap();
+    let mut wires = Vec::new();
+    let mut at = 0;
+    while at < blob.len() {
+        let n = u32::from_le_bytes(blob[at..at + 4].try_into().unwrap()) as usize;
+        wires.push(blob[at + 4..at + 4 + n].to_vec());
+        at += 4 + n;
+    }
+    assert_eq!(wires.len(), 2);
+
+    let r = relay();
+    let d = device(&r);
+    let circle_id = [0x0cu8; 16];
+    let id = hex::encode(circle_id);
+    let params = cahoots_core::params::CircleParams {
+        n: 3,
+        pad_len: PAD,
+        name: "old".into(),
+        agent_seat: false,
+    };
+    let record = CircleRecord {
+        params: params.encode().into(),
+        circle_id: circle_id.to_vec().into(),
+        seat: 1,
+        tier: 0,
+        label: "CSPRNG".into(),
+        words: Vec::new(),
+        manifest: Vec::new().into(),
+        root: vec![0x42; 32].into(),
+        seat_label: "cahoots:seat:old".into(),
+        seat_public: vec![2; 33].into(),
+        pair_keys: vec![Vec::new().into(); 3],
+        pair_counters: vec![0; 3],
+    };
+    let chat = cahoots_phone::store::ChatRecord {
+        state: state.into(),
+        outbox: Vec::new(),
+        journal: Vec::new(),
+        pending_bump: None,
+    };
+    cahoots_phone::store::create_circle(
+        &d.path,
+        &id,
+        &cahoots_phone::store::NewCircle {
+            record: &record,
+            pad: &[0; 16],
+            chat: &chat,
+            settings: &cahoots_phone::store::SettingsRecord {
+                relay: RELAY.into(),
+                unread: 0,
+            },
+            slices: params.slices(),
+        },
+    )
+    .unwrap();
+    let phone = Phone::open(
+        d.path.to_string_lossy().into_owned(),
+        Box::new(d.signer.clone()),
+        Box::new(d.http.clone()),
+    )
+    .unwrap();
+    for w in &wires {
+        r.lock().unwrap().post(&circle_id, w).unwrap();
+    }
+    // The state had read the first message already: the relay's copy of it is a replay, the
+    // second is new, and it opens in the root epoch.
+    let got = phone.poll(id.clone()).unwrap();
+    assert_eq!(texts(&got), ["old history two"]);
+    assert_eq!(got[0].kind, "text");
+    assert_eq!(got[0].epoch, 1);
+    phone.send_chat(id.clone(), "new keys".into()).unwrap();
+    assert_eq!(phone.history(id).last().unwrap().text, "new keys");
+}
