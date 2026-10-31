@@ -23,6 +23,7 @@ use crate::{
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use cahoots_channel::control::Control;
+use cahoots_channel::deposit::peek_signed;
 use cahoots_channel::keys::EpochId;
 use cahoots_channel::link::Link;
 use cahoots_channel::member::{
@@ -568,24 +569,37 @@ impl Phone {
     }
 
     /// Retire the live link: the relay refuses its token, and later epochs have no deposit
-    /// for it.
+    /// for it. The secret is forgotten at once and the signed statement kept with the owner's
+    /// state until the relay confirms; a `DELETE` that fails here is sent again on each poll.
     fn retire(&self, ch: &mut Ch) -> R<bool> {
-        let Some(hash) = ch.owner()?.gate_token_hash().map(hex::encode) else {
+        if ch.owner()?.gate_token_hash().is_none() {
             return Ok(false);
-        };
+        }
         let mut seat = self.seat_for(&ch.meta)?;
         let r = ch.owner_mut()?.retire_link(&mut seat);
-        let statement = signed(&mut seat, r)?;
+        signed(&mut seat, r)?;
         ch.meta.gate_hash = None;
         ch.persist()?;
-        self.call(
-            ch,
-            "DELETE",
-            &format!("/v1/channels/{}/gates/{hash}", ch.id),
-            Some(statement),
-            Auth::None,
-        )?;
+        self.flush_retires(ch)?;
         Ok(true)
+    }
+
+    /// Send every retire statement the relay has not confirmed, oldest first. A 204, or a 404
+    /// (the relay no longer holds the token), clears it; anything else stops and keeps the
+    /// rest for the next try.
+    fn flush_retires(&self, ch: &mut Ch) -> R<()> {
+        let pending = ch.owner()?.pending_retire().to_vec();
+        for (hash, statement) in pending {
+            let path = format!("/v1/channels/{}/gates/{}", ch.id, hex::encode(hash));
+            match self.call(ch, "DELETE", &path, Some(statement), Auth::None) {
+                Ok(_) => {}
+                Err(e) if is_status(&e, 404) => {}
+                Err(e) => return Err(e),
+            }
+            ch.owner_mut()?.retire_confirmed(&hash);
+            ch.save_state()?;
+        }
+        Ok(())
     }
 
     /// A new link (the policy's link evidence is the current link, so no policy change), and
@@ -709,25 +723,60 @@ impl Phone {
     }
 
     /// Fetch and open this member's deposit for an epoch: the link's first, then one sealed
-    /// to its key.
-    fn fetch_epoch(&self, ch: &mut Ch, epoch: &[u8; 20]) -> R<bool> {
+    /// to its key. Each deposit is signed; it is installed only once its signer's grant chain
+    /// (read by the deposit's kid) verifies against the owner circle and carries `govern`. One
+    /// that does not is passed over for the next. `ids`, the deposits a rotation control names,
+    /// limits the deposits tried to those when the control is at hand.
+    fn fetch_epoch(&self, ch: &mut Ch, epoch: &[u8; 20], ids: Option<&[[u8; 32]]>) -> R<bool> {
+        let mut places = Vec::new();
         if let Some(link_id) = ch.member().link_id() {
-            for d in self.deposits(ch, &link_id, epoch)? {
-                if ch.member_mut().install_from_link_deposit(&d).is_ok() {
+            places.push((link_id, true));
+        }
+        places.push((ch.member().my_kid(), false));
+        for (to, by_link) in places {
+            for d in self.deposits(ch, &to, epoch)? {
+                if self.install_deposit(ch, &d, by_link, ids)? {
                     return Ok(true);
                 }
-            }
-        }
-        let kid = ch.member().my_kid();
-        for d in self.deposits(ch, &kid, epoch)? {
-            if ch.member_mut().install_from_key_deposit(&d).is_ok() {
-                return Ok(true);
             }
         }
         Ok(false)
     }
 
-    /// Take the policy the relay now holds; keep the one held if it cannot be read.
+    /// Install one signed deposit if its signer checks out; `Ok(false)` when it does not.
+    fn install_deposit(
+        &self,
+        ch: &mut Ch,
+        signed: &[u8],
+        by_link: bool,
+        ids: Option<&[[u8; 32]]>,
+    ) -> R<bool> {
+        let Ok((kid, d)) = peek_signed(signed) else {
+            return Ok(false);
+        };
+        if ids.is_some_and(|ids| !ids.contains(&d.id())) {
+            return Ok(false);
+        }
+        let manifest = ch.meta.manifest.to_vec();
+        for fresh in [false, true] {
+            for chain in self.chains_for(ch, &kid, fresh)? {
+                let m = ch.member_mut();
+                let installed = if by_link {
+                    m.install_from_link_deposit(signed, &chain, &manifest)
+                } else {
+                    m.install_from_key_deposit(signed, &chain, &manifest)
+                };
+                if installed.is_ok() {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    /// Take the policy the relay now holds, once it checks out: the channel object is verified
+    /// against the owner circle's member list this phone keeps, names this channel, and names
+    /// the policy by its SHA-256. Keep the one held if anything does not.
     fn refresh_policy(&self, ch: &mut Ch) {
         let path = format!("/v1/channels/{}", ch.id);
         let Ok(v) = self
@@ -736,9 +785,23 @@ impl Phone {
         else {
             return;
         };
-        let Some(Ok(policy)) = v["policy"].as_str().map(b64) else {
+        let (Some(Ok(policy)), Some(Ok(object))) = (
+            v["policy"].as_str().map(b64),
+            v["channel"].as_str().map(b64),
+        ) else {
             return;
         };
+        let Ok(manifest) = open_manifest(&ch.meta.manifest) else {
+            return;
+        };
+        let Ok((_, obj)) = ChannelObject::verify(&object, &manifest) else {
+            return;
+        };
+        if obj.channel_id != ch.member().channel_id()
+            || <[u8; 32]>::from(Sha256::digest(&policy)) != obj.policy_id
+        {
+            return;
+        }
         if ch.member_mut().set_policy(&policy).is_ok() {
             if let Ok(line) = policy_summary(&policy) {
                 ch.meta.policy_line = line;
@@ -778,7 +841,10 @@ impl Phone {
                     }
                     Err(e) => {
                         error = e;
-                        if error == "unknown-epoch" && !owner && self.fetch_epoch(ch, &epoch)? {
+                        if error == "unknown-epoch"
+                            && !owner
+                            && self.fetch_epoch(ch, &epoch, None)?
+                        {
                             match ch.member_mut().receive(msg, &chain, &manifest) {
                                 Ok(r) => {
                                     got = Some(r);
@@ -823,10 +889,10 @@ impl Phone {
                     ch.meta.owner_kids.push(k.clone());
                 }
                 match r.control {
-                    Some(Control::Rotation { epoch_id, .. }) if !owner => {
+                    Some(Control::Rotation { epoch_id, deposits }) if !owner => {
                         // The control is read now; a failed fetch is tried again after the
                         // sync, never by reading the control again.
-                        match self.fetch_epoch(ch, &epoch_id.encode()) {
+                        match self.fetch_epoch(ch, &epoch_id.encode(), Some(&deposits)) {
                             Ok(true) => {}
                             Ok(false) => ch.meta.behind = true,
                             Err(_) => ch.meta.retry_epoch = Some(epoch_id.encode().to_vec().into()),
@@ -865,6 +931,11 @@ impl Phone {
         let mut out = Vec::new();
         if ch.meta.dead {
             return Ok(out);
+        }
+        // A link retired here whose removal the relay never confirmed: send it again. A
+        // relay that cannot be reached now is tried on the next poll.
+        if ch.is_owner() {
+            let _ = self.flush_retires(ch);
         }
         let mut history = ChannelMessages::load(&ch.dir)?;
         loop {
@@ -938,7 +1009,7 @@ impl Phone {
         if !ch.is_owner() {
             if let Some(epoch) = ch.meta.retry_epoch.clone() {
                 let epoch: [u8; 20] = epoch[..].try_into().unwrap_or([0; 20]);
-                match self.fetch_epoch(ch, &epoch) {
+                match self.fetch_epoch(ch, &epoch, None) {
                     Ok(found) => {
                         ch.meta.behind |= !found;
                         ch.meta.retry_epoch = None;
@@ -1418,15 +1489,40 @@ impl Phone {
             .collect())
     }
 
-    /// Let a request in with `actions` ("read,post" or "read"): a grant from this phone's
-    /// seat, the current keys sealed to the member, and a note on the channel. A `post` the
-    /// policy does not allow is given as read only.
+    /// What a request may be let in for without the owner choosing, as "read,post": the
+    /// actions it asks for that the live link proves (`ChannelOwner::permitted`). `""` when
+    /// nothing is (a closed channel, members post, an old link, or a request for an action
+    /// the owner gives by hand): auto-allow leaves it for the owner.
+    pub fn channel_permitted(&self, id: String, request_id: String) -> Result<String, PhoneError> {
+        let _guard = self.lock();
+        let mut ch = self.open_channel(&id)?;
+        ch.owner()?;
+        let requests = self.fetch_requests(&mut ch)?;
+        let (_, bytes, _) = requests
+            .into_iter()
+            .find(|(rid, _, _)| *rid == request_id)
+            .ok_or_else(|| crate::not_found("request"))?;
+        let actions = ch.owner()?.permitted(&bytes).map_err(ch_err)?;
+        Ok(actions
+            .iter()
+            .map(|a| a.name())
+            .collect::<Vec<_>>()
+            .join(","))
+    }
+
+    /// Let a request in with `actions`, "read,post" or "read", which the owner chose on the
+    /// screen (or `channel_permitted` gave): a grant from this phone's seat, the current keys
+    /// sealed to the member, and a note on the channel. A `post` the policy does not allow is
+    /// given as read only; `admit` and `govern` are never given (the policy refuses them).
     pub fn channel_allow(
         &self,
         id: String,
         request_id: String,
         actions: String,
     ) -> Result<(), PhoneError> {
+        if actions != "read" && actions != "read,post" {
+            return Err(channel("A request is let in to read, or to read and post."));
+        }
         let _guard = self.lock();
         let mut ch = self.open_channel(&id)?;
         ch.owner()?;

@@ -12,10 +12,17 @@ use tempfile::TempDir;
 
 const PAD: u32 = 1024;
 
-/// HTTP over the network, as Swift's `UrlSessionHttp` does it. It counts the requests made.
+/// Rewrites the body of a `GET` whose URL it is given: a relay that lies.
+type Rewrite = Box<dyn Fn(&str, Vec<u8>) -> Vec<u8> + Send + Sync>;
+
+/// HTTP over the network, as Swift's `UrlSessionHttp` does it. It counts the requests made,
+/// can fail the next `DELETE`s as an unreachable relay would, and can rewrite what a `GET`
+/// of deposits answers.
 #[derive(Clone, Default)]
 struct Net {
     requests: Arc<Mutex<Vec<String>>>,
+    fail_deletes: Arc<Mutex<u32>>,
+    deposits: Arc<Mutex<Option<Rewrite>>>,
 }
 
 impl Http for Net {
@@ -38,6 +45,15 @@ impl Http for Net {
             .lock()
             .unwrap()
             .push(format!("{method} {url}"));
+        if method == "DELETE" {
+            let mut fail = self.fail_deletes.lock().unwrap();
+            if *fail > 0 {
+                *fail -= 1;
+                return Err(PhoneError::Network {
+                    message: "the relay cannot be reached".into(),
+                });
+            }
+        }
         let mut req = ureq::request(&method, &url);
         for h in &headers {
             req = req.set(&h.name, &h.value);
@@ -58,6 +74,11 @@ impl Http for Net {
         let status = resp.status();
         let mut body = Vec::new();
         resp.into_reader().read_to_end(&mut body).unwrap();
+        if method == "GET" && url.contains("/deposits?") {
+            if let Some(rewrite) = self.deposits.lock().unwrap().as_ref() {
+                body = rewrite(&url, body);
+            }
+        }
         Ok(HttpResponse { status, body })
     }
 }
@@ -467,4 +488,241 @@ fn announcements_with_approvals_are_refused_before_anything_is_uploaded() {
     }
     assert_eq!(a.http.requests.lock().unwrap().len(), before);
     assert!(a.phone.channels().is_empty());
+}
+
+/// The seat key of `d`'s circle, as a `SeatSigner` the test can sign grants with.
+struct SeatOf<'a> {
+    signer: &'a SoftSigner,
+    label: String,
+}
+
+impl cahoots_core::seat::SeatSigner for SeatOf<'_> {
+    fn public(&mut self) -> cahoots_core::seat::SeatPublic {
+        cahoots_core::seat::SeatPublic::parse(&self.signer.public(&self.label).unwrap()).unwrap()
+    }
+    fn sign(&mut self, msg: &[u8]) -> cahoots_core::seat::Signature {
+        use cahoots_phone::signer::Signer;
+        self.signer
+            .sign(self.label.clone(), msg.to_vec())
+            .unwrap()
+            .try_into()
+            .unwrap()
+    }
+}
+
+fn b64(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// The `epoch=` of a deposits URL.
+fn epoch_of(url: &str) -> cahoots_channel::keys::EpochId {
+    let hex_epoch = url
+        .split("epoch=")
+        .nth(1)
+        .unwrap()
+        .split('&')
+        .next()
+        .unwrap();
+    cahoots_channel::keys::EpochId::decode(&hex::decode(hex_epoch).unwrap()).unwrap()
+}
+
+#[test]
+fn a_lying_relay_cannot_hand_a_reader_forged_keys() {
+    use cahoots_channel::deposit::seal_for_link;
+    use cahoots_channel::grant::{issue_root, sign_root};
+    use cahoots_channel::link::Link;
+    use cahoots_channel::member::bytes_array;
+    use cahoots_channel::Action;
+    use cahoots_core::seat::SeatKey;
+
+    let st = station();
+    let (a, b) = (device(), device());
+    let circle_id = circle(&a, &b, &st.base);
+    let id = a
+        .phone
+        .channel_start(circle_id.clone(), "Garden".into(), 2)
+        .unwrap()
+        .id;
+    let link = a.phone.channel_link(id.clone()).unwrap();
+    a.phone
+        .channel_send(id.clone(), "hello all".into())
+        .unwrap();
+
+    // Mallory holds a real grant from the owner's seat, to read and post but not govern, and
+    // knows the link's secret.
+    let mallory = SeatKey::from_seed(&[0x4d; 32]).unwrap();
+    let seat = a.phone.circles()[0].my_seat;
+    let label = a.phone.circle_seat_label(circle_id.clone()).unwrap();
+    let circle_bytes: [u8; 16] = hex::decode(&circle_id).unwrap().try_into().unwrap();
+    let channel: [u8; 16] = hex::decode(&id).unwrap().try_into().unwrap();
+    let claims = issue_root(
+        &circle_bytes,
+        &channel,
+        seat,
+        &mallory.public(),
+        &[Action::Read, Action::Post],
+        0,
+        u64::MAX,
+        0,
+        [0x4d; 16],
+    );
+    let grant = sign_root(
+        &claims,
+        SeatOf {
+            signer: &a.signer,
+            label,
+        },
+        seat,
+    );
+    let url = format!("{}/v1/channels/{id}", st.base);
+    let posted = ureq::post(&format!("{url}/grants")).send_bytes(&bytes_array(&[&grant]));
+    assert_eq!(posted.unwrap().status(), 201);
+    let secret = Link::parse(&link).unwrap().secret.unwrap();
+    let forge = move |epoch| seal_for_link(&[0x66; 32], &secret, &epoch).sign(&mallory);
+
+    // The gated relay itself refuses Mallory's deposit.
+    let refused =
+        ureq::post(&format!("{url}/deposits")).send_bytes(&forge(cahoots_channel::keys::EpochId {
+            channel_id: channel,
+            epoch: 9,
+        }));
+    match refused {
+        Err(ureq::Error::Status(403, r)) => {
+            let v: serde_json::Value = serde_json::from_str(&r.into_string().unwrap()).unwrap();
+            assert_eq!(
+                (v["error"].as_str(), v["reason"].as_str()),
+                (Some("grant"), Some("action"))
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+
+    // A relay that lies puts the forged deposit first: the reader passes over it, installs the
+    // owner's, and reads.
+    let forge = Arc::new(forge);
+    let first = Arc::clone(&forge);
+    let c = device();
+    *c.http.deposits.lock().unwrap() = Some(Box::new(move |url, body| {
+        let mut v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let list = v["deposits"].as_array_mut().unwrap();
+        list.insert(0, b64(&first(epoch_of(url))).into());
+        serde_json::to_vec(&v).unwrap()
+    }));
+    c.phone.channel_join(link.clone()).unwrap();
+    assert_eq!(
+        texts(&c.phone.channel_history(id.clone()).unwrap()),
+        ["hello all"]
+    );
+
+    // Given only the forged deposit for the next keys, the reader installs nothing and stops.
+    let only = Arc::clone(&forge);
+    *c.http.deposits.lock().unwrap() = Some(Box::new(move |url, _| {
+        serde_json::to_vec(&serde_json::json!({ "deposits": [b64(&only(epoch_of(url)))] })).unwrap()
+    }));
+    a.phone.channel_new_keys(id.clone()).unwrap();
+    a.phone.channel_send(id.clone(), "second".into()).unwrap();
+    c.phone.channel_poll(id.clone()).unwrap();
+    assert!(c.phone.channel(id.clone()).unwrap().dead);
+    assert!(!texts(&c.phone.channel_history(id.clone()).unwrap()).contains(&"second".into()));
+}
+
+#[test]
+fn a_retire_the_relay_missed_is_sent_again() {
+    let st = station();
+    let (a, b) = (device(), device());
+    let circle_id = circle(&a, &b, &st.base);
+    let id = a
+        .phone
+        .channel_start(circle_id, "News".into(), 0)
+        .unwrap()
+        .id;
+    let link = a.phone.channel_link(id.clone()).unwrap();
+    a.phone.channel_send(id.clone(), "first".into()).unwrap();
+    let c = device();
+    c.phone.channel_join(link.clone()).unwrap();
+    let deletes = |d: &Device| {
+        d.http
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.starts_with("DELETE "))
+            .count()
+    };
+
+    // The DELETE does not reach the relay: the retire fails, and the link is gone here.
+    *a.http.fail_deletes.lock().unwrap() = 1;
+    assert!(matches!(
+        a.phone.channel_retire_link(id.clone()),
+        Err(PhoneError::Network { .. })
+    ));
+    assert_eq!(deletes(&a), 1);
+    // The relay still holds the token, so the old link still reads.
+    c.phone.channel_poll(id.clone()).unwrap();
+    assert!(!c.phone.channel(id.clone()).unwrap().dead);
+
+    // The statement survived on disk: the phone opened again sends it on its next poll, once.
+    let a2 = a.reopen();
+    a2.channel_poll(id.clone()).unwrap();
+    assert_eq!(deletes(&a), 2);
+    a2.channel_poll(id.clone()).unwrap();
+    assert_eq!(deletes(&a), 2, "confirmed, so not sent again");
+
+    // The relay refuses the old link now; the owner hands out a new one.
+    c.phone.channel_poll(id.clone()).unwrap();
+    assert!(c.phone.channel(id.clone()).unwrap().dead);
+    let new_link = a2.channel_link(id.clone()).unwrap();
+    assert_ne!(new_link, link);
+    a2.channel_send(id.clone(), "again".into()).unwrap();
+    let e = device();
+    e.phone.channel_join(new_link).unwrap();
+    assert_eq!(
+        texts(&e.phone.channel_history(id.clone()).unwrap()),
+        ["again"]
+    );
+}
+
+#[test]
+fn only_what_the_link_proves_is_let_in_without_the_owner() {
+    let st = station();
+    let (a, b) = (device(), device());
+    let circle_id = circle(&a, &b, &st.base);
+    for (preset, want) in [(2u8, "read,post"), (3, "")] {
+        let id = a
+            .phone
+            .channel_start(circle_id.clone(), "Garden".into(), preset)
+            .unwrap()
+            .id;
+        let link = a.phone.channel_link(id.clone()).unwrap();
+        let c = device();
+        c.phone.channel_join(link).unwrap();
+        c.phone
+            .channel_ask_to_post(id.clone(), "Cee".into())
+            .unwrap();
+        let reqs = a.phone.channel_requests(id.clone()).unwrap();
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(
+            a.phone
+                .channel_permitted(id.clone(), reqs[0].id.clone())
+                .unwrap(),
+            want,
+            "preset {preset}"
+        );
+        // The owner's own choice can never hand out admit or govern.
+        for actions in ["read,post,admit", "govern"] {
+            assert!(a
+                .phone
+                .channel_allow(id.clone(), reqs[0].id.clone(), actions.into())
+                .is_err());
+        }
+        assert!(a.phone.channel_members(id.clone()).unwrap().is_empty());
+        a.phone
+            .channel_allow(id.clone(), reqs[0].id.clone(), "read,post".into())
+            .unwrap();
+        assert_eq!(
+            a.phone.channel_members(id.clone()).unwrap()[0].actions,
+            "read,post"
+        );
+    }
 }
