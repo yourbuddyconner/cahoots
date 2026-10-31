@@ -2,6 +2,7 @@
 **/target
 Cargo.lock.bak
 *.bin
+!crates/chat/tests/fixtures/*.bin
 *.pad
 .DS_Store
 /web/node_modules

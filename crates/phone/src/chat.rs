@@ -16,7 +16,7 @@ use crate::store::{
 use crate::{ChatMessage, Http, PhoneError};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use cahoots_chat::{bucket_pad, bucket_unpad, ChatError, ChatSession};
+use cahoots_chat::{bucket_pad, bucket_unpad, ChatError, ChatSession, MessageType};
 use cahoots_core::params::CircleParams;
 use std::path::{Path, PathBuf};
 
@@ -157,7 +157,8 @@ impl Circle {
                 // Our own messages move our sending position; a message that does not open
                 // (damaged, replayed, another kind) is passed over.
                 if let Ok((h, pt)) = self.session.receive(&bytes) {
-                    if h.sender != me {
+                    // Only text is history. Bumps and cards are handled elsewhere.
+                    if h.sender != me && h.msg_type == MessageType::Text {
                         let text = String::from_utf8_lossy(bucket_unpad(&pt).unwrap_or(&pt))
                             .into_owned();
                         let m = MessageRecord {

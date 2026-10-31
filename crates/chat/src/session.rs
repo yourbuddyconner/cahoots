@@ -470,9 +470,13 @@ impl ChatSession {
     }
 
     /// Send a bump in the current epoch, then move this session to `generation_id`.
-    /// `payload` is what `crate::bump::sign_bump` returned for this id. Without the root, the
-    /// session must already be able to move, so this refuses with `NeedsGeneration` first and
-    /// sends nothing.
+    /// `payload` is what `crate::bump::sign_bump` returned for this id.
+    ///
+    /// Only a session with the root sends a bump: it seals the bump in the generation the
+    /// others are in and derives the new key itself. Without the root this refuses with
+    /// `CannotBump`. It refuses with `CannotBump` too for a generation this session holds or
+    /// dropped, the current one included, because the bump would move nobody. Nothing is sent
+    /// when it refuses.
     pub fn send_bump(
         &mut self,
         generation_id: [u8; 32],
@@ -481,8 +485,8 @@ impl ChatSession {
         if payload.get(..32) != Some(&generation_id[..]) {
             return Err(ChatError::BadSignature);
         }
-        if self.root.is_none() && !self.knows(&generation_id) {
-            return Err(ChatError::NeedsGeneration(generation_id));
+        if self.root.is_none() || self.knows(&generation_id) {
+            return Err(ChatError::CannotBump);
         }
         let wire = self.send_typed(MessageType::Bump, payload)?;
         self.bump(generation_id)?;
@@ -557,6 +561,10 @@ impl ChatSession {
         let pt = if let Some((tag, n)) = header.epoch.generation_parts() {
             let current = self.gens.len() - 1;
             let mut result = Err(self.missing(tag));
+            // The tag is 2 bytes, so the two held generations share one by chance once in
+            // 65536. Try every generation with this tag, newest first: the first whose key
+            // opens the message wins, and a key that fails changes nothing. If none opens,
+            // the last error stands.
             let matching: Vec<usize> = (0..self.gens.len())
                 .rev()
                 .filter(|&i| self.gens[i].tag == tag)

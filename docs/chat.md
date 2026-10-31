@@ -89,7 +89,8 @@ The first byte is `2` in every chat message, the version the relay checks. It di
 | `1` | control | Reserved |
 | `2` | bump | `generation_id` and a seat's signature, section 1 |
 | `3` | card | A seat-signed contact card |
- `len` is the plaintext length. Plaintext SHOULD be bucket-padded to 64, 256, 1024, or 4096 bytes.
+
+`len` is the plaintext length. Plaintext SHOULD be bucket-padded to 64, 256, 1024, or 4096 bytes.
 
 The `sender` field is a claim. Any member can compute any sender's chain. It identifies a chain, not a person, as slices do for pure-pad messages.
 

@@ -27,7 +27,7 @@ Per-member fields are arrays with one entry per member, in seat order: `seat_see
 
 ## `root.json` fields
 
-`content_keys` are the three reveal content keys of the ceremony in `ceremony.json`, in seat order, and `circle_id` is that ceremony's circle id. `root` is HKDF-SHA256 over the content keys concatenated, with the circle id as salt and `cahoots/root/v1` as info. `chat_keys` gives HMAC-SHA256(root, `chat` || circle_id || epoch as 8 bytes big-endian) for each `epoch`, the key of an old root epoch. `gen0_id` is SHA-256(`cahoots/chat/gen0` || circle_id), and `generation_keys` gives HMAC-SHA256(root, `chat/gen` || circle_id || generation_id) for each `generation_id`. and `seal_keys` gives HMAC-SHA256(root, label || circle_id) for each `label`. The test `the_root_vectors_are_reproduced` in `crates/core/tests/root.rs` rebuilds them.
+`content_keys` are the three reveal content keys of the ceremony in `ceremony.json`, in seat order, and `circle_id` is that ceremony's circle id. `root` is HKDF-SHA256 over the content keys concatenated, with the circle id as salt and `cahoots/root/v1` as info. `chat_keys` gives HMAC-SHA256(root, `chat` || circle_id || epoch as 8 bytes big-endian) for each `epoch`, the key of an old root epoch. `gen0_id` is SHA-256(`cahoots/chat/gen0` || circle_id), and `generation_keys` gives HMAC-SHA256(root, `chat/gen` || circle_id || generation_id) for each `generation_id`. `seal_keys` gives HMAC-SHA256(root, label || circle_id) for each `label`. The test `the_root_vectors_are_reproduced` in `crates/core/tests/root.rs` rebuilds them.
 
 ## `ssh.json` fields
 

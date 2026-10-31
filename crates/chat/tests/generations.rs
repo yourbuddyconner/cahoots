@@ -170,7 +170,9 @@ fn fixture(name: &str) -> Vec<u8> {
     .unwrap()
 }
 
-/// The two root-epoch messages seat 0 sent before generations existed.
+/// The two root-epoch messages seat 0 sent before generations existed. Both fixture files were
+/// written at commit 2496588, before generations, by `tests/fixtures/make-chat-v5.rs`. Nothing
+/// in that code is random, so running it again at that commit gives the same bytes.
 fn v5_wires() -> Vec<Vec<u8>> {
     let all = fixture("chat-v5-wires.bin");
     let mut out = Vec::new();
@@ -287,4 +289,90 @@ fn a_device_without_the_root_exports_and_imports_its_generation() {
     let w = back.send(b"again").unwrap();
     assert_eq!(parse(&w).unwrap().0.counter, 1);
     assert_eq!(a.receive(&w).unwrap().1, b"again");
+}
+
+#[test]
+fn only_a_root_holder_sends_a_bump_and_only_to_a_new_generation() {
+    // A device without the root never sends a bump: its key would be one nobody else has.
+    let key0 = chat_gen_key(&ROOT, &CID, &gen0_id(&CID));
+    let mut d = synced(ChatSession::from_generation(gen0_id(&CID), key0, CID, 3, 2));
+    let payload = sign_bump(&seat_key(2), 2, &CID, &ID1).unwrap();
+    assert_eq!(d.send_bump(ID1, &payload), Err(ChatError::CannotBump));
+    // Even with the next key installed, a device does not originate the bump.
+    d.install_generation(ID1, chat_gen_key(&ROOT, &CID, &ID1));
+    assert_eq!(d.send_bump(ID1, &payload), Err(ChatError::CannotBump));
+
+    // A root holder refuses a bump to the generation it is already in, and to one it has left.
+    let mut a = member(0);
+    let to_gen0 = sign_bump(&seat_key(0), 0, &CID, &gen0_id(&CID)).unwrap();
+    assert_eq!(a.send_bump(gen0_id(&CID), &to_gen0), Err(ChatError::CannotBump));
+    let to_1 = sign_bump(&seat_key(0), 0, &CID, &ID1).unwrap();
+    a.send_bump(ID1, &to_1).unwrap();
+    assert_eq!(a.send_bump(ID1, &to_1), Err(ChatError::CannotBump));
+    assert_eq!(a.send_bump(gen0_id(&CID), &to_gen0), Err(ChatError::CannotBump));
+    // A payload for another id is refused before anything is sent.
+    assert_eq!(a.send_bump(ID2, &to_1), Err(ChatError::BadSignature));
+    // Nothing was sent by the refusals: a's next message is counter 0 of generation ID1.
+    let w = a.send(b"still here").unwrap();
+    let h = parse(&w).unwrap().0;
+    assert_eq!(h.epoch, EpochId::generation(generation_tag(&ID1), 1));
+    assert_eq!(h.counter, 0);
+}
+
+/// A `CHS3` state for seat 2 of 3 with no epoch states: the given pending flag, retired ids and
+/// generations (id, key). The layout is the one `export_state` writes.
+fn chs3(retired: &[[u8; 32]], gens: &[([u8; 32], [u8; 32])]) -> Vec<u8> {
+    let mut s = b"CHS3".to_vec();
+    s.extend_from_slice(&[2, 3]);
+    s.extend_from_slice(&0u32.to_le_bytes()); // sent_in_current
+    s.extend_from_slice(&[0; 9]); // old root epochs: highest, floor, no states
+    s.push(0); // no pending generation
+    s.push(retired.len() as u8);
+    for id in retired {
+        s.extend_from_slice(id);
+    }
+    s.push(gens.len() as u8);
+    for (id, key) in gens {
+        s.extend_from_slice(id);
+        s.extend_from_slice(key);
+        s.extend_from_slice(&[0; 9]); // highest, floor, no states
+    }
+    s
+}
+
+#[test]
+fn a_damaged_state_does_not_import() {
+    let k = [7u8; 32];
+    let import = |s: &[u8]| ChatSession::import_generation_state(CID, 3, 2, s).err();
+    // The well-formed state imports, so each failure below is the change it makes.
+    assert_eq!(import(&chs3(&[], &[(ID1, k)])), None);
+    assert_eq!(import(&chs3(&[ID2], &[(ID1, k), (ID2.map(|b| b ^ 1), k)])), None);
+    // No generation, or more than two.
+    assert_eq!(import(&chs3(&[], &[])), Some(ChatError::State));
+    assert_eq!(
+        import(&chs3(&[], &[(ID1, k), (ID2, k), ([0x33; 32], k)])),
+        Some(ChatError::State)
+    );
+    // The same generation twice, or a held generation also listed as dropped.
+    assert_eq!(import(&chs3(&[], &[(ID1, k), (ID1, k)])), Some(ChatError::State));
+    assert_eq!(import(&chs3(&[ID1], &[(ID1, k)])), Some(ChatError::State));
+    // More than four dropped generations.
+    let five: Vec<[u8; 32]> = (0..5u8).map(|i| [0x40 + i; 32]).collect();
+    assert_eq!(import(&chs3(&five[..4], &[(ID1, k)])), None);
+    assert_eq!(import(&chs3(&five, &[(ID1, k)])), Some(ChatError::State));
+
+    // A state with root epochs does not import without the root.
+    let mut b = member(1);
+    b.receive(&v5_wires()[0]).unwrap();
+    let with_old = b.export_state();
+    assert!(ChatSession::import_state(&ROOT, CID, 3, 1, &with_old).is_ok());
+    assert_eq!(
+        ChatSession::import_generation_state(CID, 3, 1, &with_old).err(),
+        Some(ChatError::State)
+    );
+    // Nor does the state written before generations.
+    assert_eq!(
+        ChatSession::import_generation_state(CID, 3, 1, &fixture("chat-v5.bin")).err(),
+        Some(ChatError::State)
+    );
 }

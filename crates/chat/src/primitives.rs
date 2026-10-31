@@ -143,6 +143,9 @@ pub enum ChatError {
     /// A bump whose signature does not verify against a seat of the manifest, or that is
     /// malformed.
     BadSignature,
+    /// `send_bump` was refused: this session does not hold the root, so it cannot derive the
+    /// new generation's key or let the others follow, or it is already in that generation.
+    CannotBump,
     /// Malformed exported state.
     State,
 }

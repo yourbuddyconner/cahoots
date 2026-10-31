@@ -748,6 +748,7 @@ fn chat_err(e: ChatError) -> String {
         ChatError::State => "state".into(),
         ChatError::NeedsGeneration(_) => "needs-generation".into(),
         ChatError::BadSignature => "bad-signature".into(),
+        ChatError::CannotBump => "cannot-bump".into(),
     }
 }
 
