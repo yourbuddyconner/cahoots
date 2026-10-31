@@ -145,25 +145,51 @@ async fn post_message(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let sub = match Submission::parse(&circle, &body) {
-        Ok(s) => s,
-        Err(RuleError::TooLarge) => {
-            return err(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "too_large",
-                RuleError::TooLarge,
-            )
-        }
-        Err(e) => return err(StatusCode::BAD_REQUEST, "malformed", e),
-    };
     let result = {
+        // One lock across the channel check and the append, so a channel stored in between
+        // cannot gain a circle entry.
         let mut log = st.log.lock().unwrap();
+        if let Some(refused) = channel_not_circle(&mut log, &circle) {
+            return refused;
+        }
+        let sub = match Submission::parse(&circle, &body) {
+            Ok(s) => s,
+            Err(RuleError::TooLarge) => {
+                return err(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "too_large",
+                    RuleError::TooLarge,
+                )
+            }
+            Err(e) => return err(StatusCode::BAD_REQUEST, "malformed", e),
+        };
         if let Some(full) = st.full(&log) {
             return full;
         }
         log.append(sub, now_ms())
     };
     st.appended(result)
+}
+
+/// With `channels`, an id the `channels` table holds is a channel, and the circle routes
+/// refuse it with `404 channel`, so its stream is reached only through the channel routes,
+/// their rate bucket and their gate.
+#[cfg(feature = "channels")]
+fn channel_not_circle(log: &mut Log, id: &CircleId) -> Option<Response> {
+    match crate::objects::store::channel(log.conn(), id) {
+        Ok(None) => None,
+        Ok(Some(_)) => Some(err(
+            StatusCode::NOT_FOUND,
+            "channel",
+            "this id is a channel; use /v1/channels/...",
+        )),
+        Err(e) => Some(err(StatusCode::INTERNAL_SERVER_ERROR, "db", e)),
+    }
+}
+
+#[cfg(not(feature = "channels"))]
+fn channel_not_circle(_log: &mut Log, _id: &CircleId) -> Option<Response> {
+    None
 }
 
 impl State {
@@ -203,6 +229,9 @@ async fn get_messages(
         Ok(c) => c,
         Err(r) => return *r,
     };
+    if let Some(refused) = channel_not_circle(&mut st.log.lock().unwrap(), &circle) {
+        return refused;
+    }
     poll_stream(&st, &circle, &q, |e| EntryRecord::from(e)).await
 }
 
@@ -241,11 +270,23 @@ pub(crate) async fn poll_stream<R: Serialize>(
     }
 }
 
+/// Every circle entry after `after`. With `channels`, channel entries are left out: the feed
+/// and its page are for circles.
 async fn feed(AxState(st): AxState<State>, Query(q): Query<PollQuery>) -> Response {
-    let log = st.log.lock().unwrap();
+    #[allow(unused_mut)]
+    let mut log = st.log.lock().unwrap();
+    #[cfg(feature = "channels")]
+    let channels = match crate::objects::store::channel_ids(log.conn()) {
+        Ok(ids) => ids,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, "db", e),
+    };
+    #[cfg(not(feature = "channels"))]
+    let channels: Vec<[u8; 16]> = Vec::new();
     let entries: Vec<EntryRecord> = log
-        .all_after(q.after, PAGE_LIMIT)
+        .all_after(q.after, usize::MAX)
         .into_iter()
+        .filter(|e| !channels.contains(&e.circle_id))
+        .take(PAGE_LIMIT)
         .map(EntryRecord::from)
         .collect();
     Json(json!({ "entries": entries, "head_seq": log.head().seq })).into_response()
@@ -265,8 +306,11 @@ async fn circle_head(AxState(st): AxState<State>, Path(circle): Path<String>) ->
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let h = st.log.lock().unwrap().circle_head(&circle);
-    head_json(h)
+    let mut log = st.log.lock().unwrap();
+    if let Some(refused) = channel_not_circle(&mut log, &circle) {
+        return refused;
+    }
+    head_json(log.circle_head(&circle))
 }
 
 async fn circles(AxState(st): AxState<State>) -> Response {

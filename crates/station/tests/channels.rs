@@ -304,7 +304,7 @@ async fn refusals() {
     let (s, v) = send(
         c.post(format!(
             "{base}/v1/circles/{}/messages",
-            hex::encode(channel)
+            hex::encode(CIRCLE)
         ))
         .body(w.clone()),
     )
@@ -501,4 +501,56 @@ fn channel_entries_survive_a_reopen() {
     assert_eq!(log.stream_head(&channel), head);
     assert_eq!(head.seq, Some(1));
     assert_eq!(log.entries_after_stream(&channel, Some(0)).len(), 1);
+}
+
+/// A well-formed version 2 (chat) body for `circle`, with one byte of plaintext.
+fn chat(circle: [u8; 16]) -> Vec<u8> {
+    let mut m = vec![2u8];
+    m.extend_from_slice(&circle);
+    m.extend_from_slice(&[1, 2, 3, 4, 5, 0]);
+    m.extend_from_slice(&0u32.to_le_bytes());
+    m.extend_from_slice(&1u32.to_le_bytes());
+    m.push(0);
+    m.extend_from_slice(&[0u8; 17]);
+    m
+}
+
+#[tokio::test]
+async fn circle_routes_refuse_a_channel_id_and_the_feed_leaves_channels_out() {
+    let (base, _dir, c) = with_channels(no_address_limits(), &[NONCE]).await;
+    let channel = channel_id_for(&CIRCLE, &NONCE);
+    let as_circle = format!("{base}/v1/circles/{}", hex::encode(channel));
+
+    // A chat body naming the channel's id as its circle: refused, and nothing is stored.
+    let (s, v) = send(c.post(format!("{as_circle}/messages")).body(chat(channel))).await;
+    assert_eq!((s, v["error"].as_str()), (404, Some("channel")), "{v}");
+    assert_eq!(v["detail"], "this id is a channel; use /v1/channels/...");
+    let (s, v) = send(c.get(format!("{as_circle}/messages"))).await;
+    assert_eq!((s, v["error"].as_str()), (404, Some("channel")));
+    let (s, v) = send(c.get(format!("{as_circle}/head"))).await;
+    assert_eq!((s, v["error"].as_str()), (404, Some("channel")));
+    let (_, v) = send(c.get(format!("{base}/v1/head"))).await;
+    assert_eq!(v["seq"], Value::Null);
+
+    // The circle still takes posts; the feed shows the circle's entries, not the channel's.
+    let circle_url = format!("{base}/v1/circles/{}/messages", hex::encode(CIRCLE));
+    assert_eq!(send(c.post(&circle_url).body(chat(CIRCLE))).await.0, 201);
+    let mut alice = member(channel, 0);
+    let (s, _) = send(
+        c.post(format!("{}/messages", ch(&base, &channel)))
+            .body(text(&mut alice, b"hi")),
+    )
+    .await;
+    assert_eq!(s, 201);
+    assert_eq!(send(c.post(&circle_url).body(chat(CIRCLE))).await.0, 201);
+    let (_, v) = send(c.get(format!("{base}/v1/feed"))).await;
+    let seen: Vec<_> = v["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| (e["seq"].clone(), e["circle_id"].clone()))
+        .collect();
+    let circle = Value::from(hex::encode(CIRCLE));
+    assert_eq!(seen, vec![(0.into(), circle.clone()), (2.into(), circle)]);
+    assert_eq!(v["head_seq"], 2);
 }

@@ -65,8 +65,9 @@ fn parse_channel(hex_id: &str) -> Result<[u8; 16], Box<Response>> {
         })
 }
 
-/// `POST /v1/channels/{channel}/messages`: the channel must be held, the body a version 3
-/// message for it; then the channel's rate bucket, the size cap, and the append.
+/// `POST /v1/channels/{channel}/messages`: the body must be a version 3
+/// message for the channel and the channel must be held; then the size cap, the channel's rate
+/// bucket, and the append.
 async fn post_message(
     AxState(st): AxState<State>,
     Path(channel): Path<String>,
@@ -76,6 +77,17 @@ async fn post_message(
         Ok(c) => c,
         Err(r) => return *r,
     };
+    let sub = match Submission::parse_channel(&channel, &body) {
+        Ok(s) => s,
+        Err(RuleError::TooLarge) => {
+            return err(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "too_large",
+                RuleError::TooLarge,
+            )
+        }
+        Err(e) => return err(StatusCode::BAD_REQUEST, "malformed", e),
+    };
     let result = {
         let mut log = st.log.lock().unwrap();
         match store::channel(log.conn(), &channel) {
@@ -83,23 +95,13 @@ async fn post_message(
             Ok(None) => return err(StatusCode::NOT_FOUND, "channel", "no such channel"),
             Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, "db", e),
         }
-        let sub = match Submission::parse_channel(&channel, &body) {
-            Ok(s) => s,
-            Err(RuleError::TooLarge) => {
-                return err(
-                    StatusCode::PAYLOAD_TOO_LARGE,
-                    "too_large",
-                    RuleError::TooLarge,
-                )
-            }
-            Err(e) => return err(StatusCode::BAD_REQUEST, "malformed", e),
-        };
-        // Only well-formed posts spend the channel's tokens, so junk cannot use them up.
-        if !st.limiter.take_channel_post(&channel) {
-            return rate_limited("too many posts to this channel; try again in a few seconds");
-        }
         if let Some(full) = st.full(&log) {
             return full;
+        }
+        // Only a post that would be stored spends the channel's tokens, so junk and a full
+        // relay cannot use them up.
+        if !st.limiter.take_channel_post(&channel) {
+            return rate_limited("too many posts to this channel; try again in a few seconds");
         }
         log.append(sub, now_ms())
     };
