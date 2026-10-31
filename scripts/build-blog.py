@@ -145,14 +145,19 @@ def head(title, description, url, image, article=None):
 TOP = f"""<header class="top">
   <div class="wrap">
     <a class="brand" href="/"><img src="/assets/mark.svg" alt="" width="22" height="22"><span>cahoots</span><span class="brand-sub">Journal</span></a>
-    <nav aria-label="Primary">
+    <button class="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="primary-nav" hidden>
+      <span class="nav-toggle-label">Menu</span>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path class="menu-open-icon" d="M4 6h16M4 12h16M4 18h16"/><path class="menu-close-icon" d="m6 6 12 12M6 18 18 6"/></svg>
+    </button>
+    <nav class="primary-nav" id="primary-nav" aria-label="Primary">
       <a href="/">Home</a>
       <a href="/docs/">Docs</a>
       <a href="{GITHUB}">GitHub</a>
       <a class="nav-cta" href="/app/">Open the app</a>
     </nav>
   </div>
-</header>"""
+</header>
+<script src="/navigation.js" defer></script>"""
 
 FOOT = f"""<footer>
   <div class="wrap foot">

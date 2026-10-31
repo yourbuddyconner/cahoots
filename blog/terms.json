@@ -1,5 +1,5 @@
 {
-  "certificate authority": {"forms": ["certificate authority", "certificate authorities", "certificate-authority"], "definition": "An organization trusted to issue certificates that connect public keys to names, such as website domains."},
+  "certificate authority": {"forms": ["certificate authority", "certificate authorities"], "definition": "An organization trusted to issue certificates that connect public keys to names, such as website domains."},
   "circle": {"forms": ["circle", "circles"], "definition": "A group established together through a Cahoots ceremony, with shared secrets and an agreed membership record."},
   "ceremony": {"forms": ["ceremony", "ceremonies"], "definition": "The setup where people exchange codes, establish their circle’s keys, and compare words to check that their devices agree."},
   "shared secret": {"forms": ["shared secret", "shared secrets"], "definition": "Secret data held by more than one participant. A check using a group’s shared key cannot, by itself, distinguish one member from another."},

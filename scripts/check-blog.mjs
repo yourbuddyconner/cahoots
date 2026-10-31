@@ -25,6 +25,34 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const browser = await chromium.launch({ channel: 'chrome' });
 const url = `http://127.0.0.1:${server.address().port}/blog/privacy-hardware-needs-a-renaissance/`;
 try {
+  const navigationContext = await browser.newContext();
+  const navigationPage = await navigationContext.newPage();
+  for (const path of ['/', '/blog/', '/blog/privacy-hardware-needs-a-renaissance/']) {
+    for (const width of [375, 499, 720, 768, 820, 821, 1280]) {
+      await navigationPage.setViewportSize({ width, height:900 });
+      await navigationPage.goto(new URL(path, url).href);
+      const toggle = navigationPage.getByRole('button', { name:'Open navigation', exact:true });
+      const nav = navigationPage.getByRole('navigation', { name:'Primary' });
+      if (width <= 820) {
+        assert.ok(await toggle.isVisible(), `${path}: hamburger visible at ${width}px`);
+        assert.ok(await nav.isHidden(), 'Compact navigation starts closed');
+        await toggle.click();
+        assert.ok(await nav.isVisible(), 'Menu opens');
+        assert.ok(await nav.getByRole('link', { name:/Open the app/ }).isVisible());
+        await navigationPage.keyboard.press('Escape');
+        assert.ok(await nav.isHidden(), 'Escape closes the menu');
+        await navigationPage.setViewportSize({ width:1024, height:900 });
+        await nav.waitFor({ state:'visible' });
+        assert.ok(await nav.isVisible(), 'Desktop links return after resizing');
+      } else {
+        assert.ok(await toggle.isHidden(), 'Desktop uses inline navigation');
+        assert.ok(await nav.isVisible());
+      }
+      assert.ok(await navigationPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Navigation does not cause overflow');
+    }
+  }
+  await navigationContext.close();
+  console.log('Home and journal navigation passed at phone, tablet, and desktop widths.');
   for (const width of [1280, 375]) {
     const context = await browser.newContext({ viewport:{ width, height:900 }, reducedMotion:'reduce', hasTouch:width < 500, isMobile:width < 500 });
     const page = await context.newPage();
@@ -35,6 +63,8 @@ try {
     assert.equal(await progress.count(), 1, 'Article has a reading progress indicator');
     assert.equal(Number(await progress.getAttribute('aria-valuenow')), 0);
     const terms = page.locator('.post .defined-term');
+    assert.equal(await page.locator('.post > p').nth(1).locator('.defined-term').count(), 0, 'Opening paragraphs read without glossary highlights');
+    assert.equal(await page.locator('.defined-term dfn', { hasText:/^certificate authority$/i }).count(), 1, 'Certificate authority is defined at its next mention');
     assert.ok(await terms.count() >= 8, 'New vocabulary has definitions');
     const grant = page.locator('.post > p .defined-term').filter({ has:page.locator('dfn', { hasText:/^grant$/i }) }).first();
     await grant.scrollIntoViewIfNeeded();
@@ -56,6 +86,15 @@ try {
     assert.ok(barBounds.y >= navBounds.y + navBounds.height - 1, 'Reading bar stays below the navigation');
     assert.ok(Math.abs(barBounds.x - articleBounds.x) < 1 && Math.abs(barBounds.width - articleBounds.width) < 1,
       'Reading bar follows the article column');
+    if (width < 500) {
+      await page.getByRole('button', { name:'Open navigation', exact:true }).click();
+      await page.waitForFunction(() => {
+        const bar = document.querySelector('.reading-progress').getBoundingClientRect();
+        const header = document.querySelector('.top').getBoundingClientRect();
+        return bar.top >= header.bottom - 1;
+      }, null, { timeout:2000 });
+      await page.keyboard.press('Escape');
+    }
     if (width > 500) {
       await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height + 5);
       await tooltip.hover();

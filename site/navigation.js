@@ -2,7 +2,7 @@
 const header = document.querySelector('header.top');
 const toggle = header.querySelector('.nav-toggle');
 const navigation = document.getElementById(toggle.getAttribute('aria-controls'));
-const mobile = window.matchMedia('(max-width: 720px)');
+const mobile = window.matchMedia('(max-width: 820px)');
 
 function setMenu(open, restoreFocus = false) {
   navigation.hidden = mobile.matches && !open;
