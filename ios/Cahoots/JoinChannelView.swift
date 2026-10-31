@@ -1,53 +1,56 @@
 import SwiftUI
 
-/// A channel link opened from outside: what the channel is, and Open to read it here.
+/// A channel link opened from outside: what the channel is, read and checked from its relay,
+/// and Open to read it here.
 struct JoinChannelView: View {
     let core: Core
-    /// The whole link, `https://cahoots.network/app/#/ch/<host>/<id>/<secret>`.
+    /// The whole link, `https://cahoots.network/app/#/ch/<host>/<id>[/<secret>]`.
     let link: String
     @EnvironmentObject private var app: AppModel
+    @State private var preview: ChannelPreview?
+    @State private var reading = true
     @State private var busy = false
     @State private var error: String?
 
-    private var parts: [String] {
-        guard let url = URL(string: link), let f = url.fragment else { return [] }
-        return f.split(separator: "/").map(String.init)
+    /// The host the link names, for the moment before the preview arrives.
+    private var host: String {
+        guard let f = URL(string: link)?.fragment else { return "the relay" }
+        let parts = f.split(separator: "/").map(String.init)
+        return parts.count >= 3 ? parts[1] : "the relay"
     }
-    private var host: String { parts.count == 4 ? parts[1] : "" }
-    private var channelId: String { parts.count == 4 ? parts[2] : "" }
-    /// A channel this phone already reads: the link is newer, or the same.
-    private var known: ChannelSummary? { app.channel(channelId) }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xl) {
                 VStack(alignment: .leading, spacing: Space.s) {
                     Text("Channel").font(.footnote.weight(.semibold)).foregroundStyle(Color.muted)
-                    Text(known?.name ?? "A channel on \(host)")
+                    Text(preview?.name ?? (reading ? "Reading \(host)" : "This channel cannot be opened."))
                         .serifTitle(.largeTitle)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
                 }
-                VStack(alignment: .leading, spacing: Space.s) {
-                    if let circle = known?.circle {
-                        Text("Owned by circle \(ChannelCopy.short(circle)), on \(host).")
-                            .font(.subheadline).foregroundStyle(Color.muted)
-                    } else {
-                        Text("On \(host). Channel \(ChannelCopy.short(channelId)).")
+                if let preview {
+                    VStack(alignment: .leading, spacing: Space.s) {
+                        Text(preview.hasSecret ? ChannelCopy.sentence(preview.policyLine) : ChannelCopy.closed)
+                            .font(.body).foregroundStyle(Color.ink)
+                        if !preview.hasSecret {
+                            Text(ChannelCopy.sentence(preview.policyLine))
+                                .font(.subheadline).foregroundStyle(Color.muted)
+                        }
+                        Text("On \(preview.relay). \(ChannelCopy.label).")
                             .font(.subheadline).foregroundStyle(Color.muted)
                     }
-                    if let line = known?.policyLine, !line.isEmpty {
-                        Text(ChannelCopy.sentence(line)).font(.body).foregroundStyle(Color.ink)
-                    }
-                    Text("\(ChannelCopy.label).")
-                        .font(.subheadline).foregroundStyle(Color.muted)
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                Text(known == nil
-                     ? "Open reads the channel from its relay and checks it before showing it. Anyone with this link can read what is posted."
-                     : "This phone already reads this channel. Open takes this link, so a newer one keeps it working.")
-                    .font(.subheadline).foregroundStyle(Color.muted)
                     .fixedSize(horizontal: false, vertical: true)
+                    if preview.hasSecret {
+                        Text(app.channel(preview.channelId) == nil
+                             ? "Anyone with this link can read what is posted."
+                             : "This phone already reads this channel. Open takes this link, so a newer one keeps it working.")
+                            .font(.subheadline).foregroundStyle(Color.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else if reading {
+                    ProgressView().frame(maxWidth: .infinity, alignment: .leading)
+                }
                 StatusLine(text: error)
             }
             .padding(.horizontal, Space.l)
@@ -56,11 +59,23 @@ struct JoinChannelView: View {
         .paperBackground()
         .navigationTitle("Channel")
         .navigationBarTitleDisplayMode(.inline)
-        .actionBar {
+        .actionBar(shown: preview?.hasSecret == true) {
             Button { Task { await open() } } label: { Working(busy: busy, title: "Open") }
                 .buttonStyle(.filled)
-                .disabled(busy || channelId.isEmpty)
+                .disabled(busy)
                 .accessibilityIdentifier("Open")
+        }
+        .task(id: link) { await read() }
+    }
+
+    private func read() async {
+        reading = true
+        defer { reading = false }
+        do {
+            preview = try await core.run { [link] in try $0.channelPreview(url: link) }
+            error = nil
+        } catch {
+            self.error = plain(error)
         }
     }
 
@@ -71,7 +86,9 @@ struct JoinChannelView: View {
         do {
             let summary = try await core.run { [link] in try $0.channelJoin(url: link) }
             await app.refresh()
-            app.path = [.channel(summary.id)]
+            // The channel takes the join screen's place.
+            if case .joinChannel = app.path.last { app.path.removeLast() }
+            app.path.append(.channel(summary.id))
         } catch {
             self.error = plain(error)
         }

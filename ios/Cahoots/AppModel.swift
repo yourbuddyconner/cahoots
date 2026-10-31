@@ -33,7 +33,12 @@ final class AppModel: ObservableObject {
     /// Each circle's faces, drawn, in seat order, by circle id.
     @Published var faces: [String: [Data]] = [:]
     @Published private(set) var seatNames: [String: [String: String]] = [:]
-    @Published var path: [Route] = []
+    @Published var path: [Route] = [] {
+        didSet {
+            // A link held while a ceremony was open goes once the ceremony leaves the screen.
+            if waitingLink != nil { Task { @MainActor in self.followWaitingLink() } }
+        }
+    }
     /// Shown once at launch when a ceremony was open when the app closed.
     @Published var lostCeremony: String?
     let ceremonies = OpenCeremonies()
@@ -65,10 +70,7 @@ final class AppModel: ObservableObject {
         opening = nil
         if c != nil {
             await refresh()
-            if let link = waitingLink {
-                waitingLink = nil
-                openLink(link)
-            }
+            followWaitingLink()
         }
         return c
     }
@@ -100,34 +102,97 @@ final class AppModel: ObservableObject {
         channels.first { $0.id == id }
     }
 
-    /// A link from outside the app: a universal link, or one tapped in another app.
-    /// `https://cahoots.network/app/#/ch/<relay host>/<channel id>/<secret>` opens the channel's
-    /// join screen. Any other link into the web app goes to Safari, which is where iOS sends a
-    /// universal link the app opens itself.
-    func openLink(_ url: URL) {
+    /// What to do with a link from outside the app.
+    enum LinkAction: Equatable {
+        /// Not a link into the web app.
+        case ignore
+        /// Another web app link: Safari, which is where iOS sends a universal link the app
+        /// opens itself.
+        case safari
+        /// The phone is still opening: follow it once it has.
+        case queue
+        /// A ceremony is on screen: follow it once the ceremony is done or left.
+        case hold
+        /// Push this route on the current path.
+        case open(Route)
+        /// A channel this phone already reads: take the link (a newer one replaces the old)
+        /// and open the channel, with no join screen.
+        case rejoin(id: String, link: String)
+    }
+
+    /// The decision for `url`, from what is on screen and on this phone. `ready` is whether
+    /// the phone has opened. Pure, so the tests can read it.
+    nonisolated static func linkAction(_ url: URL, ready: Bool, path: [Route],
+                                       channels: [ChannelSummary]) -> LinkAction {
         guard url.scheme == "https", url.host == "cahoots.network",
-              url.path == "/app" || url.path.hasPrefix("/app/") else { return }
-        guard let id = Self.channelLinkId(url) else {
+              url.path == "/app" || url.path.hasPrefix("/app/") else { return .ignore }
+        guard let id = channelLinkId(url), let link = canonicalLink(url) else { return .safari }
+        guard ready else { return .queue }
+        if path.contains(where: { if case .ceremony = $0 { return true } else { return false } }) {
+            return .hold
+        }
+        guard let known = channels.first(where: { $0.id == id }) else { return .open(.joinChannel(link)) }
+        if known.role == .owner { return .open(.channel(id)) }
+        return .rejoin(id: id, link: link)
+    }
+
+    /// A link from outside the app: a universal link, or one tapped in another app.
+    /// `https://cahoots.network/app/#/ch/<relay host>/<channel id>[/<secret>]` opens the channel
+    /// (or its join screen); any other link into the web app goes to Safari.
+    func openLink(_ url: URL) {
+        switch Self.linkAction(url, ready: core != nil, path: path, channels: channels) {
+        case .ignore:
+            return
+        case .safari:
             UIApplication.shared.open(url, options: [.universalLinksOnly: false])
-            return
-        }
-        guard core != nil else {
+        case .queue, .hold:
             waitingLink = url
-            return
-        }
-        if channel(id)?.role == .owner {
-            path = [.channel(id)]
-        } else {
-            path = [.joinChannel(url.absoluteString)]
+        case let .open(route):
+            dismissSheets()
+            path.append(route)
+        case let .rejoin(id, link):
+            dismissSheets()
+            Task {
+                // The same link changes nothing; a newer one replaces the old. Either way the
+                // channel opens, and the join's error, if any, shows there on the next poll.
+                _ = try? await core?.run { try $0.channelJoin(url: link) }
+                await refresh()
+                path.append(.channel(id))
+            }
         }
     }
 
-    /// The channel id in a link whose fragment is `/ch/<host>/<id>/<secret>`, or nil.
+    /// A held link, once no ceremony is on screen.
+    private func followWaitingLink() {
+        guard let link = waitingLink, core != nil,
+              !path.contains(where: { if case .ceremony = $0 { return true } else { return false } })
+        else { return }
+        waitingLink = nil
+        openLink(link)
+    }
+
+    /// Close whatever sheet is up, so the link's screen is the one in front.
+    private func dismissSheets() {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        for window in scenes.flatMap(\.windows) where window.isKeyWindow {
+            window.rootViewController?.presentedViewController?.dismiss(animated: true)
+        }
+    }
+
+    /// The channel id in a link whose fragment is `/ch/<host>/<id>/<secret>`, or
+    /// `/ch/<host>/<id>` for a closed channel's link without its secret. Nil for anything else.
     nonisolated static func channelLinkId(_ url: URL) -> String? {
         guard let fragment = url.fragment else { return nil }
         let parts = fragment.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
-        guard parts.count == 4, parts[0] == "ch" else { return nil }
+        guard parts.count == 3 || parts.count == 4, parts[0] == "ch" else { return nil }
         return parts[2]
+    }
+
+    /// The link in the one form the phone crate reads: `https://cahoots.network/app/#<fragment>`,
+    /// whatever the path's slash or a query string.
+    nonisolated static func canonicalLink(_ url: URL) -> String? {
+        guard let fragment = url.fragment, !fragment.isEmpty else { return nil }
+        return "https://cahoots.network/app/#\(fragment)"
     }
 
     func seatName(circle: String, seat: UInt8) -> String {

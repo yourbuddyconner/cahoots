@@ -86,9 +86,11 @@ every live channel after the circles, and channel unread counts add to the icon 
 `com.apple.developer.associated-domains` with `applinks:cahoots.network`. iOS gives the app a
 link under `https://cahoots.network/app/` only once the site serves
 `/.well-known/apple-app-site-association` naming the app, which happens when main deploys. Until
-then, channel links open in Safari and the web app. `AppModel.openLink` sends a link whose
-fragment is `#/ch/<relay host>/<channel id>/<secret>` to the join screen, and any other `/app/`
-link to Safari.
+then, channel links open in Safari and the web app. `AppModel.linkAction` decides what a link
+does. A link whose fragment is `#/ch/<relay host>/<channel id>[/<secret>]` opens the join screen
+(a preview read from the relay, then Open), or the channel itself when this phone already holds
+it. The screen goes on top of the current one, and a link that arrives during a ceremony waits
+until the ceremony is done or left. Any other `/app/` link goes to Safari.
 
 ## Ship to TestFlight
 

@@ -9,6 +9,7 @@ enum ChannelCopy {
     static let closed = "Only people the owner lets in can read this channel."
     static let newLink = "Everyone who should keep reading needs this new link."
     static let readOnly = "You can read this channel. Only the owner posts."
+    static let noLink = "This channel has no link. Only people you let in can read it."
 
     /// The five policies a channel starts with: the preset number, its name, one line on it.
     static let presets: [(UInt8, String, String)] = [

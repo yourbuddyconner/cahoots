@@ -11,8 +11,6 @@ final class ChannelModel: ObservableObject {
     @Published var draft = ""
     @Published private(set) var sending = false
     @Published var status: String?
-    /// The relay said this phone may not read: no live link and no grant.
-    @Published private(set) var closed = false
     private var rounds = 0
 
     init(core: Core, id: String) {
@@ -31,7 +29,6 @@ final class ChannelModel: ObservableObject {
         do {
             let fresh = try await core.run { [id] in try $0.channelPoll(id: id) }
             core.store.relax()
-            closed = false
             if status != nil, !sending { status = nil }
             if !fresh.isEmpty { messages = (try? await core.run { [id] in try $0.channelHistory(id: id) }) ?? messages }
             if let s = try? await core.run({ [id] in try $0.channel(id: id) }) { summary = s }
@@ -45,9 +42,8 @@ final class ChannelModel: ObservableObject {
         } catch PhoneError.Network(let m) where m == UrlSessionHttp.unreachable {
             status = "\(m) Trying again."
         } catch {
-            let words = plain(error)
-            closed = words == ChannelCopy.closed
-            status = closed ? nil : words
+            // A closed channel's own words are in the bottom bar already.
+            status = summary?.closed == true && summary?.canPost != true ? nil : plain(error)
             if let s = try? await core.run({ [id] in try $0.channel(id: id) }) { summary = s }
         }
     }
@@ -240,19 +236,17 @@ struct ChannelView: View {
         StatusLine(text: model.status)
         if summary?.dead == true {
             StateNote(text: ChannelCopy.dead, problem: true)
-        } else if model.closed {
-            StateNote(text: ChannelCopy.closed, problem: true)
         } else if summary?.canPost == true {
             composer
         } else if summary?.waiting == true {
             StateNote(text: ChannelCopy.waiting, problem: false)
+        } else if summary?.closed == true {
+            StateNote(text: ChannelCopy.closed, problem: true)
         } else if let summary {
-            // "the owner can post" is the policy line of the two announcement presets, where
-            // no one asks. The phone crate says so too, if asked.
-            let ownerOnly = summary.policyLine.contains("the owner can post")
-            StateNote(text: ownerOnly ? ChannelCopy.readOnly : "You can read this channel. Ask the owner to let you post.",
+            StateNote(text: summary.mayAskToPost ? "You can read this channel. Ask the owner to let you post."
+                                                 : ChannelCopy.readOnly,
                       problem: false)
-            if !ownerOnly {
+            if summary.mayAskToPost {
                 Button("Ask to post") { asking = true }
                     .buttonStyle(.outlined)
             }
@@ -263,7 +257,9 @@ struct ChannelView: View {
         Menu {
             if model.isOwner {
                 Button { Task { await share(note: nil) } } label: { Label("Share the link", systemImage: "square.and.arrow.up") }
-                Button { confirmRetire = true } label: { Label("Retire the link", systemImage: "link") }
+                if summary?.closed != true {
+                    Button { confirmRetire = true } label: { Label("Retire the link", systemImage: "link") }
+                }
                 Button {
                     Task {
                         if await model.attempt({ try $0.channelNewKeys(id: $1) }) != nil { notice = "New keys started." }
@@ -282,6 +278,11 @@ struct ChannelView: View {
     }
 
     private func share(note: String?) async {
+        // A closed channel has no link to share: say so rather than show the phone crate's error.
+        if model.isOwner, summary?.closed == true {
+            sharing = SharedLink(link: "", note: nil)
+            return
+        }
         if let link = await model.attempt({ try $0.channelLink(id: $1) }) {
             sharing = SharedLink(link: link, note: note)
         }
@@ -426,18 +427,24 @@ struct ChannelShareSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.xl) {
-                    ScreenHeader(title: shared.note == nil ? "Share the link." : "A new link.",
-                                 detail: ChannelCopy.linkLimit, style: .title)
+                    if shared.link.isEmpty {
+                        ScreenHeader(title: "\(name) is ready.", detail: ChannelCopy.noLink, style: .title)
+                    } else {
+                        ScreenHeader(title: shared.note == nil ? "Share the link." : "A new link.",
+                                     detail: ChannelCopy.linkLimit, style: .title)
+                    }
                     if let note = shared.note { StatusLine(text: note, problem: false) }
-                    Text(shared.link)
-                        .font(.footnote.monospaced())
-                        .foregroundStyle(Color.ink)
-                        .textSelection(.enabled)
-                        .padding(Space.m)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.paper, in: RoundedRectangle(cornerRadius: Radius.control))
-                        .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Color.line))
-                        .accessibilityIdentifier("channel link")
+                    if !shared.link.isEmpty {
+                        Text(shared.link)
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(Color.ink)
+                            .textSelection(.enabled)
+                            .padding(Space.m)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.paper, in: RoundedRectangle(cornerRadius: Radius.control))
+                            .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Color.line))
+                            .accessibilityIdentifier("channel link")
+                    }
                     if !policyLine.isEmpty {
                         Text(ChannelCopy.sentence(policyLine)).font(.subheadline).foregroundStyle(Color.muted)
                     }
@@ -450,7 +457,7 @@ struct ChannelShareSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { done() } }
             }
-            .actionBar {
+            .actionBar(shown: !shared.link.isEmpty) {
                 if let url = URL(string: shared.link) {
                     ShareLink(item: url, subject: Text(name), message: Text(ChannelCopy.linkLimit)) {
                         Text("Share the link")
