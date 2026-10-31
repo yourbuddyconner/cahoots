@@ -145,3 +145,38 @@
 .post table{border-collapse:collapse;display:block;max-width:100%;overflow:auto;font-size:14px}
 .post th,.post td{padding:10px 14px;border:1px solid var(--line);text-align:left}.post th{background:var(--bg-2)}
 @media(max-width:720px){.blog-wrap{padding-top:36px}.post{font-size:16px}.post-main h1{font-size:42px}.blog-head h1{font-size:46px}.share{flex-wrap:wrap}}
+
+/* Reading aids stay outside the article's text flow. */
+.reading-progress { position: fixed; inset: 0 0 auto; height: 4px; z-index: 120; background: var(--line); pointer-events: none; }
+.reading-progress[hidden] { display: none; }
+.reading-progress > span { display: block; height: 100%; background: var(--amber); transform: scaleX(var(--reading-fraction, 0)); transform-origin: left; }
+.reading-help { margin: 0 0 28px; color: var(--fg-3); font-size: 13px; line-height: 1.6; }
+.reading-help strong { text-decoration: underline dotted var(--amber); text-underline-offset: 4px; }
+.defined-term { cursor: help; }
+.defined-term dfn { font-style: normal; text-decoration: underline dotted var(--amber); text-underline-offset: 4px; }
+.defined-term:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; border-radius: 2px; }
+.term-definition { position: fixed; z-index: 110; bottom: 16px; left: 16px; display: block; box-sizing: border-box; width: 300px; max-width: calc(100vw - 32px); padding: 14px 16px; border-radius: 6px; background: var(--fg); color: var(--bg); font-family: var(--body); font-size: 14px; font-weight: 400; font-style: normal; line-height: 1.55; text-align: left; text-decoration: none; visibility: hidden; pointer-events: none; }
+body:not([data-reading-enhanced]) .defined-term:is(:hover, :focus) .term-definition,
+.defined-term[data-open] .term-definition { visibility: visible; pointer-events: auto; }
+body[data-reading-enhanced] .term-definition { bottom: auto; }
+
+/* Protocol diagrams use real text, so they wrap rather than shrink on a phone. */
+.post .protocol-diagram { margin: 24px 0; }
+.protocol-diagram > figcaption { margin: 0 0 14px; font-size: 15px; font-weight: 600; color: var(--fg); }
+.proof-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 16px; }
+.proof-card { padding: 18px 16px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); text-align: center; min-width: 0; }
+.post .proof-card h4 { margin: 0 0 18px; font: 600 16px/1.4 var(--body); }
+.diagram-people { display: flex; justify-content: center; align-items: flex-start; gap: 20px; }
+.diagram-person { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 14px; line-height: 1.5; }
+.post .protocol-diagram img.cahoot-head { width: 48px; height: 48px; margin: 0; padding: 0; border: 0; border-radius: 0; background: #f0dcbd; image-rendering: pixelated; }
+.key-label { padding: 4px 8px; border: 1px solid var(--line); border-radius: 3px; color: var(--amber); background: var(--bg-2); font: 12px/1.5 var(--mono); }
+.diagram-arrow { display: block; margin: 10px 0; color: var(--amber); font: 24px/1 var(--body); }
+.proof-result { padding: 12px; border: 1px solid var(--line); border-radius: 4px; font-size: 14px; line-height: 1.55; }
+.proof-result strong { display: block; margin-bottom: 4px; }
+.post .proof-card .diagram-limit { margin: 12px 0 0; font-size: 13px; line-height: 1.6; }
+.post .grant-flow { list-style: none; padding: 0; margin: 0; }
+.post .grant-flow > li { margin: 0; text-align: center; }
+.grant-step { border: 1px solid var(--line); border-radius: 4px; padding: 16px; background: var(--bg); text-align: left; }
+.grant-step-title { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; line-height: 1.5; }
+.post .grant-step p { margin: 8px 0 0; font-size: 14px; line-height: 1.6; }
+.permission-slip { display: block; margin-top: 12px; border-left: 2px solid var(--amber); padding-left: 12px; font: 13px/1.6 var(--mono); color: var(--fg-2); }

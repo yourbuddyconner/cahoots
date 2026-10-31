@@ -82,12 +82,46 @@ I want that identity to live in the context of the relationship. My key in a wor
 
 <details class="protocol-note" id="messaging-protocol-design">
 <summary>A detour into messaging design: shared secrets and individual identity</summary>
-<p>A shared secret and an individual signing key answer different questions. A message authenticated with a key everyone in the circle holds establishes that someone with that key made it. It cannot establish which member did so. A sender label does not change that: another holder of the same key could produce the same kind of proof.</p>
-<p>A signing key gives a device something the other members do not have. It signs with its private key; they check the signature with its public key. Cahoots makes a separate signing key for each seat in each circle. The ceremony binds those public keys into a membership record that every seat signs. People still have to check the ceremony and know whose device is whose. A signature establishes control of a key, not a person's legal identity or good intentions.</p>
-<p>This deliberately combines symmetric secrets for shared privacy with public-key cryptography for individual signatures. The exchange that establishes those secrets also uses public-key cryptography. The strongest one-time-pad claims apply only to messages encrypted with truly random secret bytes that are never reused. They do not extend to the signatures, the exchange, ordinary chat, or the whole system. Those still depend on conventional cryptographic assumptions.</p>
-<p>There are other ways to design individual authentication, including schemes built from hashes. Choosing one would change the protocol and its tradeoffs; a shared group secret alone would still not distinguish the people holding it. The current design uses signing keys. A secure element can generate and use a private key without handing it to the laptop asking for a signature.</p>
-<p>Hello words serve a different purpose again. They come from a secret shared by just two devices and let people check access to that secret during a call. They do not replace the signing keys used to approve actions. Keeping those jobs separate helps make each check's meaning clear.</p>
-<p>The <a href="/docs/#/protocol">protocol specification</a> describes the mechanisms. The <a href="/docs/#/security">security guide</a> explains their limits. The goal here is to carry an established relationship between tools while being explicit about which keys protect shared information and which keys can authorize a particular action.</p>
+<p>Alice and Bob should both be able to read our conversation. Only Alice should be able to approve an action as Alice. Those requirements need different evidence.</p>
+<h3>Who can read, and who approved?</h3>
+<p>A message authenticated with the group's shared key establishes that someone with that key made it. Every member can produce that kind of proof.</p>
+<figure class="protocol-diagram" aria-labelledby="proof-caption">
+<figcaption id="proof-caption">Shared access and individual approval need different evidence.</figcaption>
+<div class="proof-grid">
+<div class="proof-card">
+<h4>One secret, held together</h4>
+<div class="diagram-people">
+<div class="diagram-person"><img class="cahoot-head" src="/blog/img/cahoot-alice.svg" alt="" width="48" height="48"><strong>Alice</strong><span class="key-label">group key</span></div>
+<div class="diagram-person"><img class="cahoot-head" src="/blog/img/cahoot-bob.svg" alt="" width="48" height="48"><strong>Bob</strong><span class="key-label">group key</span></div>
+</div>
+<span class="diagram-arrow" aria-hidden="true">↓</span>
+<div class="proof-result"><strong>A valid group-authenticated message</strong>Either member can create one.</div>
+<p class="diagram-limit">The check establishes access to the group's key. It cannot tell Alice and Bob apart.</p>
+</div>
+<div class="proof-card">
+<h4>A key that stays with Alice</h4>
+<div class="diagram-person"><img class="cahoot-head" src="/blog/img/cahoot-alice.svg" alt="" width="48" height="48"><strong>Alice</strong><span class="key-label">Alice's private key</span></div>
+<span class="diagram-arrow" aria-hidden="true">↓</span>
+<div class="proof-result"><strong>Alice's signed approval</strong>Others check the signature with Alice's public key.</div>
+<p class="diagram-limit">The private key is not shared. The check identifies which member key signed.</p>
+</div>
+</div>
+</figure>
+<p>During setup, Cahoots records a separate public signing key for each member in this circle. Shared secrets protect the group's communication. Individual signatures identify which member key signed a decision or a grant. An application can encrypt a signed decision to combine both checks.</p>
+<h3>Give a helper permission without giving it your key</h3>
+<p>Now Alice wants a helper to connect two work machines for the afternoon. A grant is her signed permission for that job. The helper uses its own key.</p>
+<figure class="protocol-diagram" aria-labelledby="grant-caption">
+<figcaption id="grant-caption">A request needs both the right signer and permission for the job.</figcaption>
+<ol class="grant-flow">
+<li><div class="grant-step"><div class="grant-step-title"><img class="cahoot-head" src="/blog/img/cahoot-alice.svg" alt="" width="48" height="48">1. Alice signs a grant</div><span class="permission-slip">This helper may connect machine A to machine B.<br>Permission ends at 6 pm.</span></div><span class="diagram-arrow" aria-hidden="true">↓</span></li>
+<li><div class="grant-step"><div class="grant-step-title">2. The helper signs its request</div><p>It uses its own private key and presents Alice's grant. Alice keeps her private key.</p></div><span class="diagram-arrow" aria-hidden="true">↓</span></li>
+<li><div class="grant-step"><div class="grant-step-title">3. The service checks both</div><p>Does the request come from the helper named in the grant? Did Alice permit this connection, and is that permission still valid?</p></div></li>
+</ol>
+</figure>
+<p>The service checks identity and permission separately: which key signed this request, and does Alice's grant let that key do this job? Access to the group's messages supplies neither approval.</p>
+<p>Hello words check access to a secret shared by two devices during a call. They don't record permission to do a job. A signed grant can name the job, the resource, and the time limit.</p>
+<p>Signatures establish control of keys. People still have to associate those keys with each other and protect them. Signatures, setup, and ordinary chat rely on conventional cryptographic assumptions. The strongest one-time-pad guarantees apply only to truly random secret bytes used once.</p>
+<p>The <a href="/docs/#/protocol">protocol specification</a> describes the mechanisms. The <a href="/docs/#/security">security guide</a> explains what the checks establish and where their protection ends.</p>
 </details>
 
 Once the circle can recognize my decisions, I can also make a decision about who may help me. I should be able to authorize a particular job without giving a program my keys or all the permissions that come with them.

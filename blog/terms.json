@@ -1,0 +1,20 @@
+{
+  "certificate authority": {"forms": ["certificate authority", "certificate authorities", "certificate-authority"], "definition": "An organization trusted to issue certificates that connect public keys to names, such as website domains."},
+  "circle": {"forms": ["circle", "circles"], "definition": "A group established together through a Cahoots ceremony, with shared secrets and an agreed membership record."},
+  "ceremony": {"forms": ["ceremony", "ceremonies"], "definition": "The setup where people exchange codes, establish their circle’s keys, and compare words to check that their devices agree."},
+  "shared secret": {"forms": ["shared secret", "shared secrets"], "definition": "Secret data held by more than one participant. A check using a group’s shared key cannot, by itself, distinguish one member from another."},
+  "public key": {"forms": ["public key", "public keys"], "definition": "The shareable half of a key pair. Others use it to check signatures or establish encrypted communication with the holder of the private key."},
+  "private key": {"forms": ["private key", "private keys"], "definition": "The secret half of a key pair. Control of it allows operations such as signing; it must be protected from other people and programs."},
+  "signing key": {"forms": ["signing key", "signing keys"], "definition": "A key used to create digital signatures. Others check those signatures with the matching public key."},
+  "signature": {"forms": ["signature", "signatures"], "definition": "Cryptographic evidence that a particular private key signed specific data. It does not, by itself, establish who used that key or whether they had permission."},
+  "seat": {"forms": ["seat", "seats"], "definition": "A member’s place in one circle, identified by a signing key in the circle’s agreed membership record."},
+  "relay": {"forms": ["relay", "relays"], "definition": "A server that carries encrypted messages between participants. It does not hold their decryption keys, but can observe traffic and refuse delivery."},
+  "grant": {"forms": ["grant", "grants"], "definition": "A signed permission naming who may perform which actions, with limits such as a budget or expiry."},
+  "authentication": {"forms": ["authentication", "authenticated"], "definition": "Checking that a message or request was made with the required key. A shared group key proves something different from an individual signing key."},
+  "one-time pad": {"forms": ["one-time pad", "one-time-pad"], "definition": "Encryption using truly random secret bytes, with each byte used only once. Its strongest guarantees do not apply to ordinary encrypted chat or digital signatures."},
+  "secure element": {"forms": ["secure element", "secure elements"], "definition": "A dedicated chip designed to store and use keys while limiting access to them. It does not make the rest of a device automatically trustworthy."},
+  "firmware": {"forms": ["firmware"], "definition": "Software running on a device that controls its hardware and behavior."},
+  "reproducible builds": {"forms": ["reproducible builds"], "definition": "A build process that lets others produce identical software from the same source and inputs, then compare it with the distributed version."},
+  "remote attestation": {"forms": ["remote attestation"], "definition": "A cryptographic report about a remote device or the software it is running. Its value depends on trusting the reporting hardware and verification process."},
+  "hello words": {"forms": ["hello words"], "definition": "Two words each person says on a call to check access to a secret shared by their two devices. Both must use the same hello number."}
+}

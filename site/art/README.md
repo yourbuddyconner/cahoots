@@ -45,3 +45,9 @@ Run the tests:
 
 (`python3 -m unittest site/art/test_gen.py` does not work, because Python
 reads `site` as its own built-in module.)
+
+The journal's small diagrams reuse the same `punk_pixels()` generator. Run
+`python3 site/art/journal.py` to regenerate `site/blog/img/circle-and-tools.svg`
+and the three `cahoot-alice.svg`, `cahoot-bob.svg`, and `cahoot-casey.svg`
+portraits used in the article's responsive diagrams. The portraits are
+illustrations, not identity credentials. Commit the generated SVGs with the script.

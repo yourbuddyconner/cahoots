@@ -19,6 +19,14 @@ Posts are markdown files in `blog/`, named `YYYY-MM-DD-slug.md`, with front matt
 
 The landing page is `index.html` with its own `landing.css`. `brand.css` provides shared color, typography, and identity tokens for the landing page, docs, and journal, on top of the existing shell in `style.css`. Its hero is an inline SVG explaining how devices form a circle; it needs no JavaScript or external fonts. The hardware section lazy-loads `badge-loader.js` and `badge-render.js`, displaying `assets/badge-v1.glb`, exported directly from `hardware/v1/v1.kicad_pcb`. It rotates the assembly and separates the actual enclosure and display nodes. The view provides a pause control, honors reduced motion, and falls back to the current `assets/v1-front.png` when WebGL is unavailable. Three.js 0.186.0, the GLTF loader dependencies, and the MIT license are vendored under `vendor/three/` with local imports.
 
+### Journal reading aids
+
+`blog/terms.json` defines vocabulary and its alternate forms. The blog builder explains each term's first use in prose with a bold, dotted underline. Links, code, headings, and disclosure controls keep their markup. A term introduced inside an optional detour is still explained when it first appears in the main text. Definitions open on hover, keyboard focus, or tap; Escape or an outside tap dismisses them. Keyboard definitions also work without JavaScript. RSS uses the original rendered article, so hidden definitions do not interrupt feed readers.
+
+`site/blog/reading.js` adds the article progress bar and positions definitions within the viewport. Progress measures the article body, recalculating after images load, resizing, or opening a detour. It does not count the header, sharing controls, or footer. The table of contents remains alongside it.
+
+After building the blog, run `node scripts/check-blog.mjs` for desktop, phone, keyboard, hover, touch, progress, and no-JavaScript checks (uses `web/`'s Playwright dependency). Screenshots go to `/tmp/cahoots-blog-checks/`. Run `python3 -m unittest discover -s scripts -p test_blog_terms.py` for glossary markup checks.
+
 Regenerate the browser model and refresh the fallback image after a PCB change:
 
 ```sh

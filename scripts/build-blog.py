@@ -31,6 +31,7 @@ import subprocess
 import sys
 from email.utils import format_datetime
 from pathlib import Path
+from blog_terms import explain_terms
 
 try:
     import markdown
@@ -67,8 +68,10 @@ def read_post(path):
     slug = meta.get("slug") or re.sub(r"^\d{4}-\d{2}-\d{2}-", "", path.stem)
     source = m.group(2)
     body = markdown.markdown(source, extensions=["fenced_code", "tables", "smarty", "toc"], output_format="html5")
+    feed_body = body
+    body, term_count = explain_terms(body, POSTS / "terms.json")
     # The in-article contents: h2 headings, which the toc extension has given ids.
-    toc = [(i, re.sub(r"<[^>]+>", "", t)) for i, t in re.findall(r'<h2 id="([^"]+)">(.*?)</h2>', body)]
+    toc = [(i, html.unescape(re.sub(r"<[^>]+>", "", t))) for i, t in re.findall(r'<h2 id="([^"]+)">(.*?)</h2>', body)]
     words = len(re.findall(r"\w+", source))
     tags = meta.get("tags", [])
     if isinstance(tags, str):
@@ -87,6 +90,8 @@ def read_post(path):
         "image": meta.get("image", ""),
         "slug": slug,
         "body": body,
+        "feed_body": feed_body,
+        "term_count": term_count,
         "source": text,
         "toc": toc,
         "minutes": max(1, round(words / 230)),
@@ -99,6 +104,7 @@ def e(s):
 
 
 CSS_V = ""  # set in main() to a hash of blog.css, so browsers never keep a stale copy
+READING_V = ""
 
 
 def head(title, description, url, image, article=None):
@@ -286,6 +292,7 @@ def post_page(p, others):
 {BRAND_SUB_CSS}
 <body class="blog-body">
 <a class="skip" href="#main">Skip to content</a>
+<div class="reading-progress" role="progressbar" aria-label="Article reading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><span></span></div>
 {TOP}
 <main class="blog-wrap post-wrap" id="main">
   <div class="post-layout">
@@ -296,6 +303,7 @@ def post_page(p, others):
       <img class="phero" src="{e(hero_src(p))}" alt="" width="1600" height="800">
       <div class="actions"><a class="btn small" href="/blog/{p['slug']}.md">{ICONS['md']}View as Markdown</a></div>
       {about}
+      {'<p class="reading-help">New terms have <strong>bold, dotted underlines</strong>. Hover, tap, or use Tab to read a definition.</p>' if p['term_count'] else ''}
       <div class="post">
 {p['body']}
       </div>
@@ -310,6 +318,7 @@ def post_page(p, others):
   {related}
 </main>
 {FOOT}
+<script src="/blog/reading.js?v={READING_V}" defer></script>
 <script>
 (() => {{
   const b = document.querySelector(".copy");
@@ -371,7 +380,7 @@ def feed(posts):
     <guid>{url}</guid>
     <pubDate>{pub}</pubDate>
     <description>{e(p['description'])}</description>
-    <content:encoded><![CDATA[{p['body']}]]></content:encoded>
+    <content:encoded><![CDATA[{p['feed_body']}]]></content:encoded>
   </item>""")
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
@@ -445,9 +454,13 @@ def main():
     (out / "og").mkdir(exist_ok=True)
     (out / "assets").mkdir(exist_ok=True)
     css = ROOT / "site" / "blog" / "blog.css"
-    global CSS_V
+    global CSS_V, READING_V
     import hashlib
     CSS_V = hashlib.sha256(css.read_bytes()).hexdigest()[:10]
+    reading_js = ROOT / "site" / "blog" / "reading.js"
+    READING_V = hashlib.sha256(reading_js.read_bytes()).hexdigest()[:10]
+    if reading_js.resolve() != (blog / "reading.js").resolve():
+        shutil.copy(reading_js, blog / "reading.js")
     if css.resolve() != (blog / "blog.css").resolve():
         shutil.copy(css, blog / "blog.css")
     og_css = ROOT / "site" / "og" / "og.css"
