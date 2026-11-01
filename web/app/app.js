@@ -126,7 +126,10 @@ const loadChat = (id) => tx('chat', 'readonly', (s) => s.index('circle').getAll(
 const loadSettings = async (id) => { const s = (await tx('settings', 'readonly', (s) => s.get(id))) || { id }; if (!s.relay) s.relay = DEFAULT_RELAY; return s; };
 const saveSettings = (row) => tx('settings', 'readwrite', (s) => s.put(row));
 // A member's name: the name on their card, else the name this browser gave them, else the seat.
-const nameOf = (settings, seat, cards) => cards?.seats?.[seat]?.name || settings.names?.[seat] || `Seat ${seat + 1}`;
+// A name read from a card, as it is shown: without control characters and without the characters
+// that change the direction of text. The card keeps the name as it was signed.
+const shownName = (name) => (name || '').replace(/[\p{Cc}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, '').trim();
+const nameOf = (settings, seat, cards) => shownName(cards?.seats?.[seat]?.name) || settings.names?.[seat] || `Seat ${seat + 1}`;
 
 // This browser's name and face, kept beside the circles. The face seed is drawn once and kept.
 const DEVICE_BROWSER = 2;
@@ -1282,6 +1285,9 @@ async function screenChat(id) {
   // relay takes it, and a name or face changed meanwhile makes it due again.
   const publishCard = async () => {
     if (!circle.chat_synced() || !circle.has_root() || !circle.has_seat_key()) return;
+    // Not while a reset waits for the relay: the card would be sealed in keys the others do not
+    // have yet. It goes after the reset.
+    if (circle.pending_bump()) return;
     const due = (await loadCards(id)).due;
     if (!due) return;
     const self = await loadMe();
@@ -1353,7 +1359,6 @@ async function screenChat(id) {
         continue;
       }
       if (run !== chatRun) break;
-      try { await flushBump(); } catch (e) { /* the relay answers later: tried again on the next poll */ }
       let changed = false;
       const entries = data.entries || [];
       if (!entries.length && !circle.chat_synced()) circle.chat_mark_synced();
@@ -1384,6 +1389,8 @@ async function screenChat(id) {
         changed = true;
       }
       if (changed) { await saveCircle(circle); titleSub.textContent = `${circle.members()} people · End-to-end encrypted`; }
+      // After the entries: a reset already on the relay was found among them and is not posted again.
+      try { await flushBump(); } catch (e) { /* the relay answers later: tried again on the next poll */ }
       try { await publishCard(); } catch (e) { /* still due: tried again on the next poll */ }
     }
   };

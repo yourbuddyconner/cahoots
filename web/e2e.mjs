@@ -338,7 +338,8 @@ const setMyName = async (p, name) => {
   await p.page.getByRole('link', { name: 'Conversation', exact: true }).click();
   await p.page.waitForSelector('.status:has-text("Connected")');
 };
-await setMyName(L, 'Lena'); await setMyName(J, 'Jordan Lee');
+// Jordan's name carries characters that change the direction of text. The others see it without them.
+await setMyName(L, 'Lena'); await setMyName(J, 'Jordan \u2067Lee\u2069');
 for (const [p, other] of [[L, 'Jordan Lee'], [J, 'Lena']]) {
   await p.page.waitForSelector(`.dashboard-members b:text-is("${other}")`, { state: 'attached', timeout: 15000 });
   await p.page.getByRole('link', { name: 'People', exact: true }).click();
