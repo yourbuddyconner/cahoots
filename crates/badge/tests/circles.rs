@@ -770,3 +770,53 @@ fn boot_deletes_a_stray_slot_and_the_next_circle_gets_a_clean_one() {
     let record = b.board().chip_record_load().unwrap().unwrap();
     assert_eq!(record.slots.len(), 3);
 }
+
+/// Two circles whose public objects were made under the first policy, which any session could
+/// read. The boot that makes them again is cut off after deleting the first: the next boot
+/// makes both again, the second from its circle's record, so no object of the first policy
+/// stays readable by a tap.
+#[test]
+fn a_policy_upgrade_cut_between_two_circles_leaves_no_object_of_the_first_policy() {
+    use cahoots_badge::chip::{public_id, PUBLIC_POLICY};
+    use cahoots_chip::{ChipError, Identity};
+    let (mut b, _t1, _t2) = two_circles(true);
+    let slots: Vec<u8> = b.circles().iter().filter_map(|c| c.chip_slot).collect();
+    assert_eq!(slots.len(), 2);
+    let first = ObjectPolicy {
+        read: vec![Identity::None, Identity::Owner, Identity::Slot],
+        ..ObjectPolicy::public_object()
+    };
+    let c = b.board().owner_chip();
+    for &s in &slots {
+        let bytes = c.read_binary(public_id(s)).unwrap();
+        c.delete(public_id(s)).unwrap();
+        c.write_binary(public_id(s), &bytes, &first).unwrap();
+    }
+    c.close_session().unwrap();
+    let mut r = b.board().chip_record_load().unwrap().unwrap();
+    r.public_policy = None;
+    b.board().chip_record_store(&r).unwrap();
+
+    b.board().chip.as_mut().unwrap().cut_after_delete_for_test(public_id(slots[0]));
+    b.board().power_cycle();
+    let cut = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| b.boot()));
+    assert!(cut.is_err(), "the power was cut");
+    // The second circle's object is still of the first policy.
+    let c = b.board().chip.as_mut().unwrap();
+    c.no_session_for_test();
+    assert!(c.read_binary(public_id(slots[1])).is_ok());
+
+    b.board().power_cycle();
+    b.board().presses.push_back(Press::Both);
+    b.boot();
+    let c = b.board().chip.as_mut().unwrap();
+    c.no_session_for_test();
+    for &s in &slots {
+        assert_eq!(c.read_binary(public_id(s)), Err(ChipError::NotAllowed), "slot {s}");
+    }
+    let r = b.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.public_policy, Some(PUBLIC_POLICY));
+    for &s in &slots {
+        assert!(r.entry(s).unwrap().public_written(), "slot {s}");
+    }
+}

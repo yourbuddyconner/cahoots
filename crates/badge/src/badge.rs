@@ -1259,7 +1259,7 @@ impl<B: Board> Badge<B> {
         self.phone_state = None;
         self.pairing = None;
         self.chip_held = false;
-        self.upgrade_public_policy();
+        self.upgrade_public_policy(&circles);
         // No pairing is open after a boot: a nonce left from before goes, and the pairing
         // object names the circles the chip holds now.
         self.sync_pairing();
@@ -1635,8 +1635,10 @@ impl<B: Board> Badge<B> {
     /// deleted, so one left empty by a cut-off boot is never read back as the badge's. Such a
     /// circle's object is made again from its record at the next pairing or unpairing. The
     /// record then says [`chip::PUBLIC_POLICY`]. A read that fails leaves everything for the
-    /// next boot.
-    fn upgrade_public_policy(&mut self) {
+    /// next boot. A record slot whose object cannot be read back, such as one a cut-off boot
+    /// left unmade, is made again from its circle's record, so no object of the first policy
+    /// stays.
+    fn upgrade_public_policy(&mut self, circles: &[Circle]) {
         let Ok(mut record) = self.owned_record() else {
             return;
         };
@@ -1667,6 +1669,34 @@ impl<B: Board> Badge<B> {
         if self.board.chip_record_store(&record).is_err() {
             self.board.log("chip record: write failed");
             return;
+        }
+        // Every other slot of the record has no object the badge can read back: one a boot cut
+        // off before it was made again may still be of the first policy. Each is made again
+        // from its circle's record, with no grant, no phone and no pending bumps. A slot no
+        // circle names has its public id emptied.
+        let rest: Vec<u8> = record
+            .slots
+            .iter()
+            .map(|e| e.slot)
+            .filter(|s| !objects.iter().any(|(o, _)| o == s))
+            .collect();
+        for slot in rest {
+            match circles.iter().find(|c| c.chip_slot == Some(slot)) {
+                Some(c) => {
+                    let generation = Self::generation_of(&record, slot, c);
+                    let o = self.public_object(&record, c, generation, None, Vec::new(), None);
+                    objects.push((slot, o));
+                }
+                None => {
+                    if let Some(chip) = self.board.chip_begin() {
+                        if let Err(e) = chip.delete(chip::public_id(slot)) {
+                            if e != ChipError::NoSuchKey {
+                                self.board.log(&format!("chip: slot {slot} public object not deleted: {e:?}"));
+                            }
+                        }
+                    }
+                }
+            }
         }
         let mut made = 0;
         for (slot, o) in &objects {
