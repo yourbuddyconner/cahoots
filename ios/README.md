@@ -51,7 +51,12 @@ to `$CARGO_TARGET_DIR/ios` when the target directory is elsewhere.
 - The screens: `CirclesView`, `NewCircleView`, `JoinView`, `CeremonyView` (with `CeremonyModel`),
   `ChatView`, `PeopleView` and `HelloView`, `SettingsView`, and for channels `ChannelsView`
   (the list section and the start sheet), `ChannelView`, `JoinChannelView`,
-  `ChannelRequestsView` and `ChannelMembersView`.
+  `ChannelRequestsView` and `ChannelMembersView`, and for a badge `PairCardView`.
+- `NfcTransport.swift`: one Core NFC session per tap, its delegate on its own queue. It passes
+  APDUs to the phone crate's chip client, which runs SCP03 in Rust. It waits 30 seconds for a
+  card and 5 seconds for each answer.
+- The slot key for a paired badge is a keychain item in the `network.cahoots.secrets` service,
+  behind user presence, one per badge, so Face ID or the passcode releases it for each tap.
 
 In People, tap the pencil beside any seat to give it a name. Names are private to this phone,
 appear in chat and hello words, and are stored in the circle's protected `seat-names.json` file.
@@ -133,6 +138,35 @@ signed "Apple Distribution: Conner Swann (9Z585PW7QR)" with the profile "iOS Tea
 Provisioning Profile: network.cahoots.app". The upload was not tried: it needs the app record
 and the API key above. Later that day, with Xcode 27.2 and the iOS 27.2 SDK, the script uploaded
 build 202610302331 to App Store Connect (delivery 462fbaa7).
+
+### Pair a card on a device
+
+Needs the bench badge: the Pico 2 with its SE051 on USB, the antenna switch on, flashed from the
+`chip-pairing` branch. The first boot of that firmware wipes the circles whose keys were in the
+chip. Make a new circle on it with the bench ceremony or a pile before pairing, because a badge
+with no circles cannot pair.
+
+1. On the badge, open "pair a phone" from the list. It shows "hold the phone to the chip, then
+   press both".
+2. In the app, open Settings and choose "Pair a card". Type a name for this phone, choose "Hold
+   the phone to the card", and hold the phone to the badge's antenna. The app shows the badge's
+   circles and four words.
+3. On the badge, press both. It shows "pair with" the phone's name and four words. Check they
+   match the phone's, then press both again. The badge says "paired with" the name and "tap the
+   phone again".
+4. In the app, choose "Hold the phone again" and hold the phone to the antenna. Face ID asks for
+   the key. The app shows "Paired with" the badge and the circles it kept. Choose "Done".
+5. On Circles, each of the badge's circles shows the badge's face and "Card circle on" the
+   badge. Open one's chat. Post from the browser or another phone and read it here, and post
+   back. When the composer is replaced by "Tap your card to catch up", choose it and hold the
+   phone to the antenna.
+6. On the badge, open "phone" from the list and press both. It says "phone unpaired" and "its
+   taps end now". In the app, the next tap, for hello words in People or for a key in the chat,
+   says "This card no longer knows this phone."
+
+A tap in step 4 before the badge's presses says "Press both buttons on the badge first, then
+hold the phone again." "Forget this card" in Settings deletes the card circles from this phone.
+The badge keeps its slot until it is unpaired there.
 
 ### What to try first on a device
 

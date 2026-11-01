@@ -2,6 +2,8 @@
 
 *Written 2026-10-31 from a conversation with Conner, after a bench test the same day in which an iPhone 11 reached the SE051's applet over NFC with the Pico unpowered. This design says how a person's badge and phone become one member of a circle, how a circle made in a pile and a circle made on phones differ, and how the ceremony's rounds move between a pile and the relay so that badges and phones can be in one circle when someone wants that. It replaces the pairing section of the [iOS app design](2026-10-30-ios-app-design.md) and the E1 row of the roadmap, and it corrects two things those documents say about the hardware.*
 
+*Updated 2026-10-31 after the build on the `chip-pairing` branch. Sections 2, 3, 4, 5, 6, 9, 10 and 11 say what was built, in passages marked "built 2026-10-31" or "as built". Where the build differs, the earlier wording is kept beside it for the record.*
+
 ## The idea
 
 A **seat** is one person's membership in a circle: one key, one declared tier, one line in the manifest. Its **custodian** is whatever holds the seat key and the circle root: a badge's chip, or a phone's enclave and files, or a browser. A **device** is anything else that person uses under the seat. It holds its own key and a grant the seat signed, it gets what it needs from the custodian, and it is never in the manifest. A phone paired to a badge is a device. A laptop on the badge's cable is a device.
@@ -65,19 +67,60 @@ A **seat**, a **custodian** and a **device** are defined above. A **slot** is on
 
 Every object in the SE051 carries a policy fixed when it is made, naming which authenticated identity may do which operations. Today every object the badge makes names every session, because only the Pico could reach the chip. That changes as follows.
 
-**The badge's identity.** The firmware holds one secret for authenticating to its chip and opens an authenticated session with it over I2C before any other command. The builder chooses between the chip's platform secure channel (AES keys, SCP03) and an EC key session, and where the secret lives on the RP2350: one-time-programmable memory where the board allows it, flash otherwise, recorded in the badge's `Describe`. The seat key, the pad key when M4j's second half lands, and the right to write the public object and read the inbox are reachable only in this session.
+**The badge's identity (built 2026-10-31).** The badge owns its chip through a user-id authentication object, the owner object. The firmware opens the owner session over I2C before any other command. The owner secret is derived from the board's unique id: HKDF-SHA256 over the RP2350's device id and wafer id, with the salt `cahoots/owner/v1`, 16 bytes. Nothing is stored, so a reflash recovers it. The risk is written down and accepted for V1. Anyone who learns the board id can open the owner session over NFC for good. The id is exposed only to someone with USB access to the board, who could reflash it anyway, and a badge whose board id has leaked must be retired. V2 adds a random input kept in the RP2350's one-time-programmable memory. The bench showed that the chip has no factory reset object and refuses DeleteAll in every session. So a tap cannot wipe a badge, and a lost owner secret cannot be recovered. Nobody may delete the owner object, not even its own session. The seat key, the pad key when M4j's second half lands, the right to write the public objects and the right to read the inbox are reachable only in the owner session.
 
-**Phone slots.** A badge has four slots, four authentication objects that belong to the badge and not to any circle, so a phone pairs with a badge once and reaches every circle on it. When a circle is kept, every object of that circle a phone may touch names the four slots in its policy at creation: the root, for HMAC only; the hello objects, for HMAC only; the public object, for read. The inbox, one per badge, is writable by any session. Pairing fills a slot with the phone's session key. Unpairing deletes the slot's authentication object, which ends every tap from that phone at once. A circle kept before this change has no slot policies and cannot be reached by a phone; the badge's pairing page says which circles a phone will get.
+The spec's earlier wording, kept for the record: "The builder chooses between the chip's platform secure channel (AES keys, SCP03) and an EC key session, and where the secret lives on the RP2350: one-time-programmable memory where the board allows it, flash otherwise, recorded in the badge's `Describe`." `Describe` does not say where the identity lives. It is the same on every badge of this firmware.
 
-**The slot's session.** A slot holds the phone's enclave public key, and the chip authenticates the phone with its EC key session: the chip presents its own ephemeral key, the phone signs the challenge with the enclave key after Face ID, and the session's secure channel wraps every command that follows. Only Face ID on that phone can ever open the slot, and nothing extractable from the phone can. The `se05x` crate has these commands unimplemented today, so the phone crate adds them, with ECDH and ECDSA reaching the enclave through the signer callbacks the app already has, and the chip layer and the software chip learn to check the session. Decided 2026-10-31 (Conner), knowing the cost. The fallback, if the chip's EC session cannot be made to work on the bench, is the platform secure channel over AES keys made by the phone at pairing and kept behind Face ID in the keychain, which the crate already speaks; the slot's layout allows either kind of key.
+**The upgrade wipe (built 2026-10-31).** Every object the badge made before this firmware gave every right to every session, so a tap could have used it. The first boot of this firmware therefore deletes every Cahoots object in the chip, forgets the circles whose keys were in the chip and their grants, and then makes the owner object, the phone slot, the inbox and the grant issue counter. It shows "updated for phones. Make a new circle." once. Circles with software keys are kept. If an owner object is there and does not open with this board's secret, the badge touches nothing and does not use the chip.
 
-**What the chip computes for a phone.** Three operations on a slot's session, all HMACs the chip already does:
+**No antenna-facing id is ever empty, and none is adopted (built 2026-10-31).** The bench showed that any session, a tap included, can make a binary object at an empty id, and that object gets every right for every session. The ids that matter are the phone slot, the inbox, the grant issue counter and each circle's public object. The badge never leaves one of them empty and never uses an object at one of them that it did not make in the same conversation. The pairing object is deleted and made fresh each time the owner opens `pair a phone`.
 
-- The chat generation key: `HMAC(root, "chat/gen" || circle_id || generation_id)`, where the generation id is 32 random bytes the phone learned from the bump message or the public object (section 6). Because the id is random and chosen when the generation begins, a phone cannot ask for a future generation's key ahead of time, and a phone whose slot is gone cannot ask at all. The chip keeps no generation counter; the one the badge writes today is deleted.
+In detail:
+
+- A conversation that empties one of these ids for a moment first stores its chip record with a flag. A boot that finds the flag, or finds one of the three badge-wide objects missing, deletes all three and makes them again with the pin high, in one owner conversation.
+- If an object at the slot, the inbox or the issue counter cannot be deleted, the badge refuses the chip for good and says "the chip was touched or could not be set up. This chip cannot be used. Circles on this badge keep software keys."
+- A failure that would leave the slot empty holds the chip: the pin stays high, so the antenna is dead, until the badge is turned off and on. The list then says "chip needs a restart".
+- The badge reads back a circle's public object only when its record says the badge wrote that object. Otherwise it deletes the object and writes a new one in the same conversation. If a planted object there cannot be deleted, the badge marks the circle's slot stuck and leaves that circle out of pairing and unpairing.
+
+**One phone slot (built 2026-10-31).** A badge has one slot: one AES-128 authentication object that belongs to the badge and not to any circle, so a phone pairs with a badge once and reaches every circle on it. While no phone is paired, the slot holds a random key that nobody knows, under a policy that lets only the owner delete it. Pairing puts the phone's key in its place. Unpairing puts a new random key back, which ends every tap from that phone at once. One phone per badge holds until the chat separates senders per device (section 6).
+
+When a circle is kept, every object of that circle a phone may touch names the slot in its policy at creation. The root and the hello objects allow an HMAC in the slot's session under secure messaging. The public object allows a read in any session. The inbox, one per badge, is writable by any session. A circle kept before this firmware was wiped at the upgrade, so every circle on a badge can be reached by its phone.
+
+The spec's earlier wording, kept for the record: "A badge has four slots, four authentication objects". Four phones would chat as one seat on one sender chain, so the build keeps one.
+
+**The policies (built 2026-10-31).** Every object's policy names the owner session, the slot's session and no session. The applet keeps one entry for each identity a policy names. A session the policy names gets only its own entry's rights. A session the policy does not name gets the rights of the no-session entry (bench, applet 7.2.0). A policy refusal is status word `6986`.
+
+| Object | Owner session | Slot session | No session (any tap) |
+|---|---|---|---|
+| Owner object | nothing | nothing | read its attributes |
+| Seat key | sign, read its public key, attest, delete | nothing | nothing |
+| Root, hello object | HMAC, delete | HMAC, under SCP03 only | nothing |
+| Epoch counter, grant counter, issue counter | read, move, delete | nothing | nothing |
+| Public object, pairing object | read, write, delete | read, under SCP03 only | read |
+| Inbox | read, write, delete | write, under SCP03 only | write |
+| Phone slot | delete | nothing | nothing |
+
+The applet refuses a counter whose policy carries sign or attest rights, so counters have their own policy. The object ids are in the [protocol](../../protocol.md), section 9.
+
+**The slot's session (built 2026-10-31).** The phone opens the slot with the chip's platform secure channel over an AES key, SCP03, and not with the EC key session this section first chose. The applet's EC key session is undocumented here, its key model is not what this spec assumed, and nothing on the bench could prove it before the build. The EC session stays the intended upgrade.
+
+As built, the phone draws a fresh 16-byte AES key at each pairing and the badge puts it in the slot. The phone keeps it in the keychain behind user presence, so Face ID or the passcode releases it for each tap. A tap that opens the slot sends CreateSession for the slot, then the SCP03 handshake inside the session, at the full security level: command and response MACs, and command and response encryption. The same key serves for encryption, MAC and key encryption. The phone's APDUs are encoded by hand in the phone crate, so the LGPL `se05x` library stays in the firmware only.
+
+The property this gives up: the slot key is a keychain item, not an enclave key. Face ID guards it, but it is a secret that exists outside the Secure Enclave, where the EC session would have needed the enclave key itself.
+
+The spec's earlier wording, kept for the record: "A slot holds the phone's enclave public key, and the chip authenticates the phone with its EC key session: the chip presents its own ephemeral key, the phone signs the challenge with the enclave key after Face ID, and the session's secure channel wraps every command that follows. Only Face ID on that phone can ever open the slot, and nothing extractable from the phone can."
+
+**What the chip computes for a phone.** Three operations on a slot's session, all HMACs the chip already does. The chip does not look at the data, so a paired phone may ask for any HMAC under the root or a hello object. These three are what the app asks for:
+
+- The chat generation key: `HMAC(root, "chat/gen" || circle_id || generation_id)`, where the generation id is 32 random bytes the phone learned from the bump message or the public object (section 6). Because the id is random and chosen when the generation begins, a phone cannot ask for a future generation's key ahead of time, and a phone whose slot is gone cannot ask at all. The chip keeps no generation counter, and the one the badge writes today is deleted. As built (2026-10-31), the keep still makes the circle's epoch counter, for the owner session alone, and nothing a phone does reads or moves it.
 - Hello words. The words helper is HKDF over the pair key with no salt, so its extract step is `HMAC(zero salt, pair_key)` and its expand step is one HMAC under that result. At keep time the badge computes the extract step for each other seat and stores the result as an HMAC object, the hello object for that pair. A tap asks for the expand step, `HMAC(hello_object, "cahoots/words/v1" || speaker || counter || 0x01)`, and takes its first four bytes, which is exactly what a full seat computes. No words change for anyone; badges simply keep `n - 1` more objects per circle.
-- The seal key for cards, `HMAC(root, "seal/card" || circle_id)`, so a paired phone can open and publish cards.
+- The seal key for cards, `HMAC(root, "seal/card" || circle_id)`, so a paired phone can open and publish cards. As built, cards travel in the chat (section 7), so the app does not ask for this one.
 
-**The inbox and the public objects.** The inbox is one binary object per badge, a few hundred bytes, writable by any session and readable and clearable only by the badge. Each circle has a public object, a binary object of a few kilobytes, writable by the badge and readable by any session, written when the circle is kept and rewritten at pairing and unpairing. Its contents are in section 4.
+**The inbox and the public objects (built 2026-10-31).** The inbox is one binary object per badge, 256 bytes, writable by any session and readable and clearable only by the badge. Each circle has a public object, writable by the badge and readable by any session, written when the circle is kept and rewritten at pairing and unpairing. A new public object is its first contents plus 1 KB of room, for the device grant, the pending bumps, the phone's key and a card written later, and at most 8 KB. A badge-wide pairing object of 128 bytes, also readable by any session, carries the open pairing's nonce and the badge's key for it (section 4). The encodings are in the [protocol](../../protocol.md), section 9.
+
+**How many circles a chip holds (built 2026-10-31).** On the bench SE051, each circle took about 2.7 KB of the chip's memory: its seat key, root, counter, hello objects and public object. An empty chip of this kind holds about seven circles. The Pico has 16 places for circles, which does not mean 16 circles in the chip. The public object's room was first 2 KB, and the bench chip then ran out of memory at five circles. When the chip refuses a keep for want of memory (status word `6A84`), the badge does not keep the circle, deletes the seat key it made for it, and says "the chip is full. Forget a circle first."
+
+**A known limit: a tap can use up circle slots (recorded 2026-10-31).** Any session can make an object at an empty id, and it can make one whose policy lets nobody delete it. A tap can fill the ids of a circle slot no circle uses. The badge then passes that slot over when it keeps a circle, or marks it stuck. Sixteen such slots leave no room for a new circle's keys, and the remedy is a new chip. An undeletable object planted at the pairing object's id blocks pairing the same way. This is a denial of service and leaks no key.
 
 **The software chip** (`crates/chip/src/soft.rs`) models identities, sessions and policies well enough that every test in this document runs without hardware, and refuses what the real chip would refuse.
 
@@ -89,26 +132,54 @@ So the firmware drops the enable pin when it has nothing to say to the chip, and
 
 Two consequences the builder designs around. The badge cannot watch the inbox while a phone writes it, so pairing is a tap and then a press, not a poll. And every I2C conversation begins with the chip's boot and the authenticated session, which the chip layer wraps so the rest of the badge sees one call.
 
+**As built (2026-10-31).** The pin rests low. It rises once at power-on to find the chip. Each conversation raises the pin, waits 10 ms, resynchronises and soft-resets the chip, selects the applet and opens the owner session. At the end it closes the session and drops the pin. The badge ends its conversation at the end of each step, except during a ceremony. No menu switch for the contactless side was built. The V1 board's slide switch in the antenna line is the only switch, and the slot's policies decide what a tap may do.
+
+Commands over 254 bytes failed about half the time on the bench over I2C, a defect in the `se05x` driver's chained writes. The badge writes binary objects in 160-byte pieces, so every command fits one frame.
+
+A bench build of the firmware also passes APDUs from the laptop to the chip over I2C in no session, with the pin raised for the exchange and no owner session open, as a phone's tap finds the chip. Frame kinds 32 and 33 carry them. `cahoots-host chip` runs the phone's own chip client over it, which is how pairing was proved on the real chip before any phone had the app (section 11).
+
 ### 4. Pairing
 
-Pairing is between a phone and a badge, once, and brings every circle the badge holds. On the badge, the top-level menu gets a `pair a phone` page. On the phone, `Pair a card` is on Circles when the phone has no card and in Settings always.
+Pairing is between a phone and a badge, once, and brings every circle the badge holds.
+
+**The flow as built (2026-10-31): open the page, tap, press, tap again.**
+
+1. The owner opens `pair a phone` on the badge. The badge draws a fresh 16-byte pairing nonce and an ephemeral P-256 key pair, keeps both in RAM, empties the inbox, and writes the nonce and the key's public half to the pairing object, which any tap may read. It shows "pair a phone", "hold the phone to the chip", "then press both".
+2. On the phone, the person opens Settings, `Pair a card`, types a name for the phone, such as "Conner's phone", and holds the phone to the chip. In this one tap, in no session, the phone reads the pairing object and the public object of every circle. It draws a fresh AES key for the slot, seals it to the badge's ephemeral key, signs the request with its enclave key and writes it to the inbox. The phone then shows the badge's circles and four words.
+3. The owner presses both. The badge reads the inbox in its owner session and checks the phone's signature against the open page's nonce and key. Then it opens the sealed key and shows "pair with Conner's phone?" and four words. The words come from the nonce, the badge's ephemeral key, the phone's public key and the AES key. The owner checks that the words match the phone's and presses both again. Left or right declines and empties the inbox.
+4. The badge signs one **device grant** (section 5) per circle with that circle's seat key in the chip. It rewrites each circle's public object with the grant, the phone's public key, the current chat generation and any pending bumps (section 6). It puts the AES key in the slot, empties the inbox, writes a zero nonce over the pairing object and drops the ephemeral key. It shows "paired with Conner's phone" and "tap the phone again".
+5. The person holds the phone to the chip again. The phone opens the slot's session with the AES key, which Face ID releases, and reads every public object. Each one must name this phone's key. The phone verifies each circle's manifest and its device grant against it, then keeps each circle as a **card circle**: a circle record with no pad, no root and no seat key, whose seat is the badge's. In the same tap it fetches the generation key for the circle's current generation and for the generation each pending bump moves to. Only then does it keep the AES key in the keychain. It posts the pending bumps in order, publishes the badge's card, and shows "Paired with" the badge and the circles it kept.
+
+A second tap before the owner has pressed both says "Press both buttons on the badge first, then hold the phone again." A request that does not verify gets "that phone's request is not for this badge. Try again." on the badge, and pressing both with nothing in the inbox gets "no phone has tapped yet". A phone refuses a badge that holds no circles, with "This badge holds no circles yet. Make a circle with it first." On the badge, `pair a phone` is an entry in the list of circles, which a badge reaches once it holds a circle. Pairing from the pile screen of a badge with no circles is not built. A brand-new badge makes its circle first.
+
+**One phone per badge (built 2026-10-31).** A second pairing while a phone is paired gets "unpair the current phone first".
+
+**Unpairing (built 2026-10-31).** While a phone is paired, the badge's list has a `phone` entry. It shows the phone's name and "reads and posts in this badge's circles" and "unpairing ends its taps". Both unpairs. The badge signs a bump for each circle with the seat key and stores the unpair in its chip record before it touches anything. It puts a fresh random key in the slot, which ends the phone's taps at once. Then it adds each bump to its circle's public object and clears the grant and the phone key there. A conversation cut off anywhere in this is finished at the next boot. The screen says "phone unpaired" and "its taps end now". On the phone, `Forget this card` in Settings deletes its card circles and the phone's key for the card, and the badge keeps its slot until it is unpaired there.
+
+**Why the inbox is safe to leave open.** A stranger's tap can only put a name on the badge's screen, which the owner declines. A request is signed over the nonce of the page now open, so a request recorded at an earlier pairing does not verify. The AES key in the request is sealed to the badge's ephemeral key, so an antenna that listens to the tap learns nothing it can open. The words cover the nonce, both keys and the AES key, so if the words differ, the phone that tapped is not the phone being paired, or its key was swapped. The seal was added in the build after a review found that the first build sent the AES key in the clear.
+
+**The flow this section first gave, kept for the record.** On the badge, a top-level `pair a phone` page. On the phone, `Pair a card` on Circles when the phone has no card and in Settings always.
 
 1. The phone asks for a name for itself, "Conner's phone", then says "hold the phone to the card". It makes the slot's AES keys and writes them, its enclave public key and the name into the inbox. One tap, no authentication, since the inbox is open. On the same tap it reads each circle's public object, which any session may read, and so learns the badge's circles, their seat keys and the badge's card.
 2. The owner opens `pair a phone` on the badge and presses both. The badge raises the enable pin, authenticates, reads the inbox, clears it, and shows "pair with Conner's phone?", the number of circles it will get, and four check words derived from the phone's enclave key and the badge's identity. The phone shows the same four words. Left declines. Both accepts.
 3. The badge writes the AES keys into the first free slot. For each circle it signs a **device grant** (section 5) in the chip with that circle's seat key, one press for all of them. It rewrites each circle's public object: the circle id, the relay address, the manifest's sealed form, the badge's card (section 7), the device grants for every slot, the current generation id, and any pending revocations (section 5). It drops the enable pin.
 4. The phone taps again, now opening the slot's session after Face ID, reads the public objects, and keeps each circle as a **card circle**: a circle record with no pad, no root and no seat key, whose seat is the badge's, with the device grant beside it. It publishes the badge's card to each circle's topic (section 7) and any pending revocations, fetches each chat's generation key, and reads the chats.
 
-Up to four phones per badge. Unpairing is a menu item on the badge's `phones` page that deletes the slot, signs a revocation of that slot's device grants and a bump for each circle, and writes both into the public objects for the next tap by another device to publish. On the phone, `Forget this card` deletes its card circles. The pairing page says in one line what a paired phone can do: read and post in this badge's circles and manage their channels, until you unpair it.
-
-The inbox is open on purpose. A stranger's tap can only put a name on the badge's screen, which the owner declines, and the inbox is not readable by a tap, so the AES keys in it are seen by the badge alone. The check words are what stop a swapped key: if the words differ, the phone that tapped is not the phone being paired.
+That flow let a tap write the request before the badge had a nonce for it, so the words could not bind the AES key, and the key travelled in the clear. It also said "Up to four phones per badge" and had unpairing sign a revocation of the slot's device grants.
 
 ### 5. The device grant
 
-A grant on the existing token, signed by the seat key in the chip, to the phone's enclave key, with a new detail `cahoots:device` whose actions are `read`, `post`, `hello` and `manage`, scoped to one circle, and with the channel detail for the circle's channels at depth two, the shape a channel owner's self-grant has today. One grant per circle, signed together at pairing. No expiry in log positions, since the badge keeps no log position. Budget zero: a device spends no pad.
+**As built (2026-10-31).** A version 2 grant on the existing token, signed by the seat key in the chip under kid `[seat]`, to the phone's enclave key, with one detail `{"type": "cahoots:device", "actions": ["read", "post", "hello"]}`, scoped to one circle by its issuer. It names the seat as its grantor, has depth 0, and carries no `aud`, no expiry, no log position, no parent and no base. A device spends no pad. One grant per circle, signed together at pairing, and one for a circle kept later while a phone is paired. The exact claims are in the [protocol](../../protocol.md), section 9.
 
-It is how the circle and the relay recognise the phone. Channels already verify a member key up a chain to an admin seat, so a paired phone makes channel member keys under this grant and is an admin of its circle's channels with no further admission. The relay's gate, when a relay requires grants, sees the same chain. Other members' apps verify anything a device signs against it: cards, generation bumps, later approvals at key assurance.
+It carries no channel detail and no `manage` action, and nothing verifies it yet except the phone itself. At the second tap the phone checks each grant against the circle's manifest and its own key, and takes the badge's seat from it. Channel management from a card circle, the relay's gate and other members' checks of a device's chain are deferred. A chain check refuses a device grant today, because it accepts only pad grants.
 
-**Revocation.** Three things end a device, in this order of reach. The slot's deletion ends its taps at once, so it can never fetch another key. The generation bump (section 6) locks it out of the circle's chat from the next epoch. And a signed **revocation** of its device grants, which the badge produces at unpair, ends its channel membership and anything else that verifies the grant once it is published: the relay's gate refuses the key, members refuse its chain, and channel admins retire the channel keys it held through the channel crate's existing flow. The badge has no network, so the revocation and the bump wait in the public objects until another of the owner's devices taps, or a laptop on the cable reads them, and publishes. The pairing page and the unpair screen say exactly that: this phone's taps end now, its chat ends at the next bump, and its channel access ends when another of your devices next connects.
+Unpairing does not revoke the grant. It has no expiry and no revocation yet. Unpairing clears the grant and the phone's key from each public object at once, so any future verifier must also check that the circle's public object still names the grantee as its paired phone.
+
+**Revocation as built.** Two things end a device. Replacing the slot's key ends its taps at once, so it can never fetch another key. The generation bump (section 6) locks it out of the circle's chat once members follow it. The badge has no network, so the bumps wait in the public objects until the next phone that taps posts them. Until then the circle chats in the old generation, which the unpaired phone can still read. The unpair screen says "its taps end now".
+
+**The design this section first gave, kept for the record.** "A grant on the existing token, signed by the seat key in the chip, to the phone's enclave key, with a new detail `cahoots:device` whose actions are `read`, `post`, `hello` and `manage`, scoped to one circle, and with the channel detail for the circle's channels at depth two, the shape a channel owner's self-grant has today. One grant per circle, signed together at pairing. No expiry in log positions, since the badge keeps no log position. Budget zero: a device spends no pad."
+
+It went on: the grant is how the circle and the relay recognise the phone. A paired phone makes channel member keys under it and is an admin of its circle's channels with no further admission. The relay's gate sees the same chain. Other members' apps verify anything a device signs against it. And a signed **revocation** of the device grants, produced at unpair and published by another of the owner's devices, ends the device's channel membership. None of that is built.
 
 Chat itself verifies nothing, as the chat crate's documentation says, so the grant does not gate chat. The generation key does.
 
@@ -125,6 +196,24 @@ Today the chat's epoch key is `HMAC(root, "chat" || circle_id || n)`, derived fl
 The id is random so that a device cannot ask its chip for a future generation's key before the bump exists, and a device whose slot is gone cannot ask at all. That is the whole of the lockout; the chip keeps no counter and enforces no order. A bump is rare: it is how a device is revoked. Rotation within a generation costs nothing and keeps today's hygiene. The epoch id in the message header carries a short tag of the generation id and `n`; the builder chooses the encoding and bumps the chat state version. The web app and the phone move together, as they did for root epochs; the browser gains generation keys or it cannot share a circle with a card's phone. The flat-derivation decision of 2026-10-30 stands in spirit: a revoked device is locked out by a bump, not by a ratchet.
 
 The sender byte in a chat message is the seat, so two devices of one seat chatting at once would collide on a chain. The badge and the laptop never chat, so one chatting device per seat holds for now and is recorded as a limit.
+
+**The badge's bumps, as built (2026-10-31).** A badge signs a bump for each circle when it unpairs a phone. The bump is the chat crate's payload, `from_id || to_id || COSE_Sign1` by the seat key. The badge has no network, so the next phone that taps forwards it. The chat crate lets a device forward a seat-signed bump: the device must be in the generation the bump moves from, and the bump must move to a generation the device does not hold. After sending it, the device waits for the new key, and a tap fetches it. The phone forwards the bumps at the end of its first poll after pairing, in order, and fetches the keys for them in the pairing's second tap.
+
+The public object keeps the pending bumps as a short list, oldest first, each moving from where the one before moves to. Field 5 is the generation after the last of them. The badge never clears the list, because it cannot know whether a device posted it. At the next unpair, with W→X the last bump and X the generation the badge recorded:
+
+- If no phone was paired since that bump, nobody can have posted it. The badge replaces it with W→Y, signed fresh, and members still in W follow it in one step.
+- If a phone was paired since, it may have posted W→X and members may be in X. The badge appends X→Y.
+- With no list, or a last bump that does not end at X, the list starts again as X→Y.
+
+The list holds at most four bumps. At the cap the oldest two, A→B and B→C, are joined into A→C, signed fresh. That strands members who followed A→B and not B→C. It needs four cycles of pairing a phone that never taps and unpairing it, with nobody posting in between. A reset by any member with the root recovers them. The phone that pairs reads the whole list and starts from its first generation.
+
+The badge records each circle's generation in its chip record as the generation after its pending bumps.
+
+**Known limits, recorded 2026-10-31.**
+
+- The badge never reads the relay. If a member resets the chat after the badge last saw the circle, the bump the badge signs at unpair moves from a generation the circle has left. Members ignore it as stale, and the unpaired phone keeps the current generation's key until someone resets again. The fix, for a phone to tell the badge the current generation through the inbox, is deferred.
+- Two members who reset at once from the same generation end in the lower id, as the chat crate rules. Three resets at once from one generation are not tested. A card circle waits for one generation at a time, so if two bumps arrive before a tap, the phone fetches the key it waits for, and a message sealed in a generation between them may be passed over.
+- One chatting device per seat, as above. That is why a badge takes one phone.
 
 ### 7. Cards and faces
 
@@ -167,12 +256,28 @@ The ring expects a `Params` frame from every index. The bridge synthesises them 
 - **The NFC check** stays in Settings under Bench.
 - A card circle is stored under complete protection like any other, with no pad file and no root in its record.
 
+**As built (2026-10-31).**
+
+- **Circles** shows a card circle with the badge's face and the line "Card circle on" the badge's name, then who else is in it. The row drops the seat number. It adds "Tap your card to catch up." when the phone lacks a key. The phone has no mixed circles yet. The crate calls a circle's kind "seat" or "card".
+- **Pair a card** is a section of Settings, always, and a link on Circles while the phone has no card circle. Its three steps are the name, the words, and done. The words step has "Start over".
+- **Forget this card** is in Settings while the phone has card circles. It asks first, then deletes the card circles and the phone's key for the card. The badge keeps its slot until it is unpaired there.
+- **Chat in a card circle** shows "Tap your card to catch up" in place of the composer while the phone lacks a key. The button taps, fetches the key, and reads on. A tap is needed only when there is a key to fetch. The chat reads the circle list every 3 seconds to learn this.
+- **People** shows "your card" for the card circle's own seat, with the badge's name and face, and no pencil.
+- **Hello words** in a card circle come from a tap each time. The number moves only after a tap succeeds.
+- After an unpair, the next tap, for hello words or for a key, says "This card no longer knows this phone."
+
+**What the phone keeps for a card circle (built 2026-10-31).** The circle record, under complete protection, holds the badge's name and public key, its circle slot, the current generation id, the label of the keychain item that holds the slot key, and any bumps still to post. It holds the generation key itself only until the chat state is first saved, and the chat state then holds what it needs to read and post in that generation. Keys fetched ahead for pending bumps are kept in memory only, so a restart before they are used costs another tap. The slot's AES key is one keychain item per badge, behind user presence. So a phone unpaired from its badge can still read and post in the current generation until a bump moves the circle on, and a phone that is lost before the owner unpairs it holds a key that opens the slot once Face ID or the passcode releases it.
+
+The spec's earlier list, above, said `Pair a card` is on Circles when the phone has no card. As built it is a link there, and the section is in Settings.
+
 ### 10. The badge
 
 - A `pair a phone` page per circle, and a `phones` page that lists slots by name and unpairs on both.
 - A `card` page that shows the badge's face and name, with the join code of a ceremony in progress shown there later.
 - `Describe` says where the badge's identity lives and whether the circle has slots.
 - The declared tier stays 1 until the pad is under a chip key.
+
+**As built (2026-10-31).** The badge's list of circles gains `pair a phone` on any badge whose chip it owns, and `phone` while a phone is paired. These are badge-wide entries, after the circles, not pages per circle. The `phone` page shows the paired phone's name and unpairs on both. A badge with no circles runs the pile screen, which has no way to the list, so it pairs once it has a circle. The badge shows a phone's name in printable ASCII only, because a tap writes it. While the badge holds its chip after a failure, the list's title is "chip needs a restart" and it has no `pair a phone`. The `card` page and the change to `Describe` are not built. The pairing object carries an empty badge name, because the badge has no name yet. The declared tier stays 1.
 
 ### 11. Testing
 
@@ -184,13 +289,24 @@ The ring expects a `Params` frame from every index. The bridge synthesises them 
 - Phone and two simulators: a mixed ceremony hosted on one simulator with the bridge and a simulated card.
 - Bench, with the Click board: the enable pin dropped and a tap reaching the applet with the Pico powered; pairing; a chat read by tap; an unpair ending the next tap.
 
+**What ran (2026-10-31).**
+
+- Software chip and badge: the policies and the applet's rules as measured on the bench. A slot session derives the generation key and the hello words and is refused a signature, the seat's public key, reading the inbox, moving the epoch counter, writing a public object, and deleting the owner object, the slot or the root. Replacing the slot's key ends its session. The pairing flow, refused requests (a swapped AES key, another badge's key, an earlier nonce, a bad signature), unpairs cut off at every step and finished at boot, the bump list rules, planted objects at every antenna-facing id, and a keep on a full chip.
+- Phone: the SCP03 host side against RFC 4493's AES-CMAC examples and the worked example in Osmocom pySim, and against the software chip's own SCP03, which was written separately. Card circles end to end over a fake NFC reader on the software chip and a relay in memory: pairing, chat, a bump and the tap after it, hello words from two chips, forwarding a pending bump, a relay out of reach at the second tap, and an unpair ending the next tap.
+- Bench, with the Pico 2 and its SE051, applet 7.2.0: `scripts/pair-bench.sh` ran the phone's chip client on a laptop through the bench pass-through. It kept a circle and found an unpaired tap refused nine operations with `6986`. It paired the laptop as a phone with the same four words on both, opened the slot's SCP03 session, got an HMAC from the root, and saw every public object carry the grant and the laptop's key. After an unpair, the old key no longer opened the slot and every public object held a pending bump. The bench also measured the chip's memory (section 2).
+- iOS: the pairing screens' model, a blank name, a second tap before the press, the card circle's row and "your card" in People, as unit tests. The simulator has no NFC, so no tap has been tried from the app, and the walk only shows the "Pair a card" link.
+
+Not yet tried: a real tap from the app on a phone, and a chat read by tap on the bench. A channel member key under a device grant is not built.
+
 ## Constraints
 
-- The chip's policies are fixed at object creation, so slot policies are written when a circle is kept, and circles kept before that cannot be paired.
+- The chip's policies are fixed at object creation, so slot policies are written when a circle is kept, and circles kept before that cannot be paired. As built, the first boot of this firmware wipes them instead.
 - The chip serves one interface per boot. The badge cycles the enable pin to speak to it and leaves the pin low otherwise.
 - The badge has no clock and no log position. Device grants carry neither, and revocation is the slot and the generation.
 - The inbox and the public object are small. Everything a phone needs at pairing fits in a few kilobytes; nothing larger goes through the chip.
-- The sender byte in chat is the seat, so one chatting device per seat.
+- The sender byte in chat is the seat, so one chatting device per seat, and so one phone per badge.
+- Any session can make an object at an empty id, so the badge never leaves an antenna-facing id empty and never uses an object there it did not make.
+- The chip's memory, not the Pico's 16 places, sets how many circles a badge keeps in it: about seven on an empty SE051.
 - The pile's `Seat` payload keeps its length; the flags byte is the old agent byte.
 - A mixed circle's count is chosen by the host when it opens the ceremony, as today.
 
@@ -225,6 +341,20 @@ Calls made after the builder's review of 2026-10-31:
 - Hello words for a device come from a stored extract step and a tapped expand step, so no words change for any device.
 - The host types the badge count and the offer carries it, so joining phones never pick a badge's seat and nothing new travels on the channel.
 - Unpairing produces a signed revocation and a bump that another device publishes, so channel access ends too, and the screens say when.
+
+Calls made while building, 2026-10-31. Each replaces the call above it that it names:
+
+- The slot's session is SCP03 over an AES key, not the EC key session, because the applet's EC session is undocumented here, its key model is not what this spec assumed, and nothing on the bench could prove it before the build. The EC session stays the intended upgrade.
+- One phone per badge, not four, until the chat separates senders per device.
+- The device grant carries no channel detail and nothing verifies it yet. Channel management from a card circle is deferred. Unpairing signs no revocation of it.
+- A badge's bump at unpair is forwarded by the next phone that taps, and the chat crate lets a device forward a seat-signed bump.
+- Pending bumps are a list of at most four, with the collapse rule and the cap of section 6.
+- The first boot of this firmware wipes old circles and the chip, since their objects would be reachable by a tap.
+- The owner secret derives from the board's unique id so a reflash recovers it, with the risk written down in section 2.
+- The badge never uses an object at an antenna-facing id that it did not make in the same conversation, and never leaves one of those ids empty.
+- Pairing opens the page first, then the tap, then the press: a fresh nonce and an ephemeral badge key in the pairing object, an inbox signed by the phone and sealed to that key, and words over all of it.
+- A public object leaves 1 KB of room, and a keep the chip refuses for memory fails closed with "the chip is full. Forget a circle first."
+- No `se05x` crate in the phone app. Its APDUs are encoded by hand, so the LGPL library stays in the firmware only.
 
 ## Corrections to earlier documents
 

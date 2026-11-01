@@ -697,3 +697,173 @@ A revocation is two things: a revocation control message in the channel, which m
 ```
 
 The owner registers a link's gate token on the relay with a COSE_Sign1 by a seat, kid `[seat]`, domain `cahoots/gate/v1`, over the canonical map `{0: channel_id, 1: gate_token}`. It retires the token with the same map signed under `cahoots/gate-retire/v1`.
+
+## 9. The badge's chip
+
+A badge keeps its seat keys and circle roots in an NXP SE051 secure element. The chip has two interfaces: I2C to the badge's Pico and a contactless one to its antenna. A phone paired to the badge reaches the chip over NFC with no help from the badge, which may be asleep or off. This section says what is in the chip, who may use it, and the bytes a phone reads and writes there. It describes applet 7.2.0 as measured on the bench on 2026-10-31. Implementation: `crates/chip/src/ids.rs` and `ops.rs`, `crates/badge/src/chip.rs`, `pairing.rs` and `public.rs`, and the phone's side in `crates/phone/src/apdu.rs`, `scp03.rs`, `nfc.rs` and `card.rs`.
+
+### 9.1 Identities and policies
+
+The chip names three identities:
+
+- **Owner.** The badge's own session, opened over I2C against a user-id authentication object, the owner object. The badge's secret for it is `HKDF-SHA256(salt = "cahoots/owner/v1", ikm = board_id, info = empty)`, 16 bytes, where `board_id` is the RP2350's device id and then its wafer id, each 4 bytes little-endian. A reflash recovers it. Anyone who learns the board id can open the owner session, and the id is exposed only to someone with USB access to the board.
+- **Slot.** The paired phone's session, opened against the phone slot, an AES-128 authentication object. The session runs SCP03 (GlobalPlatform Amendment D) at security level `0x33`: command MAC, command encryption, response MAC and response encryption. The slot's one key serves as the encryption, MAC and key-encryption key.
+- **None.** Any command sent to the chip with no session open. That is any tap, and the badge before its owner session opens.
+
+Every object carries a policy fixed when it is made. For each identity the policy names, the chip keeps one entry of rights. A session the policy names gets that entry's rights only. A session the policy does not name gets the rights of the no-session entry. A right the slot holds under "SCP03" requires that the slot's session set up secure messaging. A refusal is status word `6986`.
+
+| Object | Owner | Slot | None |
+|---|---|---|---|
+| Owner object | none | none | read its attributes |
+| Seat key | sign, read the public key, attest, delete | none | none |
+| Root, hello object | HMAC, delete | HMAC, under SCP03 | none |
+| Epoch counter, grant counter, issue counter | read, move, delete | none | none |
+| Public object, pairing object | read, write, delete | read, under SCP03 | read |
+| Inbox | read, write, delete | write, under SCP03 | write |
+| Phone slot | delete | none | none |
+
+Nobody may delete the owner object, not even its own session. The chip has no factory reset object and refuses DeleteAll in every session, so a tap cannot wipe a badge.
+
+Any session may make a binary object at an id that holds nothing, and that object gets every right for every session. So a badge MUST NOT leave the phone slot, the inbox, the issue counter or the public object of a circle it keeps empty outside a conversation with the chip, and MUST NOT read back or keep an object at one of those ids that it did not make. It deletes and makes again any it finds missing or did not write, in one owner conversation. It deletes whatever is at the pairing object's id and makes the object fresh each time the owner opens `pair a phone`. If an object at one of these ids cannot be deleted, the badge does not use the chip, or for a public object, leaves that circle out of pairing.
+
+### 9.2 Object ids
+
+Every Cahoots object id is `0x4C410000 | kind << 8 | slot byte`, sent to the applet big-endian. A circle's objects use its circle slot, 0 to 15.
+
+| Kind | Object | Slot byte | Id |
+|---|---|---|---|
+| 1 | Seat key, P-256 | circle slot | `0x4C4101ss` |
+| 2 | Root, an HMAC key | circle slot | `0x4C4102ss` |
+| 3 | Chat epoch counter | circle slot | `0x4C4103ss` |
+| 4 | Grant counter, one per sign grant | grant slot, below 8 | `0x4C4104gg` |
+| 4 | Issue counter, the base of every grant | 255 | `0x4C4104FF` |
+| 5 | Phone slot, AES-128 authentication object | 0 | `0x4C410500` |
+| 6 | Hello object, an HMAC key | circle slot × 8 + other seat | `0x4C4106hh` |
+| 7 | Public object, binary | circle slot | `0x4C4107ss` |
+| 7 | Pairing object, binary | 255 | `0x4C4107FF` |
+| 8 | Inbox, binary, 256 bytes | 0 | `0x4C410800` |
+| 9 | Owner object, user id | 0 | `0x4C410900` |
+
+While no phone is paired, the phone slot holds a random key nobody knows. The phone slot, the inbox, the issue counter, the public objects and the pairing object are the ids a tap could fill if they were empty. A tap can also fill the ids of a circle slot no circle uses, with objects nobody can delete. The badge then passes that slot over.
+
+A hello object holds `HMAC-SHA256(32 zero bytes, pair_key)`, the extract step of the hello words (section 3.3) for the badge's seat and the other seat. The badge makes one for each other seat when it keeps a circle.
+
+### 9.3 The pairing object
+
+The pairing object is 128 bytes. It holds a canonical CBOR map, then zeros to the end:
+
+| Key | Value |
+|---|---|
+| 0 | nonce, bstr 16. All zeros when no pairing is open |
+| 1 | the badge's ephemeral public key for this pairing, bstr 33, P-256 SEC1 compressed |
+| 2 | the badge's name, tstr, empty while the badge has none |
+
+The badge draws a fresh nonce and a fresh ephemeral key pair when its owner opens `pair a phone`. It keeps the private key in RAM only. When the page closes, at a pairing, a decline and every boot, it writes a zero nonce and a zero key and drops the private key.
+
+### 9.4 The inbox
+
+The inbox holds a canonical CBOR map from its first byte. A reader decodes one map from the start and ignores what follows it, since a tap writes over the start and need not clear the rest. An inbox of zeros is empty.
+
+| Key | Value |
+|---|---|
+| 0 | the phone's public key, bstr 33, P-256 SEC1 compressed |
+| 1 | the phone's name, tstr, 1 to 64 bytes |
+| 2 | the sealed slot key, bstr 65 |
+| 3 | signature, bstr 64, P-256 `r || s` |
+
+**The seal.** The phone draws a fresh 16-byte AES key for the slot and its own ephemeral P-256 key pair. It computes the x coordinate of ECDH between its ephemeral key and the badge's ephemeral key, and derives:
+
+```
+k = HKDF-SHA256(salt = nonce, ikm = x, info = "cahoots/pair-seal/v1"), 32 bytes
+ciphertext || tag = ChaCha20-Poly1305(key = k, nonce = 12 zero bytes, aad = nonce || phone_public || name, plaintext = aes_key)
+sealed = phone_ephemeral_public (33, compressed) || ciphertext (16) || tag (16)
+```
+
+`k` is used once, so the zero nonce is safe. `phone_public` is the phone's key at key 0, and `name` is the UTF-8 bytes at key 1.
+
+**The signature.** ECDSA P-256 with SHA-256 by the phone's key over:
+
+```
+"cahoots/pair-inbox/v1" || nonce || badge_ephemeral_public || sealed || name
+```
+
+The badge checks the signature against the nonce and key of the pairing it has open, before it opens the seal. A request signed for an earlier pairing does not verify.
+
+**The words.** Both sides show four words: the first 44 bits of
+
+```
+SHA-256("cahoots/pair-phone/v1" || nonce || badge_ephemeral_public || phone_public || aes_key)
+```
+
+read as four 11-bit big-endian indices into the BIP-39 English wordlist, as the check words are read (section 3, step 7). The owner presses both buttons only when the words match.
+
+### 9.5 The public object
+
+Each circle has one public object. The badge writes it when the circle is kept and again at every pairing and unpairing. A new one is its first contents plus 1024 bytes of room, at most 8192 bytes. It holds a canonical CBOR map with nine keys, every one present and in order, then zeros to the end. A reader MUST refuse anything else.
+
+| Key | Value |
+|---|---|
+| 0 | circle_id, bstr 16 |
+| 1 | relay, tstr. Empty means the phone's own default relay, since the badge knows no relay |
+| 2 | the sealed manifest, bstr (section 3.5) |
+| 3 | the badge's signed contact card, bstr (section 8.8), or null |
+| 4 | the device grant for the paired phone, bstr (section 9.6), or null |
+| 5 | the chat generation id after the pending bumps, bstr 32. The generation a newly paired phone fetches the key for |
+| 6 | the pending bumps, an array of at most 4 bstr, oldest first, each moving from the generation the one before moves to. Empty when there are none |
+| 7 | the badge nonce drawn at the badge's first boot, bstr 16, kept for the record |
+| 8 | the paired phone's public key, bstr 33, or null |
+
+When the contents do not all fit, a new object leaves out the card, then the grant.
+
+**The pending bumps.** Each entry is a chat bump's payload, `from_id (32) || to_id (32) || COSE_Sign1`, the COSE_Sign1 detached, by the badge's seat key with kid `[seat]`, over `"cahoots/chat/bump/v1" || circle_id || from_id || to_id`. The badge signs one per circle when it unpairs a phone. It cannot post them, so the next phone that taps posts them to the circle's chat in order. A device may forward a bump signed by a seat when it is in the generation the bump moves from and does not hold the one it moves to.
+
+At an unpair, with W→X the last pending bump and X the generation the badge recorded for the circle:
+
+1. If no phone was paired since that bump, the badge replaces it with W→Y.
+2. Otherwise it appends X→Y.
+3. With no pending bump, or a last bump that does not end at X, the list becomes X→Y alone.
+4. While the list holds more than 4, the two oldest, A→B and B→C, are replaced by one bump A→C, signed fresh. Members in B are stranded by that until any member with the root resets the chat.
+
+The badge never removes a bump it cannot know was posted. A bump posted twice is stale the second time and moves nobody.
+
+### 9.6 The device grant
+
+A device grant is a version 2 grant (section 8.3), a COSE_Sign1 by the seat key in the chip with kid `[seat]` under the domain `cahoots/grant/v1`. Its claims are:
+
+| Key | Claim | Value |
+|---|---|---|
+| 1 | `iss` | tstr `cahoots:circle:<circle_id as lowercase hex>` |
+| 2 | `sub` | tstr `cahoots:key:<key id of the phone's key, lowercase hex>` |
+| 7 | `cti` | nonce, bstr 16 |
+| 8 | `cnf` | the phone's key, as in a pad grant |
+| -65539 | `authorization_details` | `[{"type": "cahoots:device", "actions": ["read", "post", "hello"]}]` |
+| -65540 | `cahoots-depth` | uint, 0 |
+| -65541 | `cahoots-grantor` | uint, the seat |
+
+`actions` is a non-empty subset of `read`, `post` and `hello`, each once, in that order. A decoder MUST refuse a device grant with a second detail, any other key in the detail, an `aud`, an `exp`, a log claim, a parent, a `cahoots-base`, a depth other than 0, or a grantor that is not a seat. A verifier checks it against the manifest: the kid names a seat, the seat's key signed it, the grantor is that seat, and `iss` is the manifest's circle. A chain check refuses a device grant, because a chain holds only pad grants.
+
+The badge signs one per circle at pairing, and one for a circle it keeps while a phone is paired. It carries no channel detail. Nothing verifies it today except the phone, which takes the badge's seat from it at pairing. It has no expiry and no revocation. Unpairing clears field 8 of the public object at once, so a verifier that relies on a device grant MUST also check that the circle's public object still names the grantee.
+
+### 9.7 What a slot may ask for
+
+In the slot's session, under SCP03, a phone may MAC with HMAC-SHA256 (MACOneShot, algorithm `0x19`) under the circle's root and its hello objects, and may read every public object and the pairing object. The chip does not look at the data. The app asks for three things:
+
+| Operation | Key | Data | Result |
+|---|---|---|---|
+| A chat generation key | root `0x4C4102ss` | `"chat/gen" || circle_id || generation_id` | the generation key, 32 bytes |
+| Hello words | hello object `0x4C4106hh` | `"cahoots/words/v1" || speaker (u8) || counter (u32, little-endian) || 0x01` | the expand step of the hello words. The first 4 bytes give the two words as in section 3.3 |
+| The card seal key | root `0x4C4102ss` | `"seal/card" || circle_id` | the card seal key (section 3.6). The app does not ask for it today, since cards travel in the chat |
+
+Generation ids are random, except generation 0, whose id is `SHA-256("cahoots/chat/gen0" || circle_id)`. A phone cannot ask for a generation's key before a bump names its id, and a phone whose slot key was replaced cannot ask at all. The chip enforces no order, and a paired phone can compute any HMAC under the root while it is paired.
+
+### 9.8 The applet's commands from a phone
+
+A phone sends short APDUs only. It SELECTs the applet, `A0 00 00 03 96 54 53 00 00 00 01 03 00 00 00 00`. In no session it may read the size and the bytes of an object its policy lets any session read, and write into the inbox with WriteBinary. It never creates an object, so its WriteBinary carries no policy and no length. To open the slot it sends CreateSession for `0x4C410500`, then INITIALIZE UPDATE and EXTERNAL AUTHENTICATE inside ProcessSessionCmd with the session id. Every later command is wrapped under SCP03 first and then put inside ProcessSessionCmd. As measured on the bench:
+
+- A wrapped command MUST NOT carry an Le. The applet answers one that does with `6982` and ends the session. The outer ProcessSessionCmd keeps its Le.
+- The encryption counter advances on every command, with data or not.
+- An error status comes back bare, with no response MAC.
+- An id that holds nothing answers `6985`, for ReadSize, ReadObject, MACOneShot and CreateSession. `6A82` means only a SELECT of another applet.
+- CreateSession while the badge's owner session is open answers `6985`, and the phone says the card is busy.
+- Some answers use two-byte TLV lengths (`41 82 00 08 ...`). ReadSize answers a 2-byte size.
+- The key information byte in the answer to INITIALIZE UPDATE is `03`. A phone refuses a card that does not offer SCP03.
