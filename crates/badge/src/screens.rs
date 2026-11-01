@@ -6,8 +6,7 @@
 //! has a title bar: white bold text on a black band across the top. Body text is the 10 by
 //! 20 font, the bold 9 by 18 for the one line that matters, and the 8 by 13 for the rest. A
 //! screen that waits for a button has a footer under a rule: what A does on the left, what
-//! both do in the middle, what B does on the right, in the places the buttons are. A menu
-//! page shows `<` and `>` at the edges of the middle row when there is a page on that side.
+//! both do in the middle, what B does on the right, in the places the buttons are.
 
 use crate::ssh::HostCheck;
 use alloc::format;
@@ -37,8 +36,6 @@ pub struct Screen {
 
 /// The y of the rule under the header.
 const RULE_Y: i32 = 26;
-/// The y of the middle row, where the page arrows sit.
-const MID_Y: i32 = 100;
 /// The y of the rule above the footer, which names what the buttons do.
 const FOOT_Y: i32 = 177;
 const W: i32 = Frame::WIDTH as i32;
@@ -122,27 +119,16 @@ pub fn words(circle: &str, tier: &str, words: &[&str; 6]) -> Screen {
     s.done()
 }
 
-/// The menu's words page: the header with "page/pages" in its middle, the six words one per
-/// row in the large face, and an arrow on each side that has a neighbouring page.
-pub fn words_page(
-    circle: &str,
-    tier: &str,
-    page: usize,
-    pages: usize,
-    words: &[&str; 6],
-    left: bool,
-    right: bool,
-) -> Screen {
+/// A circle's "hello words" page: the header, the title, and the six words one per row,
+/// in order. Either side button goes back.
+pub fn words_page(circle: &str, tier: &str, words: &[&str; 6]) -> Screen {
     let mut s = Draw::new();
     s.header(circle, tier);
-    s.centered(&FONT_8X13, 7, &format!("{page}/{pages}"));
-    s.word_rows(words);
-    if left {
-        s.arrow(2, "<");
+    s.centered(&FONT_9X18_BOLD, 30, "hello words");
+    for (i, w) in words.iter().enumerate() {
+        s.centered(&FONT_10X20, 52 + 20 * i as i32, w);
     }
-    if right {
-        s.arrow(W - 10, ">");
-    }
+    s.footer(Some("back"), None, Some("back"));
     s.done()
 }
 
@@ -168,37 +154,19 @@ pub fn discard_prompt() -> Screen {
     s.done()
 }
 
-/// A page of the menu: the header, "page/pages" under it, the title, the body, and an
-/// arrow on each side that has a neighbouring page.
-#[allow(clippy::too_many_arguments)]
-pub fn menu_page(
-    circle: &str,
-    tier: &str,
-    page: usize,
-    pages: usize,
-    title: &str,
-    body: &[&str],
-    left: bool,
-    right: bool,
-) -> Screen {
+/// A page one of a circle's actions opens: the header, the title, and the body. Either side
+/// button goes back to the actions.
+pub fn action_page(circle: &str, tier: &str, title: &str, body: &[&str]) -> Screen {
     let mut s = Draw::new();
     s.header(circle, tier);
-    s.centered(&FONT_8X13, 34, &format!("{page}/{pages}"));
-    s.centered(&FONT_9X18_BOLD, 56, title);
-    // Each body line is kept whole in `lines` and drawn wrapped, narrower than the screen
-    // so the rows clear the arrows.
-    let mut y = 90;
+    s.centered(&FONT_9X18_BOLD, 44, title);
+    // Each body line is kept whole in `lines` and drawn wrapped.
+    let mut y = 80;
     for line in body {
-        y = s.wrapped_centered_cols(&FONT_8X13, y, line, cols(&FONT_8X13) - 2, false);
+        y = s.wrapped_centered_cols(&FONT_8X13, y, line, cols(&FONT_8X13), false);
         s.lines.push(String::from(*line));
     }
-    if left {
-        s.arrow(2, "<");
-    }
-    if right {
-        s.arrow(190, ">");
-    }
-    s.footer(Some("page"), Some("A+B  choose"), Some("page"));
+    s.footer(Some("back"), Some("A+B  choose"), Some("back"));
     s.done()
 }
 
@@ -212,11 +180,11 @@ pub fn chooser(names: &[String], chosen: usize) -> Screen {
     chooser_titled("circles", names, chosen)
 }
 
-/// The list of circles under another title: "chip needs a restart" while the badge holds its
-/// chip until it is turned off and on.
+/// A list under another title: "chip needs a restart" while the badge holds its chip until it
+/// is turned off and on, or a circle's name over its actions. A title too wide is cut.
 pub fn chooser_titled(title: &str, names: &[String], chosen: usize) -> Screen {
     let mut s = Draw::new();
-    s.title(title);
+    s.title(&fit("", title, "", cols(&FONT_9X18_BOLD)));
     let n = names.len();
     let first = if n <= CHOOSER_ROWS {
         0
@@ -263,20 +231,18 @@ pub fn home(circles: &[String], status: &str) -> Screen {
     s.done()
 }
 
-/// The menu's grants page: one line per live grant, the chosen one marked with `>` and
-/// drawn bold. Each entry is the agent and, under it, how much is used and until when.
+/// A circle's grants page: one line per live grant, the chosen one marked with `>` and drawn
+/// bold. Each entry is the agent and, under it, how much is used and until when. The side
+/// buttons move the mark, and go back from the first entry or the last.
 pub fn grants_page(
     circle: &str,
     tier: &str,
-    page: usize,
-    pages: usize,
     entries: &[(String, String)],
     chosen: usize,
 ) -> Screen {
     let mut s = Draw::new();
     s.header(circle, tier);
-    s.centered(&FONT_8X13, 34, &format!("{page}/{pages}"));
-    s.centered(&FONT_9X18_BOLD, 56, "grants");
+    s.centered(&FONT_9X18_BOLD, 44, "grants");
     let w = cols(&FONT_8X13) - 3;
     let w2 = cols(&FONT_6X13) - 7;
     if entries.is_empty() {
@@ -313,12 +279,13 @@ pub fn grants_page(
         s.lines.push(top);
         s.lines.push(under);
     }
-    s.arrow(2, "<");
-    s.arrow(190, ">");
     if entries.is_empty() {
-        s.footer(Some("page"), Some("A+B  choose"), Some("page"));
+        s.footer(Some("back"), None, Some("back"));
     } else {
-        s.footer(Some("prev"), Some("A+B  revoke"), Some("next"));
+        let last = chosen + 1 >= entries.len();
+        let left = if chosen == 0 { "back" } else { "prev" };
+        let right = if last { "back" } else { "next" };
+        s.footer(Some(left), Some("A+B  revoke"), Some(right));
     }
     s.done()
 }
@@ -400,8 +367,8 @@ pub fn phone_page(name: &str) -> Screen {
     let mut s = Draw::new();
     s.title("phone");
     s.centered(&FONT_9X18_BOLD, 46, &fit("", &phone_name(name), "", cols(&FONT_9X18_BOLD)));
-    s.centered(&FONT_8X13, 80, "hold the phone to the chip");
-    s.centered(&FONT_8X13, 96, "for its taps");
+    s.centered(&FONT_8X13, 80, "reads and posts in");
+    s.centered(&FONT_8X13, 96, "this badge's circles");
     s.centered(&FONT_8X13, 124, "unpairing ends its taps");
     s.footer(Some("back"), Some("A+B  unpair"), Some("back"));
     s.done()
@@ -941,13 +908,5 @@ impl Draw {
         for (i, w) in words.iter().enumerate() {
             self.centered(&PROFONT_24_POINT, 30 + 28 * i as i32, w);
         }
-    }
-
-    /// An arrow glyph with its left edge at `x`, centred on the middle row.
-    fn arrow(&mut self, x: i32, glyph: &str) {
-        let style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
-        let layout = TextStyleBuilder::new().baseline(Baseline::Middle).build();
-        let at = Point::new(x, MID_Y);
-        let _ = Text::with_text_style(glyph, at, style, layout).draw(&mut Canvas(&mut self.frame));
     }
 }

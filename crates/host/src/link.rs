@@ -299,14 +299,13 @@ impl Bench {
                 None => None,
             };
         }
-        // A circle's menu: `name  tier n | k/5 | page title | ...`. The words page logs no
-        // footer, so the page counter is what marks a menu page.
-        let is_menu = fields
-            .get(1)
-            .is_some_and(|f| f.split_once('/').is_some_and(|(a, b)| a.parse::<u8>().is_ok() && b.parse::<u8>().is_ok()));
-        if is_menu || footer.contains("A+B  choose") {
-            let page = fields.get(2).copied().unwrap_or("");
-            return Some(if page == "circles" { 2 } else { 1 });
+        // A circle's actions, a list under its name: "back" is the list of circles.
+        if footer == "prev  A+B  open  next" {
+            return Some(if fields.contains(&"> back") { 2 } else { 1 });
+        }
+        // A page one of them opened, under the header `name  tier n`: Left goes back.
+        if title.contains("  tier ") && footer.starts_with("back  ") {
+            return Some(0);
         }
         None
     }

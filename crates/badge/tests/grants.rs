@@ -169,7 +169,7 @@ fn serving(chip: bool) -> (Badge<FakeBoard>, FakeLink, CircleId, SeatPublic) {
     let (mut laptop, down) = cable();
     let mut badge = Badge::new(board);
     badge.boot();
-    // Home, the list, then the circle's menu, which takes the links.
+    // Home, the list, then the circle's actions, which take the links.
     badge.idle_step();
     press(&mut badge, Press::Both);
     badge.board().links = Some((down, FakeLink::open()));
@@ -1027,20 +1027,23 @@ fn revoking_from_the_page_ends_the_grant() {
         id,
         grant_request(50, Some(EXP), false, NOW),
     );
+    // On the actions, two to the right of hello words is grants.
     press(&mut badge, Press::Right);
     press(&mut badge, Press::Right);
-    assert!(badge.board().shows("3/5"), "{:?}", badge.board().last());
-    assert!(badge.board().shows("grants"));
+    assert!(badge.board().shows("> grants"), "{:?}", badge.board().last());
+    press(&mut badge, Press::Both);
+    assert!(badge.board().shows("grants"), "{:?}", badge.board().last());
     assert!(badge.board().shows("> claude on conner..."), "{:?}", badge.board().last());
     assert!(badge.board().shows("0 of 50 \u{b7} until 29 Nov"));
-    assert!(badge.board().shows("prev  A+B  revoke  next"));
+    // The only grant is both the first and the last: either side goes back.
+    assert!(badge.board().shows("back  A+B  revoke  back"));
     // Left on the prompt goes back and revokes nothing.
     press(&mut badge, Press::Both);
     assert!(badge.board().shows("revoke this grant?"));
     assert!(badge.board().shows("it stops at once"));
     assert!(badge.board().shows("back  A+B  revoke  back"));
     press(&mut badge, Press::Left);
-    assert!(badge.board().shows("3/5"));
+    assert!(badge.board().shows("grants"));
     assert!(!record(&mut badge).grants[0].revoked);
     assert_eq!(counter(&mut badge, slot), Some(0));
     // Both twice revokes.
@@ -1075,6 +1078,7 @@ fn a_request_over_the_revoke_question_cancels_it() {
     press(&mut badge, Press::Right);
     press(&mut badge, Press::Right);
     press(&mut badge, Press::Both);
+    press(&mut badge, Press::Both);
     assert!(badge.board().shows("revoke this grant?"));
     send(
         &mut laptop,
@@ -1091,7 +1095,7 @@ fn a_request_over_the_revoke_question_cancels_it() {
         responses(&mut laptop).as_slice(),
         [(31, Response::Psk { .. })]
     ));
-    assert!(badge.board().shows("3/5"));
+    assert!(badge.board().shows("grants"));
     // Both now is the page's: it asks again and revokes nothing.
     press(&mut badge, Press::Both);
     assert!(badge.board().shows("revoke this grant?"));
@@ -1190,13 +1194,14 @@ fn a_grant_use_over_the_revoke_question_takes_it_away() {
     press(&mut badge, Press::Right);
     press(&mut badge, Press::Right);
     press(&mut badge, Press::Both);
+    press(&mut badge, Press::Both);
     assert!(badge.board().shows("revoke this grant?"));
     // The agent commits while the question is on the screen.
     assert_eq!(remaining_of(&use_grant(&mut badge, &mut laptop, id, &grant, NOW)), 49);
     assert!(badge.board().shows("49 left of 50"), "{:?}", badge.board().last());
     // Any press takes the use screen away and shows the page, with the count read again.
     press(&mut badge, Press::Left);
-    assert!(badge.board().shows("3/5"), "{:?}", badge.board().last());
+    assert!(badge.board().shows("grants"), "{:?}", badge.board().last());
     assert!(badge.board().shows("1 of 50 \u{b7} until 29 Nov"), "{:?}", badge.board().last());
     // Both now is the page's: it asks again and revokes nothing.
     press(&mut badge, Press::Both);
@@ -1209,15 +1214,18 @@ fn a_grant_use_over_the_revoke_question_takes_it_away() {
 fn a_grant_use_over_the_forget_question_takes_it_away() {
     let (mut badge, mut laptop, id, _) = serving(true);
     let (grant, _) = issue(&mut badge, &mut laptop, id, grant_request(50, Some(EXP), false, NOW));
-    // Words, key, grants, circles, forget: four to the left of words is forget.
+    // On the actions, two to the left of hello words is forget this circle.
     press(&mut badge, Press::Left);
+    press(&mut badge, Press::Left);
+    assert!(badge.board().shows("> forget this circle"), "{:?}", badge.board().last());
+    press(&mut badge, Press::Both);
     assert!(badge.board().shows("forget this circle"), "{:?}", badge.board().last());
     press(&mut badge, Press::Both);
     assert!(badge.board().shows("forget this circle?"), "{:?}", badge.board().last());
     assert_eq!(remaining_of(&use_grant(&mut badge, &mut laptop, id, &grant, NOW)), 49);
     assert!(badge.board().shows("49 left of 50"), "{:?}", badge.board().last());
     press(&mut badge, Press::Left);
-    assert!(badge.board().shows("5/5"), "{:?}", badge.board().last());
+    assert!(badge.board().shows("forget this circle"), "{:?}", badge.board().last());
     // Both now asks again and forgets nothing.
     press(&mut badge, Press::Both);
     assert!(badge.board().shows("forget this circle?"), "{:?}", badge.board().last());

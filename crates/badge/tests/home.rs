@@ -337,18 +337,16 @@ fn the_laptops_allowance_lasts_through_the_list_until_it_is_unplugged() {
     let (mut b1, _b2) = kept_pair((true, false));
     let mut laptop = plug_laptop(&mut b1);
     allow(&mut b1, &mut laptop);
-    // Home, the list, the circle's first page: a request is answered with nothing asked.
+    // Home, the list, the circle's actions: a request is answered with nothing asked.
     press(&mut b1, Press::Both);
     press(&mut b1, Press::Both);
-    assert!(b1.board().shows("1/5"), "{:?}", b1.board().last());
+    assert!(b1.board().shows("> hello words"), "{:?}", b1.board().last());
     send(&mut laptop, 901, &Request::Identify);
     step(&mut b1);
     let got = responses(&mut laptop);
     assert!(matches!(got.as_slice(), [(901, Response::Identity { .. })]), "{got:?}");
-    // Its Circles page, the list, "back": home answers with nothing asked too.
-    for _ in 0..3 {
-        press(&mut b1, Press::Right);
-    }
+    // Its "back", the list, "back": home answers with nothing asked too.
+    to_entry(&mut b1, "back");
     press(&mut b1, Press::Both);
     to_entry(&mut b1, "back");
     press(&mut b1, Press::Both);
@@ -382,10 +380,11 @@ fn a_pass_after_the_last_circle_is_forgotten_asks_about_the_laptop_again() {
         let (mut b1, _b2) = kept_pair((true, false));
         let mut laptop = plug_laptop(&mut b1);
         allow(&mut b1, &mut laptop);
-        // Forget the only circle: the list, its first page, Left to Forget, Both, Both.
+        // Forget the only circle: the list, its actions, "forget this circle", Both, Both.
         press(&mut b1, Press::Both);
         press(&mut b1, Press::Both);
-        press(&mut b1, Press::Left);
+        to_entry(&mut b1, "forget this circle");
+        press(&mut b1, Press::Both);
         assert!(b1.board().shows("forget this circle"), "{:?}", b1.board().last());
         press(&mut b1, Press::Both);
         press(&mut b1, Press::Both);
@@ -432,4 +431,29 @@ fn a_pass_after_the_last_circle_is_forgotten_asks_about_the_laptop_again() {
         assert!(b1.board().shows("a laptop"), "unplugged {unplugged}: {:?}", b1.board().last());
         assert!(responses(&mut laptop).is_empty(), "unplugged {unplugged}");
     }
+}
+
+#[test]
+fn a_circle_is_one_page_of_actions_two_levels_down_and_back_comes_home() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    let name = circle_name(&b1);
+    press(&mut b1, Press::Both);               // the menu
+    press(&mut b1, Press::Both);               // the first circle
+    // A list: each action is a row, marked or not.
+    for a in ["hello words", "key as code", "grants", "forget this circle", "back"] {
+        let row = |l: &String| l.trim_start_matches(['>', ' ']) == a;
+        assert!(b1.board().last().iter().any(row), "{a} in {:?}", b1.board().last());
+    }
+    press(&mut b1, Press::Both);               // hello words
+    assert!(b1.board().shows("hello words"));
+    assert!(!b1.board().last().iter().any(|l| l.contains("/5")));
+    press(&mut b1, Press::Left);               // back to the actions, not another page
+    assert!(b1.board().shows("> hello words"));
+    // "back" on the actions is the list, with the circle marked. "back" there is home.
+    to_entry(&mut b1, "back");
+    press(&mut b1, Press::Both);
+    assert!(b1.board().shows(&format!("> {name}")), "{:?}", b1.board().last());
+    to_entry(&mut b1, "back");
+    press(&mut b1, Press::Both);
+    assert!(b1.board().shows("closed to taps"));
 }

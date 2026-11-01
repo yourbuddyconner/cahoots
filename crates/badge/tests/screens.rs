@@ -1,6 +1,6 @@
 //! The screens the badge draws: their text and their frames.
 
-use cahoots_badge::screens::{code, menu_page, words};
+use cahoots_badge::screens::{action_page, code, words, words_page};
 use cahoots_hal::Frame;
 
 const W: [&str; 6] = ["abandon", "ability", "able", "about", "above", "absent"];
@@ -23,15 +23,31 @@ fn words_screen_lists_the_words_in_order() {
 }
 
 #[test]
-fn menu_page_marks_its_neighbours() {
+fn an_action_page_has_no_page_count_or_arrows_and_goes_back_either_side() {
     let body = ["Both to spend 32 bytes"];
-    let both = menu_page("bench", "TRNG T1", 2, 3, "key as code", &body, true, true);
-    assert!(any_black(&both.frame, 2, 10, 95, 105), "left arrow");
-    assert!(any_black(&both.frame, 190, 198, 95, 105), "right arrow");
-    assert!(both.lines.iter().any(|l| l == "2/3"));
-    let right = menu_page("bench", "TRNG T1", 1, 3, "key as code", &body, false, true);
-    assert!(!any_black(&right.frame, 2, 10, 95, 105), "no left arrow");
-    assert!(any_black(&right.frame, 190, 198, 95, 105), "right arrow");
+    let page = action_page("bench", "TRNG T1", "key as code", &body);
+    assert!(page.lines.iter().any(|l| l == "key as code"));
+    assert!(page.lines.iter().any(|l| l == "back  A+B  choose  back"));
+    assert!(
+        !page.lines.iter().any(|l| l.contains('/')),
+        "{:?}",
+        page.lines
+    );
+    assert!(!any_black(&page.frame, 2, 10, 95, 105), "no left arrow");
+    assert!(!any_black(&page.frame, 190, 198, 95, 105), "no right arrow");
+}
+
+#[test]
+fn the_hello_words_page_lists_the_words_in_order_under_its_title() {
+    let s = words_page("bench", "TRNG T1", &W);
+    assert!(s.lines.iter().any(|l| l == "hello words"));
+    let tokens: Vec<&str> = s.lines.iter().flat_map(|l| l.split_whitespace()).collect();
+    let at = tokens
+        .iter()
+        .position(|t| *t == W[0])
+        .expect("the first word");
+    assert_eq!(&tokens[at..at + 6], &W);
+    assert!(s.lines.iter().any(|l| l == "back  back"), "{:?}", s.lines);
 }
 
 #[test]
@@ -58,5 +74,6 @@ fn a_frame_is_deterministic() {
 fn only_the_code_screen_is_secret() {
     assert!(code(&[0xAB; 32]).secret);
     assert!(!words("bench", "TRNG T1", &W).secret);
-    assert!(!menu_page("bench", "TRNG T1", 2, 3, "key as code", &["x"], true, true).secret);
+    assert!(!action_page("bench", "TRNG T1", "key as code", &["x"]).secret);
+    assert!(!words_page("bench", "TRNG T1", &W).secret);
 }

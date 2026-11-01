@@ -16,6 +16,26 @@ fn main() {
     .iter()
     .map(|s| s.to_string())
     .collect();
+    let actions: Vec<String> = [
+        "hello words",
+        "key as code",
+        "grants",
+        "forget this circle",
+        "back",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let grants = vec![
+        (
+            "claude on conner's laptop".to_string(),
+            "0 of 50 \u{b7} until 29 Nov".to_string(),
+        ),
+        (
+            "ci runner".to_string(),
+            "3 of 10 \u{b7} until 2 Dec".to_string(),
+        ),
+    ];
     let shots = vec![
         screens::self_test(&selftest),
         screens::pile(None),
@@ -24,13 +44,27 @@ fn main() {
         screens::keep_prompt(&words),
         screens::discard_prompt(),
         screens::words("bench", "TRNG T1", &words),
-        screens::words_page("bench", "TRNG T1", 1, 3, &words, false, true),
-        screens::menu_page("bench", "TRNG T1", 2, 3, "key as code", &["Both spends 32 bytes and shows them as a code"], true, true),
-        screens::menu_page("bench", "TRNG T1", 3, 3, "serve a laptop", &["off", "Both turns it on"], true, false),
+        screens::home(&["bench".to_string()], "closed to taps"),
+        screens::chooser_titled("bench", &actions, 0),
+        screens::words_page("bench", "TRNG T1", &words),
+        screens::action_page(
+            "bench",
+            "TRNG T1",
+            "key as code",
+            &["Both to spend 32 bytes"],
+        ),
+        screens::action_page(
+            "bench",
+            "TRNG T1",
+            "forget this circle",
+            &["Both to forget this circle", "the others stay"],
+        ),
+        screens::grants_page("bench", "TRNG T1", &grants, 0),
+        screens::phone_page("Conner's phone"),
         screens::code(&[0xAB, 0x12, 0xC4, 0x5F, 0x00, 0x99, 0xDE, 0x01].repeat(4)),
         screens::consent(32, "bench"),
         screens::status(&["ceremony: waiting for the others"]),
-        screens::status(&["saved. read the words aloud"]),
+        screens::status(&["saved bench"]),
         screens::panic("hard fault: pc=0x10012345 lr=0x1000abcd"),
     ];
     let (cols, scale, gap) = (5usize, 2usize, 12usize);

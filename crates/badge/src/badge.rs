@@ -212,62 +212,44 @@ impl<C: Custodian> Custodian for Pads<C> {
 const SELF_TEST_MS: u32 = 2500;
 const POLL_MS: u32 = 10;
 
-/// The menu's pages. Home is where the badge rests. The others are the current circle's
-/// pages, a ring: Right goes to the next, Left to the previous, and the last page's next is
-/// the first.
+/// The menu's pages. Home is where the badge rests. Actions is a circle's page, a list of what
+/// can be done with it, and each action but "back" opens a page of its own, whose side
+/// buttons go back to the list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Page {
     /// The circles the badge holds and whether a phone can tap now. Left opens or closes the
     /// window for a tap, Right or Both shows the list.
     Home,
+    /// The current circle's actions, [`ACTIONS`]: Left and Right move, Both opens one, and
+    /// "back" shows the list of circles.
+    Actions,
     Words,
     Key,
     /// Lists the live grants of this circle; Both on one asks, then revokes it.
     Grants,
-    /// Both shows the list of circles, where another circle opens or a new one starts.
-    Circles,
     /// Both asks, then forgets this circle and nothing else.
     Forget,
 }
 
+/// A circle's actions, in the order its page lists them. The last goes back to the list.
+const ACTIONS: [&str; 5] = [
+    "hello words",
+    "key as code",
+    "grants",
+    "forget this circle",
+    "back",
+];
+
 impl Page {
-    /// The circle's ring. Home is not in it: no page turns to home, and home turns no page.
-    const ALL: [Page; 5] = [
-        Page::Words,
-        Page::Key,
-        Page::Grants,
-        Page::Circles,
-        Page::Forget,
-    ];
+    /// The page each of [`ACTIONS`] opens, in the same order. "back" opens none.
+    const OPENED: [Page; 4] = [Page::Words, Page::Key, Page::Grants, Page::Forget];
 
-    /// The page's place in the ring, from 0. Home, outside the ring, is never turned.
-    fn index(self) -> usize {
-        match self {
-            Page::Home | Page::Words => 0,
-            Page::Key => 1,
-            Page::Grants => 2,
-            Page::Circles => 3,
-            Page::Forget => 4,
-        }
-    }
-
-    fn next(self) -> Page {
-        Page::ALL[(self.index() + 1) % Page::ALL.len()]
-    }
-
-    fn previous(self) -> Page {
-        Page::ALL[(self.index() + Page::ALL.len() - 1) % Page::ALL.len()]
-    }
-
+    /// The title of a page an action opens: that action's name.
     fn title(self) -> &'static str {
-        match self {
-            Page::Home => "home",
-            Page::Words => "words",
-            Page::Key => "key as code",
-            Page::Grants => "grants",
-            Page::Circles => "circles",
-            Page::Forget => "forget this circle",
-        }
+        Page::OPENED
+            .iter()
+            .position(|p| *p == self)
+            .map_or("", |i| ACTIONS[i])
     }
 }
 
@@ -303,6 +285,9 @@ struct Menu<B: Board> {
     /// The laptop on the down link, lent by the badge while the menu runs.
     laptop: Laptop<B::Link>,
     page: Page,
+    /// The action marked on the circle's actions page, an index into [`ACTIONS`]. It stays
+    /// while the page that action opened is shown, so back marks it again.
+    action_index: usize,
     /// The request that arrived before the laptop was allowed, held while the badge asks
     /// whether to allow the laptop at all. Answered or refused with that answer.
     connect: Option<Pending>,
@@ -347,7 +332,7 @@ struct Laptop<L> {
 }
 
 /// Look at the laptop's link: log a plug-in or an unplug, and at an unplug forget the answer
-/// and any request half read. True if the laptop was just unplugged.
+/// and any request half read, and draw a new nonce. True if the laptop was just unplugged.
 fn watch_laptop<B: Board>(board: &mut B, l: &mut Laptop<B::Link>) -> bool {
     let present = l.down.peer_present();
     if present == l.peer_seen {
@@ -399,11 +384,11 @@ enum Idle<B: Board> {
     /// power was cut for a phone's tap, and home opens with the window running.
     Note { until: u64, open_tap: bool },
     /// A pairing is open, waiting for the phone's tap: Both reads the inbox, Left or Right
-    /// closes the pairing.
-    PairWait { index: usize },
-    /// "pair with {name}?" and the six words: Both pairs the phone that wrote the inbox,
-    /// Left or Right declines and empties the inbox.
-    PairAsk { inbox: Inbox, index: usize },
+    /// closes the pairing and goes home.
+    PairWait,
+    /// "pair with {name}?" and the six words, with no time limit: Both pairs the phone that
+    /// wrote the inbox, Left or Right declines and empties the inbox.
+    PairAsk { inbox: Inbox },
     /// The paired phone's page: Both unpairs it, Left or Right goes back to the list.
     Phone { index: usize },
 }
@@ -2401,12 +2386,13 @@ impl<B: Board> Badge<B> {
     ///
     /// Home opens: the circles the badge holds and whether a phone can tap now. Left opens a
     /// window of two minutes for a phone's tap, or closes it. Right or Both shows the list,
-    /// where Left and Right move, Both opens a circle's menu, "new circle" starts a pass for
-    /// one more while the board has room, and the last entry, "back", goes home. A circle's
-    /// menu is a ring of pages, Words, Key, Grants, Circles and Forget, Left and Right to
-    /// turn the page, Both to select. Both on Key spends 32 bytes and shows them as a code.
-    /// Both on Circles shows the list. Both on Forget asks, and Both again forgets this
-    /// circle and nothing else. A note goes home at any gesture, or after five seconds.
+    /// where Left and Right move, Both opens a circle's actions, "new circle" starts a pass
+    /// for one more while the board has room, and the last entry, "back", goes home. A
+    /// circle's actions are a list too: "hello words", "key as code", "grants", "forget this
+    /// circle", and "back" to the list. Both opens the page of an action, and Left or Right
+    /// there goes back to the actions. Both on the key page spends 32 bytes and shows them as
+    /// a code. Both on the forget page asks, and Both again forgets this circle and nothing
+    /// else. A note goes home at any gesture, or after five seconds.
     ///
     /// On every page, the badge answers custodian requests from the laptop on the down link
     /// for any circle it holds. The first request after the laptop was plugged in asks
@@ -2420,7 +2406,7 @@ impl<B: Board> Badge<B> {
         let idle = core::mem::replace(&mut self.idle, Idle::Off);
         // The menu watches the laptop while it runs. Elsewhere the badge does, so an unplug
         // on the list or a note still forgets the answer. A new circle's pass has the pile
-        // on that connector, and the answer is already gone.
+        // on that connector, and forgets the answer at its first step.
         if !matches!(idle, Idle::On(_) | Idle::NewCircle) {
             if let Some(l) = self.laptop.as_mut() {
                 watch_laptop(&mut self.board, l);
@@ -2443,8 +2429,8 @@ impl<B: Board> Badge<B> {
                     self.enter_menu(Page::Home, open_tap)
                 }
             }
-            Idle::PairWait { index } => self.pair_wait_step(index),
-            Idle::PairAsk { inbox, index } => self.pair_ask_step(inbox, index),
+            Idle::PairWait => self.pair_wait_step(),
+            Idle::PairAsk { inbox } => self.pair_ask_step(inbox),
             Idle::Phone { index } => self.phone_step(index),
             Idle::On(mut menu) => {
                 match Self::menu_step(
@@ -2517,12 +2503,12 @@ impl<B: Board> Badge<B> {
     }
 
     /// "pair a phone" was chosen: open a pairing and wait for the phone's tap.
-    fn pair_start(&mut self, index: usize) -> Idle<B> {
+    fn pair_start(&mut self) -> Idle<B> {
         match self.pair_open() {
             Ok(_) => {
                 self.board.tap_begin();
                 show(&mut self.board, screens::pair_wait(None));
-                Idle::PairWait { index }
+                Idle::PairWait
             }
             Err(BadgeError::AlreadyPaired) => self.note(&["unpair the current phone first"], false),
             Err(BadgeError::ChipHeld) => self.note(&[RESTART], false),
@@ -2530,13 +2516,14 @@ impl<B: Board> Badge<B> {
         }
     }
 
-    fn pair_wait_step(&mut self, index: usize) -> Idle<B> {
+    /// The pairing page: Both reads what the phone wrote. Left or Right closes the pairing and
+    /// goes home, which gives the chip its power back.
+    fn pair_wait_step(&mut self) -> Idle<B> {
         match self.board.press() {
-            Press::None => Idle::PairWait { index },
+            Press::None => Idle::PairWait,
             Press::Left | Press::Right => {
                 self.pair_close();
-                self.show_chooser(index);
-                Idle::Choose { index }
+                self.enter_menu(Page::Home, false)
             }
             Press::Both => match self.pair_read_inbox() {
                 Ok(Some(inbox)) => {
@@ -2550,18 +2537,18 @@ impl<B: Board> Badge<B> {
                         words.join(" ")
                     ));
                     show(&mut self.board, screens::pair_prompt(&inbox.name, &words));
-                    Idle::PairAsk { inbox, index }
+                    Idle::PairAsk { inbox }
                 }
                 Ok(None) => {
                     show(&mut self.board, screens::pair_wait(Some("no phone has tapped yet")));
-                    Idle::PairWait { index }
+                    Idle::PairWait
                 }
                 Err(BadgeError::NotForThisBadge) => {
                     show(
                         &mut self.board,
                         screens::pair_wait(Some("that phone's request is not for this badge. Try again.")),
                     );
-                    Idle::PairWait { index }
+                    Idle::PairWait
                 }
                 Err(_) => {
                     self.pair_close();
@@ -2571,9 +2558,11 @@ impl<B: Board> Badge<B> {
         }
     }
 
-    fn pair_ask_step(&mut self, inbox: Inbox, index: usize) -> Idle<B> {
+    /// "pair with NAME?" and the six words. They stay until a press, however long the owner
+    /// takes to compare them with the phone's.
+    fn pair_ask_step(&mut self, inbox: Inbox) -> Idle<B> {
         match self.board.press() {
-            Press::None => Idle::PairAsk { inbox, index },
+            Press::None => Idle::PairAsk { inbox },
             Press::Both => {
                 let name = screens::phone_name(&inbox.name);
                 match self.pair_accept(inbox) {
@@ -2632,7 +2621,7 @@ impl<B: Board> Badge<B> {
     }
 
     fn show_chooser(&mut self, index: usize) {
-        // The list is where every tap page ends: the chip gets its power back here.
+        // The list closes home's window for a tap: the chip gets its power back here.
         self.board.tap_end();
         let names = self.chooser_names();
         let title = if self.chip_held { "chip needs a restart" } else { "circles" };
@@ -2656,13 +2645,12 @@ impl<B: Board> Badge<B> {
             }
             Press::Both if index < self.circles.len() => {
                 self.current = index;
-                self.enter_menu(Page::Words, false)
+                self.enter_menu(Page::Actions, false)
             }
             Press::Both if self.chooser_names()[index] == BACK => self.enter_menu(Page::Home, false),
-            Press::Both if self.chooser_names()[index] == PAIR_PHONE => self.pair_start(index),
+            Press::Both if self.chooser_names()[index] == PAIR_PHONE => self.pair_start(),
             Press::Both if self.chooser_names()[index] == PHONE => match self.paired_phone() {
                 Some(name) => {
-                    self.board.tap_begin();
                     show(&mut self.board, screens::phone_page(&name));
                     Idle::Phone { index }
                 }
@@ -2794,6 +2782,7 @@ impl<B: Board> Badge<B> {
             pads: Pads { held, tier },
             laptop,
             page,
+            action_index: 0,
             connect: None,
             pending: None,
             covered: false,
@@ -2991,43 +2980,59 @@ impl<B: Board> Badge<B> {
             return MenuAction::Stay;
         }
 
+        if m.page == Page::Actions {
+            match gesture {
+                Press::None => {}
+                Press::Left | Press::Right => {
+                    let n = ACTIONS.len();
+                    m.action_index = if gesture == Press::Left {
+                        (m.action_index + n - 1) % n
+                    } else {
+                        (m.action_index + 1) % n
+                    };
+                    Self::redraw(board, circles, current, m);
+                }
+                Press::Both => {
+                    // "back", the last action, opens no page: it shows the list.
+                    let Some(&page) = Page::OPENED.get(m.action_index) else {
+                        return MenuAction::Choose;
+                    };
+                    m.page = page;
+                    if page == Page::Grants {
+                        Self::read_grants(board, clock, c, m);
+                        m.grant_index = 0;
+                    }
+                    Self::redraw(board, circles, current, m);
+                }
+            }
+            return MenuAction::Stay;
+        }
+
+        // A page an action opened: Left or Right goes back to the actions.
         match gesture {
             Press::None => {}
             Press::Left | Press::Right => {
-                let left = gesture == Press::Left;
-                // On the grants page the caret moves first; the ring turns from the first
-                // or last entry, or when there are none.
+                // On the grants page the caret moves first. From the first entry Left goes
+                // back, from the last Right does, and with no entries either does.
                 if m.page == Page::Grants {
                     let last = m.grant_entries.len().saturating_sub(1);
-                    if left && m.grant_index > 0 {
+                    if gesture == Press::Left && m.grant_index > 0 {
                         m.grant_index -= 1;
                         Self::redraw(board, circles, current, m);
                         return MenuAction::Stay;
                     }
-                    if !left && m.grant_index < last {
+                    if gesture == Press::Right && m.grant_index < last {
                         m.grant_index += 1;
                         Self::redraw(board, circles, current, m);
                         return MenuAction::Stay;
                     }
                 }
-                m.page = if left {
-                    m.page.previous()
-                } else {
-                    m.page.next()
-                };
-                if m.page == Page::Grants {
-                    Self::read_grants(board, clock, c, m);
-                    m.grant_index = if left {
-                        m.grant_entries.len().saturating_sub(1)
-                    } else {
-                        0
-                    };
-                }
+                m.page = Page::Actions;
                 Self::redraw(board, circles, current, m);
             }
             Press::Both => match m.page {
-                // Home's gestures are taken above.
-                Page::Home => {}
+                // Home's and the actions' gestures are taken above.
+                Page::Home | Page::Actions => {}
                 Page::Words => Self::redraw(board, circles, current, m),
                 Page::Key => {
                     match m.pads.spend(&c.circle_id, PSK_LEN) {
@@ -3043,7 +3048,6 @@ impl<B: Board> Badge<B> {
                     }
                     None => Self::redraw(board, circles, current, m),
                 },
-                Page::Circles => return MenuAction::Choose,
                 Page::Forget => {
                     m.confirm_forget = true;
                     show(board, screens::forget_prompt(&c.params.name));
@@ -3292,7 +3296,8 @@ fn show_status<B: Board>(board: &mut B, s: &str) {
     show(board, screens::status(&[s]));
 }
 
-/// The menu's current page: home, or a page of circle `current`.
+/// The menu's current page: home, the actions of circle `current`, or the page one of them
+/// opened.
 fn show_page<B: Board>(board: &mut B, circles: &[Circle], current: usize, m: &Menu<B>) {
     let c = &circles[current];
     let tier = tier_label(board.tier());
@@ -3303,18 +3308,17 @@ fn show_page<B: Board>(board: &mut B, circles: &[Circle], current: usize, m: &Me
             show(board, screens::home(&names, status));
             return;
         }
+        Page::Actions => {
+            let actions: Vec<String> = ACTIONS.iter().map(|a| String::from(*a)).collect();
+            show(
+                board,
+                screens::chooser_titled(&c.params.name, &actions, m.action_index),
+            );
+            return;
+        }
         Page::Words => {
             let words = c.check_words();
-            let page = screens::words_page(
-                &c.params.name,
-                &tier,
-                m.page.index() + 1,
-                Page::ALL.len(),
-                &words,
-                true,
-                true,
-            );
-            show(board, page);
+            show(board, screens::words_page(&c.params.name, &tier, &words));
             return;
         }
         Page::Grants => {
@@ -3323,31 +3327,14 @@ fn show_page<B: Board>(board: &mut B, circles: &[Circle], current: usize, m: &Me
                 .iter()
                 .map(|e| (e.agent.clone(), e.line.clone()))
                 .collect();
-            let page = screens::grants_page(
-                &c.params.name,
-                &tier,
-                m.page.index() + 1,
-                Page::ALL.len(),
-                &entries,
-                m.grant_index,
-            );
+            let page = screens::grants_page(&c.params.name, &tier, &entries, m.grant_index);
             show(board, page);
             return;
         }
         Page::Key => vec!["Both to spend 32 bytes"],
-        Page::Circles => vec!["Both to list the circles"],
         Page::Forget => vec!["Both to forget this circle", "the others stay"],
     };
-    let page = screens::menu_page(
-        &c.params.name,
-        &tier,
-        m.page.index() + 1,
-        Page::ALL.len(),
-        m.page.title(),
-        &body,
-        true,
-        true,
-    );
+    let page = screens::action_page(&c.params.name, &tier, m.page.title(), &body);
     show(board, page);
 }
 

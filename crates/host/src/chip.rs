@@ -339,6 +339,9 @@ fn fields(screen: &str) -> Vec<&str> {
     screen.split(" | ").map(str::trim).collect()
 }
 
+/// The footer of a list: the circles, or one circle's actions under its name.
+const LIST_FOOTER: &str = "prev  A+B  open  next";
+
 /// Ask the badge to raise the chip's pin and say nothing on the wire for `seconds`, so a
 /// phone's tap meets the chip powered. The badge's log prints meanwhile.
 fn window(port: &str, seconds: u64) -> Result<(), String> {
@@ -421,9 +424,6 @@ fn goto(port: &str, entry: &str) -> Result<(), String> {
                 link.send_press(2);
                 continue;
             }
-            let menu = f
-                .get(1)
-                .is_some_and(|x| x.split_once('/').is_some_and(|(a, b)| a.parse::<u8>().is_ok() && b.parse::<u8>().is_ok()));
             let code = if title == "circles" || title == "chip needs a restart" {
                 match f.iter().find_map(|x| x.strip_prefix("> ")) {
                     Some(e) if e == entry => {
@@ -432,8 +432,9 @@ fn goto(port: &str, entry: &str) -> Result<(), String> {
                     }
                     _ => 1,
                 }
-            } else if menu {
-                if f.get(2) == Some(&"circles") { 2 } else { 1 }
+            } else if footer == LIST_FOOTER {
+                // A circle's actions: "back" is the list.
+                if f.contains(&"> back") { 2 } else { 1 }
             } else if footer.contains("A+B") {
                 // Some other page with a question or a way back: Left is back or no.
                 0
@@ -517,9 +518,9 @@ fn press(port: &str, code: u8, p: Presses<'_>) -> Result<(), String> {
     Ok(())
 }
 
-/// Forget the circle named `name` through the badge's own pages: open it from the list, turn
-/// to its forget page, and answer the question with Both. Returns once the badge says it is
-/// forgotten.
+/// Forget the circle named `name` through the badge's own pages: open it from the list, open
+/// "forget this circle" from its actions, and answer the question with Both. Returns once the
+/// badge says it is forgotten.
 fn forget(port: &str, name: &str) -> Result<(), String> {
     let mut link = SerialLink::open(port, "badge").map_err(|e| format!("{port}: {e}"))?;
     link.keep_logs();
@@ -543,18 +544,20 @@ fn forget(port: &str, name: &str) -> Result<(), String> {
             let f = fields(screen);
             let title = f.first().copied().unwrap_or("");
             let footer = f.last().copied().unwrap_or("");
-            let menu = f
-                .get(1)
-                .is_some_and(|x| x.split_once('/').is_some_and(|(a, b)| a.parse::<u8>().is_ok() && b.parse::<u8>().is_ok()));
+            // A page one of the circle's actions opened has its header, "name  tier n".
             let ours = title.strip_prefix(name).is_some_and(|rest| rest.starts_with("  "));
             let code = if title == "self-test" || footer == "A+B  continue" {
                 2
             } else if title == "circles" || title == "chip needs a restart" {
                 if f.iter().find_map(|x| x.strip_prefix("> ")) == Some(name) { 2 } else { 1 }
-            } else if menu && ours {
-                if f.get(2) == Some(&"forget this circle") { 2 } else { 1 }
-            } else if menu {
-                if f.get(2) == Some(&"circles") { 2 } else { 1 }
+            } else if footer == LIST_FOOTER && title == name {
+                // Its actions, under its name: open "forget this circle".
+                if f.contains(&"> forget this circle") { 2 } else { 1 }
+            } else if footer == LIST_FOOTER {
+                // Another circle's actions: "back" is the list.
+                if f.contains(&"> back") { 2 } else { 1 }
+            } else if ours && f.get(1) == Some(&"forget this circle") {
+                2
             } else if title == "forget this circle?" {
                 if f.get(1) == Some(&name) { 2 } else { 0 }
             } else if footer.contains("A+B") {

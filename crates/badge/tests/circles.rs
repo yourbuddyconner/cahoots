@@ -1,5 +1,5 @@
 //! Many circles on one badge: a second ceremony makes a second record and a second chip slot,
-//! the list of circles opens each one's menu, forgetting one keeps the others, Serve answers for
+//! the list of circles opens each one's actions, forgetting one keeps the others, Serve answers for
 //! any circle held and no other, and nothing links two circles.
 
 mod common;
@@ -96,7 +96,7 @@ fn ceremony(
     panic!("the ceremony did not finish: {:?}", bottom.board().last());
 }
 
-/// A badge (with a chip if `chip`) that kept two circles, the second started from its menu,
+/// A badge (with a chip if `chip`) that kept two circles, the second started from the list,
 /// and the two top cards it made them with, which keep their roots in software.
 fn two_circles(chip: bool) -> (Badge<FakeBoard>, Badge<FakeBoard>, Badge<FakeBoard>) {
     let mut board = FakeBoard::seeded(0x9E37_79B9_7F4A_7C15);
@@ -153,12 +153,12 @@ fn connect(b: &mut Badge<FakeBoard>, laptop: &mut FakeLink) {
     assert!(matches!(Response::decode(f.payload), Ok(Response::Identity { .. })));
 }
 
-/// The laptop end of `b`'s down link, with `b` in the first circle's menu and the laptop
+/// The laptop end of `b`'s down link, with `b` on the first circle's actions and the laptop
 /// allowed. `b` starts on home.
 fn serve(b: &mut Badge<FakeBoard>) -> FakeLink {
     let (mut laptop, down) = cable();
     b.board().links = Some((down, FakeLink::open()));
-    // From home to the list and into the first circle's menu, which takes the links.
+    // From home to the list and into the first circle's actions, which take the links.
     assert!(b.board().shows("closed to taps"), "{:?}", b.board().last());
     press(b, Press::Both);
     let first = b.circles()[0].params.name.clone();
@@ -363,18 +363,21 @@ fn chooser_navigation() {
     assert!(b.board().shows("> new circle"));
     press(&mut b, Press::Left);
     assert!(b.board().shows("> other"));
-    // Both opens that circle's menu, on its words page.
+    // Both opens that circle's actions, under its name.
     press(&mut b, Press::Both);
-    assert!(b.board().shows("other  tier 1"));
-    assert!(b.board().shows("1/5"));
+    assert!(b.board().shows("other"), "{:?}", b.board().last());
+    assert!(b.board().shows("> hello words"));
     assert_eq!(b.circle().unwrap().params.name, "other");
-    // Its Circles page goes back to the list, with it marked.
+    // Its "back" goes back to the list, with it marked.
     press(&mut b, Press::Left);
-    press(&mut b, Press::Left);
-    assert!(b.board().shows("circles"));
+    assert!(b.board().shows("> back"));
     press(&mut b, Press::Both);
+    assert!(b.board().shows("circles"));
     assert!(b.board().shows("> other"));
     press(&mut b, Press::Left);
+    press(&mut b, Press::Both);
+    assert!(b.board().shows("fakes"), "{:?}", b.board().last());
+    // An action's page has the circle's header.
     press(&mut b, Press::Both);
     assert!(b.board().shows("fakes  tier 1"));
 }
@@ -435,15 +438,20 @@ fn forget_one_keeps_the_other() {
     press(&mut b, Press::Left);
     press(&mut b, Press::Both);
     assert_eq!(b.circle().unwrap().params.name, "first");
-    // Left from the words page is Forget. A single press on the question goes back.
+    // On its actions, Left twice is "forget this circle", and Both opens its page. A single
+    // press on the question goes back to that page.
     press(&mut b, Press::Left);
+    press(&mut b, Press::Left);
+    assert!(b.board().shows("> forget this circle"));
+    press(&mut b, Press::Both);
     assert!(b.board().shows("forget this circle"));
     press(&mut b, Press::Both);
     assert!(b.board().shows("forget this circle?"));
     assert!(b.board().shows("first"));
     assert!(b.board().shows("back  A+B  forget  back"));
     press(&mut b, Press::Right);
-    assert!(b.board().shows("5/5"));
+    assert!(b.board().shows("forget this circle"));
+    assert!(b.board().shows("back  A+B  choose  back"));
     assert_eq!(b.circles().len(), 2);
     press(&mut b, Press::Both);
     press(&mut b, Press::Both);
@@ -579,7 +587,7 @@ fn unknown_circle_chip_request() {
     // A spend for a circle the badge does not hold is refused without asking.
     let r = ask(&mut b, &mut laptop, 6, &Request::Psk { circle: stranger, context: b"wg".to_vec() });
     assert_eq!(r, Response::Error { code: ErrorCode::UnknownCircle });
-    assert!(b.board().shows("1/5"));
+    assert!(b.board().shows("> hello words"), "nothing asked: {:?}", b.board().last());
 }
 
 /// A board with one record: only `load_circle`, `save_circle` and `forget`, through the
@@ -660,8 +668,9 @@ fn a_board_with_one_record_holds_one_circle() {
     b.board().0.presses.push_back(Press::Both);
     b.idle_step();
     assert_eq!(b.board().0.last(), ["circles", "> fakes", "  back", "prev  A+B  open  next"]);
-    // Forget it from its menu: the record goes through the adapter.
-    for p in [Press::Both, Press::Left, Press::Both, Press::Both] {
+    // Forget it from its actions, "forget this circle" two to the left: the record goes
+    // through the adapter.
+    for p in [Press::Both, Press::Left, Press::Left, Press::Both, Press::Both, Press::Both] {
         b.board().0.presses.push_back(p);
         b.idle_step();
     }
@@ -679,11 +688,13 @@ fn a_failed_forget_never_leaves_a_record_over_a_blank_pad() {
     let mut b = Badge::new(board);
     b.boot();
     b.idle_step();
-    // From home the list, open "fakes", then Left to Forget, Both to ask, Both to forget: the
-    // ledger erase fails.
+    // From home the list, open "fakes", Left twice to "forget this circle", Both to open it,
+    // Both to ask, Both to forget: the ledger erase fails.
     press(&mut b, Press::Both);
     press(&mut b, Press::Both);
     press(&mut b, Press::Left);
+    press(&mut b, Press::Left);
+    press(&mut b, Press::Both);
     press(&mut b, Press::Both);
     press(&mut b, Press::Both);
     assert!(b.board().log.iter().any(|l| l.starts_with("forget: ")), "{:?}", b.board().log);

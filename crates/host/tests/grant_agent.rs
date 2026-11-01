@@ -257,18 +257,20 @@ fn after_a_revoke_on_the_badge_one_commit_fails_and_the_next_asks() {
     wait_line(&top, "4 left of 5");
 
     // The holder revokes it on the badge: a press takes the use screen away, Both shows the
-    // list, Both opens the circle, two presses reach the grants page, Both asks and Both
-    // again revokes.
+    // list, Both opens the circle's actions, two presses reach "grants", Both opens it, Both
+    // asks and Both again revokes.
     press(&top, "R");
     wait_line(&top, "closed to taps");
     press(&top, "B");
     wait_line(&top, "> bench");
     press(&top, "B");
-    wait_line(&top, "1/5");
+    wait_line(&top, "> hello words");
     press(&top, "R");
-    wait_line(&top, "2/5");
+    wait_line(&top, "> key as code");
     press(&top, "R");
-    let page = wait_line(&top, "3/5");
+    wait_line(&top, "> grants");
+    press(&top, "B");
+    let page = wait_line(&top, "grants");
     assert!(page.lines().any(|l| l.starts_with("1 of 5")), "{page}");
     press(&top, "B");
     wait_line(&top, "revoke this grant?");
