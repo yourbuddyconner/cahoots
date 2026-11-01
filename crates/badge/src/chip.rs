@@ -126,6 +126,11 @@ impl SlotEntry {
 /// session: the badge wipes them at boot.
 pub const GENERATION: u8 = 2;
 
+/// The generation of the record a badge stores when it refuses its chip for good: an object a
+/// tap made stays where the badge's own must be, or the setup failed after the owner object,
+/// which nobody may delete, was made. Later boots refuse at once and touch nothing.
+pub const REFUSED_GENERATION: u8 = 0xFF;
+
 /// The bytes a stored chip record starts with.
 pub const RECORD_MAGIC: &[u8; 5] = b"CAHC2";
 
@@ -199,6 +204,20 @@ impl ChipRecord {
             return Ok(None);
         }
         Err(Malformed)
+    }
+
+    /// The record a badge stores when it refuses its chip for good: no slots, no phone, and
+    /// [`REFUSED_GENERATION`].
+    pub fn refused() -> ChipRecord {
+        ChipRecord {
+            generation: REFUSED_GENERATION,
+            ..ChipRecord::default()
+        }
+    }
+
+    /// True for the record of a chip the badge refused for good.
+    pub fn is_refused(&self) -> bool {
+        self.generation == REFUSED_GENERATION
     }
 
     /// True for a record made by firmware that owns its chip.

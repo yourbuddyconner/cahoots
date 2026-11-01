@@ -316,12 +316,17 @@ enum Owned {
     Kept,
     /// Wiped and set up anew.
     Upgraded,
-    /// Not this badge's to own: left unused.
+    /// Not this badge's to own, for good: left unused.
     Refused,
+    /// Not usable this boot: left unused, tried again at the next.
+    NotNow,
 }
 
-/// What the badge says when it will not use its chip.
-const REFUSED: &str = "this chip was touched before the badge owned it. It cannot be used.";
+/// What the badge says when it will never use its chip.
+const REFUSED: &str =
+    "this chip was touched before the badge owned it. It cannot be used. Circles on this badge keep software keys.";
+/// What the badge says when it cannot use its chip this time.
+const NOT_NOW: &str = "the chip could not be set up. Circles made now keep software keys.";
 
 impl<B: Board> Badge<B> {
     pub fn new(board: B) -> Self {
@@ -427,6 +432,7 @@ impl<B: Board> Badge<B> {
         let said = match owned {
             Owned::Upgraded => Some("updated for phones. Make a new circle."),
             Owned::Refused => Some(REFUSED),
+            Owned::NotNow => Some(NOT_NOW),
             Owned::Kept => None,
         };
         if let Some(said) = said {
@@ -585,23 +591,26 @@ impl<B: Board> Badge<B> {
     ///
     /// A chip record of this firmware's generation, on a chip whose owner object opens with
     /// the board's secret, means the chip was set up by this badge: only a missing phone slot
-    /// or inbox is made again. Anything else means the chip's objects were made the old way,
-    /// reachable by any session, or by a tap: every object but the owner object is deleted,
-    /// the circles and the grants with it, and the chip is set up anew, and the badge says so
-    /// once. If the phone slot, the inbox or the issue counter id holds an object that cannot
-    /// be deleted, or the owner object is not this badge's, the chip is not owned: none of
-    /// the objects a tap reaches is made, the board stops handing the chip out for this boot,
-    /// and the badge says the chip cannot be used.
+    /// or inbox is made again. A refused record means an earlier boot found the chip touched:
+    /// it is refused again at once, and nothing else is touched. Anything else means the
+    /// chip's objects were made the old way, reachable by any session, or by a tap: every
+    /// object but the owner object is deleted, the circles whose keys were in the chip and
+    /// the grants with them, and the chip is set up anew in one owner conversation
+    /// ([`chip::first_boot`]), and the badge says so once.
+    ///
+    /// Every way out but those two refuses the chip for this boot ([`Badge::refuse_chip`]):
+    /// the board stops handing it out, so its pin rests low with nothing made that a tap could
+    /// claim and nothing in it used. Where the chip is in a state no later boot can trust (an
+    /// object a tap made stays at the phone slot, inbox or issue counter id, or the setup
+    /// failed after the owner object was made) a refused record is stored, so the wipe runs
+    /// once and later boots refuse at once. Otherwise no record is stored and the next boot
+    /// tries again. Circles whose keys are in software are never touched here.
     ///
     /// An unreadable record changes nothing: it is not the same as no record.
     fn own_chip(&mut self) -> Owned {
         if !self.board.has_chip() {
             return Owned::Kept;
         }
-        let Some(secret) = self.board.owner_secret() else {
-            self.board.log("chip: the board gives no owner secret, left as it is");
-            return Owned::Kept;
-        };
         let stored = match self.board.chip_record_load() {
             Ok(r) => r,
             Err(_) => {
@@ -610,37 +619,53 @@ impl<B: Board> Badge<B> {
                 return Owned::Kept;
             }
         };
+        if stored.as_ref().is_some_and(|r| r.is_refused()) {
+            return self.refuse_chip("chip: refused at an earlier boot", true);
+        }
+        let Some(secret) = self.board.owner_secret() else {
+            return self.refuse_chip("chip: the board gives no owner secret", false);
+        };
+        // The nonce before anything is deleted: a random source that fails leaves all as it is.
+        let mut nonce = [0u8; 16];
+        let drawn = self.board.entropy().fill(&mut nonce).is_ok();
         let Some(chip) = self.board.chip_begin() else {
-            self.board.log("chip: no answer");
-            return Owned::Kept;
+            return self.refuse_chip("chip: no answer", false);
         };
         let has_owner = match chip.exists(KeyId::OWNER) {
             Ok(b) => b,
             Err(e) => {
-                // Not knowing is not the same as no owner object: nothing is wiped.
-                self.board.log(&format!("chip: could not look for the owner object: {e:?}"));
-                return Owned::Kept;
+                return self.refuse_chip(&format!("chip: could not look for the owner object: {e:?}"), false);
             }
         };
         let opens = has_owner && chip.open_owner(&secret).is_ok();
         if stored.as_ref().is_some_and(|r| r.is_current()) && opens {
-            if let Err(e) = chip::ensure_owned(chip, &secret) {
-                self.board.log(&format!("chip: owner objects not made: {e:?}"));
-            }
-            return Owned::Kept;
+            return match chip::ensure_owned(chip, &secret) {
+                Ok(()) => Owned::Kept,
+                Err(e) => self.refuse_chip(&format!("chip: owner objects not made: {e:?}"), false),
+            };
         }
         if has_owner && !opens {
-            return self.refuse_chip("upgrade: the chip's owner object does not open with this badge's secret");
+            return self.refuse_chip(
+                "upgrade: the chip's owner object does not open with this badge's secret",
+                false,
+            );
         }
-        // The chip first: everything but the owner object goes, the phone slot, the inbox and
-        // the issue counter included, whoever made them.
-        let wiped = chip::delete_for_upgrade(chip);
-        let (n, left) = match wiped {
+        if !drawn {
+            return self.refuse_chip("upgrade: the random source failed, chip left as it is", false);
+        }
+        // Everything but the owner object goes, the phone slot, the inbox and the issue
+        // counter included, whoever made them.
+        let (n, left) = match chip::delete_for_upgrade(chip) {
             Ok(w) => w,
             Err(e) => {
-                return self.refuse_chip(&format!("upgrade: the chip's objects could not be listed: {e:?}"));
+                return self.refuse_chip(&format!("upgrade: the chip's objects could not be listed: {e:?}"), false);
             }
         };
+        let stuck = left.iter().any(|(id, _)| chip::ANTENNA_IDS.contains(id));
+        let made = if stuck { None } else { Some(chip::first_boot(chip, &secret, nonce)) };
+        // A setup that failed before the owner object was made can be tried again; one that
+        // failed after cannot, since nobody may delete the owner object.
+        let owner_made = matches!(made, Some(Err(_))) && chip.exists(KeyId::OWNER) != Ok(false);
         self.board.log(&format!(
             "upgrade: {n} chip objects made before the badge owned its chip deleted"
         ));
@@ -648,58 +673,64 @@ impl<B: Board> Badge<B> {
             self.board
                 .log(&format!("upgrade: chip object {:08x} not deleted: {e:?}", id.0));
         }
-        // The circles and the grants go either way: their keys were reachable by any session.
+        // The circles whose keys were in the chip, and the grants, go: those keys were
+        // reachable by any session. Circles with software keys stay.
         let circles = self.board.load_circles();
-        for c in &circles {
+        let (gone, kept): (Vec<Circle>, Vec<Circle>) =
+            circles.into_iter().partition(|c| c.chip_slot.is_some());
+        for c in &gone {
             if self.board.forget(&c.circle_id, c.params.pad_len).is_err() {
                 self.board.log("upgrade: a circle was not forgotten");
             }
         }
-        if self.board.store_circles(&[]).is_err() {
+        if !gone.is_empty() && self.board.store_circles(&kept).is_err() {
             self.board.log("upgrade: circle records failed");
         }
         if self.board.grants_store(&GrantsRecord::default()).is_err() {
             self.board.log("grants record: write failed");
         }
-        if left.iter().any(|(id, _)| chip::ANTENNA_IDS.contains(id)) {
-            return self.refuse_chip("upgrade: an object a tap made stays at the phone slot, inbox or grant counter id");
-        }
-        let mut nonce = [0u8; 16];
-        if self.board.entropy().fill(&mut nonce).is_err() {
-            self.board.log("upgrade: the random source failed, chip left as it is");
-            return Owned::Upgraded;
-        }
-        let Some(chip) = self.board.chip_begin() else {
-            self.board.log("chip: no answer");
-            return Owned::Upgraded;
-        };
-        match chip::first_boot(chip, &secret, nonce) {
-            Ok(record) => {
-                if self.board.chip_record_store(&record).is_err() {
-                    self.board.log("chip record: write failed");
-                } else {
-                    self.board.log(
-                        "upgrade: the chip has its owner, its phone slot, its inbox and its grant counter",
-                    );
-                }
+        let record = match made {
+            None => {
+                return self.refuse_chip(
+                    "upgrade: an object a tap made stays at the phone slot, inbox or grant counter id",
+                    true,
+                )
             }
-            Err(e) => self.board.log(&format!("upgrade: chip not set up: {e:?}")),
+            Some(Err(e)) => {
+                return self.refuse_chip(&format!("upgrade: chip not set up: {e:?}"), owner_made);
+            }
+            Some(Ok(record)) => record,
+        };
+        if self.board.chip_record_store(&record).is_err() {
+            return self.refuse_chip("chip record: write failed", false);
         }
-        if !circles.is_empty() || n > 0 || stored.is_some() {
+        self.board.log(
+            "upgrade: the chip has its owner, its phone slot, its inbox and its grant counter",
+        );
+        if !gone.is_empty() || n > 0 || stored.is_some() {
             Owned::Upgraded
         } else {
             Owned::Kept
         }
     }
 
-    /// The chip is not this badge's to own: log why, end the conversation and stop the board
-    /// handing the chip out.
-    fn refuse_chip(&mut self, why: &str) -> Owned {
+    /// The chip is not this badge's to use: log why, end the conversation and stop the board
+    /// handing the chip out for this boot. With `for_good`, store the refused record, so later
+    /// boots refuse at once.
+    fn refuse_chip(&mut self, why: &str, for_good: bool) -> Owned {
         self.board.log(why);
-        self.board.log("chip: not owned, not used");
         self.board.chip_end();
         self.board.chip_unusable();
-        Owned::Refused
+        if for_good {
+            self.board.log("chip: not owned, never used");
+            if self.board.chip_record_store(&chip::ChipRecord::refused()).is_err() {
+                self.board.log("chip record: write failed");
+            }
+            Owned::Refused
+        } else {
+            self.board.log("chip: not used this time");
+            Owned::NotNow
+        }
     }
 
     /// At boot: delete every chip object in a slot the chip record does not know, and log it.
@@ -725,7 +756,28 @@ impl<B: Board> Badge<B> {
         let Some(chip) = self.board.chip_begin() else {
             return;
         };
-        let lines = record.reconcile_keeping(chip, &keep);
+        let mut lines = record.reconcile_keeping(chip, &keep);
+        // A slot the record keeps but no circle names held an object a wipe could not delete:
+        // try again, and let the slot go once it is empty.
+        let orphans: Vec<u8> = record
+            .slots
+            .iter()
+            .map(|e| e.slot)
+            .filter(|s| !keep.contains(s))
+            .collect();
+        for slot in orphans {
+            match chip::delete_slot(chip, slot) {
+                Ok(left) if left.is_empty() => {
+                    record.remove(slot);
+                    lines.push(format!("chip: slot {slot} names no circle, emptied and let go"));
+                }
+                Ok(left) => lines.push(format!(
+                    "chip: slot {slot} names no circle, {} objects in it still cannot be deleted",
+                    left.len()
+                )),
+                Err(e) => lines.push(format!("chip: slot {slot} names no circle, not emptied: {e:?}")),
+            }
+        }
         for l in &lines {
             self.board.log(l);
         }

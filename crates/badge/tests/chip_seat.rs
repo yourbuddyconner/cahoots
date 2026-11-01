@@ -534,3 +534,29 @@ fn a_slot_holding_an_object_that_cannot_be_deleted_is_passed_over() {
     });
     assert!(b1.board().log.iter().any(|l| l == "seat key made in the chip, slot 1"));
 }
+
+#[test]
+fn boot_empties_a_slot_the_record_keeps_but_no_circle_names() {
+    // A wipe left slot 3 in the record because an object there would not go then.
+    let mut board = FakeBoard::new().with_soft_chip([4; 32]);
+    board
+        .owner_chip()
+        .generate(id(KeyKind::Seat, 3), Curve::P256, &ObjectPolicy::owner_only())
+        .unwrap();
+    board.record_slot(SlotEntry {
+        slot: 3,
+        circle_id: [9; 16],
+        has_seat: true,
+        has_root: false,
+        has_epoch: false,
+    });
+    let mut badge = Badge::new(board);
+    badge.boot();
+    assert!(circle_objects(&mut badge).is_empty());
+    assert!(badge.board().chip_record_load().unwrap().unwrap().slots.is_empty());
+    assert!(badge
+        .board()
+        .log
+        .iter()
+        .any(|l| l == "chip: slot 3 names no circle, emptied and let go"));
+}

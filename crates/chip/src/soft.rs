@@ -79,6 +79,8 @@ impl CryptoRng for SoftRng {}
 pub struct SoftChip {
     objects: BTreeMap<u32, Entry>,
     session: Session,
+    /// With `Some(n)`, the creating call after the next `n` fails.
+    fail_create: Option<usize>,
     rng: SoftRng,
     clock: u64,
     ca: p256::ecdsa::SigningKey,
@@ -103,6 +105,7 @@ impl SoftChip {
         SoftChip {
             objects: BTreeMap::new(),
             session: Session::None,
+            fail_create: None,
             rng: SoftRng { seed, counter: 0 },
             clock: 0,
             ca: p256::ecdsa::SigningKey::from_slice(&ca).expect("the test CA key is valid"),
@@ -282,6 +285,16 @@ impl SoftChip {
         self.open_slot(false)
     }
 
+    /// The next creating call fails with `6A80`, as a write the applet refuses does.
+    pub fn fail_next_create_for_test(&mut self) {
+        self.fail_create = Some(0);
+    }
+
+    /// The creating call after the next `n` fails with `6A80`.
+    pub fn fail_create_after_for_test(&mut self, n: usize) {
+        self.fail_create = Some(n);
+    }
+
     /// Back to no session, as a tap by anything that holds no key would be.
     pub fn no_session_for_test(&mut self) {
         self.session = Session::None;
@@ -301,6 +314,14 @@ impl SoftChip {
     fn create(&mut self, id: KeyId, object: Object, policy: &ObjectPolicy) -> Result<(), ChipError> {
         if self.objects.contains_key(&id.0) {
             return Err(ChipError::Exists);
+        }
+        match self.fail_create {
+            Some(0) => {
+                self.fail_create = None;
+                return Err(ChipError::Status(0x6A80));
+            }
+            Some(n) => self.fail_create = Some(n - 1),
+            None => {}
         }
         self.objects.insert(id.0, Entry { object, policy: policy.clone() });
         Ok(())
