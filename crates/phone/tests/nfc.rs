@@ -339,6 +339,6 @@ fn the_session_reads_only_the_circle_slots_the_badge_vouches_for() {
     assert!(matches!(e, TapError::Disagree));
     assert_eq!(
         PhoneError::from(e).to_string(),
-        "This card’s records disagree. Unpair and pair again."
+        "This card's records disagree. Unpair and pair again."
     );
 }

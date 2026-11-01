@@ -109,7 +109,7 @@ impl From<TapError> for PhoneError {
             }
             TapError::NotScp03 => nfc("The card does not offer the secure channel this app needs."),
             TapError::NoPairing => nfc("Open “pair a phone” on your badge, then hold the phone to the card again."),
-            TapError::Disagree => nfc("This card’s records disagree. Unpair and pair again."),
+            TapError::Disagree => nfc("This card's records disagree. Unpair and pair again."),
             TapError::Status(sw) => PhoneError::Nfc {
                 message: format!("The card answered with code {sw:04X}. Try again."),
             },
