@@ -134,7 +134,7 @@ fn an_agent_signs_under_a_grant_until_it_is_spent() {
     let public = ssh_key::PublicKey::from_bytes(&blob).unwrap();
     let keyfile = tmp.path().join("key.pub");
     std::fs::write(&keyfile, format!("{} {comment}\n", public.to_openssh().unwrap())).unwrap();
-    wait_line(&top, "1/5");
+    wait_line(&top, "closed to taps");
 
     // Two commits under the grant: no press, and the badge counts down.
     for (name, left) in [("one", "1 left of 2"), ("two", "0 left of 2")] {
@@ -247,7 +247,7 @@ fn after_a_revoke_on_the_badge_one_commit_fails_and_the_next_asks() {
     let public = ssh_key::PublicKey::from_bytes(&blob).unwrap();
     let keyfile = tmp.path().join("key.pub");
     std::fs::write(&keyfile, format!("{} {comment}\n", public.to_openssh().unwrap())).unwrap();
-    wait_line(&top, "1/5");
+    wait_line(&top, "closed to taps");
 
     // One commit under the grant, with no press.
     let one = tmp.path().join("one");
@@ -256,9 +256,14 @@ fn after_a_revoke_on_the_badge_one_commit_fails_and_the_next_asks() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     wait_line(&top, "4 left of 5");
 
-    // The holder revokes it on the badge: a press takes the use screen away, two more reach
-    // the grants page, Both asks and Both again revokes.
+    // The holder revokes it on the badge: a press takes the use screen away, Both shows the
+    // list, Both opens the circle, two presses reach the grants page, Both asks and Both
+    // again revokes.
     press(&top, "R");
+    wait_line(&top, "closed to taps");
+    press(&top, "B");
+    wait_line(&top, "> bench");
+    press(&top, "B");
     wait_line(&top, "1/5");
     press(&top, "R");
     wait_line(&top, "2/5");
@@ -270,7 +275,9 @@ fn after_a_revoke_on_the_badge_one_commit_fails_and_the_next_asks() {
     press(&top, "B");
     wait_line(&top, "no grants");
 
-    // The next commit fails, with nobody asked, and the agent retires the grant.
+    // The circle's menu is a new one: the laptop's next request asks about the laptop again.
+    // Allowed, the next commit fails with nothing more asked, and the agent retires the grant.
+    serving.start();
     let two = tmp.path().join("two");
     std::fs::write(&two, COMMIT).unwrap();
     let out = git_sign(tmp.path(), &agent_sock, &keyfile, &two).wait_with_output().unwrap();

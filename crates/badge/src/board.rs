@@ -439,6 +439,11 @@ pub trait Board {
     fn tap_begin(&mut self) {}
     /// Power the chip again after [`Board::tap_begin`]. Nothing happens if no tap was begun.
     fn tap_end(&mut self) {}
+    /// True while `tap_begin` has cut the chip's power and no conversation has restored it.
+    /// The default, for a board without a power switch, is false.
+    fn tap_open(&self) -> bool {
+        false
+    }
     /// The secret of the chip's owner object, the badge's identity to its chip: the one the
     /// chip's owner object opened with, once a conversation has found out, where a board
     /// keeps an older secret beside the current one. `None` on a board without a chip.

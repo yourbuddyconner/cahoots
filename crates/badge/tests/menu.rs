@@ -13,15 +13,18 @@ use cahoots_custodian::CircleId;
 use cahoots_hal::{Entropy, Link};
 use common::{cable, FakeBoard, FakeLink, FAKE_TIER};
 
-/// A badge booted with a stored circle and in the menu, and the laptop end of its down link.
+/// A badge booted with a stored circle and in its menu, and the laptop end of its down link.
 fn in_the_menu() -> (Badge<FakeBoard>, FakeLink, CircleId) {
-    let (mut board, _, _) = FakeBoard::with_circle();
+    let (board, _, _) = FakeBoard::with_circle();
     let id = board.circle.as_ref().unwrap().circle_id;
     let (laptop, down) = cable();
-    board.links = Some((down, FakeLink::open()));
     let mut badge = Badge::new(board);
     badge.boot();
+    // Home, the list, then the circle's menu, which takes the links.
     badge.idle_step();
+    press(&mut badge, Press::Both);
+    badge.board().links = Some((down, FakeLink::open()));
+    press(&mut badge, Press::Both);
     (badge, laptop, id)
 }
 

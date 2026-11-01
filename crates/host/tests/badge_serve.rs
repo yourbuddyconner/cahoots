@@ -84,8 +84,8 @@ fn a_host_board_in_serve_answers_identify_on_its_down_link() {
         }
     };
 
-    // The words page. The first request makes the badge ask about the laptop; Both allows it.
-    wait_screen(&dir, "1/5");
+    // Home. The first request makes the badge ask about the laptop, and Both allows it.
+    wait_screen(&dir, "closed to taps");
     let _presser = {
         let dir = dir.clone();
         std::thread::spawn(move || {

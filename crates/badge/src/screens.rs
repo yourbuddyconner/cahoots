@@ -239,6 +239,30 @@ pub fn chooser_titled(title: &str, names: &[String], chosen: usize) -> Screen {
     s.done()
 }
 
+/// How many circle names the home page shows before it says how many more there are.
+const HOME_ROWS: usize = 6;
+
+/// The home page, where the badge rests: the circles it holds by name, then `status`, which
+/// says whether a phone can tap now. A opens or closes the window for a tap, both or B open
+/// the menu.
+pub fn home(circles: &[String], status: &str) -> Screen {
+    let mut s = Draw::new();
+    s.title("badge");
+    let w = cols(&FONT_8X13);
+    let shown = if circles.len() > HOME_ROWS { HOME_ROWS - 1 } else { circles.len() };
+    let mut y = 30;
+    for name in &circles[..shown] {
+        s.centered(&FONT_8X13, y, &fit("", name, "", w));
+        y += 16;
+    }
+    if circles.len() > shown {
+        s.centered(&FONT_8X13, y, &format!("+{} more", circles.len() - shown));
+    }
+    s.centered(&FONT_8X13, 150, status);
+    s.footer(Some("tap"), Some("A+B  menu"), Some("menu"));
+    s.done()
+}
+
 /// The menu's grants page: one line per live grant, the chosen one marked with `>` and
 /// drawn bold. Each entry is the agent and, under it, how much is used and until when.
 pub fn grants_page(

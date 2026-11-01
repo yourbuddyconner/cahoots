@@ -165,12 +165,15 @@ fn board(chip: bool) -> (FakeBoard, CircleId, SeatPublic) {
 /// A badge serving its down link with the laptop allowed, the laptop end, the circle id, and
 /// the seat public key.
 fn serving(chip: bool) -> (Badge<FakeBoard>, FakeLink, CircleId, SeatPublic) {
-    let (mut board, id, public) = board(chip);
+    let (board, id, public) = board(chip);
     let (mut laptop, down) = cable();
-    board.links = Some((down, FakeLink::open()));
     let mut badge = Badge::new(board);
     badge.boot();
+    // Home, the list, then the circle's menu, which takes the links.
     badge.idle_step();
+    press(&mut badge, Press::Both);
+    badge.board().links = Some((down, FakeLink::open()));
+    press(&mut badge, Press::Both);
     send(&mut laptop, 900, &Request::Identify);
     badge.idle_step();
     assert!(

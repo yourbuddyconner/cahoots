@@ -222,8 +222,11 @@ fn a_tap_in_no_session_reads_which_circles_the_badge_holds_and_no_public_object(
     assert_eq!(tapped(&mut b1).circles, 1);
     b1.pair_close();
     assert_eq!(tapped(&mut b1).circles, 1);
-    // Forgetting the circle takes it off the pairing object.
+    // Forgetting the circle takes it off the pairing object: home, the list, the circle's
+    // menu, then Left to Forget.
     b1.idle_step();
+    press(&mut b1, Press::Both);
+    press(&mut b1, Press::Both);
     press(&mut b1, Press::Left);
     assert!(b1.board().shows("forget this circle"), "{:?}", b1.board().last());
     press(&mut b1, Press::Both);
@@ -850,10 +853,7 @@ fn a_pairing_that_leaves_the_slot_empty_holds_the_chip_until_the_next_boot() {
     assert_eq!(tapped_nonce(&mut b1), [0; 16]);
     b1.idle_step();
     assert!(b1.board().pin_high());
-    // The list says why the chip is gone, after the restart note.
-    for _ in 0..3 {
-        press(&mut b1, Press::Right);
-    }
+    // The list, from home, says why the chip is gone.
     press(&mut b1, Press::Both);
     assert!(b1.board().shows("chip needs a restart"), "{:?}", b1.board().last());
     assert!(!b1.board().last().iter().any(|l| l.ends_with("pair a phone")));
@@ -920,12 +920,10 @@ fn press(b: &mut Badge<FakeBoard>, p: Press) {
     b.idle_step();
 }
 
-/// From a just-kept circle's menu to the list of circles, entry `index` marked.
+/// From a just-kept circle to home, then to the list of circles, entry `index` marked.
 fn to_the_list_at(b: &mut Badge<FakeBoard>, index: usize) {
     b.idle_step();
-    for _ in 0..3 {
-        press(b, Press::Right);
-    }
+    assert!(b.board().shows("closed to taps"), "{:?}", b.board().last());
     press(b, Press::Both);
     assert!(b.board().last().iter().any(|l| l == "circles"), "{:?}", b.board().last());
     for _ in 0..index {
@@ -981,7 +979,13 @@ fn pairing_from_the_list_shows_the_name_and_the_six_words() {
     press(&mut b1, Press::Left);
     assert!(b1.board().shows("not paired"));
     assert_eq!(tapped_nonce(&mut b1), [0; 16]);
+    // Any press goes home. From there, the list and "pair a phone" again.
     press(&mut b1, Press::Right);
+    assert!(b1.board().shows("closed to taps"), "{:?}", b1.board().last());
+    press(&mut b1, Press::Both);
+    press(&mut b1, Press::Right);
+    press(&mut b1, Press::Right);
+    assert!(b1.board().shows("> pair a phone"), "{:?}", b1.board().last());
 
     // Open, tap, Both, then Both again, pairs.
     press(&mut b1, Press::Both);
@@ -994,16 +998,28 @@ fn pairing_from_the_list_shows_the_name_and_the_six_words() {
     assert!(!b1.board().pin_high());
     // "tap the phone again": the chip's power is cut for that second tap.
     assert!(b1.board().tap_open);
+    // Any press goes home, with the window for that tap open.
+    press(&mut b1, Press::Right);
+    assert!(b1.board().shows("open for a tap, 2 min"), "{:?}", b1.board().last());
+    assert!(b1.board().tap_open);
 
-    // Back on the list, "pair a phone" says to unpair first, and "phone" is there. The list
-    // gives the chip its power back.
+    // The list gives the chip its power back. "pair a phone" says to unpair first, and
+    // "phone" is there.
+    press(&mut b1, Press::Both);
+    assert!(!b1.board().tap_open);
+    press(&mut b1, Press::Right);
     press(&mut b1, Press::Right);
     assert!(b1.board().shows("> pair a phone"));
-    assert!(!b1.board().tap_open);
     press(&mut b1, Press::Both);
     assert!(b1.board().shows("unpair the current phone first"));
-    press(&mut b1, Press::Right);
-    press(&mut b1, Press::Right);
+    // A note goes home by itself five seconds later, with no press.
+    b1.board().uptime += 5;
+    b1.idle_step();
+    assert!(b1.board().shows("closed to taps"), "{:?}", b1.board().last());
+    press(&mut b1, Press::Both);
+    for _ in 0..3 {
+        press(&mut b1, Press::Right);
+    }
     assert!(b1.board().shows("> phone"), "{:?}", b1.board().last());
     press(&mut b1, Press::Both);
     assert!(b1.board().shows("Conner's phone"), "{:?}", b1.board().last());
@@ -1019,9 +1035,13 @@ fn pairing_from_the_list_shows_the_name_and_the_six_words() {
     assert_eq!(b1.paired_phone(), None);
     assert_eq!(tap(&mut b1).open_slot_with_key_for_test(&PHONE_KEY), Err(ChipError::BadSession));
 
-    // With the phone gone the list has no "phone" entry again, and the mark is on its last.
+    // Any press goes home, which gives the chip the power the phone's page cut. With the
+    // phone gone the list has no "phone" entry again.
     press(&mut b1, Press::Right);
-    assert!(b1.board().shows("> pair a phone"), "{:?}", b1.board().last());
+    assert!(b1.board().shows("closed to taps"), "{:?}", b1.board().last());
+    assert!(!b1.board().tap_open);
+    press(&mut b1, Press::Both);
+    assert!(b1.board().shows("  pair a phone"), "{:?}", b1.board().last());
     assert!(!b1.board().last().iter().any(|l| l.trim_start_matches(['>', ' ']) == "phone"));
 }
 

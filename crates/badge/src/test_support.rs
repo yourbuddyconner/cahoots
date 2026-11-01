@@ -624,6 +624,9 @@ impl Board for FakeBoard {
     fn tap_end(&mut self) {
         self.tap_open = false;
     }
+    fn tap_open(&self) -> bool {
+        self.tap_open
+    }
     fn chip_unusable(&mut self) {
         self.chip_end();
         self.chip_refused = true;

@@ -297,6 +297,10 @@ impl Board for PicoBoard {
         log!("se051: power back");
     }
 
+    fn tap_open(&self) -> bool {
+        self.tap_open
+    }
+
     /// Close the session and drop the pin.
     fn chip_end(&mut self) {
         if !self.chip_up || self.chip_held {
