@@ -297,10 +297,10 @@ fn an_old_bump_read_again_moves_nothing() {
     other.mark_synced();
     let (_, payload0) = other.receive(&b64_decode(&w0).unwrap()).unwrap();
     let (from, to) = (payload0[..32].try_into().unwrap(), payload0[32..64].try_into().unwrap());
-    assert_eq!(other.apply_bump(from, to), Ok(true));
+    assert_eq!(other.apply_bump(from, to), Ok(cahoots_chat::BumpOutcome::Moved { dropped_own: false }));
     let (_, payload1) = other.receive(&b64_decode(&w1).unwrap()).unwrap();
     let (from, to) = (payload1[..32].try_into().unwrap(), payload1[32..64].try_into().unwrap());
-    assert_eq!(other.apply_bump(from, to), Ok(true));
+    assert_eq!(other.apply_bump(from, to), Ok(cahoots_chat::BumpOutcome::Moved { dropped_own: false }));
     assert_eq!(Some(hex::encode(other.generation_id())), newest);
     let replay = other
         .send_typed(cahoots_chat::MessageType::Bump, &payload0)
@@ -367,4 +367,22 @@ fn faces_are_576_pixels_and_each_seat_has_an_interim_face() {
     assert_ne!(a0, a1);
     assert_eq!(b.interim_face_seed(0).unwrap(), a0);
     assert!(a.interim_face_seed(2).is_none());
+}
+
+#[test]
+fn two_resets_at_once_end_in_one_generation_and_the_losing_one_is_not_posted() {
+    let (mut a, mut b) = pair();
+    let wa = a.bump_generation().unwrap();
+    let wb = b.bump_generation().unwrap();
+    assert_ne!(a.generation_id_hex(), b.generation_id_hex());
+    let ra = a.chat_receive(&wb).unwrap();
+    let rb = b.chat_receive(&wa).unwrap();
+    // Both end in the lower id. The one that lost moved and dropped its unposted reset.
+    assert_eq!(a.generation_id_hex(), b.generation_id_hex());
+    assert_eq!(ra.ignored(), !rb.ignored());
+    let (loser, winner) = if ra.ignored() { (&b, &a) } else { (&a, &b) };
+    assert!(loser.pending_bump().is_none());
+    assert!(winner.pending_bump().is_some());
+    let w = a.chat_send(b"one generation").unwrap();
+    assert_eq!(b.chat_receive(&w).unwrap().text(), b"one generation");
 }

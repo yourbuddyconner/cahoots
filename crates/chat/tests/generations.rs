@@ -2,7 +2,8 @@
 //! signed bump moves the circle to a fresh generation, and the last two stay open.
 
 use cahoots_chat::{
-    generation_tag, parse, sign_bump, verify_bump, ChatError, ChatSession, EpochId, MessageType,
+    generation_tag, parse, sign_bump, verify_bump, BumpOutcome, ChatError, ChatSession, EpochId,
+    MessageType,
 };
 use cahoots_core::manifest::{Manifest, Seat};
 use cahoots_core::params::CircleParams;
@@ -15,6 +16,8 @@ const CID: CircleId = [0x0c; 16];
 const ID1: [u8; 32] = [0x11; 32];
 const ID2: [u8; 32] = [0x22; 32];
 const ID3: [u8; 32] = [0x33; 32];
+
+const MOVED: BumpOutcome = BumpOutcome::Moved { dropped_own: false };
 
 fn g0() -> [u8; 32] {
     gen0_id(&CID)
@@ -115,7 +118,7 @@ fn a_bump_moves_every_root_holder_and_locks_out_a_device_without_the_key() {
         verify_bump(&got, &CID, &manifest()).unwrap(),
         (g0(), ID1, 0)
     );
-    assert_eq!(b.apply_bump(g0(), ID1), Ok(true));
+    assert_eq!(b.apply_bump(g0(), ID1), Ok(MOVED));
     assert_eq!(b.generation_id(), ID1);
 
     let (h, got) = d.receive(&wire).unwrap();
@@ -229,7 +232,7 @@ fn a_v5_state_with_root_epoch_history_imports_as_generation_zero() {
 
     // Exported again, the state is the new form and keeps everything.
     let again = b.export_state();
-    assert_eq!(&again[..4], b"CHS3");
+    assert_eq!(&again[..4], b"CHS4");
     let mut b2 = ChatSession::import_state(&ROOT, CID, 3, 1, &again).unwrap();
     assert_eq!(b2.receive(&wires[1]), Err(ChatError::Replay));
     b2.mark_synced();
@@ -249,11 +252,11 @@ fn the_last_two_generations_stay_open() {
         .send_bump(ID1, &sign_bump(&seat_key(0), 0, &CID, &g0(), &ID1).unwrap())
         .unwrap();
     b.receive(&wire).unwrap();
-    assert_eq!(b.apply_bump(g0(), ID1), Ok(true));
+    assert_eq!(b.apply_bump(g0(), ID1), Ok(MOVED));
     assert_eq!(b.receive(&straggler0).unwrap().1, b"late in gen 0");
 
     c.receive(&wire).unwrap();
-    assert_eq!(c.apply_bump(g0(), ID1), Ok(true));
+    assert_eq!(c.apply_bump(g0(), ID1), Ok(MOVED));
     let another0 = {
         // A second straggler, sealed by a member still in generation 0.
         let mut late = member(2);
@@ -265,7 +268,7 @@ fn the_last_two_generations_stay_open() {
         .send_bump(ID2, &sign_bump(&seat_key(0), 0, &CID, &ID1, &ID2).unwrap())
         .unwrap();
     b.receive(&wire2).unwrap();
-    assert_eq!(b.apply_bump(ID1, ID2), Ok(true));
+    assert_eq!(b.apply_bump(ID1, ID2), Ok(MOVED));
     assert_eq!(b.generation_id(), ID2);
     // One generation back still opens. Two back is gone.
     assert_eq!(b.receive(&straggler1).unwrap().1, b"late in gen 1");
@@ -386,6 +389,23 @@ fn a_damaged_state_does_not_import() {
     assert_eq!(import(&chs3(&five[..4], &[(ID1, k)])), None);
     assert_eq!(import(&chs3(&five, &[(ID1, k)])), Some(ChatError::State));
 
+    // The trailer of the current form: a flag that is not 0 or 1 does not import, and
+    // neither does a state cut short of it.
+    let good = member(2).export_state().to_vec();
+    assert_eq!(&good[..4], b"CHS4");
+    assert!(ChatSession::import_state(&ROOT, CID, 3, 2, &good).is_ok());
+    let mut bad = good.clone();
+    *bad.last_mut().unwrap() = 2;
+    assert_eq!(
+        ChatSession::import_state(&ROOT, CID, 3, 2, &bad).err(),
+        Some(ChatError::State)
+    );
+    let short = &good[..good.len() - 1];
+    assert_eq!(
+        ChatSession::import_state(&ROOT, CID, 3, 2, short).err(),
+        Some(ChatError::State)
+    );
+
     // A state with root epochs does not import without the root.
     let mut b = member(1);
     b.receive(&v5_wires()[0]).unwrap();
@@ -409,34 +429,196 @@ fn a_bump_moves_only_from_the_generation_it_was_sealed_in_and_names() {
     let first = sign_bump(&seat_key(0), 0, &CID, &g0(), &ID1).unwrap();
     let w1 = a.send_bump(ID1, &first).unwrap();
     b.receive(&w1).unwrap();
-    assert_eq!(b.apply_bump(g0(), ID1), Ok(true));
+    assert_eq!(b.apply_bump(g0(), ID1), Ok(MOVED));
     let w2 = a
         .send_bump(ID2, &sign_bump(&seat_key(0), 0, &CID, &ID1, &ID2).unwrap())
         .unwrap();
     b.receive(&w2).unwrap();
-    assert_eq!(b.apply_bump(ID1, ID2), Ok(true));
+    assert_eq!(b.apply_bump(ID1, ID2), Ok(MOVED));
 
     // The first bump's payload sealed again in the current generation: it moves from a
     // generation the circle left, so it is stale and moves nothing.
     let replay = a.send_typed(MessageType::Bump, &first).unwrap();
     let (_, got) = b.receive(&replay).unwrap();
     let (from, to, _) = verify_bump(&got, &CID, &manifest()).unwrap();
-    assert_eq!(b.apply_bump(from, to), Ok(false));
+    assert_eq!(b.apply_bump(from, to), Ok(BumpOutcome::Stale));
     assert_eq!(b.generation_id(), ID2);
 
     // A bump that names the current generation but was sealed in the one before: stale.
     let mut c = member(2);
     c.receive(&w1).unwrap();
-    assert_eq!(c.apply_bump(g0(), ID1), Ok(true));
+    assert_eq!(c.apply_bump(g0(), ID1), Ok(MOVED));
     let sideways = sign_bump(&seat_key(0), 0, &CID, &ID2, &ID3).unwrap();
     let in_old = c.send_typed(MessageType::Bump, &sideways).unwrap();
     assert_eq!(b.receive(&in_old).unwrap().0.msg_type, MessageType::Bump);
-    assert_eq!(b.apply_bump(ID2, ID3), Ok(false));
+    assert_eq!(b.apply_bump(ID2, ID3), Ok(BumpOutcome::Stale));
     assert_eq!(b.generation_id(), ID2);
 
     // The same bump sealed in the generation it names moves.
     let in_current = a.send_typed(MessageType::Bump, &sideways).unwrap();
     b.receive(&in_current).unwrap();
-    assert_eq!(b.apply_bump(ID2, ID3), Ok(true));
+    assert_eq!(b.apply_bump(ID2, ID3), Ok(MOVED));
     assert_eq!(b.generation_id(), ID3);
+}
+
+/// Two bumps from generation 0, to `low` and `high`, sealed by seats 0 and 1 of `a` and `b`.
+fn concurrent(
+    a: &mut ChatSession,
+    b: &mut ChatSession,
+    low: [u8; 32],
+    high: [u8; 32],
+) -> (Vec<u8>, Vec<u8>) {
+    let wa = a
+        .send_bump(
+            high,
+            &sign_bump(&seat_key(0), 0, &CID, &g0(), &high).unwrap(),
+        )
+        .unwrap();
+    let wb = b
+        .send_bump(low, &sign_bump(&seat_key(1), 1, &CID, &g0(), &low).unwrap())
+        .unwrap();
+    (wa, wb)
+}
+
+#[test]
+fn two_bumps_at_once_end_in_the_lower_generation_for_everyone() {
+    let (low, high) = (ID1, ID2);
+    assert!(low < high);
+    let mut a = member(0);
+    let mut b = member(1);
+    let mut c = member(2);
+    // a sends something before it hears of b's bump.
+    let (wa, wb) = concurrent(&mut a, &mut b, low, high);
+    let early = a.send(b"from a, in its own generation").unwrap();
+
+    // a reads b's bump: b's id is lower, so a follows it and drops its own.
+    a.receive(&wb).unwrap();
+    assert_eq!(
+        a.apply_bump(g0(), low),
+        Ok(BumpOutcome::Moved { dropped_own: true })
+    );
+    assert_eq!(a.generation_id(), low);
+    // b reads a's bump: b's own id is lower, so b stays, and holds a's generation too.
+    b.receive(&wa).unwrap();
+    assert_eq!(b.apply_bump(g0(), high), Ok(BumpOutcome::Stale));
+    assert_eq!(b.generation_id(), low);
+    assert_eq!(
+        b.receive(&early).unwrap().1,
+        b"from a, in its own generation"
+    );
+
+    // c reads both, in either order, and ends in the lower one.
+    c.receive(&wa).unwrap();
+    assert_eq!(c.apply_bump(g0(), high), Ok(MOVED));
+    c.receive(&wb).unwrap();
+    assert_eq!(c.apply_bump(g0(), low), Ok(MOVED));
+    assert_eq!(c.generation_id(), low);
+    assert_eq!(
+        c.receive(&early).unwrap().1,
+        b"from a, in its own generation"
+    );
+
+    // Everyone reads everyone in the lower generation.
+    let from_a = a.send(b"a").unwrap();
+    let from_b = b.send(b"b").unwrap();
+    let from_c = c.send(b"c").unwrap();
+    for w in [&from_a, &from_b, &from_c] {
+        assert_eq!(
+            parse(w).unwrap().0.epoch.generation_parts().unwrap().0,
+            generation_tag(&low)
+        );
+    }
+    assert_eq!(a.receive(&from_b).unwrap().1, b"b");
+    assert_eq!(a.receive(&from_c).unwrap().1, b"c");
+    assert_eq!(b.receive(&from_a).unwrap().1, b"a");
+    assert_eq!(b.receive(&from_c).unwrap().1, b"c");
+    assert_eq!(c.receive(&from_a).unwrap().1, b"a");
+    assert_eq!(c.receive(&from_b).unwrap().1, b"b");
+
+    // Kept across export and import: the losing bump read again moves nobody.
+    let mut back = ChatSession::import_state(&ROOT, CID, 3, 0, &a.export_state()).unwrap();
+    back.receive(&wb).ok();
+    assert_eq!(back.generation_id(), low);
+    // b holds both new generations now. Generation 0 was dropped to make room, so the losing
+    // bump does not open again.
+    let mut back_b = ChatSession::import_state(&ROOT, CID, 3, 1, &b.export_state()).unwrap();
+    assert_eq!(back_b.receive(&wa), Err(ChatError::NeedsGeneration(g0())));
+    assert_eq!(back_b.receive(&early), Err(ChatError::Replay));
+    assert_eq!(back_b.generation_id(), low);
+}
+
+#[test]
+fn a_device_that_followed_the_losing_bump_needs_the_winner() {
+    let (low, high) = (ID1, ID2);
+    let mut a = member(0);
+    let mut b = member(1);
+    let mut d = synced(ChatSession::from_generation(
+        g0(),
+        chat_gen_key(&ROOT, &CID, &g0()),
+        CID,
+        3,
+        2,
+    ));
+    let (wa, wb) = concurrent(&mut a, &mut b, low, high);
+    // The device reads a's bump first and is given its key.
+    d.receive(&wa).unwrap();
+    assert_eq!(
+        d.apply_bump(g0(), high),
+        Err(ChatError::NeedsGeneration(high))
+    );
+    d.install_generation(high, chat_gen_key(&ROOT, &CID, &high));
+    assert_eq!(d.generation_id(), high);
+    // Then b's, with the lower id: the device needs that key, and keeps its own meanwhile.
+    d.receive(&wb).unwrap();
+    assert_eq!(
+        d.apply_bump(g0(), low),
+        Err(ChatError::NeedsGeneration(low))
+    );
+    assert_eq!(d.generation_id(), high);
+    let w = b.send(b"in the winner").unwrap();
+    assert_eq!(d.receive(&w), Err(ChatError::NeedsGeneration(low)));
+    // Kept across export and import.
+    let mut d = ChatSession::import_generation_state(CID, 3, 2, &d.export_state()).unwrap();
+    d.mark_synced();
+    assert_eq!(d.receive(&w), Err(ChatError::NeedsGeneration(low)));
+    d.install_generation(low, chat_gen_key(&ROOT, &CID, &low));
+    assert_eq!(d.generation_id(), low);
+    assert_eq!(d.receive(&w).unwrap().1, b"in the winner");
+    let back = d.send(b"from d").unwrap();
+    assert_eq!(b.receive(&back).unwrap().1, b"from d");
+    // A second competing bump from generation 0 is compared with the winner, not with the
+    // device's first generation.
+    let lower = [0x01; 32];
+    let wl = {
+        let mut e = member(0);
+        e.send_bump(
+            lower,
+            &sign_bump(&seat_key(0), 0, &CID, &g0(), &lower).unwrap(),
+        )
+        .unwrap()
+    };
+    assert_eq!(d.receive(&wl), Err(ChatError::NeedsGeneration(g0())));
+}
+
+#[test]
+fn an_own_bump_that_wins_is_not_dropped() {
+    let (low, high) = (ID1, ID2);
+    let mut a = member(0);
+    let mut b = member(1);
+    let (wa, wb) = concurrent(&mut a, &mut b, low, high);
+    // b made the lower one: reading a's moves nothing and drops nothing.
+    b.receive(&wa).unwrap();
+    assert_eq!(b.apply_bump(g0(), high), Ok(BumpOutcome::Stale));
+    // a made the higher one: its own is dropped.
+    a.receive(&wb).unwrap();
+    assert_eq!(
+        a.apply_bump(g0(), low),
+        Ok(BumpOutcome::Moved { dropped_own: true })
+    );
+    // A bump a only followed is not its own: a later loss drops nothing of its own.
+    let mut c = member(2);
+    c.receive(&wa).unwrap();
+    assert_eq!(c.apply_bump(g0(), high), Ok(MOVED));
+    c.receive(&wb).unwrap();
+    assert_eq!(c.apply_bump(g0(), low), Ok(MOVED));
 }

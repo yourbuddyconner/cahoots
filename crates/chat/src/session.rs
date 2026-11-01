@@ -24,7 +24,11 @@ pub const MAX_OWN_SKIP: u32 = 1 << 16;
 /// `CHS1` was the pad-epoch state. It does not import. `CHS2` was the root-epoch state, written
 /// by the browser's state version 5. It imports as generation 0, with its root epochs kept for
 /// reading old history.
-const STATE_MAGIC: &[u8; 4] = b"CHS3";
+/// `CHS3` is the generation state without the trailer `CHS4` adds (where the current
+/// generation was entered from, whether by this member's own bump, and where a pending one
+/// moves from). It imports, with the current generation taken as entered from the one before.
+const STATE_MAGIC: &[u8; 4] = b"CHS4";
+const STATE_MAGIC_GENERATIONS: &[u8; 4] = b"CHS3";
 const STATE_MAGIC_ROOT_EPOCHS: &[u8; 4] = ChatSession::STATE_MAGIC_ROOT_EPOCHS;
 
 #[derive(Clone)]
@@ -309,6 +313,13 @@ pub struct ChatSession {
     gens: Vec<Generation>,
     /// A generation a bump named whose key this session could not derive.
     pending: Option<[u8; 32]>,
+    /// The generation the pending bump moves from.
+    pending_from: Option<[u8; 32]>,
+    /// The generation the current one was entered from, by a bump. `None` for generation 0
+    /// and for a session made from one generation's key.
+    current_from: Option<[u8; 32]>,
+    /// Whether this member's own bump made the current generation.
+    current_own: bool,
     /// Ids of generations whose keys were dropped, oldest first.
     retired: Vec<[u8; 32]>,
     /// Our own messages in the current epoch of the current generation.
@@ -354,6 +365,9 @@ impl ChatSession {
             old: Epochs::default(),
             gens: alloc::vec![Generation::new(generation_id, generation_key)],
             pending: None,
+            pending_from: None,
+            current_from: None,
+            current_own: false,
             retired: Vec::new(),
             sent_in_current: 0,
             synced: false,
@@ -430,35 +444,78 @@ impl ChatSession {
     }
 
     /// Follow a verified bump from `from` to `to`, read with the last call to `receive`, and
-    /// start epoch 1 of `to`. Returns true when the session moved.
+    /// start epoch 1 of `to`.
     ///
-    /// The session moves only when the bump was sealed in generation `from` and `from` is the
-    /// current generation. Any other bump is stale and moves nothing (false): one read again
-    /// after the circle moved on, one sealed in a generation it does not name, or one to a
-    /// generation already held or dropped. So an old bump replayed never takes the session
-    /// back or sideways.
+    /// The bump counts only when it was sealed in generation `from`. Then:
+    ///
+    /// - `from` is the current generation: the session moves to `to`.
+    /// - The current generation was entered from `from` too, by another bump: two members
+    ///   bumped at once. The lower id wins. If `to` is lower, the session moves to it, and the
+    ///   generation it leaves stays held so nothing sealed there is lost. `dropped_own` says
+    ///   that generation came from this member's own bump, whose wire need not be posted now.
+    ///   If the current id is lower, the session stays, and with the root it holds `to` too, so
+    ///   what the other member sent before it followed still opens.
+    /// - Anything else is stale and moves nothing: one read again after the circle moved on,
+    ///   one sealed in a generation it does not name, or one to a generation already held or
+    ///   dropped. So an old bump replayed never takes the session back or sideways.
     ///
     /// With the root the key of `to` is derived. Without it the answer is
     /// `NeedsGeneration(to)`: fetch the key and call `install_generation`.
-    pub fn apply_bump(&mut self, from: [u8; 32], to: [u8; 32]) -> Result<bool, ChatError> {
-        if self.opened_in != Some(from) || self.current().id != from || self.knows(&to) {
-            return Ok(false);
+    pub fn apply_bump(&mut self, from: [u8; 32], to: [u8; 32]) -> Result<BumpOutcome, ChatError> {
+        if self.opened_in != Some(from) || self.knows(&to) {
+            return Ok(BumpOutcome::Stale);
         }
-        self.follow(to)?;
-        Ok(true)
+        let current = self.current().id;
+        if from == current {
+            self.follow(from, to, false)?;
+            return Ok(BumpOutcome::Moved { dropped_own: false });
+        }
+        if self.current_from != Some(from) {
+            return Ok(BumpOutcome::Stale);
+        }
+        if current < to {
+            // Ours wins. The other member follows it by the same rule. Until then its messages
+            // are in `to`: hold it beside the current generation.
+            if let Some(root) = &self.root {
+                let key = chat_gen_key(root, &self.circle_id, &to);
+                self.hold_beside_current(to, key);
+            }
+            return Ok(BumpOutcome::Stale);
+        }
+        let dropped_own = self.current_own;
+        self.follow(from, to, false)?;
+        Ok(BumpOutcome::Moved { dropped_own })
     }
 
-    /// Move to `to`, deriving its key with the root.
-    fn follow(&mut self, to: [u8; 32]) -> Result<(), ChatError> {
+    /// Move to `to`, entered from `from`, deriving its key with the root.
+    fn follow(&mut self, from: [u8; 32], to: [u8; 32], own: bool) -> Result<(), ChatError> {
         let key = match &self.root {
             Some(root) => chat_gen_key(root, &self.circle_id, &to),
             None => {
                 self.pending = Some(to);
+                self.pending_from = Some(from);
                 return Err(ChatError::NeedsGeneration(to));
             }
         };
-        self.enter(to, key);
+        self.enter(to, key, Some(from), own);
         Ok(())
+    }
+
+    /// Hold `id` as the generation before the current one, dropping the oldest held.
+    fn hold_beside_current(&mut self, id: [u8; 32], key: Zeroizing<[u8; 32]>) {
+        if self.gens.len() >= MAX_GENERATIONS {
+            let gone = self.gens.remove(0);
+            self.retire(gone.id);
+        }
+        let at = self.gens.len() - 1;
+        self.gens.insert(at, Generation::new(id, key));
+    }
+
+    fn retire(&mut self, id: [u8; 32]) {
+        self.retired.push(id);
+        while self.retired.len() > MAX_RETIRED {
+            self.retired.remove(0);
+        }
     }
 
     /// Move to a generation whose key this device was given, and start its epoch 1. A
@@ -469,7 +526,11 @@ impl ChatSession {
         generation_key: Zeroizing<[u8; 32]>,
     ) {
         if !self.knows(&generation_id) {
-            self.enter(generation_id, generation_key);
+            let from = match self.pending_from {
+                Some(from) if self.pending == Some(generation_id) => from,
+                _ => self.current().id,
+            };
+            self.enter(generation_id, generation_key, Some(from), false);
         }
     }
 
@@ -477,19 +538,25 @@ impl ChatSession {
         self.gens.iter().any(|g| &g.id == generation_id) || self.retired.contains(generation_id)
     }
 
-    fn enter(&mut self, generation_id: [u8; 32], generation_key: Zeroizing<[u8; 32]>) {
+    fn enter(
+        &mut self,
+        generation_id: [u8; 32],
+        generation_key: Zeroizing<[u8; 32]>,
+        from: Option<[u8; 32]>,
+        own: bool,
+    ) {
         self.gens
             .push(Generation::new(generation_id, generation_key));
         while self.gens.len() > MAX_GENERATIONS {
             let gone = self.gens.remove(0);
-            self.retired.push(gone.id);
-        }
-        while self.retired.len() > MAX_RETIRED {
-            self.retired.remove(0);
+            self.retire(gone.id);
         }
         if self.pending == Some(generation_id) {
             self.pending = None;
+            self.pending_from = None;
         }
+        self.current_from = from;
+        self.current_own = own;
         self.sent_in_current = 0;
         self.start_epoch();
     }
@@ -520,7 +587,7 @@ impl ChatSession {
             return Err(ChatError::CannotBump);
         }
         let wire = self.send_typed(MessageType::Bump, payload)?;
-        self.follow(generation_id)?;
+        self.follow(current, generation_id, true)?;
         Ok(wire)
     }
 
@@ -683,6 +750,16 @@ impl ChatSession {
             out.extend_from_slice(g.key.as_ref());
             g.epochs.export(&mut out);
         }
+        for id in [&self.current_from, &self.pending_from] {
+            match id {
+                Some(id) => {
+                    out.push(1);
+                    out.extend_from_slice(id);
+                }
+                None => out.push(0),
+            }
+        }
+        out.push(u8::from(self.current_own));
         out
     }
 
@@ -732,7 +809,7 @@ impl ChatSession {
             let mut s = ChatSession::new(root, circle_id, members, my_index);
             s.old = old;
             s
-        } else if magic == STATE_MAGIC {
+        } else if magic == STATE_MAGIC || magic == STATE_MAGIC_GENERATIONS {
             let sent_in_current = r.u32()?;
             let old = Epochs::import(&mut r, members)?;
             if root.is_none() && !old.states.is_empty() {
@@ -770,6 +847,27 @@ impl ChatSession {
                 g.epochs = epochs;
                 gens.push(g);
             }
+            let (current_from, pending_from, current_own) = if magic == STATE_MAGIC {
+                let mut opt = || -> Result<Option<[u8; 32]>, ChatError> {
+                    match r.u8()? {
+                        0 => Ok(None),
+                        1 => Ok(Some(r.id()?)),
+                        _ => Err(ChatError::State),
+                    }
+                };
+                let current_from = opt()?;
+                let pending_from = opt()?;
+                let own = match r.u8()? {
+                    0 => false,
+                    1 => true,
+                    _ => return Err(ChatError::State),
+                };
+                (current_from, pending_from, own)
+            } else {
+                // Before the trailer: the current generation was entered from the one before.
+                let from = (gens.len() > 1).then(|| gens[0].id);
+                (from, None, false)
+            };
             ChatSession {
                 root: root.map(|k| Zeroizing::new(*k)),
                 circle_id,
@@ -778,6 +876,9 @@ impl ChatSession {
                 old,
                 gens,
                 pending,
+                pending_from,
+                current_from,
+                current_own,
                 retired,
                 sent_in_current,
                 synced: false,

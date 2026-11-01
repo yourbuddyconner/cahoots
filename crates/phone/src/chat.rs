@@ -18,7 +18,7 @@ use crate::{ChatMessage, Http, PhoneError};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use cahoots_chat::bump::{sign_bump, verify_bump};
-use cahoots_chat::{bucket_pad, bucket_unpad, ChatError, ChatSession, MessageType};
+use cahoots_chat::{bucket_pad, bucket_unpad, BumpOutcome, ChatError, ChatSession, MessageType};
 use cahoots_core::params::CircleParams;
 use std::path::{Path, PathBuf};
 
@@ -371,12 +371,22 @@ impl Circle {
 
     /// Verify a bump just read from the relay against the manifest and follow it. Returns the
     /// seat that signed it when this phone moved, or `None` when it does not verify, is stale
-    /// (it moves from a generation this phone is not in), or cannot be followed.
+    /// (it moves from a generation this phone is not in), lost to a bump made at the same
+    /// time, or cannot be followed. When this phone's own unposted reset lost, it is dropped.
     fn apply_bump(&mut self, payload: &[u8]) -> Option<u8> {
         let sealed = cahoots_core::manifest::SealedManifest::decode(&self.record.manifest).ok()?;
         let manifest = cahoots_core::manifest::Manifest::decode(&sealed.body).ok()?;
         let (from, to, seat) = verify_bump(payload, &self.circle_id, &manifest).ok()?;
-        self.session.apply_bump(from, to).ok()?.then_some(seat)
+        match self.session.apply_bump(from, to).ok()? {
+            BumpOutcome::Moved { dropped_own } => {
+                // Our own reset lost to one made at the same time: it is not posted.
+                if dropped_own {
+                    self.chat.pending_bump = None;
+                }
+                Some(seat)
+            }
+            BumpOutcome::Stale => None,
+        }
     }
 
     /// Move everyone in the circle to new keys: sign a bump with this seat's key, apply it,

@@ -113,6 +113,17 @@ pub struct Header {
     pub msg_type: MessageType,
 }
 
+/// What `ChatSession::apply_bump` did with a verified bump.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BumpOutcome {
+    /// Nothing moved: the bump was stale, or it lost to the generation this session is in.
+    Stale,
+    /// The session moved to the bump's generation. `dropped_own` is set when it left a
+    /// generation its own bump made, after two bumps from the same generation: that bump lost,
+    /// and its wire need not be posted.
+    Moved { dropped_own: bool },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChatError {
     Version,

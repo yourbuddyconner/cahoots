@@ -810,7 +810,8 @@ pub struct Circle {
 pub struct ChatReceived {
     /// `text`, `control`, `bump` or `card`.
     kind: &'static str,
-    /// A bump that did not verify, was stale, or could not be followed: nothing moved.
+    /// A bump that did not verify, was stale, lost to this device's own generation, or could
+    /// not be followed: nothing moved.
     ignored: bool,
     text: Vec<u8>,
     sender: u8,
@@ -827,7 +828,8 @@ impl ChatReceived {
         self.kind.into()
     }
     /// True for a bump that changed nothing: it did not verify against the circle's manifest,
-    /// it moves from a generation this device is not in, or this device cannot follow it.
+    /// it moves from a generation this device is not in, it lost to a bump made at the same
+    /// time, or this device cannot follow it.
     pub fn ignored(&self) -> bool {
         self.ignored
     }
@@ -1064,7 +1066,15 @@ impl Circle {
                     .and_then(|m| chat::verify_bump(&text, &circle_id, m).ok());
                 match verified {
                     // A bump that cannot be applied is consumed, not retried forever.
-                    Some((from, to, _)) => ignored = chat.apply_bump(from, to) != Ok(true),
+                    Some((from, to, _)) => match chat.apply_bump(from, to) {
+                        Ok(chat::BumpOutcome::Moved { dropped_own }) => {
+                            // Our own reset lost to one made at the same time: it is not posted.
+                            if dropped_own {
+                                self.pending_bump = None;
+                            }
+                        }
+                        _ => ignored = true,
+                    },
                     None => ignored = true,
                 }
                 "bump"
