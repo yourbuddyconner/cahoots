@@ -56,7 +56,8 @@ to `$CARGO_TARGET_DIR/ios` when the target directory is elsewhere.
   APDUs to the phone crate's chip client, which runs SCP03 in Rust. It waits 30 seconds for a
   card and 5 seconds for each answer.
 - The slot key for a paired badge is a keychain item in the `network.cahoots.secrets` service,
-  behind user presence, one per badge, so Face ID or the passcode releases it for each tap.
+  behind user presence, one per badge, so Face ID or the passcode releases it for each tap after
+  pairing.
 
 In People, tap the pencil beside any seat to give it a name. Names are private to this phone,
 appear in chat and hello words, and are stored in the circle's protected `seat-names.json` file.
@@ -149,13 +150,14 @@ with no circles cannot pair.
 1. On the badge, open "pair a phone" from the list. It shows "hold the phone to the chip, then
    press both".
 2. In the app, open Settings and choose "Pair a card". Type a name for this phone, choose "Hold
-   the phone to the card", and hold the phone to the badge's antenna. The app shows the badge's
-   circles and four words.
+   the phone to the card", and hold the phone to the badge's antenna. Face ID asks once, because
+   the phone signs its request with its enclave key. The app shows the badge's circles and four
+   words.
 3. On the badge, press both. It shows "pair with" the phone's name and four words. Check they
    match the phone's, then press both again. The badge says "paired with" the name and "tap the
    phone again".
-4. In the app, choose "Hold the phone again" and hold the phone to the antenna. Face ID asks for
-   the key. The app shows "Paired with" the badge and the circles it kept. Choose "Done".
+4. In the app, choose "Hold the phone again" and hold the phone to the antenna. This tap asks
+   nothing. The app shows "Paired with" the badge and the circles it kept. Choose "Done".
 5. On Circles, each of the badge's circles shows the badge's face and "Card circle on" the
    badge. Open one's chat. Post from the browser or another phone and read it here, and post
    back. When the composer is replaced by "Tap your card to catch up", choose it and hold the

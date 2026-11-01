@@ -864,6 +864,6 @@ A phone sends short APDUs only. It SELECTs the applet, `A0 00 00 03 96 54 53 00 
 - The encryption counter advances on every command, with data or not.
 - An error status comes back bare, with no response MAC.
 - An id that holds nothing answers `6985`, for ReadSize, ReadObject, MACOneShot and CreateSession. `6A82` means only a SELECT of another applet.
-- CreateSession while the badge's owner session is open answers `6985`, and the phone says the card is busy.
+- CreateSession while the badge's owner session is open is expected to answer `6985`, as the software chip does. The bench did not measure it. The phone then says the card is busy.
 - Some answers use two-byte TLV lengths (`41 82 00 08 ...`). ReadSize answers a 2-byte size.
 - The key information byte in the answer to INITIALIZE UPDATE is `03`. A phone refuses a card that does not offer SCP03.
