@@ -322,11 +322,13 @@ enum Owned {
     NotNow,
 }
 
-/// What the badge says when it will never use its chip.
+/// What the badge says when it will never use its chip: a tap touched it before the badge
+/// owned it, or its setup failed after the owner object, which nobody may delete, was made.
 const REFUSED: &str =
-    "this chip was touched before the badge owned it. It cannot be used. Circles on this badge keep software keys.";
+    "the chip was touched or could not be set up. This chip cannot be used. Circles on this badge keep software keys.";
 /// What the badge says when it cannot use its chip this time.
-const NOT_NOW: &str = "the chip could not be set up. Circles made now keep software keys.";
+const NOT_NOW: &str =
+    "the chip could not be set up. Try turning the badge off and on. Circles made now keep software keys.";
 
 impl<B: Board> Badge<B> {
     pub fn new(board: B) -> Self {
@@ -533,8 +535,15 @@ impl<B: Board> Badge<B> {
             if let Some(chip) = self.board.chip_begin() {
                 let left = chip::delete_slot(chip, slot).map_err(|e| format!("chip: {e:?}"))?;
                 if !left.is_empty() {
-                    // The record keeps the slot, so it is never chosen again.
+                    // The record keeps the slot, marked stuck, so it is never chosen again
+                    // and the next boot tries it again.
                     self.log_left(&left);
+                    if let Ok(Some(mut record)) = self.board.chip_record_load() {
+                        record.set_stuck(slot, true);
+                        if self.board.chip_record_store(&record).is_err() {
+                            self.board.log("chip record: write failed");
+                        }
+                    }
                     return Err(left_line(left.len()));
                 }
             }
@@ -639,9 +648,29 @@ impl<B: Board> Badge<B> {
         };
         let opens = has_owner && chip.open_owner(&secret).is_ok();
         if stored.as_ref().is_some_and(|r| r.is_current()) && opens {
-            return match chip::ensure_owned(chip, &secret) {
-                Ok(()) => Owned::Kept,
-                Err(e) => self.refuse_chip(&format!("chip: owner objects not made: {e:?}"), false),
+            let remake = stored.as_ref().is_some_and(|r| r.needs_remake());
+            return match chip::ensure_owned(chip, &secret, remake) {
+                Ok(chip::Ensured::Kept) => Owned::Kept,
+                Ok(chip::Ensured::Remade) => {
+                    self.board
+                        .log("chip: the phone slot, the inbox and the grant counter were made again");
+                    if let Some(mut record) = stored {
+                        // A remade slot holds no phone's key.
+                        record.generation = chip::GENERATION;
+                        record.phone = None;
+                        if self.board.chip_record_store(&record).is_err() {
+                            self.board.log("chip record: write failed");
+                        }
+                    }
+                    Owned::Kept
+                }
+                Err(chip::EnsureError::Before(e)) => {
+                    self.refuse_chip(&format!("chip: the owner session did not open: {e:?}"), false)
+                }
+                Err(chip::EnsureError::During(e)) => self.refuse_chip(
+                    &format!("chip: the phone slot, inbox or grant counter not made again: {e:?}"),
+                    true,
+                ),
             };
         }
         if has_owner && !opens {
@@ -757,18 +786,30 @@ impl<B: Board> Badge<B> {
             return;
         };
         let mut lines = record.reconcile_keeping(chip, &keep);
-        // A slot the record keeps but no circle names held an object a wipe could not delete:
-        // try again, and let the slot go once it is empty.
-        let orphans: Vec<u8> = record
-            .slots
-            .iter()
-            .map(|e| e.slot)
-            .filter(|s| !keep.contains(s))
-            .collect();
-        for slot in orphans {
+        // A slot a wipe marked stuck held an object that could not be deleted: try again, and
+        // let the slot go once it is empty. A slot no loaded circle names but not marked stuck
+        // is left: its circle's record may only have failed to read this time.
+        let mut stuck: Vec<u8> = Vec::new();
+        for e in &record.slots {
+            if keep.contains(&e.slot) {
+                continue;
+            }
+            if record.is_stuck(e.slot) {
+                stuck.push(e.slot);
+            } else {
+                lines.push(format!("chip: slot {} names no circle that loaded, left as it is", e.slot));
+            }
+        }
+        for slot in record.stuck.clone().unwrap_or_default() {
+            if !keep.contains(&slot) && !stuck.contains(&slot) {
+                stuck.push(slot);
+            }
+        }
+        for slot in stuck {
             match chip::delete_slot(chip, slot) {
                 Ok(left) if left.is_empty() => {
                     record.remove(slot);
+                    record.set_stuck(slot, false);
                     lines.push(format!("chip: slot {slot} names no circle, emptied and let go"));
                 }
                 Ok(left) => lines.push(format!(
@@ -806,6 +847,9 @@ impl<B: Board> Badge<B> {
         match self.board.chip_record_load() {
             Ok(Some(mut record)) => {
                 record.slots.retain(|e| stayed.contains(&e.slot));
+                for slot in &stayed {
+                    record.set_stuck(*slot, true);
+                }
                 if self.board.chip_record_store(&record).is_err() {
                     self.board.log("chip record: write failed");
                 }

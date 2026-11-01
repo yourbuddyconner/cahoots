@@ -966,7 +966,7 @@ fn a_signature_that_does_not_verify_is_never_returned() {
     circle.chip_slot = Some(0);
     circle.seat_key = [0; 32];
     let mut chip = Lying(SoftChip::with_seed([5; 32]));
-    cahoots_badge::chip::ensure_owned(&mut chip, &cahoots_chip::TEST_OWNER_SECRET).unwrap();
+    cahoots_badge::chip::first_boot(&mut chip, &cahoots_chip::TEST_OWNER_SECRET, [0; 16]).unwrap();
     let p = chip
         .generate(KeyId::new(KeyKind::Seat, 0), Curve::P256, &ObjectPolicy::owner_only())
         .unwrap();

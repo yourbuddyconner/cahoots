@@ -354,6 +354,7 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
         }),
         badge_nonce: [9; 16],
         generation: GENERATION,
+        stuck: Some(vec![3, 7]),
     };
     let bytes = r.encode();
     assert_eq!(ChipRecord::decode(&bytes), Ok(r.clone()));
@@ -371,6 +372,16 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
     sector.extend_from_slice(&old);
     assert_eq!(ChipRecord::from_stored(&sector), Ok(None));
     assert!(ChipRecord::from_stored(&[0xFF; 8]).is_err());
+    // A stuck list that is empty or out of order is not canonical.
+    for bad in [Some(vec![]), Some(vec![7, 3]), Some(vec![3, 3])] {
+        let mut r2 = r.clone();
+        r2.stuck = bad;
+        assert!(ChipRecord::decode(&r2.encode()).is_err());
+    }
+    // A record with no stuck slots encodes as before, four fields.
+    let mut plain = r.clone();
+    plain.stuck = None;
+    assert_eq!(plain.encode()[0], 0x84);
     let mut cut = stored.clone();
     cut.pop();
     assert!(ChipRecord::from_stored(&cut).is_err());
@@ -536,27 +547,53 @@ fn a_slot_holding_an_object_that_cannot_be_deleted_is_passed_over() {
 }
 
 #[test]
-fn boot_empties_a_slot_the_record_keeps_but_no_circle_names() {
-    // A wipe left slot 3 in the record because an object there would not go then.
+fn boot_empties_a_slot_a_wipe_marked_stuck_and_leaves_one_merely_unnamed() {
+    // A wipe left slot 3 in the record, marked stuck, because an object there would not go
+    // then. Slot 5 is in the record too, but its circle's record only failed to load.
     let mut board = FakeBoard::new().with_soft_chip([4; 32]);
-    board
-        .owner_chip()
-        .generate(id(KeyKind::Seat, 3), Curve::P256, &ObjectPolicy::owner_only())
-        .unwrap();
-    board.record_slot(SlotEntry {
-        slot: 3,
-        circle_id: [9; 16],
-        has_seat: true,
-        has_root: false,
-        has_epoch: false,
-    });
+    for slot in [3, 5] {
+        board
+            .owner_chip()
+            .generate(id(KeyKind::Seat, slot), Curve::P256, &ObjectPolicy::owner_only())
+            .unwrap();
+        board.record_slot(SlotEntry {
+            slot,
+            circle_id: [slot; 16],
+            has_seat: true,
+            has_root: false,
+            has_epoch: false,
+        });
+    }
+    let mut r = board.chip_record_load().unwrap().unwrap();
+    r.set_stuck(3, true);
+    board.chip_record_store(&r).unwrap();
     let mut badge = Badge::new(board);
     badge.boot();
-    assert!(circle_objects(&mut badge).is_empty());
-    assert!(badge.board().chip_record_load().unwrap().unwrap().slots.is_empty());
-    assert!(badge
-        .board()
-        .log
+    // Slot 3 is emptied and let go; slot 5's key stays, and so does its entry.
+    assert_eq!(circle_objects(&mut badge), vec![id(KeyKind::Seat, 5)]);
+    let r = badge.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.slots.iter().map(|e| e.slot).collect::<Vec<_>>(), vec![5]);
+    assert_eq!(r.stuck, None);
+    let log = &badge.board().log;
+    assert!(log.iter().any(|l| l == "chip: slot 3 names no circle, emptied and let go"));
+    assert!(log
         .iter()
-        .any(|l| l == "chip: slot 3 names no circle, emptied and let go"));
+        .any(|l| l == "chip: slot 5 names no circle that loaded, left as it is"));
+}
+
+#[test]
+fn a_wipe_marks_the_slot_it_could_not_empty_as_stuck() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    let policy = ObjectPolicy {
+        delete: Vec::new(),
+        ..ObjectPolicy::any_session()
+    };
+    chip(&mut b1).put_hmac_key(id(KeyKind::Hello, 1), &[3; 32], &policy).unwrap();
+    let board = b1.board();
+    board.a_down = true;
+    board.release_at_ms = board.elapsed_ms + 3000;
+    b1.boot();
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.slots.iter().map(|e| e.slot).collect::<Vec<_>>(), vec![0]);
+    assert!(r.is_stuck(0));
 }

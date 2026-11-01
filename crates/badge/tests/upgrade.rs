@@ -13,8 +13,8 @@ use cahoots_chip::{
 use common::FakeBoard;
 
 const SCREEN: &str = "updated for phones. Make a new circle.";
-const REFUSED: &str = "this chip was touched before the badge owned it. It cannot be used. Circles on this badge keep software keys.";
-const NOT_NOW: &str = "the chip could not be set up. Circles made now keep software keys.";
+const REFUSED: &str = "the chip was touched or could not be set up. This chip cannot be used. Circles on this badge keep software keys.";
+const NOT_NOW: &str = "the chip could not be set up. Try turning the badge off and on. Circles made now keep software keys.";
 
 fn not_now(b: &mut Badge<FakeBoard>) -> usize {
     b.board().statuses().iter().filter(|s| *s == NOT_NOW).count()
@@ -359,4 +359,81 @@ fn a_setup_that_fails_before_the_owner_object_is_tried_again() {
     reboot(&mut b);
     assert!(b.board().has_chip());
     assert!(b.board().chip_record_load().unwrap().unwrap().is_current());
+}
+
+/// A chip this badge set up whose record says the phone slot, inbox and grant counter must be
+/// made again (a conversation that emptied one was cut off), and whose slot a tap filled while
+/// the pin rested low.
+fn remake_board(planted_policy: ObjectPolicy) -> FakeBoard {
+    let mut board = FakeBoard::new().with_soft_chip([6; 32]);
+    let mut r = board.chip_record_load().unwrap().unwrap();
+    r.generation = cahoots_badge::chip::REMAKE_GENERATION;
+    board.chip_record_store(&r).unwrap();
+    board.owner_chip().delete(KeyId::SLOT).unwrap();
+    let c = board.chip.as_mut().unwrap();
+    c.close_session().unwrap();
+    c.put_aes_auth(KeyId::SLOT, &[0x42; 16], &planted_policy).unwrap();
+    board
+}
+
+#[test]
+fn a_slot_a_tap_filled_while_it_was_empty_is_deleted_and_made_again() {
+    let mut b = Badge::new(remake_board(ObjectPolicy::any_session()));
+    b.boot();
+    pin_rests(&mut b);
+    assert_eq!(refused(&mut b), 0);
+    assert_eq!(not_now(&mut b), 0);
+    assert!(b.board().has_chip());
+    // The slot is the badge's again: a tap in no session cannot delete it.
+    let c = b.board().chip.as_mut().unwrap();
+    assert_eq!(c.delete(KeyId::SLOT), Err(ChipError::NotAllowed));
+    let r = b.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.generation, cahoots_badge::chip::GENERATION);
+    assert!(b
+        .board()
+        .log
+        .iter()
+        .any(|l| l == "chip: the phone slot, the inbox and the grant counter were made again"));
+    // The issue counter was made again too, with the badge's policy.
+    assert_eq!(b.board().owner_chip().counter_get(KeyId::new(KeyKind::Grant, 255)), Ok(0));
+}
+
+#[test]
+fn a_slot_a_tap_filled_that_cannot_be_deleted_refuses_the_chip_for_good() {
+    let mut b = Badge::new(remake_board(stuck()));
+    b.boot();
+    assert_eq!(refused(&mut b), 1);
+    assert!(!b.board().has_chip());
+    assert!(b.board().chip_record_load().unwrap().unwrap().is_refused());
+    reboot(&mut b);
+    assert_eq!(refused(&mut b), 2);
+    assert!(!b.board().has_chip());
+}
+
+#[test]
+fn a_missing_inbox_on_an_owned_chip_brings_all_three_back_new() {
+    let mut board = FakeBoard::new().with_soft_chip([6; 32]);
+    board.owner_chip().delete(KeyId::INBOX).unwrap();
+    let mut b = Badge::new(board);
+    b.boot();
+    assert!(b.board().has_chip());
+    assert!(b.board().owner_chip().exists(KeyId::INBOX).unwrap());
+    assert!(b
+        .board()
+        .log
+        .iter()
+        .any(|l| l == "chip: the phone slot, the inbox and the grant counter were made again"));
+}
+
+#[test]
+fn a_remade_grant_counter_starts_above_every_grant_on_the_chip() {
+    let mut board = remake_board(ObjectPolicy::any_session());
+    board
+        .owner_chip()
+        .put_counter(KeyId::new(KeyKind::Grant, 2), (3 << 32) + 1, &ObjectPolicy::owner_counter())
+        .unwrap();
+    let mut b = Badge::new(board);
+    b.boot();
+    // The next grant's base is 4 << 32: no base is given twice.
+    assert_eq!(b.board().owner_chip().counter_get(KeyId::new(KeyKind::Grant, 255)), Ok(3));
 }

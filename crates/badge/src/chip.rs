@@ -126,6 +126,12 @@ impl SlotEntry {
 /// session: the badge wipes them at boot.
 pub const GENERATION: u8 = 2;
 
+/// The generation of a record of a chip this badge owns whose phone slot, inbox and issue
+/// counter must be made again at the next boot: written before a conversation that leaves one
+/// of those ids empty for a moment, so a cut-off conversation never leaves one for a tap to
+/// fill and the badge to adopt.
+pub const REMAKE_GENERATION: u8 = 3;
+
 /// The generation of the record a badge stores when it refuses its chip for good: an object a
 /// tap made stays where the badge's own must be, or the setup failed after the owner object,
 /// which nobody may delete, was made. Later boots refuse at once and touch nothing.
@@ -158,6 +164,10 @@ pub struct ChipRecord {
     pub badge_nonce: [u8; 16],
     #[n(3)]
     pub generation: u8,
+    /// The circle slots a wipe left an object in that could not be deleted, in order, or
+    /// `None` for none. Boot tries them again ([`crate::Badge::boot`]).
+    #[n(4)]
+    pub stuck: Option<Vec<u8>>,
 }
 
 /// The record of earlier firmware, which only [`ChipRecord::from_stored`] reads, to know it.
@@ -180,7 +190,11 @@ impl ChipRecord {
     /// Strict: exactly one canonical encoding, slots in increasing order with none twice.
     pub fn decode(bytes: &[u8]) -> Result<ChipRecord, Malformed> {
         let r: ChipRecord = minicbor::decode(bytes).map_err(|_| Malformed)?;
-        if r.encode() != bytes || r.slots.windows(2).any(|w| w[0].slot >= w[1].slot) {
+        let stuck_ok = r
+            .stuck
+            .as_ref()
+            .is_none_or(|v| !v.is_empty() && v.windows(2).all(|w| w[0] < w[1]));
+        if r.encode() != bytes || r.slots.windows(2).any(|w| w[0].slot >= w[1].slot) || !stuck_ok {
             return Err(Malformed);
         }
         Ok(r)
@@ -220,9 +234,31 @@ impl ChipRecord {
         self.generation == REFUSED_GENERATION
     }
 
+    /// True if a wipe left an object in circle slot `slot`.
+    pub fn is_stuck(&self, slot: u8) -> bool {
+        self.stuck.as_ref().is_some_and(|v| v.contains(&slot))
+    }
+
+    /// Mark or unmark circle slot `slot` as holding an object a wipe could not delete.
+    pub fn set_stuck(&mut self, slot: u8, stuck: bool) {
+        let mut v = self.stuck.take().unwrap_or_default();
+        v.retain(|&s| s != slot);
+        if stuck {
+            v.push(slot);
+            v.sort_unstable();
+        }
+        self.stuck = (!v.is_empty()).then_some(v);
+    }
+
+    /// True if the phone slot, the inbox and the issue counter must be made again at the next
+    /// boot, whatever stands at their ids.
+    pub fn needs_remake(&self) -> bool {
+        self.generation == REMAKE_GENERATION
+    }
+
     /// True for a record made by firmware that owns its chip.
     pub fn is_current(&self) -> bool {
-        self.generation == GENERATION
+        self.generation == GENERATION || self.generation == REMAKE_GENERATION
     }
 
     pub fn entry(&self, slot: u8) -> Option<&SlotEntry> {
@@ -402,33 +438,90 @@ pub fn delete_for_upgrade(chip: &mut dyn ChipOps) -> Result<(usize, Left), ChipE
     Ok((deleted, left))
 }
 
-/// Make the objects the badge owns its chip by, where they are missing, and open the owner
-/// session: the owner object (a user id holding `owner_secret`), the phone slot as a
-/// placeholder holding a random key nobody keeps, and the inbox. Run in one conversation, so
-/// no id a policy names is left empty at its end.
-pub fn ensure_owned(chip: &mut dyn ChipOps, owner_secret: &[u8; 16]) -> Result<(), ChipError> {
-    if !chip.exists(KeyId::OWNER)? {
-        chip.put_user_id(KeyId::OWNER, owner_secret, &ObjectPolicy::owner_object())?;
+/// What [`ensure_owned`] did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ensured {
+    /// Every object was there and nothing was asked of it.
+    Kept,
+    /// The phone slot, the inbox and the issue counter were deleted and made again.
+    Remade,
+}
+
+/// Why [`ensure_owned`] failed: before it changed anything, so a later boot may try again, or
+/// while it remade the objects, so the chip may be left with an id a tap could claim.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnsureError {
+    Before(ChipError),
+    During(ChipError),
+}
+
+/// On a chip this badge owns: open the owner session, and if `remake` is set or any of the
+/// phone slot, the inbox and the issue counter is missing, delete whatever is at all three ids
+/// and make them again, in this one conversation ([`remake_antenna`]).
+///
+/// The badge never adopts an object at those ids it did not make in the conversation that
+/// left them in place: a tap can make one only while the pin rests low, and this delete and
+/// make run with the pin high. An id left empty by a conversation that was cut off is flagged
+/// by the record ([`REMAKE_GENERATION`]) before the conversation starts, so the next boot
+/// remakes it whatever stands there by then.
+pub fn ensure_owned(
+    chip: &mut dyn ChipOps,
+    owner_secret: &[u8; 16],
+    remake: bool,
+) -> Result<Ensured, EnsureError> {
+    chip.open_owner(owner_secret).map_err(EnsureError::Before)?;
+    let mut missing = false;
+    for id in ANTENNA_IDS {
+        missing |= !chip.exists(id).map_err(EnsureError::Before)?;
     }
-    chip.open_owner(owner_secret)?;
-    if !chip.exists(KeyId::SLOT)? {
-        let random = chip.random(16)?;
-        let mut key = [0u8; 16];
-        key.copy_from_slice(&random);
-        let made = chip.put_aes_auth(KeyId::SLOT, &key, &ObjectPolicy::placeholder_slot());
-        zeroize::Zeroize::zeroize(&mut key);
-        made?;
+    if !remake && !missing {
+        return Ok(Ensured::Kept);
     }
-    if !chip.exists(KeyId::INBOX)? {
-        chip.write_binary(KeyId::INBOX, &[0; INBOX_LEN], &ObjectPolicy::inbox())?;
+    remake_antenna(chip).map_err(EnsureError::During)?;
+    Ok(Ensured::Remade)
+}
+
+/// The highest issue number any grant counter on the chip was based on: a remade issue
+/// counter starts there, so no base is given twice.
+fn issue_floor(chip: &mut dyn ChipOps) -> Result<u64, ChipError> {
+    let mut floor = 0;
+    for id in chip.ids()? {
+        match KeyId::parse(id.0) {
+            Some((KeyKind::Grant, slot)) if slot != crate::grants::ISSUE_SLOT => {
+                if let Ok(raw) = chip.counter_get(id) {
+                    floor = floor.max(raw >> 32);
+                }
+            }
+            _ => {}
+        }
     }
+    Ok(floor)
+}
+
+/// In the owner session: delete whatever is at the phone slot, inbox and issue counter ids,
+/// then make the slot as a placeholder holding a random key nobody keeps, an empty inbox, and
+/// the issue counter at [`issue_floor`]. An object there that cannot be deleted is an error.
+pub fn remake_antenna(chip: &mut dyn ChipOps) -> Result<(), ChipError> {
+    let floor = issue_floor(chip)?;
+    for id in ANTENNA_IDS {
+        delete_quietly(chip, id)?;
+    }
+    let random = chip.random(16)?;
+    let mut key = [0u8; 16];
+    key.copy_from_slice(&random);
+    let made = chip.put_aes_auth(KeyId::SLOT, &key, &ObjectPolicy::placeholder_slot());
+    zeroize::Zeroize::zeroize(&mut key);
+    made?;
+    chip.write_binary(KeyId::INBOX, &[0; INBOX_LEN], &ObjectPolicy::inbox())?;
+    chip.put_counter(issue_id(), floor, &ObjectPolicy::owner_counter())?;
     Ok(())
 }
 
-/// The first boot of a chip under this firmware: [`ensure_owned`], the grant issue counter at
-/// 0 for the owner alone, and the new record, with no circle slots, no phone and
-/// `badge_nonce`. The caller has emptied the phone slot, inbox and issue counter ids first
-/// ([`delete_for_upgrade`]), so nothing a tap made there is adopted.
+/// The first boot of a chip under this firmware, in one conversation: the owner object (a user
+/// id holding `owner_secret`) unless it is there, the owner session, then the phone slot, the
+/// inbox and the issue counter ([`remake_antenna`]), and the new record, with no circle
+/// slots, no phone and `badge_nonce`. The caller has emptied the chip but for the owner object
+/// first ([`delete_for_upgrade`]), so nothing a tap made is adopted.
 ///
 /// No factory reset undoes this, on the bench chip (SE051, applet 7.2.0, 2026-10-31): it has
 /// no factory-reset authentication object (`7FFF0205` does not exist), and `DeleteAll` is
@@ -440,14 +533,16 @@ pub fn first_boot(
     owner_secret: &[u8; 16],
     badge_nonce: [u8; 16],
 ) -> Result<ChipRecord, ChipError> {
-    ensure_owned(chip, owner_secret)?;
-    if !chip.exists(issue_id())? {
-        chip.put_counter(issue_id(), 0, &ObjectPolicy::owner_counter())?;
+    if !chip.exists(KeyId::OWNER)? {
+        chip.put_user_id(KeyId::OWNER, owner_secret, &ObjectPolicy::owner_object())?;
     }
+    chip.open_owner(owner_secret)?;
+    remake_antenna(chip)?;
     Ok(ChipRecord {
         slots: Vec::new(),
         phone: None,
         badge_nonce,
         generation: GENERATION,
+        stuck: None,
     })
 }
