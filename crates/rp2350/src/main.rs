@@ -243,7 +243,15 @@ fn main() -> ! {
             id[..4].copy_from_slice(&info.device_id.to_le_bytes());
             id[4..8].copy_from_slice(&info.wafer_id.to_le_bytes());
             id[8..].copy_from_slice(&randid);
-            legacy_owner_secret = Some(cahoots_chip::owner_secret(&id[..8]));
+            // Only for a chip this badge already keeps a current record of: a fresh badge
+            // never adopts an owner object planted under the older, weaker secret.
+            let owned = matches!(
+                store::load_chip_record().map(|r| r.and_then(|b| cahoots_badge::chip::ChipRecord::decode(&b).ok())),
+                Ok(Some(r)) if r.is_current()
+            );
+            if owned {
+                legacy_owner_secret = Some(cahoots_chip::owner_secret(&id[..8]));
+            }
             Some(cahoots_chip::owner_secret(&id))
         }
         (_, None) => {

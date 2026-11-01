@@ -17,7 +17,7 @@ use cahoots_badge::chip::ChipRecord;
 use cahoots_badge::grants::GrantsRecord;
 use cahoots_badge::{screens, Board, BoardError, Circle, Press};
 use cahoots_chip::se05x::Se05xChip;
-use cahoots_chip::{ChipOps, KeyId, KeyKind};
+use cahoots_chip::{ChipError, ChipOps, KeyId, KeyKind};
 use embedded_hal::digital::OutputPin;
 use cahoots_core::circle_id::CircleId;
 use cahoots_hal::health::Tested;
@@ -65,11 +65,12 @@ pub struct PicoBoard {
     /// ROM did not give the id.
     pub owner_secret: Option<[u8; 16]>,
     /// The owner secret of builds before 2026-11-01, from the device and wafer ids alone, tried
-    /// when `owner_secret` does not open the chip. Once it opens, it becomes `owner_secret`
-    /// for the rest of the boot.
+    /// when the chip refuses `owner_secret`. Once it opens, it becomes `owner_secret` for the
+    /// rest of the boot. `None` unless a current chip record was stored before this boot, so a
+    /// fresh badge never adopts an owner object a tap planted under it.
     pub legacy_owner_secret: Option<[u8; 16]>,
-    /// The last conversation found the owner object and its session opened with neither
-    /// secret.
+    /// The last conversation found the owner object and the chip refused every secret the
+    /// badge has (`BadSession`), not a bus error.
     pub owner_refused: bool,
     /// Bench builds: the pin is high for the laptop's APDUs, in no session, since this moment
     /// (the last APDU). `None` when the pass-through holds nothing.
@@ -367,8 +368,9 @@ impl PicoBoard {
                         log!("se051: owner session open");
                     }
                     Err(e) => {
-                        let legacy = self.legacy_owner_secret;
-                        if legacy.is_some_and(|l| chip.open_owner(&l).is_ok()) {
+                        let legacy = self.legacy_owner_secret.filter(|_| e == ChipError::BadSession);
+                        let older = legacy.map(|l| chip.open_owner(&l));
+                        if older == Some(Ok(())) {
                             // From now on this boot's conversations open with it, and say
                             // so no more.
                             self.owner_secret = legacy;
@@ -377,7 +379,10 @@ impl PicoBoard {
                             log!("se051: owner session open with the older secret");
                         } else {
                             log!("se051: the owner session did not open ({e:?})");
-                            self.owner_refused = true;
+                            // Only the chip refusing every secret the badge has means the
+                            // chip is another's. A bus error may pass at the next boot.
+                            let refused = |r: Result<(), ChipError>| r == Err(ChipError::BadSession);
+                            self.owner_refused = refused(Err(e)) && older.is_none_or(refused);
                             self.chip_end();
                             return None;
                         }
