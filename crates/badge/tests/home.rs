@@ -373,3 +373,63 @@ fn the_laptops_allowance_lasts_through_the_list_until_it_is_unplugged() {
     assert!(b1.board().shows("a laptop"), "{:?}", b1.board().last());
     assert!(responses(&mut laptop).is_empty());
 }
+
+#[test]
+fn a_pass_after_the_last_circle_is_forgotten_asks_about_the_laptop_again() {
+    // Unplugged while the pass runs and plugged in again, or plugged in all along: either
+    // way, the first request after the keep asks.
+    for unplugged in [true, false] {
+        let (mut b1, _b2) = kept_pair((true, false));
+        let mut laptop = plug_laptop(&mut b1);
+        allow(&mut b1, &mut laptop);
+        // Forget the only circle: the list, its first page, Left to Forget, Both, Both.
+        press(&mut b1, Press::Both);
+        press(&mut b1, Press::Both);
+        press(&mut b1, Press::Left);
+        assert!(b1.board().shows("forget this circle"), "{:?}", b1.board().last());
+        press(&mut b1, Press::Both);
+        press(&mut b1, Press::Both);
+        assert!(b1.circles().is_empty());
+        if unplugged {
+            laptop.present.set(false);
+        }
+        // With no circle left the firmware runs a pass: a new pile, b1 at the bottom.
+        let (lower, upper) = cable();
+        b1.board().links = Some((FakeLink::open(), lower));
+        let mut top = FakeBoard::seeded(0x2545_F491_4F6C_DD1D);
+        top.links = Some((upper, FakeLink::open()));
+        let mut b3 = Badge::new(top);
+        for _ in 0..10_000 {
+            b1.step();
+            b3.step();
+            if has_seat(&mut b1) && has_seat(&mut b3) {
+                break;
+            }
+        }
+        b3.board().presses.push_back(Press::Both);
+        let mut at = (false, false);
+        drive(&mut b1, &mut b3, |s1, s2| {
+            at.0 |= *s1 == Step::Prompt;
+            at.1 |= *s2 == Step::Prompt;
+            at.0 && at.1
+        });
+        b1.board().presses.push_back(Press::Both);
+        b3.board().presses.push_back(Press::Both);
+        let mut kept = (false, false);
+        drive(&mut b1, &mut b3, |s1, s2| {
+            kept.0 |= *s1 == Step::Kept;
+            kept.1 |= *s2 == Step::Kept;
+            kept.0 && kept.1
+        });
+        laptop.present.set(true);
+        let saved = format!("saved {}", circle_name(&b1));
+        assert!(b1.board().shows(&saved), "{:?}", b1.board().last());
+        b1.board().uptime += 5;
+        step(&mut b1);
+        assert!(b1.board().shows("closed to taps"), "{:?}", b1.board().last());
+        send(&mut laptop, 950, &Request::Identify);
+        step(&mut b1);
+        assert!(b1.board().shows("a laptop"), "unplugged {unplugged}: {:?}", b1.board().last());
+        assert!(responses(&mut laptop).is_empty(), "unplugged {unplugged}");
+    }
+}

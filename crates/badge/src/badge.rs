@@ -334,14 +334,15 @@ struct Laptop<L> {
     /// Bytes read from the link that are not a whole request yet.
     rx: Vec<u8>,
     /// The laptop was allowed, with Both, since it was plugged in. The first request after a
-    /// plug-in asks. Unplugging forgets the answer, and so does a new circle's pass, which
-    /// puts the pile on this connector.
+    /// plug-in asks. Unplugging forgets the answer, and so does every pass, which puts the
+    /// pile on this connector.
     connected: bool,
     /// Whether the link reported a peer when last looked at, so a change is logged once.
     peer_seen: bool,
     /// The nonce a proof under a grant must be made over: drawn when the laptop is first
-    /// looked at, and drawn again after every signature under a grant. `None` while the
-    /// random source fails: no nonce is given and no use accepted until a draw succeeds.
+    /// looked at, and drawn again after every signature under a grant and whenever the
+    /// answer is forgotten. `None` while the random source fails: no nonce is given and no
+    /// use accepted until a draw succeeds.
     nonce: Option<[u8; 16]>,
 }
 
@@ -362,9 +363,16 @@ fn watch_laptop<B: Board>(board: &mut B, l: &mut Laptop<B::Link>) -> bool {
         return false;
     }
     // Whatever was allowed was allowed for that laptop while it was plugged in.
+    forget_laptop(board, l);
+    true
+}
+
+/// Forget the laptop's answer and any request half read, and draw a new nonce: whatever is
+/// on the link next may not be the laptop that was allowed.
+fn forget_laptop<B: Board>(board: &mut B, l: &mut Laptop<B::Link>) {
     l.connected = false;
     l.rx.clear();
-    true
+    l.nonce = fresh_nonce(board);
 }
 
 /// What the menu asks of the badge after a step.
@@ -2103,6 +2111,13 @@ impl<B: Board> Badge<B> {
     fn advance(&mut self, state: State<B::Link>) -> Result<(State<B::Link>, Step), String> {
         match state {
             State::Idle => {
+                // A pass puts the pile, or the bridge, on the down connector, and nothing
+                // watches the laptop while it runs: the laptop that was allowed there is
+                // asked again at its next request. This holds for every pass, the one after
+                // the last circle was forgotten too.
+                if let Some(l) = self.laptop.as_mut() {
+                    forget_laptop(&mut self.board, l);
+                }
                 let screen = self.pile_screen(None);
                 show(&mut self.board, screen);
                 let (down, up) = self.board.links();
@@ -2568,7 +2583,14 @@ impl<B: Board> Badge<B> {
                     }
                     Err(BadgeError::NotAllUpdated) => {
                         self.board.tap_begin();
-                        self.note(&[&format!("paired with {name}"), "some circles not updated"], true)
+                        self.note(
+                            &[
+                                &format!("paired with {name}"),
+                                "some circles not updated",
+                                "hold the phone again",
+                            ],
+                            true,
+                        )
                     }
                     Err(BadgeError::ChipHeld) => self.note(&[RESTART], false),
                     Err(BadgeError::UnpairUnfinished) => self.note(
@@ -2651,12 +2673,7 @@ impl<B: Board> Badge<B> {
             },
             Press::Both => {
                 self.board.log("new circle: looking for the pile");
-                // The pile, or the bridge, sits on the down connector now: the laptop that
-                // was allowed there is asked again at its next request.
-                if let Some(l) = self.laptop.as_mut() {
-                    l.connected = false;
-                    l.rx.clear();
-                }
+                // The pass forgets the laptop as it starts: see `advance`.
                 self.state = State::Idle;
                 Idle::NewCircle
             }
