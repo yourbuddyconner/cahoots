@@ -151,20 +151,28 @@ with no circles cannot pair.
    press both".
 2. In the app, open Settings and choose "Pair a card". Type a name for this phone, choose "Hold
    the phone to the card", and hold the phone to the badge's antenna. Face ID asks once, because
-   the phone signs its request with its enclave key. The app shows the badge's circles and four
-   words.
-3. On the badge, press both. It shows "pair with" the phone's name and four words. Check they
-   match the phone's, then press both again. The badge says "paired with" the name and "tap the
-   phone again".
+   the phone signs its request with its enclave key. The app shows how many circles the badge
+   holds and six words, and says "On the badge, press both to see its words. If they match,
+   press both again, then hold the phone to the card." A badge with no name shows as "your
+   badge".
+3. On the badge, press both. It shows "pair with" the phone's name and six words in two rows.
+   Check they match the phone's, then press both again. The badge says "paired with" the name
+   and "tap the phone again".
 4. In the app, choose "Hold the phone again" and hold the phone to the antenna. This tap asks
    nothing. The app shows "Paired with" the badge and the circles it kept. Choose "Done".
 5. On Circles, each of the badge's circles shows the badge's face and "Card circle on" the
    badge. Open one's chat. Post from the browser or another phone and read it here, and post
    back. When the composer is replaced by "Tap your card to catch up", choose it and hold the
-   phone to the antenna.
+   phone to the antenna. Face ID asks here, because the tap reads the card's key from the
+   keychain.
 6. On the badge, open "phone" from the list and press both. It says "phone unpaired" and "its
    taps end now". In the app, the next tap, for hello words in People or for a key in the chat,
-   says "This card no longer knows this phone."
+   says "This card no longer knows this phone." The card circle still reads and posts in its
+   chat until a phone posts the bump the badge signed at the unpair. If a phone is lost,
+   unpair it on the badge, then pair another phone, which posts the bump, or ask a member with
+   the circle's root to reset the chat. To pair this phone again, open "pair a phone" on the
+   badge and "Pair a card" in the app. If the app still shows the words from before, choose
+   "Start over" first: those words were for a pairing the badge has closed.
 
 A tap in step 4 before the badge's presses says "Press both buttons on the badge first, then
 hold the phone again." "Forget this card" in Settings deletes the card circles from this phone.
@@ -240,26 +248,32 @@ address) and on a label the screen rightly stops showing once step one ends. Nei
 
 ## Tried on the bench
 
-On 2026-10-31, the phone's own chip client (`crates/phone/src/nfc.rs`, `apdu.rs` and
+On 2026-10-31 and again on 2026-11-01, the phone's own chip client (`crates/phone/src/nfc.rs`, `apdu.rs` and
 `scp03.rs`) ran against the real SE051 on the Pico 2, applet 7.2.0. No phone was in the loop: the
 laptop ran the client, and a bench build of the firmware passed each APDU to the chip over I2C
 in no session, with the chip's pin raised for the exchange, as a phone's tap finds it
 (`cahoots-host chip`, frame kinds 32 and 33). `scripts/pair-bench.sh` runs it end to end:
 
 1. The board kept a new circle with the laptop as the two cards under it.
-2. In no session, the laptop read the circle's public object, and the applet refused each of
-   these with `6986`: a MAC with the circle's root or a hello object, a signature with the seat
-   key, an AES key at the phone slot's id, deleting the slot, the owner object or the root,
-   reading the inbox and writing the public object.
+2. In no session, the laptop read the pairing object, which named circle slots 0, 1 and 2, and
+   the applet refused it each of their public objects. It refused each of these with `6986`
+   too: a MAC with the circle's root or a hello object, a signature with the seat key, an AES
+   key at the phone slot's id, deleting the slot, the owner object or the root, reading the
+   inbox, and reading or writing the public object.
 3. The laptop pressed into "pair a phone", read the pairing object, and wrote a signed, sealed
-   inbox as "bench laptop". Both showed the same four words (that run: issue crisp fault
-   aware). Both again paired.
+   inbox as "bench laptop". Both showed the same six words (the 2026-11-01 run: theory wave
+   elite still setup eyebrow). Both again paired.
 4. The laptop opened the phone slot's SCP03 session with its key, at C-MAC, C-ENC, R-MAC and
-   R-ENC, asked the applet's version in it, and MACed `chat/gen` with the circle's root. Every
-   circle's public object carried a device grant and the laptop's key.
+   R-ENC, asked the applet's version in it, and MACed `chat/gen` with the circle's root. In
+   that session every public object the pairing object names carried a device grant and the
+   laptop's key.
 5. The laptop pressed into "phone" and unpaired. The old key no longer opened the slot ("the
-   card does not open with this key"), and every public object named no phone and held a
-   pending bump.
+   card does not open with this key"), and the badge's log said it wrote every public object
+   with a pending bump and no phone.
+
+The 2026-11-01 run used the firmware before the owner secret took in the RP2350's random id,
+because the bench chip was owned under the earlier secret. With the later firmware the bench
+chip's owner session does not open, and the badge runs without its chip.
 
 What the applet does that the client and the software chip had to learn: no Le inside a wrapped
 command (it ends the session with `6982`), `6985` for an id that holds nothing, the two-byte

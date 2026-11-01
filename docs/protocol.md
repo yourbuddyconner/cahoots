@@ -706,7 +706,7 @@ A badge keeps its seat keys and circle roots in an NXP SE051 secure element. The
 
 The chip names three identities:
 
-- **Owner.** The badge's own session, opened over I2C against a user-id authentication object, the owner object. The badge's secret for it is `HKDF-SHA256(salt = "cahoots/owner/v1", ikm = board_id, info = empty)`, 16 bytes, where `board_id` is the RP2350's device id and then its wafer id, each 4 bytes little-endian. A reflash recovers it. Anyone who learns the board id can open the owner session, and the id is exposed only to someone with USB access to the board.
+- **Owner.** The badge's own session, opened over I2C against a user-id authentication object, the owner object. The badge's secret for it is `HKDF-SHA256(salt = "cahoots/owner/v1", ikm = board_id, info = empty)`, 16 bytes, where `board_id` is the RP2350's device id and then its wafer id, each 4 bytes little-endian, then its 128-bit RANDID from OTP rows 0x008 to 0x00F, each row's 16 bits little-endian in row order, 24 bytes in all. A reflash recovers it. Anyone who learns those inputs can open the owner session. A USB host can reboot the badge into BOOTSEL and read RANDID there, so a badge plugged into a USB host that is not trusted is retired.
 - **Slot.** The paired phone's session, opened against the phone slot, an AES-128 authentication object. The session runs SCP03 (GlobalPlatform Amendment D) at security level `0x33`: command MAC, command encryption, response MAC and response encryption. The slot's one key serves as the encryption, MAC and key-encryption key.
 - **None.** Any command sent to the chip with no session open. That is any tap, and the badge before its owner session opens.
 
@@ -718,13 +718,16 @@ Every object carries a policy fixed when it is made. For each identity the polic
 | Seat key | sign, read the public key, attest, delete | none | none |
 | Root, hello object | HMAC, delete | HMAC, under SCP03 | none |
 | Epoch counter, grant counter, issue counter | read, move, delete | none | none |
-| Public object, pairing object | read, write, delete | read, under SCP03 | read |
+| Public object | read, write, delete | read, under SCP03 | none |
+| Pairing object | read, write, delete | read, under SCP03 | read |
 | Inbox | read, write, delete | write, under SCP03 | write |
 | Phone slot | delete | none | none |
 
 Nobody may delete the owner object, not even its own session. The chip has no factory reset object and refuses DeleteAll in every session, so a tap cannot wipe a badge.
 
-Any session may make a binary object at an id that holds nothing, and that object gets every right for every session. So a badge MUST NOT leave the phone slot, the inbox, the issue counter or the public object of a circle it keeps empty outside a conversation with the chip, and MUST NOT read back or keep an object at one of those ids that it did not make. It deletes and makes again any it finds missing or did not write, in one owner conversation. It deletes whatever is at the pairing object's id and makes the object fresh each time the owner opens `pair a phone`. If an object at one of these ids cannot be deleted, the badge does not use the chip, or for a public object, leaves that circle out of pairing.
+Any session may make an object at an id that holds nothing, and that object gets every right for every session. The bench made a binary object, an HMAC key, an AES key (an authentication object too), a P-256 key pair and a counter that way in no session. So a badge MUST NOT leave the phone slot, the inbox, the issue counter, the pairing object or the public object of a circle it keeps empty outside a conversation with the chip, and MUST NOT read back or keep an object at one of those ids that it did not make. It deletes and makes again any it finds missing or did not write, in one owner conversation, with its record flagged first so that a conversation cut off between the delete and the make is done again at the next boot. If an object at one of these ids cannot be deleted, the badge does not use the chip, or for a public object, leaves that circle out of pairing and drops its bump at an unpair.
+
+A phone MUST read only the public objects of the circle slots the pairing object names, and MUST refuse two that name the same circle.
 
 ### 9.2 Object ids
 
@@ -756,9 +759,10 @@ The pairing object is 128 bytes. It holds a canonical CBOR map, then zeros to th
 |---|---|
 | 0 | nonce, bstr 16. All zeros when no pairing is open |
 | 1 | the badge's ephemeral public key for this pairing, bstr 33, P-256 SEC1 compressed |
-| 2 | the badge's name, tstr, empty while the badge has none |
+| 2 | the badge's name, tstr, empty while the badge has none. A phone shows "your badge" for an empty name |
+| 3 | circles, uint16: bit `s` set for each circle slot `s`, 0 to 15, whose public object the badge wrote and vouches for |
 
-The badge draws a fresh nonce and a fresh ephemeral key pair when its owner opens `pair a phone`. It keeps the private key in RAM only. When the page closes, at a pairing, a decline and every boot, it writes a zero nonce and a zero key and drops the private key.
+The badge makes the pairing object at its first boot, with a zero nonce, a zero key and no circles, and keeps it made: it writes over it in place. It draws a fresh nonce and a fresh ephemeral key pair when its owner opens `pair a phone`. It keeps the private key in RAM only. When the page closes, at a pairing, a decline and every boot, it writes a zero nonce and a zero key and drops the private key. It rewrites the circles at every keep, forget, pairing and unpairing, and at boot.
 
 ### 9.4 The inbox
 
@@ -789,17 +793,17 @@ sealed = phone_ephemeral_public (33, compressed) || ciphertext (16) || tag (16)
 
 The badge checks the signature against the nonce and key of the pairing it has open, before it opens the seal. A request signed for an earlier pairing does not verify.
 
-**The words.** Both sides show four words: the first 44 bits of
+**The words.** Both sides show six words: the first 66 bits of
 
 ```
 SHA-256("cahoots/pair-phone/v1" || nonce || badge_ephemeral_public || phone_public || aes_key)
 ```
 
-read as four 11-bit big-endian indices into the BIP-39 English wordlist, as the check words are read (section 3, step 7). The owner presses both buttons only when the words match.
+read as six 11-bit big-endian indices into the BIP-39 English wordlist, as the check words are read (section 3, step 7). The owner presses both buttons only when the words match.
 
 ### 9.5 The public object
 
-Each circle has one public object. The badge writes it when the circle is kept and again at every pairing and unpairing. A new one is its first contents plus 1024 bytes of room, at most 8192 bytes. It holds a canonical CBOR map with nine keys, every one present and in order, then zeros to the end. A reader MUST refuse anything else.
+Each circle has one public object. The badge writes it when the circle is kept and again at every pairing and unpairing. Only the badge and its paired phone, in the slot's session, may read it. Objects made by the first firmware, which any session could read, are made again once under this policy at boot, with the same contents. A new one is its first contents plus 1024 bytes of room, at most 8192 bytes. It holds a canonical CBOR map with nine keys, every one present and in order, then zeros to the end. A reader MUST refuse anything else.
 
 | Key | Value |
 |---|---|
@@ -858,7 +862,7 @@ Generation ids are random, except generation 0, whose id is `SHA-256("cahoots/ch
 
 ### 9.8 The applet's commands from a phone
 
-A phone sends short APDUs only. It SELECTs the applet, `A0 00 00 03 96 54 53 00 00 00 01 03 00 00 00 00`. In no session it may read the size and the bytes of an object its policy lets any session read, and write into the inbox with WriteBinary. It never creates an object, so its WriteBinary carries no policy and no length. To open the slot it sends CreateSession for `0x4C410500`, then INITIALIZE UPDATE and EXTERNAL AUTHENTICATE inside ProcessSessionCmd with the session id. Every later command is wrapped under SCP03 first and then put inside ProcessSessionCmd. As measured on the bench:
+A phone sends short APDUs only. It SELECTs the applet, `A0 00 00 03 96 54 53 00 00 00 01 03 00 00 00 00`. In no session it may read the size and the bytes of an object its policy lets any session read, which is the pairing object alone, and write into the inbox with WriteBinary. It never creates an object, so its WriteBinary carries no policy and no length. To open the slot it sends CreateSession for `0x4C410500`, then INITIALIZE UPDATE and EXTERNAL AUTHENTICATE inside ProcessSessionCmd with the session id. Every later command is wrapped under SCP03 first and then put inside ProcessSessionCmd. As measured on the bench:
 
 - A wrapped command MUST NOT carry an Le. The applet answers one that does with `6982` and ends the session. The outer ProcessSessionCmd keeps its Le.
 - The encryption counter advances on every command, with data or not.
