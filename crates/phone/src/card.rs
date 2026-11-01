@@ -313,12 +313,12 @@ impl Phone {
     pub fn pair_card_start(&self, name: String) -> Result<PairPreview, PhoneError> {
         let name = name.trim().to_string();
         if name.is_empty() {
-            return Err(PhoneError::Nfc {
+            return Err(PhoneError::Ceremony {
                 message: "Enter a name for this phone.".into(),
             });
         }
         if name.len() > cahoots_badge::pairing::MAX_NAME {
-            return Err(PhoneError::Nfc {
+            return Err(PhoneError::Ceremony {
                 message: "That name is too long for the badge. Try a shorter one.".into(),
             });
         }
@@ -424,31 +424,44 @@ impl Phone {
             return Ok(Vec::new());
         };
         let label = key_label(&badge_nonce);
-        self.signer.put_secret(label.clone(), key.to_vec())?;
         self.lock().pairing = None;
         let mut kept = Vec::new();
+        let mut first = None;
         for (slot, o, keys) in read {
             let Some(k) = check(o, &mine) else {
                 continue;
             };
-            if let Some(id) = self.keep_card_circle(slot, k, keys, &badge_name, &label)? {
-                kept.push(id);
+            match self.keep_card_circle(slot, k, keys, &badge_name, &label) {
+                Ok(Some(id)) => kept.push(id),
+                Ok(None) => {}
+                Err(e) => {
+                    first.get_or_insert(e);
+                }
             }
         }
-        Ok(kept)
+        // The slot key is kept only for a badge with a card circle on this phone.
+        if !kept.is_empty() {
+            self.signer.put_secret(label, key.to_vec())?;
+        }
+        first.map_or(Ok(kept), Err)
     }
 
     /// Tap the card for the keys a card circle's chat waits for (`needs_tap`), and for the
-    /// bumps it still has to post. `NotPaired` when the badge no longer knows this phone:
+    /// bumps it still has to post. With nothing to fetch it does not tap. `NotPaired` when
+    /// the badge no longer knows this phone:
     /// offer `forget_card`.
     pub fn tap_for_keys(&self, circle: String) -> Result<(), PhoneError> {
         self.with_circle(&circle, |c, me| {
             let card = c.record.card.clone().ok_or_else(|| PhoneError::NotFound {
-                message: "This circle is not a card's.".into(),
+                message: "This circle is not from a badge.".into(),
             })?;
+            let wanted = c.wanted_generations();
+            // Nothing to fetch: no tap, and no Face ID for the key.
+            if wanted.is_empty() {
+                return Ok(());
+            }
             let key = me.slot_key(&card.key_label)?;
             let mine = me.my_public()?;
-            let wanted = c.wanted_generations();
             let circle_id = c.circle_id;
             let slot = card.circle_slot;
             let keys = me.tap_slot(&key, |s| {

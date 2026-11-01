@@ -254,7 +254,16 @@ impl Circle {
 
     pub(crate) fn save_chat(&mut self) -> Result<(), PhoneError> {
         self.chat.state = self.session.export_state().to_vec().into();
-        self.chat.save(&self.dir)
+        self.chat.save(&self.dir)?;
+        // A card circle's first key is in the saved state now: the record need not keep it,
+        // so a lost phone holds only the keys the chat still keeps.
+        if let Some(card) = self.record.card.as_mut() {
+            if let Some(mut k) = card.generation_key.take() {
+                zeroize::Zeroize::zeroize(&mut k);
+                self.record.save(&self.dir)?;
+            }
+        }
+        Ok(())
     }
 
     /// Save the chain state and outbox with the history lines they made, in one write, then
@@ -325,10 +334,11 @@ impl Circle {
                 // Our own messages move our sending position; a message that does not open
                 // (damaged, replayed, another kind) is passed over. A card circle that meets
                 // a message in the generation it waits for stops here, without passing it,
-                // until a tap gives the key.
+                // until a tap gives the key. One in a generation it dropped is passed over
+                // like any other that does not open: no tap gives that key back.
                 let mut opened = self.session.receive(&bytes);
                 if let Err(ChatError::NeedsGeneration(id)) = opened {
-                    if self.record.is_card() {
+                    if self.record.is_card() && self.session.pending_generation() == Some(id) {
                         if !self.install_ahead(id) {
                             stalled = true;
                             break;

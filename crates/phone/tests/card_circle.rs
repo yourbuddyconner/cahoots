@@ -17,6 +17,7 @@ use cahoots_phone::signer::SoftSigner;
 use cahoots_phone::store::CircleRecord;
 use cahoots_phone::{Http, Phone, PhoneError, Signer};
 use cahoots_relay::{MemRelay, Relay};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 
@@ -42,9 +43,18 @@ impl Nfc for FakeNfc {
     }
 }
 
-/// The relay's HTTP interface over a `MemRelay`.
+/// The relay's HTTP interface over a `MemRelay`, and a switch that takes it off the network.
 #[derive(Clone)]
-struct FakeHttp(Arc<Mutex<MemRelay>>);
+struct FakeHttp(Arc<Mutex<MemRelay>>, Arc<AtomicBool>);
+
+impl FakeHttp {
+    fn reach(&self) -> Result<(), PhoneError> {
+        if self.1.load(Ordering::SeqCst) {
+            return Err(PhoneError::Network { message: "offline".into() });
+        }
+        Ok(())
+    }
+}
 
 fn circle_of(url: &str) -> [u8; 16] {
     let rest = url.strip_prefix(&format!("{RELAY}/v1/circles/")).expect("relay url");
@@ -53,6 +63,7 @@ fn circle_of(url: &str) -> [u8; 16] {
 
 impl Http for FakeHttp {
     fn get(&self, url: String) -> Result<Vec<u8>, PhoneError> {
+        self.reach()?;
         let after = url
             .split(['?', '&'])
             .find_map(|p| p.strip_prefix("after="))
@@ -65,6 +76,7 @@ impl Http for FakeHttp {
         Ok(serde_json::to_vec(&serde_json::json!({ "entries": entries })).unwrap())
     }
     fn post(&self, url: String, body: Vec<u8>) -> Result<Vec<u8>, PhoneError> {
+        self.reach()?;
         let seq = self.0.lock().unwrap().post(&circle_of(&url), &body).unwrap();
         Ok(serde_json::to_vec(&serde_json::json!({ "seq": seq })).unwrap())
     }
@@ -84,7 +96,18 @@ struct Device {
     path: std::path::PathBuf,
     signer: SoftSigner,
     nfc: FakeNfc,
+    http: FakeHttp,
     phone: Arc<Phone>,
+}
+
+fn open(path: &std::path::Path, signer: &SoftSigner, http: &FakeHttp, nfc: &FakeNfc) -> Arc<Phone> {
+    Phone::open(
+        path.to_string_lossy().into_owned(),
+        Box::new(signer.clone()),
+        Box::new(http.clone()),
+        Box::new(nfc.clone()),
+    )
+    .unwrap()
 }
 
 fn device(relay: &Arc<Mutex<MemRelay>>) -> Device {
@@ -92,15 +115,17 @@ fn device(relay: &Arc<Mutex<MemRelay>>) -> Device {
     let path = dir.path().to_path_buf();
     let signer = SoftSigner::new();
     let nfc = FakeNfc::default();
-    let phone = Phone::open(
-        path.to_string_lossy().into_owned(),
-        Box::new(signer.clone()),
-        Box::new(FakeHttp(relay.clone())),
-        Box::new(nfc.clone()),
-    )
-    .unwrap();
+    let http = FakeHttp(relay.clone(), Arc::new(AtomicBool::new(false)));
+    let phone = open(&path, &signer, &http, &nfc);
     phone.set_default_relay(RELAY.into()).unwrap();
-    Device { _dir: dir, path, signer, nfc, phone }
+    Device { _dir: dir, path, signer, nfc, http, phone }
+}
+
+impl Device {
+    /// The app is closed and opened again: everything is read from disk.
+    fn restart(&mut self) {
+        self.phone = open(&self.path, &self.signer, &self.http, &self.nfc);
+    }
 }
 
 /// Card 1 at the bottom, card 2 on top. `chips` says which cards have a chip.
@@ -261,10 +286,9 @@ impl Member {
         relay.lock().unwrap().post(&self.manifest.circle_id, &wire).unwrap();
     }
 
-    /// Move the circle to a new generation with a bump signed by this seat.
-    fn bump(&mut self, relay: &Arc<Mutex<MemRelay>>) -> [u8; 32] {
+    /// Move the circle to generation `to` with a bump signed by this seat.
+    fn bump(&mut self, relay: &Arc<Mutex<MemRelay>>, to: [u8; 32]) -> [u8; 32] {
         self.read(relay);
-        let to = [0x77; 32];
         let from = self.session.generation_id();
         let payload =
             sign_bump(&self.key, self.seat, &self.manifest.circle_id, &from, &to).unwrap();
@@ -304,7 +328,7 @@ fn a_phone_pairs_chats_by_tap_follows_a_bump_and_forgets_the_card() {
     let (mut b1, b2) = kept_pair((true, false));
     let mut member = Member::of(&b2);
     let badge_seat = b1.circle().unwrap().seat;
-    let d = device(&relay);
+    let mut d = device(&relay);
 
     // The badge has signed a card: it is in the public object the second tap reads.
     let ids = pair_then(&mut b1, &d, badge_signs_a_card);
@@ -350,7 +374,7 @@ fn a_phone_pairs_chats_by_tap_follows_a_bump_and_forgets_the_card() {
     assert_eq!(badge.face_seed, vec![0x5F; 32]);
 
     // A bump by the member moves the circle on. The phone holds no root: it waits for a tap.
-    member.bump(&relay);
+    member.bump(&relay, [0x77; 32]);
     member.say(&relay, "after the reset");
     let got = d.phone.poll(id.clone()).unwrap();
     assert_eq!(got.len(), 1);
@@ -361,6 +385,15 @@ fn a_phone_pairs_chats_by_tap_follows_a_bump_and_forgets_the_card() {
     // Without the card nothing changes.
     assert!(matches!(d.phone.tap_for_keys(id.clone()), Err(PhoneError::NoCard)));
     assert!(d.phone.circles()[0].needs_tap);
+    // Nor across a restart: the chat still waits for the key, and still says so.
+    d.restart();
+    assert!(d.phone.circles()[0].needs_tap);
+    assert!(d.phone.poll(id.clone()).unwrap().is_empty());
+    let e = d.phone.send_chat(id.clone(), "too soon".into()).err().unwrap();
+    assert_eq!(e.to_string(), "Tap your card to catch up.");
+    // The first key left the record once the chat state held it.
+    let held = CircleRecord::load(&dir).unwrap();
+    assert!(held.card.as_ref().unwrap().generation_key.is_none());
 
     tap(&mut b1, &d, |p| p.tap_for_keys(id.clone())).unwrap();
     assert!(!d.phone.circles()[0].needs_tap);
@@ -373,8 +406,14 @@ fn a_phone_pairs_chats_by_tap_follows_a_bump_and_forgets_the_card() {
     assert!(history.contains(&"hello from the other card".to_string()));
     assert!(history.contains(&"caught up".to_string()));
 
+    // With nothing to fetch there is no tap: no card in the reader, and no error.
+    d.phone.tap_for_keys(id.clone()).unwrap();
+
     // The badge unpairs the phone: the next tap says so, and the card circles can be forgotten.
     b1.unpair().unwrap();
+    member.bump(&relay, [0x78; 32]);
+    d.phone.poll(id.clone()).unwrap();
+    assert!(d.phone.circles()[0].needs_tap);
     let e = tap(&mut b1, &d, |p| p.tap_for_keys(id.clone())).err().unwrap();
     assert!(matches!(e, PhoneError::NotPaired));
     assert_eq!(e.to_string(), "This card no longer knows this phone.");
@@ -483,4 +522,73 @@ fn a_tap_without_an_open_pairing_says_so_and_keeps_nothing() {
     // A name the badge cannot hold.
     let e = d.phone.pair_card_start("x".repeat(65)).err().unwrap();
     assert_eq!(e.to_string(), "That name is too long for the badge. Try a shorter one.");
+}
+
+#[test]
+fn an_entry_in_a_generation_the_card_circle_dropped_is_passed_over() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b1, b2) = kept_pair((true, false));
+    let mut member = Member::of(&b2);
+    let d = device(&relay);
+    let id = pair(&mut b1, &d).remove(0);
+    let seat = b1.circle().unwrap().seat;
+
+    // A device of the member's seat that never moved from the first generation.
+    let c = b2.circle().unwrap();
+    let mut stale = ChatSession::new(&c.root.unwrap(), c.circle_id, c.params.n, c.seat);
+    stale.mark_synced();
+
+    // Two bumps, each caught up with a tap: the phone drops the first generation.
+    for to in [[0x81; 32], [0x82; 32]] {
+        member.bump(&relay, to);
+        d.phone.poll(id.clone()).unwrap();
+        assert!(d.phone.circles()[0].needs_tap);
+        tap(&mut b1, &d, |p| p.tap_for_keys(id.clone())).unwrap();
+        d.phone.poll(id.clone()).unwrap();
+        assert!(!d.phone.circles()[0].needs_tap);
+    }
+
+    // A late entry in the first generation does not stop the poll, and no tap is asked for.
+    let late = stale.send(&bucket_pad(b"late").unwrap()).unwrap();
+    relay.lock().unwrap().post(&c.circle_id, &late).unwrap();
+    member.say(&relay, "after the late one");
+    let got = d.phone.poll(id.clone()).unwrap();
+    assert_eq!(got.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["after the late one"]);
+    assert!(!d.phone.circles()[0].needs_tap);
+    d.phone.send_chat(id.clone(), "still chatting".into()).unwrap();
+    assert_eq!(member.read(&relay), vec![(seat, "still chatting".to_string())]);
+}
+
+#[test]
+fn a_relay_out_of_reach_at_the_second_tap_leaves_the_bumps_for_the_next_poll() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b1, b2) = kept_pair((true, false));
+    let mut member = Member::of(&b2);
+    let first = device(&relay);
+    pair(&mut b1, &first);
+    b1.unpair().unwrap();
+    let o = badge_chip::read_public(b1.board().owner_chip(), 0).unwrap().unwrap();
+    b1.board().chip.as_mut().unwrap().close_session().unwrap();
+
+    // The second phone pairs while the relay is out of reach: the circle is kept, and the
+    // bump waits.
+    let second = device(&relay);
+    second.http.1.store(true, Ordering::SeqCst);
+    let id = pair(&mut b1, &second).remove(0);
+    let dir = second.path.join("circles").join(&id);
+    let record = CircleRecord::load(&dir).unwrap();
+    assert_eq!(record.card.as_ref().unwrap().forward.len(), 1);
+    assert!(relay.lock().unwrap().poll(&o.circle_id, None, 0).unwrap().is_empty());
+
+    // Back online, the next poll posts it, with the key the second tap fetched ahead.
+    second.http.1.store(false, Ordering::SeqCst);
+    second.phone.poll(id.clone()).unwrap();
+    let record = CircleRecord::load(&dir).unwrap();
+    assert!(record.card.as_ref().unwrap().forward.is_empty());
+    assert!(!second.phone.circles()[0].needs_tap);
+    member.read(&relay);
+    assert_eq!(member.session.generation_id(), o.generation);
+    second.phone.send_chat(id.clone(), "after the outage".into()).unwrap();
+    let seat = b1.circle().unwrap().seat;
+    assert_eq!(member.read(&relay), vec![(seat, "after the outage".to_string())]);
 }
