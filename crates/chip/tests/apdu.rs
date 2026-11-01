@@ -56,8 +56,12 @@ fn nothing_answers_before_the_applet_is_selected() {
 fn a_session_opens_only_against_an_aes_key_and_never_while_the_badge_holds_the_chip() {
     let mut c = chip();
     c.apdu(&select());
+    // The applet itself opens a session against the owner's user id and refuses at
+    // VerifySessionUserId without the secret; the software chip, which does not model user-id
+    // sessions over APDUs, refuses at once.
     assert_eq!(sw(&c.apdu(&create_session(KeyId::OWNER))), 0x6985);
-    assert_eq!(sw(&c.apdu(&create_session(KeyId::new(KeyKind::Root, 9)))), 0x6A82);
+    // An id that holds nothing: 6985, as the applet answers (bench), not 6A82.
+    assert_eq!(sw(&c.apdu(&create_session(KeyId::new(KeyKind::Root, 9)))), 0x6985);
     c.open_owner(&TEST_OWNER_SECRET).unwrap();
     assert_eq!(sw(&c.apdu(&create_session(KeyId::SLOT))), 0x6985);
     c.close_session().unwrap();
@@ -69,7 +73,9 @@ fn a_host_without_the_key_is_refused_and_the_session_ends() {
     let mut c = chip();
     c.apdu(&select());
     let a = c.apdu(&create_session(KeyId::SLOT));
-    let sid = a[2..10].to_vec();
+    // `41 82 00 08` and the id: the applet writes this length in its two-byte form.
+    assert_eq!(&a[..4], &[0x41, 0x82, 0x00, 0x08]);
+    let sid = a[4..12].to_vec();
     // Out of order: EXTERNAL AUTHENTICATE before INITIALIZE UPDATE.
     let mut auth = vec![0x84, 0x82, 0x33, 0x00, 0x10];
     auth.extend_from_slice(&[0; 16]);

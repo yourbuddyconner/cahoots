@@ -60,7 +60,8 @@ pub enum TapError {
     NotPaired,
     /// The object's policy refuses this session (`6986` or `6982`).
     NotAllowed,
-    /// No object has that id (`6A82`).
+    /// No object has that id. The applet answers `6985` for a read, a MAC or a session on an
+    /// id that holds nothing (bench, SE051 applet 7.2.0), and `6A82` only for a SELECT.
     NotFound,
     /// What the object holds is not what was asked for.
     Malformed,
@@ -115,7 +116,7 @@ impl From<TapError> for PhoneError {
 fn refused(sw: u16) -> TapError {
     match sw {
         0x6982 | 0x6986 => TapError::NotAllowed,
-        0x6A82 => TapError::NotFound,
+        0x6A82 | 0x6985 => TapError::NotFound,
         sw => TapError::Status(sw),
     }
 }
@@ -358,6 +359,15 @@ impl Session<'_, '_> {
         self.mac(KeyId::new(KeyKind::Hello, circle_slot * SEATS + other), data)
     }
 
+    /// The applet's version, major, minor and patch, asked in the session.
+    pub fn version(&mut self) -> Result<[u8; 3], TapError> {
+        let a = self.exchange(apdu::get_version())?;
+        apdu::find_tlv(&a, 0x41)
+            .and_then(|v| v.get(..3))
+            .and_then(|v| v.try_into().ok())
+            .ok_or(TapError::BadAnswer)
+    }
+
     /// The public object of the circle in `circle_slot`, read in the session.
     pub fn read_public(&mut self, circle_slot: u8) -> Result<PublicObject, TapError> {
         read_public(self, circle_slot)
@@ -380,7 +390,9 @@ impl Channel for Session<'_, '_> {
         if c.data.len() > apdu::MAX_SESSION_DATA {
             return Err(TapError::TooLong);
         }
-        let inner = self.scp.wrap(c.cla, c.ins, c.p1, c.p2, &c.data, c.le.map(|_| 0));
+        // No Le inside the wrapped command: the applet refuses one with 6982 and ends the
+        // session (bench, SE051 applet 7.2.0, 2026-10-31). The answer comes back anyway.
+        let inner = self.scp.wrap(c.cla, c.ins, c.p1, c.p2, &c.data, None);
         let (data, sw) = self.tap.send(&apdu::process_session(&self.id, &inner).encode())?;
         if sw != 0x9000 {
             return Err(refused(sw));

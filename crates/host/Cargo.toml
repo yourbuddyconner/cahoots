@@ -34,12 +34,14 @@ qrcode = { version = "0.14.1", default-features = false }
 # `bridge --offer-image`: the host's code read from a photo or a screenshot.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 rqrr = "0.11"
+# `chip`: the phone's own chip client (SCP03, the APDUs, the pairing inbox), run against the
+# real applet through a bench firmware's pass-through.
+cahoots-phone = { path = "../phone" }
+hex = { workspace = true }
 
 [dev-dependencies]
 qrcode = { version = "0.14.1", default-features = false, features = ["image"] }
-cahoots-phone = { path = "../phone" }
 cahoots-relay = { path = "../relay" }
-hex = { workspace = true }
 tempfile = "3"
 cahoots-chat = { workspace = true }
 ssh-key = { version = "0.6", default-features = false, features = ["std", "ecdsa", "p256", "ed25519", "rand_core", "getrandom"] }

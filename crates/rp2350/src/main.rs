@@ -254,6 +254,8 @@ fn main() -> ! {
         chip_up: false,
         chip_held: false,
         owner_secret,
+        #[cfg(feature = "bench")]
+        bench_raw: None,
     });
     badge.boot();
     loop {

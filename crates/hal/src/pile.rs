@@ -20,6 +20,8 @@
 //! | `Count` 18 | `n u8` |
 //! | `Ping` 30 | none. A presence beacon for links with no detect line, such as a USB serial port: the side that can see the port is open sends one now and then, and the other side treats a recent `Ping` as "plugged in". Both layers ignore it. |
 //! | `Log` 31 | UTF-8 text. A line of the sender's log, for a host on the other end of the cable to print. Both layers ignore it. |
+//! | `Apdu` 32 | a command APDU for the badge's chip, from a laptop, for a firmware built with its `bench` feature only. Empty: end the exchange and drop the chip's pin. Both layers ignore it. |
+//! | `ApduReply` 33 | the chip's answer to an `Apdu`, its data then SW1 SW2. Empty when the chip did not answer, and in reply to an empty `Apdu`. Both layers ignore it. |
 
 use crate::ring::{RingCeremony, RingError};
 use crate::{Entropy, Link};
@@ -40,6 +42,11 @@ pub const KIND_COUNT: u8 = 18;
 pub const KIND_PRESS: u8 = 29;
 pub const KIND_PING: u8 = 30;
 pub const KIND_LOG: u8 = 31;
+/// A command APDU the laptop sends the badge's chip, for a firmware built with its `bench`
+/// feature and nothing else. A production badge ignores it.
+pub const KIND_APDU: u8 = 32;
+/// The chip's answer to a [`KIND_APDU`] frame.
+pub const KIND_APDU_REPLY: u8 = 33;
 
 const DOWN: usize = 0;
 const UP: usize = 1;

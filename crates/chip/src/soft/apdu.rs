@@ -13,6 +13,7 @@
 //! | INITIALIZE UPDATE | `80 50 00 00` | host challenge (8), in the session |
 //! | EXTERNAL AUTHENTICATE | `84 82 lvl 00` | host cryptogram (8), C-MAC (8), in the session |
 //! | CloseSession | `80 04 00 1C` | none |
+//! | GetVersion | `80 04 00 20` | none |
 //! | ReadObject | `80 02 00 00` | `41` id, `42` offset (2), `43` length (2) |
 //! | ReadSize | `80 02 00 07` | `41` id |
 //! | WriteBinary | `80 01 06 00` | `11` policy, `41` id, `42` offset (2), `43` file length (2), `44` data |
@@ -26,13 +27,20 @@
 //!
 //! Status words: `90 00`; `6986` for a policy refusal (the applet's answer on the bench);
 //! `6982` for a session that failed secure messaging; `6985` for a session that cannot be
-//! opened (the chip is in its badge's owner session, or the object is not an AES key) or a
-//! command out of order in one; `6A82` for no such object; `6A89` for an id in use; `6A80` for
-//! bad data; `6700` for a bad length; `6D00` for a command it does not know; `6E00` before the
-//! applet is selected.
+//! opened (the chip is in its badge's owner session, or the object is not an AES key), a
+//! command out of order in one, and an id that holds nothing (a read, a MAC or a session on
+//! it: the applet's answer on the bench, not `6A82`); `6A82` for a SELECT of another applet;
+//! `6A89` for an id in use; `6A80` for bad data; `6700` for a bad length; `6D00` for a command it does not know;
+//! `6E00` before the applet is selected.
+//!
+//! Any session may make a binary object at an id that holds nothing, with or without a file
+//! length, and the object takes the applet's default policy (every right for every session):
+//! the applet does that on the bench. The badge never adopts such an object.
 //!
 //! Not modelled: a policy in WriteBinary (a phone never makes objects; it is refused with
-//! `6A80`), and the user-id session, which only the badge opens, over I2C.
+//! `6A80`), and the user-id session, which only the badge opens, over I2C. CreateSession
+//! against the owner's user id is refused here with `6985`; the applet opens it and refuses
+//! at VerifySessionUserId without the secret.
 
 use super::scp03::Card;
 use super::{read_rights, sign_rights, write_rights, Object, SoftChip};
@@ -47,8 +55,9 @@ pub const APPLET_ID: [u8; 16] = [
     0xA0, 0x00, 0x00, 0x03, 0x96, 0x54, 0x53, 0x00, 0x00, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00, 0x00,
 ];
 
-/// What SELECT answers: the applet version 7.2.0, its configuration and the secure box version.
-const SELECT_ANSWER: [u8; 7] = [7, 2, 0, 0x3F, 0xFF, 0x01, 0x0B];
+/// What SELECT answers: the applet version 7.2.0, its configuration and the secure box version,
+/// as the bench chip (SE051, 2026-10-31) answers it.
+const SELECT_ANSWER: [u8; 7] = [7, 2, 0, 0x3F, 0xFF, 0xFF, 0xFF];
 
 const SW_OK: u16 = 0x9000;
 const SW_WRONG_LENGTH: u16 = 0x6700;
@@ -88,6 +97,8 @@ struct Command<'a> {
     /// `CLA INS P1 P2` and Lc as sent, for the C-MAC.
     header: &'a [u8],
     data: &'a [u8],
+    /// An Le byte (or two) followed the data.
+    le: bool,
 }
 
 fn parse(apdu: &[u8]) -> Option<Command<'_>> {
@@ -106,7 +117,7 @@ fn parse(apdu: &[u8]) -> Option<Command<'_>> {
         _ => return None,
     };
     if lc_len == 0 {
-        return Some(Command { cla, ins, p1, p2, header: &apdu[..4], data: &[] });
+        return Some(Command { cla, ins, p1, p2, header: &apdu[..4], data: &[], le: !rest.is_empty() });
     }
     let data_end = lc_len + lc;
     let tail = rest.len().checked_sub(data_end)?;
@@ -121,6 +132,7 @@ fn parse(apdu: &[u8]) -> Option<Command<'_>> {
         p2,
         header: &apdu[..4 + lc_len],
         data: &rest[lc_len..data_end],
+        le: tail > 0,
     })
 }
 
@@ -163,6 +175,15 @@ fn tlv(tag: u8, v: &[u8]) -> Vec<u8> {
     out
 }
 
+/// A TLV with the length always in its two-byte form (`82 hi lo`), as the applet writes the
+/// answers of CreateSession and ReadObject (bench).
+fn tlv_long(tag: u8, v: &[u8]) -> Vec<u8> {
+    let mut out = vec![tag, 0x82];
+    out.extend_from_slice(&(v.len() as u16).to_be_bytes());
+    out.extend_from_slice(v);
+    out
+}
+
 fn object_id(v: Option<&[u8]>) -> Option<KeyId> {
     Some(KeyId(u32::from_be_bytes(v?.try_into().ok()?)))
 }
@@ -177,7 +198,8 @@ fn u16_of(v: Option<&[u8]>) -> Option<Option<usize>> {
 fn status(e: ChipError) -> u16 {
     match e {
         ChipError::NotAllowed => SW_NOT_ALLOWED,
-        ChipError::NoSuchKey => SW_NOT_FOUND,
+        // The applet's answer to a read, a MAC or a write on an id that holds nothing.
+        ChipError::NoSuchKey => SW_CONDITIONS,
         ChipError::Exists => SW_EXISTS,
         ChipError::BadSession => SW_CONDITIONS,
         ChipError::Status(s) => s,
@@ -230,7 +252,7 @@ impl SoftChip {
             return answer(Vec::new(), SW_CONDITIONS);
         }
         let key = match self.objects.get(&id.0) {
-            None => return answer(Vec::new(), SW_NOT_FOUND),
+            None => return answer(Vec::new(), SW_CONDITIONS),
             Some(e) => match &e.object {
                 Object::Aes(k) => *k,
                 _ => return answer(Vec::new(), SW_CONDITIONS),
@@ -239,7 +261,7 @@ impl SoftChip {
         let mut sid = [0u8; 8];
         self.rng.fill_bytes(&mut sid);
         self.nfc = Some(NfcSession { id: sid, key, stage: Stage::Created });
-        answer(tlv(0x41, &sid), SW_OK)
+        answer(tlv_long(0x41, &sid), SW_OK)
     }
 
     fn process_session(&mut self, data: &[u8]) -> Vec<u8> {
@@ -287,13 +309,14 @@ impl SoftChip {
                 answer(Vec::new(), SW_OK)
             }
             Stage::Open(mut card) => {
-                if c.cla != 0x84 {
+                // The applet refuses a wrapped command with an Le, and ends the session (bench).
+                if c.cla != 0x84 || c.le {
                     return answer(Vec::new(), SW_SM_FAILED);
                 }
                 let Some(plain) = card.open_command(c.header, c.data) else {
                     return answer(Vec::new(), SW_SM_FAILED);
                 };
-                let cmd = Command { cla: 0x80, ins: c.ins, p1: c.p1, p2: c.p2, header: &[], data: &plain };
+                let cmd = Command { cla: 0x80, ins: c.ins, p1: c.p1, p2: c.p2, header: &[], data: &plain, le: false };
                 if (cmd.ins, cmd.p1, cmd.p2) == (0x04, 0x00, 0x1C) {
                     return answer(card.seal_response(&[]), SW_OK);
                 }
@@ -322,6 +345,8 @@ impl SoftChip {
         let t = tlvs(c.data).ok_or(SW_WRONG_DATA)?;
         let id = || object_id(find(&t, 0x41)).ok_or(SW_WRONG_DATA);
         match (c.ins, c.p1, c.p2) {
+            // GetVersion: any session.
+            (0x04, 0x00, 0x20) => Ok(tlv(0x41, &SELECT_ANSWER)),
             // ReadObject.
             (0x02, 0x00, 0x00) => {
                 let offset = u16_of(find(&t, 0x42)).ok_or(SW_WRONG_DATA)?.unwrap_or(0);
@@ -329,7 +354,7 @@ impl SoftChip {
                 let b = self.read_binary(id()?).map_err(status)?;
                 let end = length.map_or(b.len(), |n| offset + n);
                 let part = b.get(offset..end).ok_or(SW_WRONG_DATA)?;
-                Ok(tlv(0x41, part))
+                Ok(tlv_long(0x41, part))
             }
             // ReadSize.
             (0x02, 0x00, 0x07) => match self.get(id()?, read_rights).map_err(status)? {
@@ -347,7 +372,8 @@ impl SoftChip {
                 let data = find(&t, 0x44).unwrap_or(&[]);
                 if !self.objects.contains_key(&id.0) {
                     // A new object with the applet's default policy: every right for anyone.
-                    let n = file_length.ok_or(SW_NOT_FOUND)?;
+                    // With no file length it is as long as what is written (bench).
+                    let n = file_length.unwrap_or(offset + data.len());
                     let mut body = vec![0u8; n];
                     body.get_mut(offset..offset + data.len()).ok_or(SW_WRONG_DATA)?.copy_from_slice(data);
                     return self

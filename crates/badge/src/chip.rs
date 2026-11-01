@@ -749,6 +749,13 @@ pub fn write_public(
     Ok(())
 }
 
+/// Delete whatever is at circle slot `slot`'s public object id, before a keep writes the
+/// circle's first one: the applet lets any session make an object at an id that holds
+/// nothing, so one found there before the circle existed is not the badge's.
+pub fn clear_public(chip: &mut dyn ChipOps, slot: u8) -> Result<(), ChipError> {
+    delete_quietly(chip, public_id(slot))
+}
+
 /// Circle slot `slot`'s public object as stored, or why not: a chip error, or `None` for
 /// bytes that are not a public object.
 pub fn read_public(

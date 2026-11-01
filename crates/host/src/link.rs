@@ -167,6 +167,8 @@ pub struct SerialLink {
     broken: bool,
     errors: u32,
     bench: Option<Bench>,
+    /// Log lines kept for [`SerialLink::take_logs`], when asked for.
+    kept: Option<Vec<String>>,
 }
 
 /// What the bench driver is steering the badge toward.
@@ -349,6 +351,7 @@ impl SerialLink {
             broken: false,
             errors: 0,
             bench: Bench::from_env(),
+            kept: None,
         })
     }
 
@@ -365,6 +368,78 @@ impl SerialLink {
             self.label,
             ["Left", "Right", "Both"][usize::from(code.min(2))]
         );
+    }
+
+    /// Send one command APDU to the badge's chip through a bench firmware's pass-through
+    /// (frame kind 32) and return the answer: its data, then SW1 and SW2. An empty `apdu`
+    /// ends the exchange: the badge drops the chip's pin, as when a phone moves away, and the
+    /// answer is empty. `TimedOut` when no answer comes within five seconds, which is what a
+    /// firmware without the `bench` feature does.
+    pub fn apdu(&mut self, apdu: &[u8]) -> io::Result<Vec<u8>> {
+        use cahoots_core::frame::{decode, FrameError};
+        use cahoots_hal::pile::{KIND_APDU, KIND_APDU_REPLY};
+        let f = cahoots_core::frame::Frame { kind: KIND_APDU, seq: self.seq, payload: apdu };
+        self.seq = self.seq.wrapping_add(1);
+        // Whatever arrived before this command is not its answer.
+        self.through.clear();
+        self.pending.extend(cahoots_core::frame::encode(&f));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut rx: Vec<u8> = Vec::new();
+        loop {
+            self.ping_if_due();
+            self.push_out();
+            self.pull_in();
+            rx.extend(self.through.drain(..));
+            loop {
+                match decode(&rx) {
+                    Ok((f, used)) => {
+                        let reply = (f.kind == KIND_APDU_REPLY).then(|| f.payload.to_vec());
+                        rx.drain(..used);
+                        if let Some(r) = reply {
+                            return Ok(r);
+                        }
+                    }
+                    Err(FrameError::Incomplete) => break,
+                    Err(FrameError::Crc) => {
+                        rx.remove(0);
+                    }
+                }
+            }
+            if self.broken {
+                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "the badge's port went away"));
+            }
+            if std::time::Instant::now() > deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "the badge did not answer. Is it running a bench build?",
+                ));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    /// Keep the board's log lines from now on, for [`SerialLink::take_logs`].
+    pub fn keep_logs(&mut self) {
+        self.kept.get_or_insert_with(Vec::new);
+    }
+
+    /// The log lines that arrived since the last call, once [`SerialLink::keep_logs`] is on.
+    pub fn take_logs(&mut self) -> Vec<String> {
+        self.kept.as_mut().map(std::mem::take).unwrap_or_default()
+    }
+
+    /// Send what is queued and take what arrived, with a `Ping` when one is due.
+    pub fn pump(&mut self) {
+        self.ping_if_due();
+        self.push_out();
+        self.pull_in();
+        self.through.clear();
+    }
+
+    /// Press a button on a bench build: `0` Left, `1` Right, `2` Both.
+    pub fn send_press(&mut self, code: u8) {
+        self.press(code);
+        self.push_out();
     }
 
     fn ping_if_due(&mut self) {
@@ -443,6 +518,9 @@ impl SerialLink {
                     eprintln!("[{}] {line}", self.label);
                     if let Some(b) = self.bench.as_mut() {
                         presses.extend(b.react(&line));
+                    }
+                    if let Some(k) = self.kept.as_mut() {
+                        k.push(line);
                     }
                 }
                 for code in presses {

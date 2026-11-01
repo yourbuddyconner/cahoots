@@ -202,6 +202,33 @@ On 2026-10-30, Xcode 15.4, iOS 17.5, on a Mac with Apple silicon.
 The first runs failed on the test's own typing (the relay address field kept part of the old
 address) and on a label the screen rightly stops showing once step one ends. Neither was the app.
 
+## Tried on the bench
+
+On 2026-10-31, the phone's own chip client (`crates/phone/src/nfc.rs`, `apdu.rs` and
+`scp03.rs`) ran against the real SE051 on the Pico 2, applet 7.2.0. No phone was in the loop: the
+laptop ran the client, and a bench build of the firmware passed each APDU to the chip over I2C
+in no session, with the chip's pin raised for the exchange, as a phone's tap finds it
+(`cahoots-host chip`, frame kinds 32 and 33). `scripts/pair-bench.sh` runs it end to end:
+
+1. The board kept a new circle with the laptop as the two cards under it.
+2. In no session, the laptop read the circle's public object, and the applet refused each of
+   these with `6986`: a MAC with the circle's root or a hello object, a signature with the seat
+   key, an AES key at the phone slot's id, deleting the slot, the owner object or the root,
+   reading the inbox and writing the public object.
+3. The laptop pressed into "pair a phone", read the pairing object, and wrote a signed, sealed
+   inbox as "bench laptop". Both showed the same four words (that run: issue crisp fault
+   aware). Both again paired.
+4. The laptop opened the phone slot's SCP03 session with its key, at C-MAC, C-ENC, R-MAC and
+   R-ENC, asked the applet's version in it, and MACed `chat/gen` with the circle's root. Every
+   circle's public object carried a device grant and the laptop's key.
+5. The laptop pressed into "phone" and unpaired. The old key no longer opened the slot ("the
+   card does not open with this key"), and every public object named no phone and held a
+   pending bump.
+
+What the applet does that the client and the software chip had to learn: no Le inside a wrapped
+command (it ends the session with `6982`), `6985` for an id that holds nothing, the two-byte
+TLV length in some answers, and a 2-byte answer to ReadSize. Not tried: Core NFC on a device.
+
 ## First-use guide
 
 The app shows a four-page guide on first use. It explains circles and seats, hello words, channel access, and local storage. Completing or skipping it records `cahoots.welcomeSeen` on that phone or browser. The guide can be reopened from **How Cahoots works** in iOS Settings or the browser home screen’s More options menu. Incoming routes are kept while it is shown.

@@ -148,7 +148,7 @@ impl<L: Link> Channel<L> {
 
 /// A link to one badge. See the module docs.
 pub enum BadgeClient {
-    Serial(Channel<SerialLink>),
+    Serial(Box<Channel<SerialLink>>),
     Sim(Channel<SocketLink>),
 }
 
@@ -156,7 +156,7 @@ impl BadgeClient {
     /// A real board on the serial port at `path`.
     pub fn serial(path: &str) -> Result<BadgeClient, ClientError> {
         SerialLink::open(path, "badge")
-            .map(|l| BadgeClient::Serial(Channel::new(l)))
+            .map(|l| BadgeClient::Serial(Box::new(Channel::new(l))))
             .map_err(|e| ClientError::Open(format!("{path}: {e}")))
     }
 

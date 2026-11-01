@@ -64,6 +64,10 @@ pub struct PicoBoard {
     /// The secret of the chip's owner object, from the RP2350's unique id, or `None` if the
     /// ROM did not give the id.
     pub owner_secret: Option<[u8; 16]>,
+    /// Bench builds: the pin is high for the laptop's APDUs, in no session, since this moment
+    /// (the last APDU). `None` when the pass-through holds nothing.
+    #[cfg(feature = "bench")]
+    pub bench_raw: Option<crate::clock::Instant>,
 }
 
 impl PicoBoard {
@@ -121,6 +125,8 @@ impl Board for PicoBoard {
             self.stack_logged = deepest;
             log!("stack: {deepest} bytes used at the deepest point so far");
         }
+        #[cfg(feature = "bench")]
+        self.bench_serve();
         let used = crate::HEAP.used();
         if used > self.heap_logged + 16 * 1024 {
             self.heap_logged = used;
@@ -242,6 +248,9 @@ impl Board for PicoBoard {
         if self.chip_held {
             return None;
         }
+        // The badge's own conversation starts on a chip that the laptop's session is gone from.
+        #[cfg(feature = "bench")]
+        self.chip_raw_end();
         self.wake().map(|c| c as &mut dyn ChipOps)
     }
 
@@ -380,6 +389,82 @@ impl PicoBoard {
         })
     }
 }
+
+/// The laptop drops the pin after this long with no APDU, as a phone's field goes away.
+#[cfg(feature = "bench")]
+const BENCH_RAW_IDLE: crate::clock::Duration = crate::clock::Duration::from_secs(5);
+
+#[cfg(feature = "bench")]
+impl PicoBoard {
+    /// Raise the pin for the laptop's APDUs and wake the chip, in no session: the chip as a
+    /// phone's tap finds it. The owner session is never opened here. `None` while the badge's
+    /// own conversation is open or the chip is held.
+    fn chip_raw(&mut self) -> Option<&mut Chip> {
+        if self.chip.is_none() || self.chip_held || self.chip_up {
+            return None;
+        }
+        if self.bench_raw.is_none() {
+            let _ = self.chip_enable.set_high();
+            log!("bench: pin high for the laptop, no session");
+            self.delay.delay_ms(CHIP_START_MS);
+            if let Err(e) = self.chip.as_mut()?.restart() {
+                log!("bench: the chip did not answer after the pin rose ({e:?})");
+                let _ = self.chip_enable.set_low();
+                return None;
+            }
+        }
+        self.bench_raw = Some(crate::clock::Instant::now());
+        self.chip.as_mut()
+    }
+
+    /// Drop the pin the laptop's APDUs held, and give the chip a moment without power, so
+    /// the next conversation finds it with no session.
+    fn chip_raw_end(&mut self) {
+        if self.bench_raw.take().is_some() {
+            let _ = self.chip_enable.set_low();
+            log!("bench: pin low, the laptop's exchange is over");
+            self.delay.delay_ms(BENCH_RAW_GAP_MS);
+        }
+    }
+
+    /// Answer the laptop's APDUs. Between the badge's own conversations only: while one is
+    /// open the APDUs wait for its end.
+    fn bench_serve(&mut self) {
+        if self.chip_up {
+            return;
+        }
+        if self.bench_raw.is_some_and(|t| t.elapsed() > BENCH_RAW_IDLE) {
+            self.chip_raw_end();
+        }
+        while let Some(apdu) = link::bench_apdu() {
+            if apdu.is_empty() {
+                self.chip_raw_end();
+                link::bench_reply(&[]);
+                continue;
+            }
+            let head = format!("{:02x?}", &apdu[..apdu.len().min(4)]);
+            let answer = match self.chip_raw() {
+                Some(chip) => match chip.raw(&apdu) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        log!("bench: apdu {head} got no answer ({e:?})");
+                        Vec::new()
+                    }
+                },
+                None => Vec::new(),
+            };
+            if answer.len() >= 2 {
+                let sw = &answer[answer.len() - 2..];
+                log!("bench: apdu {head} {} bytes, answer {} bytes {:02x}{:02x}", apdu.len(), answer.len() - 2, sw[0], sw[1]);
+            }
+            link::bench_reply(&answer);
+        }
+    }
+}
+
+/// How long the pin stays low after the laptop's exchange, so the chip powers down.
+#[cfg(feature = "bench")]
+const BENCH_RAW_GAP_MS: u32 = 100;
 
 /// The chip wants this long after its enable pin rises before it answers.
 pub const CHIP_START_MS: u32 = 10;

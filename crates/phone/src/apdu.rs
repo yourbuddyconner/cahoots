@@ -11,6 +11,7 @@
 //! | INITIALIZE UPDATE | `80 50 00 00` | host challenge (8) | diversification data (10), key information (3), card challenge (8), card cryptogram (8) |
 //! | EXTERNAL AUTHENTICATE | `84 82 lvl 00` | host cryptogram (8), C-MAC (8): built by [`crate::scp03::Scp03::external_authenticate`] | none |
 //! | CloseSession | `80 04 00 1C` | none | none |
+//! | GetVersion | `80 04 00 20` | none | `41` the applet's version (7 bytes) |
 //! | ReadObject | `80 02 00 00` | `41` id (4), `42` offset (2), `43` length (2) | `41` the bytes |
 //! | ReadSize | `80 02 00 07` | `41` id (4) | `41` the size, big-endian |
 //! | WriteBinary | `80 01 06 00` | `41` id (4), `42` offset (2), `44` data | none |
@@ -151,6 +152,10 @@ pub fn initialize_update(host_challenge: &[u8; 8]) -> Apdu {
 
 pub fn close_session() -> Apdu {
     Apdu::new(0x04, 0x00, 0x1C, Vec::new(), None)
+}
+
+pub fn get_version() -> Apdu {
+    Apdu::new(0x04, 0x00, 0x20, Vec::new(), Some(256))
 }
 
 pub fn read_object(object_id: u32, offset: u16, length: u16) -> Apdu {

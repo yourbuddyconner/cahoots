@@ -27,7 +27,7 @@ use embedded_hal::i2c::{ErrorKind, I2c, NoAcknowledgeSource};
 use se05x::se05x::commands::{
     CheckObjectExists, CloseSession, CreateSession, DeleteSecureObject, EcdsaSign, EddsaSign,
     GetRandom, GetVersion, MacOneShotGenerate, ReadAttestObject, ReadEcCurveList, ReadIdList,
-    ReadObject, ReadSize, VerifySessionUserId, WriteBinary, WriteCounter, WriteEcKey,
+    ReadObject, VerifySessionUserId, WriteBinary, WriteCounter, WriteEcKey,
     WriteSymmKey, WriteUserId,
 };
 use se05x::se05x::constants::PRIME256V1_INITIALIZER;
@@ -56,9 +56,16 @@ const ED25519_REVERSED: bool = true;
 /// The response buffer: the largest response is an attestation (about 250 bytes) or a
 /// chunk of the certificate; the applet's longest APDU payload is 889 bytes.
 const BUF: usize = 1024;
-/// The certificate is read, and a binary object written, in chunks of this many bytes: well
-/// under the applet's 889-byte APDU payload with the session wrapper and the tags around it.
+/// The certificate and binary objects are read in chunks of this many bytes: well under the
+/// applet's 889-byte APDU payload with the session wrapper and the tags around it.
 const CHUNK: u16 = 512;
+/// A binary object is written in chunks of this many bytes, so that every command, wrapped
+/// in the owner session with a policy and its tags (66 bytes at most), fits one T=1 frame of
+/// 254 bytes. A longer command goes out in chained frames, and the driver reads the chip's
+/// acknowledgement of each frame once, with no retry while the chip is still busy and
+/// refuses its address: on the bench (SE051, applet 7.2.0, 2026-10-31) about half the
+/// commands over 254 bytes failed that way, and every shorter one passed.
+const WRITE_CHUNK: usize = 160;
 
 /// The I2C bus as the driver wants it, with the bus error reduced to its kind so the driver
 /// can see a NACK. The driver's own embedded-hal 1.0 wrapper requires the HAL's error type
@@ -246,6 +253,34 @@ fn reversed(b: &[u8]) -> Vec<u8> {
     b.iter().rev().copied().collect()
 }
 
+/// A command APDU as bytes, sent as it is: the bench's pass-through ([`Se05xChip::raw`]).
+struct Raw<'a>(&'a [u8]);
+
+/// The answer's data, as it is.
+struct RawAnswer<'a>(&'a [u8]);
+
+impl<'a> se05x::se05x::Se05XResponse<'a> for RawAnswer<'a> {
+    fn from_response(data: &'a [u8]) -> Result<Self, SeError> {
+        Ok(RawAnswer(data))
+    }
+}
+
+impl iso7816::command::DataSource for Raw<'_> {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl<W: iso7816::command::Writer> iso7816::command::DataStream<W> for Raw<'_> {
+    fn to_writer(&self, writer: &mut W) -> Result<(), W::Error> {
+        writer.write_all(self.0)
+    }
+}
+
+impl<W: iso7816::command::Writer> se05x::se05x::Se05XCommand<W> for Raw<'_> {
+    type Response<'a> = RawAnswer<'a>;
+}
+
 /// The SE051 as a [`ChipOps`].
 pub struct Se05xChip<I: I2c, D: DelayNs> {
     se: Se05X<Bus<I>, Wait<D>>,
@@ -284,6 +319,22 @@ impl<I: I2c, D: DelayNs> Se05xChip<I, D> {
         Ok(())
     }
 
+    /// Send `apdu` as it is, in no session, and return the answer: its data, then SW1 and
+    /// SW2. For the bench's pass-through only: the laptop drives the applet as a phone would.
+    /// An answer whose status is not `90 00` comes back as its status word alone, because the
+    /// driver keeps no data with a failing status.
+    pub fn raw(&mut self, apdu: &[u8]) -> Result<Vec<u8>, ChipError> {
+        match self.se.run_command(&Raw(apdu), &mut self.buf) {
+            Ok(RawAnswer(data)) => {
+                let mut out = data.to_vec();
+                out.extend_from_slice(&[0x90, 0x00]);
+                Ok(out)
+            }
+            Err(SeError::Status(s)) => Ok(s.to_u16().to_be_bytes().to_vec()),
+            Err(e) => Err(err(e)),
+        }
+    }
+
     /// True when a session is open.
     pub fn in_session(&self) -> bool {
         self.session.is_some()
@@ -294,10 +345,26 @@ impl<I: I2c, D: DelayNs> Se05xChip<I, D> {
         Ok(r.data.to_vec())
     }
 
+    /// A binary object's size. The applet answers ReadSize with a 2-byte size (bench, SE051
+    /// applet 7.2.0, 2026-10-31), which the driver's `ReadSize` refuses to parse (it wants 8
+    /// bytes), so the command goes as bytes and the answer is read here.
+    fn read_size(&mut self, id: ObjectId) -> Result<u16, ChipError> {
+        let mut cmd = vec![0x80, 0x02, 0x00, 0x07, 0x06, 0x41, 0x04];
+        cmd.extend_from_slice(&id.0);
+        cmd.push(0x00);
+        let a = run!(self, Raw(&cmd))?.0;
+        match a {
+            [0x41, n, size @ ..] if usize::from(*n) == size.len() && !size.is_empty() && size.len() <= 8 => {
+                let v = size.iter().fold(0u64, |v, &b| v << 8 | u64::from(b));
+                u16::try_from(v).map_err(|_| ChipError::Transport)
+            }
+            _ => Err(ChipError::Transport),
+        }
+    }
+
     /// A binary object of any size, in chunks.
     fn read_file(&mut self, id: ObjectId) -> Result<Vec<u8>, ChipError> {
-        let size = run!(self, ReadSize { object_id: id })?.size.0;
-        let size = u16::try_from(size).map_err(|_| ChipError::Transport)?;
+        let size = self.read_size(id)?;
         let mut out = Vec::with_capacity(size as usize);
         let mut at = 0u16;
         while at < size {
@@ -641,7 +708,7 @@ impl<I: I2c, D: DelayNs> ChipOps for Se05xChip<I, D> {
         }
         self.fresh(id)?;
         let policy = policies(policy);
-        let first = &data[..data.len().min(CHUNK as usize)];
+        let first = &data[..data.len().min(WRITE_CHUNK)];
         run!(
             self,
             WriteBinary {
@@ -676,7 +743,7 @@ impl<I: I2c, D: DelayNs> Se05xChip<I, D> {
     fn write_chunks(&mut self, id: KeyId, data: &[u8], from: usize) -> Result<(), ChipError> {
         let mut at = from;
         while at < data.len() {
-            let end = data.len().min(at + CHUNK as usize);
+            let end = data.len().min(at + WRITE_CHUNK);
             run!(
                 self,
                 WriteBinary {

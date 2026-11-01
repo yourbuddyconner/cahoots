@@ -87,6 +87,7 @@ fn phone(relay: &Arc<Mutex<MemRelay>>) -> PhoneDevice {
         Box::new(FakeHttp {
             relay: relay.clone(),
         }),
+        Box::new(cahoots_phone::nfc::NoNfc),
     )
     .unwrap();
     PhoneDevice { _dir: dir, phone }

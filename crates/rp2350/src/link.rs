@@ -464,11 +464,17 @@ macro_rules! log {
     };
 }
 
-/// Push queued USB bytes out. Called from every wait in the badge.
 #[cfg(feature = "bench")]
 static BENCH_PRESSES: Mutex<RefCell<VecDeque<Press>>> = Mutex::new(RefCell::new(VecDeque::new()));
 #[cfg(feature = "bench")]
+static BENCH_APDUS: Mutex<RefCell<VecDeque<Vec<u8>>>> = Mutex::new(RefCell::new(VecDeque::new()));
+#[cfg(feature = "bench")]
 static BENCH_SCAN: Mutex<RefCell<Vec<u8>>> = Mutex::new(RefCell::new(Vec::new()));
+
+/// The longest `Apdu` payload the bench takes: an extended APDU of the applet's longest
+/// payload (889 bytes) with its header and Le.
+#[cfg(feature = "bench")]
+pub const BENCH_APDU_MAX: usize = 900;
 
 /// A press the laptop sent (bench builds only), consumed.
 #[cfg(feature = "bench")]
@@ -476,21 +482,52 @@ pub fn bench_press() -> Option<Press> {
     critical_section::with(|cs| BENCH_PRESSES.borrow_ref_mut(cs).pop_front())
 }
 
-/// Watch the USB byte stream for `Press` frames. The pile and the ceremony skip frame kinds
-/// they do not know, so the same bytes also go to them unchanged. A press frame is 14 bytes;
-/// the scan tries every offset of the last chunk plus a short tail, so a reveal's 20 KiB
-/// streams past without being parsed (a false match needs its CRC to agree, which it does
-/// not) and a press split across two chunks is still found.
+/// A command APDU the laptop sent for the chip (bench builds only), consumed. Empty means
+/// the laptop is done: drop the chip's pin.
+#[cfg(feature = "bench")]
+pub fn bench_apdu() -> Option<Vec<u8>> {
+    critical_section::with(|cs| BENCH_APDUS.borrow_ref_mut(cs).pop_front())
+}
+
+/// Send the chip's answer to the laptop as an `ApduReply` frame (bench builds only).
+#[cfg(feature = "bench")]
+pub fn bench_reply(answer: &[u8]) {
+    with_usb(|p| {
+        let f = Frame {
+            kind: cahoots_hal::pile::KIND_APDU_REPLY,
+            seq: p.seq,
+            payload: answer,
+        };
+        p.seq = p.seq.wrapping_add(1);
+        p.queue_logs();
+        p.push_pending(&encode(&f));
+        p.service();
+    });
+}
+
+/// Watch the USB byte stream for `Press` and `Apdu` frames. The pile and the ceremony skip
+/// frame kinds they do not know, so the same bytes also go to them unchanged. Only offsets
+/// whose first byte is one of the two kinds are decoded, so a reveal's 20 KiB streams past
+/// without its CRC being taken at every byte (a false match needs its CRC to agree, which
+/// it does not). What is kept for the next chunk is the tail from the first offset that may
+/// be the start of a frame cut in two, so a press or an APDU split across USB packets is
+/// still found.
 #[cfg(feature = "bench")]
 fn bench_scan(cs: critical_section::CriticalSection, bytes: &[u8]) {
-    use cahoots_core::frame::decode;
-    const TAIL: usize = 13;
+    use cahoots_core::frame::{decode_max, FrameError, CRC_LEN, HEADER_LEN};
+    use cahoots_hal::pile::{KIND_APDU, KIND_PRESS};
+    const LONGEST: usize = HEADER_LEN + BENCH_APDU_MAX + CRC_LEN;
     let mut scan = BENCH_SCAN.borrow_ref_mut(cs);
     scan.extend_from_slice(bytes);
     let mut i = 0;
+    let mut keep_from = None;
     while i < scan.len() {
-        match decode(&scan[i..]) {
-            Ok((f, used)) if f.kind == cahoots_hal::pile::KIND_PRESS => {
+        if scan[i] != KIND_PRESS && scan[i] != KIND_APDU {
+            i += 1;
+            continue;
+        }
+        match decode_max(&scan[i..], BENCH_APDU_MAX) {
+            Ok((f, used)) if f.kind == KIND_PRESS => {
                 let press = match f.payload.first() {
                     Some(0) => Some(Press::Left),
                     Some(1) => Some(Press::Right),
@@ -500,17 +537,30 @@ fn bench_scan(cs: critical_section::CriticalSection, bytes: &[u8]) {
                 if let Some(p) = press {
                     BENCH_PRESSES.borrow_ref_mut(cs).push_back(p);
                 }
+                // A start before a whole frame was not one, and is never scanned again.
+                keep_from = None;
                 i += used;
             }
-            _ => i += 1,
+            Ok((f, used)) => {
+                BENCH_APDUS.borrow_ref_mut(cs).push_back(f.payload.to_vec());
+                keep_from = None;
+                i += used;
+            }
+            Err(FrameError::Incomplete) => {
+                keep_from.get_or_insert(i);
+                i += 1;
+            }
+            Err(FrameError::Crc) => i += 1,
         }
     }
-    if scan.len() > TAIL {
-        let cut = scan.len() - TAIL;
-        scan.drain(..cut);
-    }
+    let cut = match keep_from {
+        Some(k) => k.max(scan.len().saturating_sub(LONGEST)),
+        None => scan.len(),
+    };
+    scan.drain(..cut);
 }
 
+/// Push queued USB bytes out. Called from every wait in the badge.
 pub fn usb_pump() {
     with_usb(|p| {
         p.queue_logs();

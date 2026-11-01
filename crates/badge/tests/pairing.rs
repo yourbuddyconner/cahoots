@@ -59,6 +59,14 @@ fn drive(
 
 /// Run a pile of two to the keep and keep the circle on both cards.
 fn kept_pair(chips: (bool, bool)) -> (Badge<FakeBoard>, Badge<FakeBoard>) {
+    kept_pair_with(chips, |_, _| {})
+}
+
+/// [`kept_pair`], with `before_keep` run once both cards show the keep prompt.
+fn kept_pair_with(
+    chips: (bool, bool),
+    mut before_keep: impl FnMut(&mut Badge<FakeBoard>, &mut Badge<FakeBoard>),
+) -> (Badge<FakeBoard>, Badge<FakeBoard>) {
     let (mut b1, mut b2) = pile_of_two(chips);
     for _ in 0..10_000 {
         b1.step();
@@ -74,6 +82,7 @@ fn kept_pair(chips: (bool, bool)) -> (Badge<FakeBoard>, Badge<FakeBoard>) {
         at.1 |= *s2 == Step::Prompt;
         at.0 && at.1
     });
+    before_keep(&mut b1, &mut b2);
     b1.board().presses.push_back(Press::Both);
     b2.board().presses.push_back(Press::Both);
     let mut kept = (false, false);
@@ -164,6 +173,24 @@ fn pair(b: &mut Badge<FakeBoard>, name: &str, key: [u8; 16]) -> Inbox {
 /// The seat the other card holds.
 fn other_seat(b: &Badge<FakeBoard>) -> u8 {
     1 - b.circle().unwrap().seat
+}
+
+/// The applet lets any session make an object at an id that holds nothing (bench, SE051 applet
+/// 7.2.0). A public object a tap made at a circle slot before the circle was kept is deleted
+/// at the keep and made again under the badge's policy, so the tap cannot write it later.
+#[test]
+fn a_public_object_a_tap_made_before_the_keep_is_not_adopted() {
+    let (mut b1, _b2) = kept_pair_with((true, true), |b1, _| {
+        tap(b1)
+            .write_binary(chip::public_id(0), &[0; 4096], &ObjectPolicy::any_session())
+            .unwrap();
+    });
+    let p = public(&mut b1);
+    assert_eq!(p.circle_id, b1.circle().unwrap().circle_id);
+    assert_eq!(
+        tap(&mut b1).rewrite_binary(chip::public_id(0), &[0; 16]),
+        Err(ChipError::NotAllowed)
+    );
 }
 
 #[test]

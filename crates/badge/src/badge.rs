@@ -1631,6 +1631,8 @@ impl<B: Board> Badge<B> {
             phone_public: phone.map(|p| p.public),
         };
         let chip = self.board.chip_begin().ok_or("chip: not found")?;
+        chip::clear_public(chip, slot)
+            .map_err(|e| format!("chip: an object at the public object's id was not deleted: {e:?}"))?;
         let written = chip::write_public(chip, slot, &object);
         self.board.log(&format!(
             "chip: slot {slot} kept, seat key for the owner alone, root for the owner and the phone slot"

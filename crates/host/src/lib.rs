@@ -13,6 +13,8 @@
 //!   badge's seat key, the circle as `authorized_keys`, and the chip's attestation.
 //! - [`card`]: contact cards and grants the badge signs.
 //! - [`bridge`]: a pile of cards joining a ceremony a phone hosts through the relay.
+//! - [`chip`]: the phone's chip client run against a real badge's chip, through a bench
+//!   firmware's APDU pass-through.
 //! - [`agentkey`], [`grants`]: an agent's own key, and the grants that let it sign git commits
 //!   without a press on the badge.
 
@@ -23,6 +25,7 @@ pub mod badge_client;
 pub mod bridge;
 pub mod board;
 pub mod card;
+pub mod chip;
 pub mod device;
 pub mod display;
 mod font;

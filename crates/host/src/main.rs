@@ -20,6 +20,7 @@
 //! cahoots-host grant (--serial <port> | --sim <socket>) --circle <name> --to <key hex> --purpose <name>... --budget N --until N [--depth N] [--v2] [--out <file>]
 //! cahoots-host grant request (--serial <port> | --sim <socket>) --circle <name> --agent <text> --author <text> [--location <repo>] --budget N (--until YYYY-MM-DD | --standing)
 //! cahoots-host grant list
+//! cahoots-host chip (pairing|inbox|open|hmac|public|refusals|goto|press) --serial <port> ...
 //! cahoots-host grant show <file>
 //! cahoots-host grant forget <file>
 //! cahoots-host grant verify <file> --state <dir> --circle <name>
@@ -224,7 +225,7 @@ fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let Some(cmd) = argv.first().cloned() else {
         eprintln!(
-            "usage: cahoots-host <ceremony|pile|bridge|badge|logs|send|recv|status|agent|git-sign|roster|attest|card|grant> ..."
+            "usage: cahoots-host <ceremony|pile|bridge|badge|logs|send|recv|status|agent|git-sign|roster|attest|card|grant|chip> ..."
         );
         std::process::exit(2);
     };
@@ -458,6 +459,7 @@ fn main() {
                 })
         }
         "card" => run_card(&args),
+        "chip" => cahoots_host::chip::run(&args.0),
         "grant" => match args.0.first().map(String::as_str) {
             Some("request" | "list" | "show" | "verify" | "forget") => run_agent_grant(&args),
             _ => run_grant(&args),
