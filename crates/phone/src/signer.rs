@@ -19,6 +19,27 @@ pub trait Signer: Send + Sync {
     fn make_key(&self, label: String) -> Result<Vec<u8>, PhoneError>;
     /// ECDSA P-256 over SHA-256 of `message` with the key named `label`: raw `r || s`, 64 bytes.
     fn sign(&self, label: String, message: Vec<u8>) -> Result<Vec<u8>, PhoneError>;
+    /// Several signatures follow, for one thing the person asked for: ask for Face ID once
+    /// for all of them. Every `batch_begin` is followed by one `batch_end`.
+    fn batch_begin(&self);
+    /// The signatures of the batch are made. The next `sign` asks again.
+    fn batch_end(&self);
+}
+
+/// A batch of signatures, open until this is dropped.
+pub(crate) struct Batch<'a>(&'a dyn Signer);
+
+impl<'a> Batch<'a> {
+    pub fn begin(signer: &'a dyn Signer) -> Self {
+        signer.batch_begin();
+        Batch(signer)
+    }
+}
+
+impl Drop for Batch<'_> {
+    fn drop(&mut self) {
+        self.0.batch_end();
+    }
 }
 
 /// A `SeatSigner` over the callback for one key.
@@ -67,6 +88,8 @@ pub struct SoftSigner {
 struct SoftInner {
     keys: HashMap<String, SeatKey>,
     signs: Vec<String>,
+    /// `begin`, `sign <label>` and `end`, in order.
+    events: Vec<String>,
     locked: bool,
 }
 
@@ -83,6 +106,12 @@ impl SoftSigner {
     /// The label of every signature made, in order.
     pub fn sign_calls(&self) -> Vec<String> {
         self.inner.lock().unwrap().signs.clone()
+    }
+
+    /// Every batch begun and ended and every signature made, in order: `begin`, `sign
+    /// <label>`, `end`.
+    pub fn events(&self) -> Vec<String> {
+        self.inner.lock().unwrap().events.clone()
     }
 
     /// The public key made under `label`, if any.
@@ -125,8 +154,17 @@ impl Signer for SoftSigner {
                 message: format!("No key is named {label}."),
             })?
             .sign(&message);
+        inner.events.push(format!("sign {label}"));
         inner.signs.push(label);
         Ok(sig.to_vec())
+    }
+
+    fn batch_begin(&self) {
+        self.inner.lock().unwrap().events.push("begin".into());
+    }
+
+    fn batch_end(&self) {
+        self.inner.lock().unwrap().events.push("end".into());
     }
 }
 
@@ -146,6 +184,8 @@ mod tests {
             self.0.fetch_add(1, Ordering::SeqCst);
             Err(PhoneError::Locked)
         }
+        fn batch_begin(&self) {}
+        fn batch_end(&self) {}
     }
 
     #[test]

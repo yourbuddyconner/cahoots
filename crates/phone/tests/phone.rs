@@ -1694,3 +1694,270 @@ fn a_refused_share_stops_the_polls_until_share_my_card() {
     b.phone.poll(id.clone()).unwrap();
     assert_eq!(member(&b, &id, 0).name, "Ada Two");
 }
+
+#[test]
+fn set_my_name_signs_every_circle_in_one_batch() {
+    let r = relay();
+    let (a, b) = named(&r, ["Ada", "Bea"]);
+    let (one, _, _) = finish(&a, &b);
+    let (two, _, _) = finish(&a, &b);
+    for id in [&one, &two] {
+        a.phone.poll(id.clone()).unwrap();
+    }
+    let before = a.signer.events().len();
+    a.phone.set_my_name("Ada King".into()).unwrap();
+    let events = a.signer.events()[before..].to_vec();
+    // One begin, both cards signed inside it, one end: Face ID is asked once.
+    assert_eq!(events.first().map(String::as_str), Some("begin"));
+    assert_eq!(events.last().map(String::as_str), Some("end"));
+    assert_eq!(events.iter().filter(|e| *e == "begin").count(), 1);
+    assert_eq!(events.iter().filter(|e| *e == "end").count(), 1);
+    assert_eq!(events.iter().filter(|e| e.starts_with("sign ")).count(), 2);
+    // A refusal ends the batch too.
+    a.signer.set_locked(true);
+    let before = a.signer.events().len();
+    assert!(matches!(a.phone.redraw_face(), Err(PhoneError::Locked)));
+    assert_eq!(a.signer.events()[before..], ["begin", "end"]);
+}
+
+#[test]
+fn a_name_is_shown_without_control_or_direction_characters() {
+    let r = relay();
+    let (a, b) = named(&r, ["Ada", ""]);
+    let (id, _, _) = finish(&a, &b);
+    b.phone
+        .set_my_name("Bea\u{202E}lin\u{7}\u{2066}da\u{200F}".into())
+        .unwrap();
+    a.phone.poll(id.clone()).unwrap();
+    assert_eq!(member(&a, &id, 1).name, "Bealinda");
+    assert_eq!(cahoots_phone::display_name("\u{202D}\u{1b}[31m Ann \u{2069}"), "[31m Ann");
+}
+
+#[test]
+fn a_chat_record_from_before_resets_and_cards_still_loads() {
+    #[derive(minicbor::Encode)]
+    struct OldChatRecord {
+        #[n(0)]
+        state: minicbor::bytes::ByteVec,
+        #[n(1)]
+        outbox: Vec<cahoots_phone::store::OutboxEntry>,
+        #[n(2)]
+        journal: Vec<cahoots_phone::store::MessageRecord>,
+    }
+    let old = OldChatRecord {
+        state: b"CHS2 state bytes".to_vec().into(),
+        outbox: vec![cahoots_phone::store::OutboxEntry {
+            id: "out-1".into(),
+            wire: vec![2, 3, 4].into(),
+        }],
+        journal: Vec::new(),
+    };
+    let bytes = minicbor::to_vec(&old).unwrap();
+    // Built by hand too: an array of three, the state, the outbox, the journal.
+    let mut by_hand = vec![0x83, 0x50];
+    by_hand.extend_from_slice(b"CHS2 state bytes");
+    by_hand.extend_from_slice(&[0x81, 0x82, 0x65]);
+    by_hand.extend_from_slice(b"out-1");
+    by_hand.extend_from_slice(&[0x43, 2, 3, 4, 0x80]);
+    assert_eq!(bytes, by_hand);
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join(cahoots_phone::store::CHAT), &by_hand).unwrap();
+    let got = cahoots_phone::store::ChatRecord::load(dir.path()).unwrap();
+    assert_eq!(&got.state[..], b"CHS2 state bytes");
+    assert_eq!(got.outbox.len(), 1);
+    assert_eq!(got.outbox[0].id, "out-1");
+    assert!(got.journal.is_empty());
+    assert!(got.pending_bump.is_none());
+    assert!(got.pending_card.is_none());
+    assert!(!got.card_due);
+}
+
+#[test]
+fn a_phone_restored_from_before_its_reset_follows_it() {
+    let r = relay();
+    let (a, b) = (device(&r), device(&r));
+    let (id, _, _) = finish(&a, &b);
+    for d in [&a, &b] {
+        d.phone.set_relay(id.clone(), RELAY.into()).unwrap();
+    }
+    a.phone.send_chat(id.clone(), "before".into()).unwrap();
+    b.phone.poll(id.clone()).unwrap();
+    let dir = cahoots_phone::store::circles_dir(&a.path).join(&id);
+    let saved: Vec<(String, Vec<u8>)> = [cahoots_phone::store::CHAT, cahoots_phone::store::CURSOR]
+        .iter()
+        .map(|f| (f.to_string(), std::fs::read(dir.join(f)).unwrap()))
+        .collect();
+    a.phone.bump_chat_generation(id.clone()).unwrap();
+    assert!(!a.phone.chat_reset_waiting(id.clone()));
+
+    // The phone comes back from a copy made before the reset.
+    for (f, bytes) in &saved {
+        std::fs::write(dir.join(f), bytes).unwrap();
+    }
+    let restored = Phone::open(
+        a.path.to_string_lossy().into_owned(),
+        Box::new(a.signer.clone()),
+        Box::new(a.http.clone()),
+    )
+    .unwrap();
+    restored.poll(id.clone()).unwrap();
+    restored.send_chat(id.clone(), "after".into()).unwrap();
+    // Its message is in the new generation, which B reads.
+    let circle: [u8; 16] = hex::decode(&id).unwrap().try_into().unwrap();
+    let all = r.lock().unwrap().poll(&circle, None, 0).unwrap();
+    let (bump_header, _) = cahoots_chat::parse(&all[all.len() - 2].1).unwrap();
+    let (after_header, _) = cahoots_chat::parse(&all[all.len() - 1].1).unwrap();
+    assert_eq!(bump_header.msg_type, cahoots_chat::MessageType::Bump);
+    assert_ne!(
+        after_header.epoch.generation_parts().unwrap().0,
+        bump_header.epoch.generation_parts().unwrap().0
+    );
+    assert_eq!(
+        texts(&b.phone.poll(id.clone()).unwrap()),
+        ["Keys were reset by seat 1.", "after"]
+    );
+}
+
+#[test]
+fn a_phone_that_updates_late_reads_what_it_passed_over_and_follows_the_reset() {
+    use cahoots_chat::{sign_bump, ChatSession};
+    use cahoots_core::manifest::{Manifest, Seat};
+    use cahoots_core::root::gen0_id;
+    use cahoots_core::seat::SeatKey;
+
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../chat/tests/fixtures");
+    let state = std::fs::read(fixtures.join("chat-v5.bin")).unwrap();
+    assert_eq!(&state[..4], b"CHS2");
+    let blob = std::fs::read(fixtures.join("chat-v5-wires.bin")).unwrap();
+    let mut wires = Vec::new();
+    let mut at = 0;
+    while at < blob.len() {
+        let n = u32::from_le_bytes(blob[at..at + 4].try_into().unwrap()) as usize;
+        wires.push(blob[at + 4..at + 4 + n].to_vec());
+        at += 4 + n;
+    }
+
+    let root = [0x42u8; 32];
+    let circle_id = [0x0cu8; 16];
+    let id = hex::encode(circle_id);
+    let params = cahoots_core::params::CircleParams {
+        n: 3,
+        pad_len: PAD,
+        name: "old".into(),
+        agent_seat: false,
+    };
+    let seat_key = |i: u8| SeatKey::from_seed(&[i + 1; 32]).unwrap();
+    let manifest = Manifest {
+        circle_id,
+        floor: Manifest::default_floor(&params),
+        params: params.clone(),
+        seats: (0..3)
+            .map(|i| Seat {
+                seat: i,
+                key: seat_key(i).public(),
+                tier: 0,
+                evidence: Vec::new(),
+            })
+            .collect(),
+        genesis: 0,
+    };
+    let sealed = SealedManifest {
+        body: manifest.encode(),
+        attestations: Vec::new(),
+    };
+
+    // While this phone ran the build before generations, seat 1 of the circle chatted in
+    // generation 0 and then reset the keys. The old build passed over all of it.
+    let r = relay();
+    for w in &wires {
+        r.lock().unwrap().post(&circle_id, w).unwrap();
+    }
+    let mut first = ChatSession::new(&root, circle_id, 3, 0);
+    first.mark_synced();
+    let in_gen0 = first.send(b"in generation 0").unwrap();
+    let to = [0x77u8; 32];
+    let payload = sign_bump(&seat_key(0), 0, &circle_id, &gen0_id(&circle_id), &to).unwrap();
+    let bump = first.send_bump(to, &payload).unwrap();
+    let after = first.send(b"after the reset").unwrap();
+    let mut last = 0;
+    for w in [&in_gen0, &bump, &after] {
+        last = r.lock().unwrap().post(&circle_id, w).unwrap();
+    }
+
+    let d = device(&r);
+    let record = CircleRecord {
+        params: params.encode().into(),
+        circle_id: circle_id.to_vec().into(),
+        seat: 1,
+        tier: 0,
+        label: "CSPRNG".into(),
+        words: Vec::new(),
+        manifest: sealed.encode().into(),
+        root: root.to_vec().into(),
+        seat_label: "cahoots:seat:old".into(),
+        seat_public: vec![2; 33].into(),
+        pair_keys: vec![Vec::new().into(); 3],
+        pair_counters: vec![0; 3],
+    };
+    let chat = cahoots_phone::store::ChatRecord {
+        state: state.into(),
+        outbox: Vec::new(),
+        journal: Vec::new(),
+        pending_bump: None,
+        pending_card: None,
+        card_due: false,
+    };
+    let dir = cahoots_phone::store::create_circle(
+        &d.path,
+        &id,
+        &cahoots_phone::store::NewCircle {
+            record: &record,
+            pad: &[0; 16],
+            chat: &chat,
+            settings: &cahoots_phone::store::SettingsRecord {
+                relay: RELAY.into(),
+                unread: 0,
+                face_override: None,
+            },
+            slices: params.slices(),
+        },
+    )
+    .unwrap();
+    cahoots_phone::store::CursorRecord { after: Some(last) }
+        .save(&dir)
+        .unwrap();
+
+    let phone = Phone::open(
+        d.path.to_string_lossy().into_owned(),
+        Box::new(d.signer.clone()),
+        Box::new(d.http.clone()),
+    )
+    .unwrap();
+    // Read again from the start: the message it had read is a replay, the rest is new.
+    let got = phone.poll(id.clone()).unwrap();
+    assert_eq!(
+        texts(&got),
+        [
+            "old history two",
+            "in generation 0",
+            "Keys were reset by seat 1.",
+            "after the reset"
+        ]
+    );
+    // It ended in the new generation: seat 1 reads its reply there.
+    phone.send_chat(id.clone(), "caught up".into()).unwrap();
+    let all = r.lock().unwrap().poll(&circle_id, Some(last), 0).unwrap();
+    assert_eq!(all.len(), 1);
+    let (_, text) = first.receive(&all[0].1).unwrap();
+    assert_eq!(cahoots_chat::bucket_unpad(&text).unwrap(), b"caught up");
+    assert_eq!(first.generation_id(), to);
+    // A second open does not read from the start again.
+    drop(phone);
+    let again = Phone::open(
+        d.path.to_string_lossy().into_owned(),
+        Box::new(d.signer.clone()),
+        Box::new(d.http.clone()),
+    )
+    .unwrap();
+    assert!(again.poll(id).unwrap().is_empty());
+}

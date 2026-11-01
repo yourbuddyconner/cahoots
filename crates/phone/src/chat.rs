@@ -74,7 +74,16 @@ impl Circle {
             ChatSession::import_state(&root, circle_id, params.n, record.seat, &chat.state)
                 .map_err(chat_err)?
         };
-        let cursor = store::load_if_present(&dir.join(store::CURSOR))?.unwrap_or_default();
+        let mut cursor: CursorRecord =
+            store::load_if_present(&dir.join(store::CURSOR))?.unwrap_or_default();
+        // A state from before generations: the build that wrote it read past messages it could
+        // not open, a generation's and a reset among them. Read the relay again from its start.
+        // What was read already comes back as replays and is passed over.
+        if chat.state.starts_with(ChatSession::STATE_MAGIC_ROOT_EPOCHS) && cursor.after.is_some()
+        {
+            cursor = CursorRecord::default();
+            cursor.save(dir)?;
+        }
         let settings =
             store::load_if_present(&dir.join(store::SETTINGS))?.unwrap_or(SettingsRecord {
                 relay: DEFAULT_RELAY.into(),
@@ -170,10 +179,13 @@ impl Circle {
                 // Our own messages move our sending position; a message that does not open
                 // (damaged, replayed, another kind) is passed over.
                 if let Ok((h, pt)) = self.session.receive(&bytes) {
-                    if h.msg_type == MessageType::Bump && h.sender != me {
-                        // A bump counts only with a seat's signature from the manifest; a
-                        // bad one is passed over without a word.
-                        if let Some(seat) = self.apply_bump(&pt) {
+                    // A bump counts only with a seat's signature from the manifest; a bad or
+                    // stale one is passed over without a word. Our own is followed too, so a
+                    // phone restored from older state moves with its own reset. Its line is
+                    // in the history from when it was sent.
+                    if h.msg_type == MessageType::Bump {
+                        let moved = self.apply_bump(&pt);
+                        if let Some(seat) = moved.filter(|_| h.sender != me) {
                             let m = MessageRecord {
                                 id: format!("relay-{seq}"),
                                 sender: seat,

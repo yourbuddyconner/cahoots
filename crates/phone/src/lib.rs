@@ -514,7 +514,10 @@ impl Phone {
     /// Publish this seat's card in every circle `pick` chooses, and return the first error.
     /// After a refused Face ID nothing more is asked: the circles left are marked due, the
     /// next poll of each tries again, and `Locked` is returned.
+    ///
+    /// The signatures are one batch, so the person is asked for Face ID once.
     fn publish_everywhere(&self, pick: impl Fn(&Circle) -> bool) -> Result<(), PhoneError> {
+        let _batch = signer::Batch::begin(self.signer.as_ref());
         let mut first = None;
         let mut locked = false;
         for id in store::circle_ids(&self.dir) {
@@ -1107,7 +1110,7 @@ impl Phone {
                     let card = c.card(s.seat);
                     Member {
                         seat: s.seat,
-                        name: card.as_ref().map(|k| k.name.clone()).unwrap_or_default(),
+                        name: card.as_ref().map(|k| display_name(&k.name)).unwrap_or_default(),
                         face_seed: seat_face(phone, c, s.seat, card.as_ref(), &s.key.0),
                         has_card: card.is_some(),
                         device: card.as_ref().and_then(|k| k.device),
@@ -1261,6 +1264,27 @@ fn seat_face(
 }
 
 /// The circle's manifest, from the sealed copy kept with it.
+/// A name read from a card, as it is shown: without control characters and without the
+/// characters that change the direction of text, so a name cannot hide or reorder what is
+/// drawn around it. The card keeps the name as it was signed.
+pub fn display_name(name: &str) -> String {
+    name.chars()
+        .filter(|&c| {
+            !c.is_control()
+                && !matches!(
+                    c,
+                    '\u{061C}'
+                        | '\u{200E}'
+                        | '\u{200F}'
+                        | '\u{202A}'..='\u{202E}'
+                        | '\u{2066}'..='\u{2069}'
+                )
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 fn manifest_of(c: &Circle) -> Result<cahoots_core::manifest::Manifest, PhoneError> {
     let unreadable = || PhoneError::Storage {
         message: "The member list saved for this circle is damaged or cannot be read.".into(),

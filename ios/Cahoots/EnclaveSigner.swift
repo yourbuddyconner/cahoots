@@ -20,6 +20,13 @@ final class EnclaveSigner: Signer {
     /// Whether keys are made in the Secure Enclave.
     let usesEnclave: Bool
 
+    /// While a batch is open, every signature uses this one context: Face ID is asked by the
+    /// first and the rest reuse it. Guarded by `batchLock`, since the crate calls from its own
+    /// thread.
+    private let batchLock = NSLock()
+    private var batchContext: LAContext?
+    private var batchDepth = 0
+
     init(enclave: Bool = EnclaveSigner.enclaveAvailable) {
         usesEnclave = enclave
     }
@@ -70,14 +77,51 @@ final class EnclaveSigner: Signer {
         return try publicKey(of: data)
     }
 
+    /// The crate opens a batch around signatures made for one request, such as a card
+    /// published in every circle.
+    func batchBegin() { beginBatch() }
+    func batchEnd() { endBatch() }
+
+    /// Hold one context until `endBatch`, so the signatures in between ask for Face ID once.
+    func beginBatch() {
+        batchLock.lock()
+        defer { batchLock.unlock() }
+        if batchDepth == 0 { batchContext = Self.newContext() }
+        batchDepth += 1
+    }
+
+    /// Let the batch's context go. The next signature asks again.
+    func endBatch() {
+        batchLock.lock()
+        defer { batchLock.unlock() }
+        guard batchDepth > 0 else { return }
+        batchDepth -= 1
+        if batchDepth == 0 {
+            batchContext?.invalidate()
+            batchContext = nil
+        }
+    }
+
+    private static func newContext() -> LAContext {
+        let context = LAContext()
+        context.localizedReason = "Confirm this phone’s membership in the circle"
+        return context
+    }
+
+    /// The batch's context, or a fresh one outside a batch.
+    private func signingContext() -> LAContext {
+        batchLock.lock()
+        defer { batchLock.unlock() }
+        return batchContext ?? Self.newContext()
+    }
+
     func sign(label: String, message: Data) throws -> Data {
         guard let stored = try load(label) else {
             throw PhoneError.Signer(message: "This phone no longer has the key for that seat.")
         }
         do {
             if usesEnclave {
-                let context = LAContext()
-                context.localizedReason = "Confirm this phone’s membership in the circle"
+                let context = signingContext()
                 let key = try SecureEnclave.P256.Signing.PrivateKey(
                     dataRepresentation: stored, authenticationContext: context)
                 return try key.signature(for: message).rawRepresentation
