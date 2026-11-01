@@ -183,6 +183,7 @@ fn ceremony_with_soft_chip_makes_seat_in_chip() {
             has_root: true,
             has_epoch: true,
             chat_generation: None,
+            public_written: Some(true),
         }]
     );
 
@@ -266,6 +267,7 @@ fn reconcile_deletes_unknown_slot_and_logs() {
             has_root: false,
             has_epoch: false,
             chat_generation: None,
+            public_written: None,
         }],
         ..ChipRecord::default()
     };
@@ -348,6 +350,7 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
                 has_root: true,
                 has_epoch: true,
                 chat_generation: None,
+                public_written: None,
             },
             SlotEntry {
                 slot: 3,
@@ -356,6 +359,7 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
                 has_root: false,
                 has_epoch: false,
                 chat_generation: None,
+                public_written: None,
             },
         ],
         phone: Some(PhoneSlot {
@@ -584,6 +588,7 @@ fn boot_empties_a_slot_a_wipe_marked_stuck_and_leaves_one_merely_unnamed() {
             has_root: false,
             has_epoch: false,
             chat_generation: None,
+            public_written: None,
         });
     }
     let mut r = board.chip_record_load().unwrap().unwrap();

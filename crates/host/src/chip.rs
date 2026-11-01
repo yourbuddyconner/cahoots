@@ -12,7 +12,8 @@
 //! cahoots-host chip refusals --serial <port> --circle <slot>
 //! cahoots-host chip raw --serial <port> --apdu <hex> [--apdu <hex>]...
 //! cahoots-host chip goto --serial <port> --entry <name>
-//! cahoots-host chip press --serial <port> (left|right|both) [--after <text>] [--until <text>]
+//! cahoots-host chip press --serial <port> (left|right|both) [--after <text>] [--until <text> [--expect <text>] [--then <text>]]
+//! cahoots-host chip forget --serial <port> --circle <name>
 //! ```
 //!
 //! `--key` is the phone slot's 16-byte AES key, in hex. `inbox` signs with a software P-256 key
@@ -20,7 +21,17 @@
 //! enclave key. `refusals` tries, in no session, what an unpaired tap must not do, and says
 //! what the applet answered to each. `goto` presses through the badge's menu and list to an
 //! entry of the list ("pair a phone", "phone") and opens it; `press` waits for a log line
-//! holding `--after` if given, sends one press, and waits for a line holding `--until`.
+//! holding `--after` if given, sends one press, and waits for a line holding `--until` (see
+//! [`press`] for `--expect` and `--then`); `forget` forgets a circle through the badge's pages.
+//!
+//! What the bench showed an unpaired tap can do: read the public objects and the pairing
+//! object, write the inbox, and make a binary object at any id that holds nothing, under the
+//! applet's default policy (every right for every session). The badge never adopts such an
+//! object: it writes a circle's public object at the keep after deleting whatever stands at
+//! its id, and reads back only public objects it wrote. But a tap can fill the ids of circle
+//! slots not yet used with objects nobody may delete, and each such slot is then burnt: the
+//! badge passes it over when it picks a slot for a new circle (see `cahoots_badge::chip`).
+//! That is a denial of service on the badge's sixteen circle slots, not a way to any key.
 //!
 //! Every APDU and its answer are printed to stderr, as `-> ` and `<- ` hex lines.
 
@@ -135,6 +146,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let port = req("--serial")?;
     match sub {
         "goto" => return goto(port, req("--entry")?),
+        "forget" => return forget(port, req("--circle")?),
         "press" => {
             let code = match args.get(1).map(String::as_str) {
                 Some("left") => 0,
@@ -142,7 +154,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 Some("both") => 2,
                 _ => return Err("press: left, right or both".into()),
             };
-            return press(port, code, get("--after"), get("--until"));
+            return press(
+                port,
+                code,
+                Presses { after: get("--after"), until: get("--until"), expect: get("--expect"), then: get("--then") },
+            );
         }
         _ => {}
     }
@@ -264,7 +280,9 @@ fn refusals(reader: &SerialNfc, slot: u8) -> Result<(), String> {
     let mut allowed = Vec::new();
     for (what, apdu) in tries {
         let answer = reader.transceive(apdu.encode()).map_err(|e| e.to_string())?;
-        let sw = u16::from_be_bytes([answer[answer.len() - 2], answer[answer.len() - 1]]);
+        let Some((_, sw)) = cahoots_phone::apdu::split(&answer) else {
+            return Err(format!("{what}: the card's answer has no status word"));
+        };
         if sw == 0x9000 {
             println!("{what}: ALLOWED");
             allowed.push(what);
@@ -359,46 +377,123 @@ fn goto(port: &str, entry: &str) -> Result<(), String> {
     Err(format!("did not reach \"{entry}\" in 90 seconds"))
 }
 
+/// What `press` waits for. See [`press`].
+struct Presses<'a> {
+    after: Option<&'a str>,
+    until: Option<&'a str>,
+    expect: Option<&'a str>,
+    then: Option<&'a str>,
+}
+
+/// Wait for `line` to arrive on `link`, `secs` at most, and return it.
+fn wait_line(link: &mut SerialLink, text: &str, secs: u64) -> Result<String, String> {
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    while Instant::now() < deadline {
+        link.pump();
+        if let Some(l) = link.take_logs().into_iter().find(|l| l.contains(text)) {
+            return Ok(l);
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    Err(format!("the badge did not say \"{text}\" in {secs} seconds"))
+}
+
 /// Wait for a log line holding `after` (60 seconds) if given, send one press, then wait for a
-/// line holding `until` (20 seconds) and print it, or watch for three seconds.
-fn press(port: &str, code: u8, after: Option<&str>, until: Option<&str>) -> Result<(), String> {
+/// line holding `until` (20 seconds) and print it, or watch for three seconds. With `expect`,
+/// the `until` line must hold it too, or the press is answered with Left (no) and this fails.
+/// With `then`, once the screen the press led to is drawn, the same press goes again, for
+/// the next screen, and this waits for a line holding `then`: one process, so no line is
+/// missed between the two presses.
+fn press(port: &str, code: u8, p: Presses<'_>) -> Result<(), String> {
     let mut link = SerialLink::open(port, "badge").map_err(|e| format!("{port}: {e}"))?;
     link.keep_logs();
-    if let Some(a) = after {
-        let deadline = Instant::now() + Duration::from_secs(60);
-        'wait: loop {
-            if Instant::now() > deadline {
-                return Err(format!("the badge did not say \"{a}\" in 60 seconds"));
-            }
-            link.pump();
-            for line in link.take_logs() {
-                if line.contains(a) {
-                    break 'wait;
-                }
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
+    if let Some(a) = p.after {
+        wait_line(&mut link, a, 60)?;
         // The badge throws away a gesture seen while its prompt is drawn.
         std::thread::sleep(Duration::from_millis(600));
     }
     link.send_press(code);
-    let wait = if until.is_some() { 20 } else { 3 };
-    let deadline = Instant::now() + Duration::from_secs(wait);
+    let Some(u) = p.until else {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline {
+            link.pump();
+            link.take_logs();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        return Ok(());
+    };
+    let line = wait_line(&mut link, u, 20)?;
+    println!("{line}");
+    if let Some(e) = p.expect {
+        if !line.contains(e) {
+            wait_line(&mut link, "drawn", 10)?;
+            std::thread::sleep(Duration::from_millis(600));
+            link.send_press(0);
+            return Err(format!("the badge said \"{line}\", not \"{e}\". Answered no"));
+        }
+    }
+    if let Some(t) = p.then {
+        wait_line(&mut link, "drawn", 10)?;
+        std::thread::sleep(Duration::from_millis(600));
+        link.send_press(code);
+        println!("{}", wait_line(&mut link, t, 20)?);
+    }
+    Ok(())
+}
+
+/// Forget the circle named `name` through the badge's own pages: open it from the list, turn
+/// to its forget page, and answer the question with Both. Returns once the badge says it is
+/// forgotten.
+fn forget(port: &str, name: &str) -> Result<(), String> {
+    let mut link = SerialLink::open(port, "badge").map_err(|e| format!("{port}: {e}"))?;
+    link.keep_logs();
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let started = Instant::now();
+    let mut last = String::new();
+    let mut nudged = false;
+    let done = format!("forgotten: {name} ");
     while Instant::now() < deadline {
         link.pump();
         for line in link.take_logs() {
-            if let Some(u) = until {
-                if line.contains(u) {
-                    println!("{line}");
-                    return Ok(());
-                }
+            if line.starts_with(&done) {
+                println!("{line}");
+                return Ok(());
             }
+            let Some(screen) = line.strip_prefix("screen: ") else { continue };
+            if screen == last {
+                continue;
+            }
+            last = screen.to_string();
+            let f = fields(screen);
+            let title = f.first().copied().unwrap_or("");
+            let footer = f.last().copied().unwrap_or("");
+            let menu = f
+                .get(1)
+                .is_some_and(|x| x.split_once('/').is_some_and(|(a, b)| a.parse::<u8>().is_ok() && b.parse::<u8>().is_ok()));
+            let ours = title.strip_prefix(name).is_some_and(|rest| rest.starts_with("  "));
+            let code = if title == "self-test" || footer == "A+B  continue" {
+                2
+            } else if title == "circles" || title == "chip needs a restart" {
+                if f.iter().find_map(|x| x.strip_prefix("> ")) == Some(name) { 2 } else { 1 }
+            } else if menu && ours {
+                if f.get(2) == Some(&"forget this circle") { 2 } else { 1 }
+            } else if menu {
+                if f.get(2) == Some(&"circles") { 2 } else { 1 }
+            } else if title == "forget this circle?" {
+                if f.get(1) == Some(&name) { 2 } else { 0 }
+            } else if footer.contains("A+B") {
+                0
+            } else {
+                1
+            };
+            link.send_press(code);
+        }
+        if !nudged && last.is_empty() && started.elapsed() > Duration::from_millis(1500) {
+            nudged = true;
+            link.send_press(1);
         }
         std::thread::sleep(Duration::from_millis(5));
     }
-    match until {
-        Some(u) => Err(format!("the badge did not say \"{u}\" in {wait} seconds")),
-        None => Ok(()),
-    }
+    Err(format!("did not forget \"{name}\" in 120 seconds"))
 }
 

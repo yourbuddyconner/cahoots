@@ -116,6 +116,16 @@ impl PublicObject {
         (n <= MAX_PUBLIC).then(|| (n + PUBLIC_ROOM).min(MAX_PUBLIC))
     }
 
+    /// What a new public object holds when these contents do not all fit
+    /// [`crate::public::MAX_PUBLIC`]: all of them, else without the card, else without the card
+    /// and the device grant (the least a phone reads a circle by). `None` if even that does not
+    /// fit.
+    pub fn fitted_for_new(&self) -> Option<PublicObject> {
+        let no_card = PublicObject { card: None, ..self.clone() };
+        let minimal = PublicObject { grant: None, ..no_card.clone() };
+        [self.clone(), no_card, minimal].into_iter().find(|o| o.new_len().is_some())
+    }
+
     /// Strict: one canonical map from the start, every key present in order, then only zeros.
     pub fn decode(bytes: &[u8]) -> Result<PublicObject, Malformed> {
         if bytes.len() > MAX_PUBLIC {

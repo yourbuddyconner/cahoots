@@ -253,7 +253,8 @@ fn reversed(b: &[u8]) -> Vec<u8> {
     b.iter().rev().copied().collect()
 }
 
-/// A command APDU as bytes, sent as it is: the bench's pass-through ([`Se05xChip::raw`]).
+/// A command APDU as bytes, sent as it is: the bench's pass-through (`Se05xChip::raw`, with
+/// the `bench` feature) and ReadSize ([`Se05xChip::read_size`]).
 struct Raw<'a>(&'a [u8]);
 
 /// The answer's data, as it is.
@@ -323,6 +324,7 @@ impl<I: I2c, D: DelayNs> Se05xChip<I, D> {
     /// SW2. For the bench's pass-through only: the laptop drives the applet as a phone would.
     /// An answer whose status is not `90 00` comes back as its status word alone, because the
     /// driver keeps no data with a failing status.
+    #[cfg(feature = "bench")]
     pub fn raw(&mut self, apdu: &[u8]) -> Result<Vec<u8>, ChipError> {
         match self.se.run_command(&Raw(apdu), &mut self.buf) {
             Ok(RawAnswer(data)) => {

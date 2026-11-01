@@ -5,7 +5,11 @@
 # firmware's APDU pass-through, and presses the badge's buttons over USB (the firmware's
 # `bench` feature). Then it unpairs and checks that the old key no longer opens the chip.
 #
-#   scripts/pair-bench.sh [--port /dev/cu.usbmodempico21] [--state /tmp/pbench] [--no-flash]
+#   scripts/pair-bench.sh [--port /dev/cu.usbmodempico21] [--state /tmp/pbench] [--no-flash] [--forget | --keep]
+#
+# --forget, the default, forgets the circle the run kept, through the badge's own forget
+# page, once the run is done, so the bench chip's sixteen circle slots do not fill up.
+# --keep leaves it on the badge.
 #
 # Logs land in $STATE/pair.log. The run ends with "pair bench: ok".
 set -u
@@ -13,11 +17,14 @@ PORT=/dev/cu.usbmodempico21
 STATE=/tmp/pbench
 NAME=${NAME:-pair-$(date +%H%M)}
 FLASH=1
+FORGET=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --port) PORT=$2; shift 2;;
     --state) STATE=$2; shift 2;;
     --no-flash) FLASH=0; shift;;
+    --forget) FORGET=1; shift;;
+    --keep) FORGET=0; shift;;
     *) echo "unknown argument $1"; exit 2;;
   esac
 done
@@ -28,7 +35,10 @@ mkdir -p "$STATE"
 LOG="$STATE/pair.log"
 : > "$LOG"
 say() { echo "pair bench: $*" | tee -a "$LOG"; }
+PILE=""
 fail() { say "FAILED: $*"; exit 1; }
+# A pile left running would hold the port: whatever ends the run, it goes too.
+trap '[ -n "$PILE" ] && kill $PILE 2>/dev/null' EXIT
 # One `cahoots-host chip` command: its APDUs and the badge's log go to the log, what it
 # prints to stdout and the log both, and its exit status is the command's.
 chip() {
@@ -96,7 +106,14 @@ while :; do
   say "the port is deaf, flashing to re-enumerate the badge (try $try)"
   flash
 done
+# The ceremony takes well under a minute on the bench: three minutes means it hung.
+i=0
+while kill -0 $PILE 2>/dev/null; do
+  i=$((i+1)); [ $i -gt 180 ] && fail "the ceremony did not end in three minutes, see $LOG"
+  sleep 1
+done
 wait $PILE || fail "the ceremony did not complete, see $LOG"
+PILE=""
 # The cards on the laptop are done before the badge asks to keep the circle, so the pile
 # may be gone before the badge's keep prompt: press Both for it here.
 if ! grep -q "chip: slot [0-9]* kept" "$LOG"; then
@@ -125,24 +142,41 @@ WORDS=$(sed -n 's/^words: //p' "$STATE/inbox.txt")
 PHONE=$(sed -n 's/^phone key: //p' "$STATE/inbox.txt")
 say "the laptop shows: $WORDS"
 
-chip press both --until "pairing: " > "$STATE/ask.txt" || fail "the badge did not read the inbox"
-grep -q "words $WORDS\$" "$STATE/ask.txt" || fail "the badge's words are not the laptop's: $(cat "$STATE/ask.txt")"
-say "the badge shows the same words"
-chip press both --until "paired with" >/dev/null || fail "the badge did not pair"
-say "paired"
+# Both reads the inbox and shows the words. Only if they are the laptop's, Both again, once
+# the question is drawn, pairs; any other words are answered no.
+chip press both --until "pairing: " --expect "words $WORDS" --then "paired with" > "$STATE/ask.txt" \
+  || fail "the badge did not pair: $(cat "$STATE/ask.txt")"
+say "the badge showed the same words and paired"
 
 chip open --key "$KEY" || fail "the slot did not open with the paired key"
 chip hmac --key "$KEY" --circle "$SLOT" --label "chat/gen" || fail "no HMAC with the root of slot $SLOT"
 chip public > "$STATE/public1.txt" || fail "reading the public objects after pairing"
-grep -q "device grant yes, phone key $PHONE" "$STATE/public1.txt" || fail "the public object does not carry the grant and the phone's key"
-say "the public object carries the device grant and the phone's key"
+grep -q "^slot " "$STATE/public1.txt" || fail "no public objects after pairing"
+if grep "^slot " "$STATE/public1.txt" | grep -v "device grant yes, phone key $PHONE," >/dev/null; then
+  fail "a public object does not carry the grant and the phone's key"
+fi
+say "every public object carries the device grant and the phone's key"
 
 say "unpairing on the badge"
 chip goto --entry "phone" || fail "could not open the phone page"
 chip press both --until "phone unpaired" >/dev/null || fail "the badge did not unpair"
-if chip open --key "$KEY"; then fail "the old key still opens the slot"; fi
+# The handshake must be refused for the key, not fail for any other reason.
+if "$HOST" chip open --key "$KEY" --serial "$PORT" >>"$LOG" 2>"$STATE/old-key.err"; then
+  cat "$STATE/old-key.err" >>"$LOG"
+  fail "the old key still opens the slot"
+fi
+cat "$STATE/old-key.err" >>"$LOG"
+grep -q "the card does not open with this key" "$STATE/old-key.err" \
+  || fail "the old key failed for another reason: $(tail -1 "$STATE/old-key.err")"
 say "the old key no longer opens the slot"
 chip public > "$STATE/public2.txt" || fail "reading the public objects after unpairing"
-grep -q "phone key none, pending bumps [1-9]" "$STATE/public2.txt" || fail "the public object does not hold a pending bump"
-say "the public object names no phone and holds a pending bump"
+grep -q "^slot " "$STATE/public2.txt" || fail "no public objects after unpairing"
+if grep "^slot " "$STATE/public2.txt" | grep -v "device grant no, phone key none, pending bumps [1-9]" >/dev/null; then
+  fail "a public object still names the phone or holds no pending bump"
+fi
+say "every public object names no phone and holds a pending bump"
+if [ "$FORGET" = 1 ]; then
+  chip forget --circle "$NAME" >/dev/null || fail "could not forget $NAME"
+  say "forgot $NAME"
+fi
 say "ok"

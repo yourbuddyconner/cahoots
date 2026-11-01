@@ -22,6 +22,16 @@
 //! knows, then the phone slot as a placeholder whose key nobody holds, and the inbox. Every
 //! policy names identities by those ids, and none of them is ever left empty for a tap to
 //! claim.
+//!
+//! A tap may make a binary object at any id that holds nothing, under the applet's default
+//! policy (every right for every session), or under a policy that lets nobody delete it (bench,
+//! SE051 applet 7.2.0). The badge never adopts one: a keep deletes whatever stands at the new
+//! circle's public id before it writes ([`remake_public`]), and the badge reads back only a
+//! public object the record says it wrote ([`SlotEntry::public_written`]). What a tap can do is
+//! burn circle slots: one whose ids hold an object nobody may delete is passed over when the
+//! badge picks a slot for a new circle, and a public id it cannot clear marks the slot stuck.
+//! A tap that fills all sixteen leaves the badge no slot for a new circle's keys. That is a
+//! denial of service, not a way to any key, and the remedy is a new chip.
 
 use alloc::format;
 use alloc::string::String;
@@ -102,9 +112,26 @@ pub struct SlotEntry {
     /// signed a bump to a new one. `None` means generation 0, `cahoots_core::root::gen0_id`.
     #[cbor(n(5), with = "minicbor::bytes")]
     pub chat_generation: Option<[u8; 32]>,
+    /// `Some(true)` once the badge wrote this circle's public object itself, `None` until then
+    /// and after it is gone. The badge reads back only a public object it wrote: the applet
+    /// lets any session make an object at an id that holds nothing, so one the badge did not
+    /// write may be a tap's. A record of earlier firmware has no such field and reads as not
+    /// written.
+    #[n(6)]
+    pub public_written: Option<bool>,
 }
 
 impl SlotEntry {
+    /// True once the badge wrote this circle's public object.
+    pub fn public_written(&self) -> bool {
+        self.public_written == Some(true)
+    }
+
+    /// Note whether the badge's own public object is at the circle's public id.
+    pub fn set_public_written(&mut self, written: bool) {
+        self.public_written = written.then_some(true);
+    }
+
     /// The circle's current chat generation id: the one the last bump this badge signed
     /// moved to, or generation 0.
     pub fn current_generation(&self) -> [u8; 32] {
@@ -235,6 +262,7 @@ impl ChipRecord {
                 .as_ref()
                 .is_none_or(|v| !v.is_empty() && v.windows(2).all(|w| w[0] < w[1]));
         if r.encode() != bytes
+            || r.slots.iter().any(|e| e.public_written == Some(false))
             || r.slots.windows(2).any(|w| w[0].slot >= w[1].slot)
             || !stuck_ok
             || !unpair_ok
@@ -703,6 +731,8 @@ pub fn hello_value(pair_key: &[u8; 32]) -> zeroize::Zeroizing<[u8; 32]> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PublicError {
     Chip(ChipError),
+    /// An object the badge did not write stands at the public id and cannot be deleted.
+    Undeletable(ChipError),
     /// The contents do not fit the object, or [`crate::public::MAX_PUBLIC`] for a new one.
     TooLarge,
 }
@@ -749,11 +779,22 @@ pub fn write_public(
     Ok(())
 }
 
-/// Delete whatever is at circle slot `slot`'s public object id, before a keep writes the
-/// circle's first one: the applet lets any session make an object at an id that holds
-/// nothing, so one found there before the circle existed is not the badge's.
-pub fn clear_public(chip: &mut dyn ChipOps, slot: u8) -> Result<(), ChipError> {
-    delete_quietly(chip, public_id(slot))
+/// Delete whatever is at circle slot `slot`'s public object id and write `object` there as a
+/// new object under [`ObjectPolicy::public_object`], in the owner session. For a public id the
+/// badge has not written (see [`SlotEntry::public_written`]): the applet lets any session
+/// make an object at an id that holds nothing, so what is there may be a tap's, and is never
+/// read or written over. `Undeletable` if it stays.
+pub fn remake_public(
+    chip: &mut dyn ChipOps,
+    slot: u8,
+    object: &crate::public::PublicObject,
+) -> Result<(), PublicError> {
+    match delete_quietly(chip, public_id(slot)) {
+        Ok(()) => {}
+        Err(e @ ChipError::NotAllowed) => return Err(PublicError::Undeletable(e)),
+        Err(e) => return Err(PublicError::Chip(e)),
+    }
+    write_public(chip, slot, object)
 }
 
 /// Circle slot `slot`'s public object as stored, or why not: a chip error, or `None` for

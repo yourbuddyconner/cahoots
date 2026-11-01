@@ -16,6 +16,9 @@ std = ["dep:getrandom", "dep:aes", "dep:cmac", "dep:cbc"]
 # The SE051 backend over I2C, for the firmware only. The driver is LGPL-3.0-only; see
 # crates/rp2350/README.md.
 se05x = ["dep:se05x", "dep:embedded-hal", "dep:iso7816"]
+# `Se05xChip::raw`, the firmware's APDU pass-through for the laptop. For bench builds only: it
+# sends any command to the chip in no session.
+bench = ["se05x"]
 
 [dependencies]
 minicbor = { version = "2.3", default-features = false, features = ["alloc", "derive"] }

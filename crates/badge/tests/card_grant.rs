@@ -158,6 +158,7 @@ fn serving(chip: bool) -> (Badge<FakeBoard>, FakeLink, CircleId, SeatPublic) {
             has_root: true,
             has_epoch: false,
             chat_generation: None,
+            public_written: None,
         });
         let circle = board.circle.as_mut().unwrap();
         circle.chip_slot = Some(0);

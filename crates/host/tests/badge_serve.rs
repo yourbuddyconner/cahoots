@@ -171,6 +171,7 @@ fn a_host_board_keeps_the_chip_slot_the_root_and_the_chip_record() {
             has_root: true,
             has_epoch: true,
             chat_generation: None,
+            public_written: None,
         }],
         phone: None,
         badge_nonce: [7; 16],

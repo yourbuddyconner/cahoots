@@ -471,10 +471,6 @@ static BENCH_APDUS: Mutex<RefCell<VecDeque<Vec<u8>>>> = Mutex::new(RefCell::new(
 #[cfg(feature = "bench")]
 static BENCH_SCAN: Mutex<RefCell<Vec<u8>>> = Mutex::new(RefCell::new(Vec::new()));
 
-/// The longest `Apdu` payload the bench takes: an extended APDU of the applet's longest
-/// payload (889 bytes) with its header and Le.
-#[cfg(feature = "bench")]
-pub const BENCH_APDU_MAX: usize = 900;
 
 /// A press the laptop sent (bench builds only), consumed.
 #[cfg(feature = "bench")]
@@ -516,7 +512,7 @@ pub fn bench_reply(answer: &[u8]) {
 fn bench_scan(cs: critical_section::CriticalSection, bytes: &[u8]) {
     use cahoots_core::frame::{decode_max, FrameError, CRC_LEN, HEADER_LEN};
     use cahoots_hal::pile::{KIND_APDU, KIND_PRESS};
-    const LONGEST: usize = HEADER_LEN + BENCH_APDU_MAX + CRC_LEN;
+    const LONGEST: usize = HEADER_LEN + cahoots_hal::pile::APDU_MAX + CRC_LEN;
     let mut scan = BENCH_SCAN.borrow_ref_mut(cs);
     scan.extend_from_slice(bytes);
     let mut i = 0;
@@ -526,7 +522,7 @@ fn bench_scan(cs: critical_section::CriticalSection, bytes: &[u8]) {
             i += 1;
             continue;
         }
-        match decode_max(&scan[i..], BENCH_APDU_MAX) {
+        match decode_max(&scan[i..], cahoots_hal::pile::APDU_MAX) {
             Ok((f, used)) if f.kind == KIND_PRESS => {
                 let press = match f.payload.first() {
                     Some(0) => Some(Press::Left),

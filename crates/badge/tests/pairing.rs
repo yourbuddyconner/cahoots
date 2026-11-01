@@ -744,10 +744,12 @@ fn an_unpair_left_unfinished_keeps_a_phone_paired_since_and_blocks_a_pairing_unt
     assert_eq!(b1.board().chip_record_load().unwrap().unwrap().pending_unpair, None);
 
     // An unpair whose public object cannot be written leaves its bump in the record, and no
-    // phone pairs until it is written.
+    // phone pairs until it is written. Here the badge's object has no room for one more bump.
+    let small = PublicObject { grant: None, phone_public: None, pending_bumps: Vec::new(), ..public(&mut b1) };
+    let exact = small.encode();
     let c = b1.board().owner_chip();
     c.delete(chip::public_id(0)).unwrap();
-    c.write_binary(chip::public_id(0), &[0], &ObjectPolicy::public_object()).unwrap();
+    c.write_binary(chip::public_id(0), &exact, &ObjectPolicy::public_object()).unwrap();
     assert_eq!(b1.unpair(), Err(BadgeError::NotAllUpdated));
     assert!(b1.board().chip_record_load().unwrap().unwrap().pending_unpair.is_some());
     b1.pair_open().unwrap();
@@ -1031,4 +1033,102 @@ fn the_pairing_object_round_trips_and_is_no_circles() {
     assert_eq!(PairingObject::decode(&bytes), Some(o));
     assert_eq!(KeyId::PAIRING.circle_slot(), None);
     assert!(KeyId::PAIRING.is_badge_wide());
+}
+
+/// What a record of earlier firmware looks like for circle slot 0, and a tap's object at its
+/// public id in place of the badge's: the badge's object deleted and one planted in no
+/// session under `policy`, naming a phone and carrying a bump of the tap's.
+fn plant_public(b: &mut Badge<FakeBoard>, policy: &ObjectPolicy) -> PublicObject {
+    let mut r = b.board().chip_record_load().unwrap().unwrap();
+    r.entry_mut(0).unwrap().set_public_written(false);
+    b.board().chip_record_store(&r).unwrap();
+    let mut planted = public(b);
+    planted.pending_bumps = vec![b"a bump of the tap's".to_vec()];
+    planted.phone_public = Some([2; 33]);
+    b.board().owner_chip().delete(chip::public_id(0)).unwrap();
+    let bytes = planted.padded(4096).unwrap();
+    tap(b).write_binary(chip::public_id(0), &bytes, policy).unwrap();
+    planted
+}
+
+/// The public object of slot 0 is the badge's: a tap in no session cannot write it.
+fn assert_badges_own(b: &mut Badge<FakeBoard>) {
+    assert_eq!(
+        tap(b).rewrite_binary(chip::public_id(0), &[0; 16]),
+        Err(ChipError::NotAllowed)
+    );
+    let r = b.board().chip_record_load().unwrap().unwrap();
+    assert!(r.entry(0).unwrap().public_written());
+}
+
+#[test]
+fn a_public_object_a_tap_planted_before_a_pairing_is_replaced_not_adopted() {
+    let (mut b1, _b2) = kept_pair((true, true));
+    plant_public(&mut b1, &ObjectPolicy::any_session());
+    let inbox = pair(&mut b1, "phone", PHONE_KEY);
+    let p = public(&mut b1);
+    assert!(p.pending_bumps.is_empty(), "the tap's bump was carried forward");
+    assert_eq!(p.phone_public, Some(inbox.public));
+    assert!(p.grant.is_some());
+    assert_badges_own(&mut b1);
+}
+
+#[test]
+fn a_public_object_a_tap_planted_before_an_unpair_is_replaced_not_adopted() {
+    let (mut b1, _b2) = kept_pair((true, true));
+    pair(&mut b1, "phone", PHONE_KEY);
+    plant_public(&mut b1, &ObjectPolicy::any_session());
+    b1.unpair().unwrap();
+    let p = public(&mut b1);
+    // Only the badge's own bump, from its record; nothing of the tap's.
+    assert_eq!(p.pending_bumps.len(), 1);
+    assert_ne!(p.pending_bumps[0], b"a bump of the tap's".to_vec());
+    assert_eq!(p.phone_public, None);
+    assert_eq!(p.grant, None);
+    assert_badges_own(&mut b1);
+}
+
+#[test]
+fn a_planted_public_object_nobody_can_delete_marks_the_slot_stuck_and_is_not_updated() {
+    let (mut b1, _b2) = kept_pair((true, true));
+    let planted = plant_public(&mut b1, &ObjectPolicy::owner_object());
+    b1.pair_open().unwrap();
+    phone_taps(&mut b1, "phone", PHONE_KEY);
+    let read = b1.pair_read_inbox().unwrap().unwrap();
+    assert_eq!(b1.pair_accept(read), Err(BadgeError::NotAllUpdated));
+    // Paired, and the circle left out: the tap's object is as the tap made it.
+    assert_eq!(b1.paired_phone().as_deref(), Some("phone"));
+    assert_eq!(public(&mut b1), planted);
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert!(r.is_stuck(0));
+    assert!(!r.entry(0).unwrap().public_written());
+    assert!(b1
+        .board()
+        .log
+        .iter()
+        .any(|l| l.contains("pairing: paired with phone, 0 circles, 1 not updated")));
+}
+
+/// A keep whose contents are too large for a new public object writes the least one, with no
+/// card and no grant; one whose least object is too large is not kept.
+#[test]
+fn a_public_object_too_large_for_the_chip_keeps_the_least_it_can() {
+    let base = PublicObject {
+        circle_id: [1; 16],
+        relay: String::new(),
+        manifest: vec![7; 7500],
+        card: Some(vec![8; 900]),
+        grant: Some(vec![9; 900]),
+        generation: [3; 32],
+        pending_bumps: Vec::new(),
+        badge_nonce: [4; 16],
+        phone_public: Some([2; 33]),
+    };
+    let least = base.fitted_for_new().unwrap();
+    assert_eq!((least.card.as_ref(), least.grant.as_ref()), (None, None));
+    assert_eq!(least.manifest, base.manifest);
+    let small = PublicObject { manifest: vec![7; 100], ..base.clone() };
+    assert_eq!(small.fitted_for_new(), Some(small.clone()));
+    let huge = PublicObject { manifest: vec![7; 8200], ..base };
+    assert_eq!(huge.fitted_for_new(), None);
 }

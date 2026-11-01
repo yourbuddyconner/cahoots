@@ -377,7 +377,13 @@ impl SerialLink {
     /// firmware without the `bench` feature does.
     pub fn apdu(&mut self, apdu: &[u8]) -> io::Result<Vec<u8>> {
         use cahoots_core::frame::{decode, FrameError};
-        use cahoots_hal::pile::{KIND_APDU, KIND_APDU_REPLY};
+        use cahoots_hal::pile::{APDU_MAX, KIND_APDU, KIND_APDU_REPLY};
+        if apdu.len() > APDU_MAX {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("an APDU of {} bytes is longer than the badge takes ({APDU_MAX})", apdu.len()),
+            ));
+        }
         let f = cahoots_core::frame::Frame { kind: KIND_APDU, seq: self.seq, payload: apdu };
         self.seq = self.seq.wrapping_add(1);
         // Whatever arrived before this command is not its answer.

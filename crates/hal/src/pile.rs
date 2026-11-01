@@ -47,6 +47,9 @@ pub const KIND_LOG: u8 = 31;
 pub const KIND_APDU: u8 = 32;
 /// The chip's answer to a [`KIND_APDU`] frame.
 pub const KIND_APDU_REPLY: u8 = 33;
+/// The longest `Apdu` payload a bench build takes: an extended APDU of the applet's longest
+/// payload (889 bytes) with its header and Le.
+pub const APDU_MAX: usize = 900;
 
 const DOWN: usize = 0;
 const UP: usize = 1;
