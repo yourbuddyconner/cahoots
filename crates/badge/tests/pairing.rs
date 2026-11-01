@@ -188,7 +188,7 @@ fn keeping_a_circle_writes_hello_objects_and_a_public_object() {
             card: None,
             grant: None,
             generation: gen0_id(&c1.circle_id),
-            pending_bumps: Vec::new(),
+            pending_bump: None,
             badge_nonce: record.badge_nonce,
             phone_public: None,
         }
@@ -419,7 +419,7 @@ fn unpairing_ends_the_taps_and_leaves_a_bump_a_device_can_post() {
     // the seat from generation 0.
     let p = public(&mut b1);
     assert_eq!((p.phone_public, p.grant.clone()), (None, None));
-    let [bump] = p.pending_bumps.as_slice() else { panic!("{:?}", p.pending_bumps) };
+    let bump = &p.pending_bump.clone().unwrap();
     let (from, to, seat) = verify_bump(bump, &c1.circle_id, &manifest(&b1)).unwrap();
     assert_eq!((from, seat), (gen0_id(&c1.circle_id), c1.seat));
     assert_eq!(p.generation, to);
@@ -451,7 +451,7 @@ fn unpairing_ends_the_taps_and_leaves_a_bump_a_device_can_post() {
     let p = public(&mut b1);
     assert_eq!(p.phone_public, Some(again.public));
     assert_eq!(p.generation, to);
-    assert_eq!(p.pending_bumps, vec![bump.clone()]);
+    assert_eq!(p.pending_bump.as_ref(), Some(bump));
     assert!(verify_device_grant(p.grant.as_ref().unwrap(), &manifest(&b1)).is_ok());
     let c = tap(&mut b1);
     assert_eq!(c.open_slot_with_key_for_test(&PHONE_KEY), Err(ChipError::BadSession));
@@ -466,40 +466,94 @@ fn unpairing_ends_the_taps_and_leaves_a_bump_a_device_can_post() {
 }
 
 #[test]
-fn two_unpairs_with_no_post_between_leave_both_bumps_in_order() {
+fn two_unpairs_with_no_post_between_leave_one_bump_from_the_first_generation() {
     let (mut b1, b2) = kept_pair((true, false));
     let c1 = b1.circle().unwrap().clone();
     let root = b2.circle().unwrap().root.unwrap();
+    let g0 = gen0_id(&c1.circle_id);
     pair(&mut b1, "first phone", PHONE_KEY);
     b1.unpair().unwrap();
+    let first = public(&mut b1);
     pair(&mut b1, "second phone", [0xCD; 16]);
     b1.unpair().unwrap();
 
+    // One bump, from generation 0 straight to the second unpair's generation, freshly signed.
     let p = public(&mut b1);
-    let [one, two] = p.pending_bumps.as_slice() else { panic!("{:?}", p.pending_bumps) };
-    let g0 = gen0_id(&c1.circle_id);
-    let (f1, t1, _) = verify_bump(one, &c1.circle_id, &manifest(&b1)).unwrap();
-    let (f2, t2, _) = verify_bump(two, &c1.circle_id, &manifest(&b1)).unwrap();
-    assert_eq!((f1, f2), (g0, t1));
-    assert_eq!(p.generation, t2);
+    let bump = p.pending_bump.clone().unwrap();
+    assert_ne!(Some(&bump), first.pending_bump.as_ref());
+    let (from, to, _) = verify_bump(&bump, &c1.circle_id, &manifest(&b1)).unwrap();
+    assert_eq!(from, g0);
+    assert_ne!(to, first.generation);
+    assert_eq!(p.generation, to);
+    let record = b1.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(record.entry(0).unwrap().chat_generation, Some(to));
 
-    // A device posts them in order, each from the generation it moves from; a member with the
-    // root follows both.
+    // A device holding generation 0 posts it; a member with the root follows in one step.
+    let mut device = ChatSession::from_generation(
+        g0,
+        chat_gen_key(&root, &c1.circle_id, &g0),
+        c1.circle_id,
+        2,
+        c1.seat,
+    );
+    device.mark_synced();
+    let wire = device.send_bump(to, &bump).unwrap();
     let mut member = ChatSession::new(&root, c1.circle_id, 2, other_seat(&b1));
-    for (from, to, bump) in [(f1, t1, one), (f2, t2, two)] {
-        let mut device = ChatSession::from_generation(
-            from,
-            chat_gen_key(&root, &c1.circle_id, &from),
-            c1.circle_id,
-            2,
-            c1.seat,
-        );
-        device.mark_synced();
-        let wire = device.send_bump(to, bump).unwrap();
-        member.receive(&wire).unwrap();
-        assert_eq!(member.apply_bump(from, to), Ok(BumpOutcome::Moved { dropped_own: false }));
+    member.receive(&wire).unwrap();
+    assert_eq!(member.apply_bump(from, to), Ok(BumpOutcome::Moved { dropped_own: false }));
+    assert_eq!(member.generation_id(), to);
+
+    // A phone paired afterwards finds exactly that one bump to post, however many cycles ran.
+    for i in 0..12u8 {
+        pair(&mut b1, "a phone", [i; 16]);
+        b1.unpair().unwrap();
     }
-    assert_eq!(member.generation_id(), t2);
+    pair(&mut b1, "last phone", [0xEF; 16]);
+    let p = public(&mut b1);
+    let (from, to, _) = verify_bump(p.pending_bump.as_ref().unwrap(), &c1.circle_id, &manifest(&b1)).unwrap();
+    assert_eq!((from, to), (g0, p.generation));
+}
+
+#[test]
+fn an_unpair_left_unfinished_keeps_a_phone_paired_since_and_blocks_a_pairing_until_done() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    let phone = pair(&mut b1, "Conner's phone", PHONE_KEY);
+    // A bump left in the record from an earlier unpair is written at boot without taking the
+    // paired phone's grant or key off the public object.
+    let mut record = b1.board().chip_record_load().unwrap().unwrap();
+    record.pending_unpair = Some(vec![chip::PendingBump { slot: 0, to: [9; 32], payload: vec![1, 2, 3] }]);
+    b1.board().chip_record_store(&record).unwrap();
+    b1.board().presses.push_back(Press::Both);
+    b1.boot();
+    let p = public(&mut b1);
+    assert_eq!(p.phone_public, Some(phone.public));
+    assert!(verify_device_grant(p.grant.as_ref().unwrap(), &manifest(&b1)).is_ok());
+    assert_eq!((p.pending_bump, p.generation), (Some(vec![1, 2, 3]), [9; 32]));
+    assert_eq!(b1.board().chip_record_load().unwrap().unwrap().pending_unpair, None);
+
+    // An unpair whose public object cannot be written leaves its bump in the record, and no
+    // phone pairs until it is written.
+    let c = b1.board().owner_chip();
+    c.delete(chip::public_id(0)).unwrap();
+    c.write_binary(chip::public_id(0), &[0], &ObjectPolicy::public_object()).unwrap();
+    assert_eq!(b1.unpair(), Err(BadgeError::NotAllUpdated));
+    assert!(b1.board().chip_record_load().unwrap().unwrap().pending_unpair.is_some());
+    b1.pair_open().unwrap();
+    let inbox = phone_taps(&mut b1, "new phone", [0xCD; 16]);
+    assert_eq!(b1.pair_accept(inbox), Err(BadgeError::UnpairUnfinished));
+    assert_eq!(b1.paired_phone(), None);
+    assert_eq!(tap(&mut b1).open_slot_with_key_for_test(&[0xCD; 16]), Err(ChipError::BadSession));
+}
+
+#[test]
+fn a_boot_closes_a_pairing_left_open() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    b1.pair_open().unwrap();
+    assert_ne!(tapped_nonce(&mut b1), [0; 16]);
+    b1.board().presses.push_back(Press::Both);
+    b1.boot();
+    assert_eq!(tapped_nonce(&mut b1), [0; 16]);
+    assert_eq!(b1.pair_read_inbox(), Err(BadgeError::NotOpen));
 }
 
 #[test]
@@ -529,10 +583,19 @@ fn a_pairing_that_leaves_the_slot_empty_holds_the_chip_until_the_next_boot() {
     // The phone's key and both placeholders fail: the slot's id is empty.
     b1.board().chip.as_mut().unwrap().fail_next_creates_for_test(3);
     assert_eq!(b1.pair_accept(inbox), Err(BadgeError::ChipHeld));
-    // The pin stays high, so no tap reaches the chip, and the badge uses it no more.
+    // The pin stays high, so no tap reaches the chip, and the badge uses it no more. The
+    // pairing object says no pairing is open.
     assert!(b1.board().pin_high());
+    assert_eq!(tapped_nonce(&mut b1), [0; 16]);
     b1.idle_step();
     assert!(b1.board().pin_high());
+    // The list says why the chip is gone, after the restart note.
+    for _ in 0..3 {
+        press(&mut b1, Press::Right);
+    }
+    press(&mut b1, Press::Both);
+    assert!(b1.board().shows("chip needs a restart"), "{:?}", b1.board().last());
+    assert!(!b1.board().last().iter().any(|l| l.ends_with("pair a phone")));
     let record = b1.board().chip_record_load().unwrap().unwrap();
     assert_eq!(record.generation, REMAKE_GENERATION);
     assert!(!b1.board().owner_chip().exists(KeyId::SLOT).unwrap());
@@ -577,7 +640,7 @@ fn an_unpair_cut_off_before_the_public_objects_is_finished_at_the_next_boot() {
     assert_eq!(record.entry(0).unwrap().chat_generation, Some(pending.to));
     let p = public(&mut b1);
     assert_eq!((p.phone_public, p.grant.clone()), (None, None));
-    assert_eq!(p.pending_bumps, vec![pending.payload.clone()]);
+    assert_eq!(p.pending_bump, Some(pending.payload.clone()));
     assert_eq!(p.generation, pending.to);
     let (from, to, _) = verify_bump(&pending.payload, &c1.circle_id, &manifest(&b1)).unwrap();
     assert_eq!((from, to), (gen0_id(&c1.circle_id), pending.to));
@@ -586,7 +649,7 @@ fn an_unpair_cut_off_before_the_public_objects_is_finished_at_the_next_boot() {
     // A second boot changes nothing more: the bump is there once.
     b1.board().presses.push_back(Press::Both);
     b1.boot();
-    assert_eq!(public(&mut b1).pending_bumps.len(), 1);
+    assert_eq!(public(&mut b1).pending_bump, Some(pending.payload.clone()));
 }
 
 /// One gesture, then one idle step.
@@ -730,7 +793,7 @@ fn a_public_object_refuses_bytes_that_are_not_one() {
         card: Some(vec![4]),
         grant: None,
         generation: [2; 32],
-        pending_bumps: vec![vec![5, 6], vec![7]],
+        pending_bump: Some(vec![5, 6]),
         badge_nonce: [3; 16],
         phone_public: Some([2; 33]),
     };

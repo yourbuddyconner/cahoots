@@ -209,8 +209,14 @@ const CHOOSER_ROWS: usize = 8;
 /// With more entries than rows, the rows shown are the ones around the chosen entry, with
 /// its place in the list under the title.
 pub fn chooser(names: &[String], chosen: usize) -> Screen {
+    chooser_titled("circles", names, chosen)
+}
+
+/// The list of circles under another title: "chip needs a restart" while the badge holds its
+/// chip until it is turned off and on.
+pub fn chooser_titled(title: &str, names: &[String], chosen: usize) -> Screen {
     let mut s = Draw::new();
-    s.title("circles");
+    s.title(title);
     let n = names.len();
     let first = if n <= CHOOSER_ROWS {
         0

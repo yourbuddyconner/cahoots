@@ -64,6 +64,8 @@ pub enum BadgeError {
     /// The phone is unpaired and its taps end, but some circles' public objects were not
     /// written: they are written at the next boot.
     NotAllUpdated,
+    /// An earlier unpair left public objects unwritten: no phone pairs until they are.
+    UnpairUnfinished,
 }
 
 impl From<chip::PublicError> for BadgeError {
@@ -372,6 +374,8 @@ pub struct Badge<B: Board> {
     /// Whether the badge can pair a phone, and the paired phone's name: read from the chip
     /// record when first needed, and again after a boot, a keep, a pairing or an unpairing.
     phone_state: Option<(bool, Option<String>)>,
+    /// The badge held its chip until a restart ([`Board::chip_hold`]).
+    chip_held: bool,
 }
 
 /// What [`Badge::own_chip`] found at boot.
@@ -411,6 +415,7 @@ impl<B: Board> Badge<B> {
             clock: Clock::default(),
             pairing_nonce: None,
             phone_state: None,
+            chip_held: false,
         }
     }
 
@@ -485,7 +490,7 @@ impl<B: Board> Badge<B> {
         c: &Circle,
         generation: [u8; 32],
         grant: Option<Vec<u8>>,
-        pending_bumps: Vec<Vec<u8>>,
+        pending_bump: Option<Vec<u8>>,
         phone_public: Option<[u8; 33]>,
     ) -> PublicObject {
         PublicObject {
@@ -499,7 +504,7 @@ impl<B: Board> Badge<B> {
                 .map(|(_, card)| card.clone()),
             grant,
             generation,
-            pending_bumps,
+            pending_bump,
             badge_nonce: record.badge_nonce,
             phone_public,
         }
@@ -518,7 +523,10 @@ impl<B: Board> Badge<B> {
         self.board.log(&format!(
             "chip: the phone slot could not be made ({e:?}), held until the next boot"
         ));
+        // Zero means no pairing is open: say so while the chip still answers.
+        self.close_pairing();
         self.board.chip_hold();
+        self.chip_held = true;
         self.phone_state = None;
         BadgeError::ChipHeld
     }
@@ -671,7 +679,9 @@ impl<B: Board> Badge<B> {
         let circles = self.chip_circles();
         if record.pending_unpair.is_some() {
             let all: Vec<Circle> = circles.iter().map(|(_, c)| c.clone()).collect();
-            self.finish_unpair(&mut record, &all);
+            if self.finish_unpair(&mut record, &all) > 0 {
+                return Err(BadgeError::UnpairUnfinished);
+            }
         }
         let grantee = SeatPublic::parse(&inbox.public).map_err(|_| BadgeError::BadInbox)?;
         let mut nonces = Vec::new();
@@ -690,12 +700,11 @@ impl<B: Board> Badge<B> {
                 return Err(BadgeError::Chip(e));
             }
             let old = chip.read_binary(chip::public_id(*slot)).ok();
-            // Bumps signed at earlier unpairs stay, in order, for this phone to post.
+            // A bump signed at an earlier unpair stays for this phone to post.
             let pending = old
                 .as_deref()
                 .and_then(|b| PublicObject::decode(b).ok())
-                .map(|o| o.pending_bumps)
-                .unwrap_or_default();
+                .and_then(|o| o.pending_bump);
             let generation = Self::generation_of(&record, *slot, c);
             let object =
                 self.public_object(&record, c, generation, Some(grant), pending, Some(inbox.public));
@@ -813,8 +822,17 @@ impl<B: Board> Badge<B> {
         }
         let mut bumps = Vec::new();
         for ((slot, c), to) in circles.iter().zip(ids) {
-            let from = Self::generation_of(&record, *slot, c);
+            let mut from = Self::generation_of(&record, *slot, c);
             let chip = self.board.chip_begin().ok_or(BadgeError::NoChip)?;
+            // A bump W to X still pending is replaced by one bump W to the new generation, so
+            // a circle has at most one: members are still in W, and X was never posted to.
+            if let Some(p) = chip::read_public(chip, *slot).ok().flatten().and_then(|o| o.pending_bump) {
+                if p.get(32..64) == Some(&from[..]) {
+                    if let Some(w) = p.get(..32).and_then(|w| <[u8; 32]>::try_from(w).ok()) {
+                        from = w;
+                    }
+                }
+            }
             let mut signer = ChipSeat::new(chip, KeyId::new(KeyKind::Seat, *slot));
             let payload = cahoots_chat::sign_bump(&mut signer, c.seat, &c.circle_id, &from, &to);
             if let Some(e) = signer.error {
@@ -882,16 +900,18 @@ impl<B: Board> Badge<B> {
             let circle = circles.iter().find(|c| c.chip_slot == Some(b.slot));
             let object = match (old, circle) {
                 (Some(mut o), _) => {
-                    if !o.pending_bumps.contains(&b.payload) {
-                        o.pending_bumps.push(b.payload.clone());
-                    }
+                    o.pending_bump = Some(b.payload.clone());
                     o.generation = b.to;
-                    o.grant = None;
-                    o.phone_public = None;
+                    // A phone paired since keeps its grant and its key here.
+                    if record.phone.is_none() {
+                        o.grant = None;
+                        o.phone_public = None;
+                    }
                     o
                 }
                 (None, Some(c)) => {
-                    self.public_object(record, c, b.to, None, vec![b.payload.clone()], None)
+                    let phone = record.phone.as_ref().map(|p| p.public);
+                    self.public_object(record, c, b.to, None, Some(b.payload.clone()), phone)
                 }
                 (None, None) => {
                     self.board.log(&format!(
@@ -977,6 +997,14 @@ impl<B: Board> Badge<B> {
         self.finish_unpair_at_boot(&circles);
         self.phone_state = None;
         self.pairing_nonce = None;
+        self.chip_held = false;
+        // No pairing is open after a boot: a nonce left from before goes.
+        if let Some(chip) = self.board.chip_begin() {
+            match chip::close_pairing(chip) {
+                Ok(()) | Err(cahoots_chip::ChipError::NoSuchKey) => {}
+                Err(e) => self.board.log(&format!("pairing: the pairing object was not closed: {e:?}")),
+            }
+        }
         let held: Vec<cahoots_core::circle_id::CircleId> = circles.iter().map(|c| c.circle_id).collect();
         for l in grants::sweep(&mut self.board, &held) {
             self.board.log(&l);
@@ -1530,7 +1558,7 @@ impl<B: Board> Badge<B> {
             card: None,
             grant,
             generation: gen0_id(&circle_id),
-            pending_bumps: Vec::new(),
+            pending_bump: None,
             badge_nonce: record.badge_nonce,
             phone_public: phone.map(|p| p.public),
         };
@@ -2056,6 +2084,10 @@ impl<B: Board> Badge<B> {
                 match self.pair_accept(inbox) {
                     Ok(()) => self.note(&[&format!("paired with {name}"), "tap the phone again"], index),
                     Err(BadgeError::ChipHeld) => self.note(&[RESTART], index),
+                    Err(BadgeError::UnpairUnfinished) => self.note(
+                        &["finish the last unpair first, turn the badge off and on"],
+                        index,
+                    ),
                     Err(_) => self.note(&["pairing failed, try again"], index),
                 }
             }
@@ -2086,7 +2118,8 @@ impl<B: Board> Badge<B> {
 
     fn show_chooser(&mut self, index: usize) {
         let names = self.chooser_names();
-        show(&mut self.board, screens::chooser(&names, index));
+        let title = if self.chip_held { "chip needs a restart" } else { "circles" };
+        show(&mut self.board, screens::chooser_titled(title, &names, index));
     }
 
     fn choose_step(&mut self, index: usize) -> Idle<B> {
