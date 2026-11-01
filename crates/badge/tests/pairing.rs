@@ -224,7 +224,7 @@ fn a_tap_in_no_session_reads_which_circles_the_badge_holds_and_no_public_object(
     assert_eq!(tapped(&mut b1).circles, 1);
     // Forgetting the circle takes it off the pairing object: home, the list, the circle's
     // menu, then Left to Forget.
-    b1.idle_step();
+    home_after_keep(&mut b1);
     press(&mut b1, Press::Both);
     press(&mut b1, Press::Both);
     press(&mut b1, Press::Left);
@@ -851,7 +851,7 @@ fn a_pairing_that_leaves_the_slot_empty_holds_the_chip_until_the_next_boot() {
     // pairing object says no pairing is open.
     assert!(b1.board().pin_high());
     assert_eq!(tapped_nonce(&mut b1), [0; 16]);
-    b1.idle_step();
+    home_after_keep(&mut b1);
     assert!(b1.board().pin_high());
     // The list, from home, says why the chip is gone.
     press(&mut b1, Press::Both);
@@ -920,10 +920,18 @@ fn press(b: &mut Badge<FakeBoard>, p: Press) {
     b.idle_step();
 }
 
-/// From a just-kept circle to home, then to the list of circles, entry `index` marked.
-fn to_the_list_at(b: &mut Badge<FakeBoard>, index: usize) {
+/// Right after a keep: the note names the circle, and five seconds later home comes.
+fn home_after_keep(b: &mut Badge<FakeBoard>) {
+    let saved = format!("saved {}", b.circle().unwrap().params.name);
+    assert!(b.board().shows(&saved), "{:?}", b.board().last());
+    b.board().uptime += 5;
     b.idle_step();
     assert!(b.board().shows("closed to taps"), "{:?}", b.board().last());
+}
+
+/// From a just-kept circle to home, then to the list of circles, entry `index` marked.
+fn to_the_list_at(b: &mut Badge<FakeBoard>, index: usize) {
+    home_after_keep(b);
     press(b, Press::Both);
     assert!(b.board().last().iter().any(|l| l == "circles"), "{:?}", b.board().last());
     for _ in 0..index {
@@ -993,10 +1001,11 @@ fn pairing_from_the_list_shows_the_name_and_the_six_words() {
     press(&mut b1, Press::Both);
     press(&mut b1, Press::Both);
     assert!(b1.board().shows("paired with Conner's phone"), "{:?}", b1.board().last());
+    assert!(b1.board().shows("hold the phone again"));
     assert_eq!(b1.paired_phone().as_deref(), Some("Conner's phone"));
     assert_eq!(tapped_nonce(&mut b1), [0; 16]);
     assert!(!b1.board().pin_high());
-    // "tap the phone again": the chip's power is cut for that second tap.
+    // "hold the phone again": the chip's power is cut for that second tap.
     assert!(b1.board().tap_open);
     // Any press goes home, with the window for that tap open.
     press(&mut b1, Press::Right);

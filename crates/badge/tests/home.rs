@@ -5,6 +5,10 @@
 mod common;
 
 use cahoots_badge::{Badge, Press, Step};
+use cahoots_core::frame::{self, Frame};
+use cahoots_custodian::wire::{ChipRequest, Request, Response, KIND_REQUEST, KIND_RESPONSE};
+use cahoots_hal::Link;
+use cahoots_objects::card::Card;
 use common::{cable, FakeBoard, FakeLink};
 
 /// Card 1 at the bottom, card 2 on top. `chips` says which cards have a chip.
@@ -46,8 +50,8 @@ fn drive(
     panic!("the badges did not get there");
 }
 
-/// Run a pile of two to the keep, keep the circle on both cards, then take one idle step on
-/// each, as the firmware's loop does right after a keep: each card rests where that puts it.
+/// Run a pile of two to the keep and keep the circle on both cards. Each card shows the keep's
+/// note, "saved" and the circle's name, and five seconds later rests on home.
 fn kept_pair(chips: (bool, bool)) -> (Badge<FakeBoard>, Badge<FakeBoard>) {
     let (mut b1, mut b2) = pile_of_two(chips);
     for _ in 0..10_000 {
@@ -72,8 +76,12 @@ fn kept_pair(chips: (bool, bool)) -> (Badge<FakeBoard>, Badge<FakeBoard>) {
         kept.1 |= *s2 == Step::Kept;
         kept.0 && kept.1
     });
-    step(&mut b1);
-    step(&mut b2);
+    for b in [&mut b1, &mut b2] {
+        let saved = format!("saved {}", circle_name(b));
+        assert!(b.board().shows(&saved), "{:?}", b.board().last());
+        b.board().uptime += 5;
+        step(b);
+    }
     (b1, b2)
 }
 
@@ -91,6 +99,59 @@ fn step(b: &mut Badge<FakeBoard>) {
 /// The name of the badge's circle.
 fn circle_name(b: &Badge<FakeBoard>) -> String {
     b.circle().unwrap().params.name.clone()
+}
+
+fn send(laptop: &mut FakeLink, seq: u32, req: &Request) {
+    let payload = req.encode();
+    laptop.send(&frame::encode(&Frame {
+        kind: KIND_REQUEST,
+        seq,
+        payload: &payload,
+    }));
+}
+
+/// Everything waiting on the laptop end, as `(seq, response)` frames.
+fn responses(laptop: &mut FakeLink) -> Vec<(u32, Response)> {
+    let mut bytes = Vec::new();
+    let mut buf = [0u8; 256];
+    loop {
+        let n = laptop.recv(&mut buf);
+        if n == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buf[..n]);
+    }
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < bytes.len() {
+        let (f, used) = frame::decode(&bytes[at..]).expect("a whole frame");
+        assert_eq!(f.kind, KIND_RESPONSE);
+        out.push((f.seq, Response::decode(f.payload).expect("a response")));
+        at += used;
+    }
+    out
+}
+
+/// Plug a laptop into the down connector of a badge resting on home, and return the
+/// laptop's end. The badge takes the link when home is entered again: the list, then "back".
+fn plug_laptop(b: &mut Badge<FakeBoard>) -> FakeLink {
+    let (laptop, down) = cable();
+    b.board().links = Some((down, FakeLink::open()));
+    press(b, Press::Both);
+    to_entry(b, "back");
+    press(b, Press::Both);
+    assert!(b.board().shows("closed to taps"), "{:?}", b.board().last());
+    laptop
+}
+
+/// The laptop's first request asks about the laptop, and Both allows it until unplugged.
+fn allow(b: &mut Badge<FakeBoard>, laptop: &mut FakeLink) {
+    send(laptop, 900, &Request::Identify);
+    step(b);
+    assert!(b.board().shows("a laptop"), "{:?}", b.board().last());
+    press(b, Press::Both);
+    let got = responses(laptop);
+    assert!(matches!(got.as_slice(), [(900, Response::Identity { .. })]), "{got:?}");
 }
 
 /// Press Right until `entry` is the marked entry of the list on the screen.
@@ -210,4 +271,105 @@ fn a_board_that_cannot_cut_the_chips_power_opens_no_window() {
     assert!(!b1.board().tap_open);
     assert_eq!(b1.board().screens.len(), at_rest);
     assert!(b1.board().shows("closed to taps"));
+}
+
+#[test]
+fn a_signature_allowed_while_the_window_is_open_draws_home_once_and_closed() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    let mut laptop = plug_laptop(&mut b1);
+    allow(&mut b1, &mut laptop);
+    let (circle, seat) = {
+        let c = b1.circle().unwrap();
+        (c.circle_id, c.seat)
+    };
+    press(&mut b1, Press::Left);
+    assert!(b1.board().tap_open);
+    // A card to sign: asking reads nothing from the chip, so the window is still open while
+    // the question is on the screen.
+    let card = Card {
+        circle_id: circle,
+        seat,
+        name: "Ada Lovelace".into(),
+        handles: vec![("email".into(), "ada@example.com".into())],
+        endpoints: Vec::new(),
+        log: 1,
+        face: None,
+        device: None,
+    };
+    let op = ChipRequest::Card {
+        card: card.encode().unwrap(),
+    };
+    send(&mut laptop, 7, &Request::Chip { circle, op });
+    step(&mut b1);
+    assert!(b1.board().shows("sign your card"), "{:?}", b1.board().last());
+    assert!(b1.board().tap_open);
+    let before = b1.board().screens.len();
+    // Both: the chip signs, which gives it its power back and so ends the window.
+    press(&mut b1, Press::Both);
+    let got = responses(&mut laptop);
+    assert!(matches!(got.as_slice(), [(7, Response::Chip { .. })]), "{got:?}");
+    assert!(!b1.board().tap_open);
+    // Home is drawn once, and says the window is closed.
+    assert_eq!(b1.board().screens.len(), before + 1);
+    assert!(b1.board().shows("closed to taps"), "{:?}", b1.board().last());
+    step(&mut b1);
+    step(&mut b1);
+    assert_eq!(b1.board().screens.len(), before + 1);
+}
+
+#[test]
+fn a_press_in_the_step_a_laptop_first_asks_is_not_its_answer() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    let mut laptop = plug_laptop(&mut b1);
+    // The laptop's first request and a Both come in the same step: the question is drawn,
+    // and the press is not taken as the answer, nor as home's.
+    send(&mut laptop, 900, &Request::Identify);
+    press(&mut b1, Press::Both);
+    assert!(b1.board().shows("a laptop"), "{:?}", b1.board().last());
+    assert!(responses(&mut laptop).is_empty());
+    press(&mut b1, Press::Both);
+    let got = responses(&mut laptop);
+    assert!(matches!(got.as_slice(), [(900, Response::Identity { .. })]), "{got:?}");
+}
+
+#[test]
+fn the_laptops_allowance_lasts_through_the_list_until_it_is_unplugged() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    let mut laptop = plug_laptop(&mut b1);
+    allow(&mut b1, &mut laptop);
+    // Home, the list, the circle's first page: a request is answered with nothing asked.
+    press(&mut b1, Press::Both);
+    press(&mut b1, Press::Both);
+    assert!(b1.board().shows("1/5"), "{:?}", b1.board().last());
+    send(&mut laptop, 901, &Request::Identify);
+    step(&mut b1);
+    let got = responses(&mut laptop);
+    assert!(matches!(got.as_slice(), [(901, Response::Identity { .. })]), "{got:?}");
+    // Its Circles page, the list, "back": home answers with nothing asked too.
+    for _ in 0..3 {
+        press(&mut b1, Press::Right);
+    }
+    press(&mut b1, Press::Both);
+    to_entry(&mut b1, "back");
+    press(&mut b1, Press::Both);
+    assert!(b1.board().shows("closed to taps"), "{:?}", b1.board().last());
+    send(&mut laptop, 902, &Request::Identify);
+    step(&mut b1);
+    let got = responses(&mut laptop);
+    assert!(matches!(got.as_slice(), [(902, Response::Identity { .. })]), "{got:?}");
+    assert!(b1.board().shows("closed to taps"));
+
+    // Unplugged while the list is on the screen: the answer goes. Plugged in again, the next
+    // request asks.
+    press(&mut b1, Press::Both);
+    laptop.present.set(false);
+    step(&mut b1);
+    assert!(b1.board().log.iter().any(|l| l == "down link: nothing plugged in"));
+    laptop.present.set(true);
+    to_entry(&mut b1, "back");
+    press(&mut b1, Press::Both);
+    send(&mut laptop, 903, &Request::Identify);
+    step(&mut b1);
+    assert!(b1.board().shows("a laptop"), "{:?}", b1.board().last());
+    assert!(responses(&mut laptop).is_empty());
 }

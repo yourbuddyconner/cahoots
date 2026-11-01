@@ -300,18 +300,13 @@ struct Pending {
 /// the badge answers the laptop for any circle it holds.
 struct Menu<B: Board> {
     pads: Pads<CirclePad<B>>,
-    down: B::Link,
-    rx: Vec<u8>,
+    /// The laptop on the down link, lent by the badge while the menu runs.
+    laptop: Laptop<B::Link>,
     page: Page,
-    /// The laptop on the down link was allowed, with Both, since it was plugged in. The
-    /// first request after a plug-in asks; unplugging forgets the answer.
-    connected: bool,
     /// The request that arrived before the laptop was allowed, held while the badge asks
     /// whether to allow the laptop at all. Answered or refused with that answer.
     connect: Option<Pending>,
     pending: Option<Pending>,
-    /// Whether the down link reported a peer on the last step, so a change is logged once.
-    peer_seen: bool,
     /// Another screen (the code, or an error) covers the page; any gesture goes back to it.
     covered: bool,
     /// Both on the Forget page asked "forget this circle?": Both forgets, Left or Right goes
@@ -323,17 +318,53 @@ struct Menu<B: Board> {
     grant_index: usize,
     /// Both on a grant asked "revoke this grant?": Both revokes, Left or Right goes back.
     confirm_revoke: bool,
-    /// The nonce a proof under a grant must be made over: drawn when the menu opens, and
-    /// drawn again after every signature under a grant.
-    /// `None` while the random source fails: no nonce is given and no use accepted until a
-    /// draw succeeds.
-    nonce: Option<[u8; 16]>,
     /// The uptime at which the window for a phone's tap closes, while it is open. Home opens
     /// it and says so. It closes then, at a second press, or when a conversation of the
     /// badge's own gives the chip its power back.
     tap_until: Option<u64>,
     /// Home has been drawn saying one minute is left in the window.
     tap_minute_shown: bool,
+}
+
+/// The laptop on the down link. The badge keeps it while a laptop stays plugged in and lends
+/// it to the menu while the menu runs, so the answer to "allow until unplugged?", a request
+/// half read and the nonce for grants all outlive a trip through the list.
+struct Laptop<L> {
+    down: L,
+    /// Bytes read from the link that are not a whole request yet.
+    rx: Vec<u8>,
+    /// The laptop was allowed, with Both, since it was plugged in. The first request after a
+    /// plug-in asks. Unplugging forgets the answer, and so does a new circle's pass, which
+    /// puts the pile on this connector.
+    connected: bool,
+    /// Whether the link reported a peer when last looked at, so a change is logged once.
+    peer_seen: bool,
+    /// The nonce a proof under a grant must be made over: drawn when the laptop is first
+    /// looked at, and drawn again after every signature under a grant. `None` while the
+    /// random source fails: no nonce is given and no use accepted until a draw succeeds.
+    nonce: Option<[u8; 16]>,
+}
+
+/// Look at the laptop's link: log a plug-in or an unplug, and at an unplug forget the answer
+/// and any request half read. True if the laptop was just unplugged.
+fn watch_laptop<B: Board>(board: &mut B, l: &mut Laptop<B::Link>) -> bool {
+    let present = l.down.peer_present();
+    if present == l.peer_seen {
+        return false;
+    }
+    l.peer_seen = present;
+    board.log(if present {
+        "down link: a laptop is listening"
+    } else {
+        "down link: nothing plugged in"
+    });
+    if present {
+        return false;
+    }
+    // Whatever was allowed was allowed for that laptop while it was plugged in.
+    l.connected = false;
+    l.rx.clear();
+    true
 }
 
 /// What the menu asks of the badge after a step.
@@ -413,7 +444,7 @@ pub struct Badge<B: Board> {
     circles: Vec<Circle>,
     /// The circle whose menu is open, or was last.
     current: usize,
-    /// A circle was just kept: the next idle step opens home, with `current` that circle.
+    /// A circle was just kept: home comes after its note, with `current` that circle.
     open_current: bool,
     state: State<B::Link>,
     idle: Idle<B>,
@@ -434,6 +465,9 @@ pub struct Badge<B: Board> {
     phone_state: Option<(bool, Option<String>)>,
     /// The badge held its chip until a restart ([`Board::chip_hold`]).
     chip_held: bool,
+    /// The laptop on the down link, while no menu has it on loan. `None` until a menu first
+    /// takes the link, and again after a boot.
+    laptop: Option<Laptop<B::Link>>,
 }
 
 /// What [`Badge::own_chip`] found at boot.
@@ -482,6 +516,7 @@ impl<B: Board> Badge<B> {
             pairing: None,
             phone_state: None,
             chip_held: false,
+            laptop: None,
         }
     }
 
@@ -1280,6 +1315,8 @@ impl<B: Board> Badge<B> {
         self.phone_state = None;
         self.pairing = None;
         self.chip_held = false;
+        // A boot starts the laptop over: it is asked again at its first request.
+        self.laptop = None;
         self.upgrade_public_policy(&circles);
         // No pairing is open after a boot: a nonce left from before goes, and the pairing
         // object names the circles the chip holds now.
@@ -2294,7 +2331,6 @@ impl<B: Board> Badge<B> {
                     self.chip_slot = None;
                     self.board
                         .log(&format!("saved: {} seat {seat}", result.params.name));
-                    show_status(&mut self.board, "saved. read the words aloud");
                     // The board's order, which is the order the next boot lists them in.
                     let stored = self.board.load_circles();
                     self.circles = if stored.iter().any(|c| c.circle_id == id) {
@@ -2308,7 +2344,9 @@ impl<B: Board> Badge<B> {
                         .position(|c| c.circle_id == id)
                         .unwrap_or(0);
                     self.open_current = true;
-                    self.idle = Idle::Off;
+                    // The keep prompt has just shown the words. A note names the circle, then
+                    // home comes.
+                    self.idle = self.note(&[&format!("saved {}", result.params.name)], false);
                     return Ok((State::Idle, Step::Kept));
                 }
                 if matches!(gesture, Press::Left | Press::Right) {
@@ -2365,6 +2403,14 @@ impl<B: Board> Badge<B> {
             return;
         }
         let idle = core::mem::replace(&mut self.idle, Idle::Off);
+        // The menu watches the laptop while it runs. Elsewhere the badge does, so an unplug
+        // on the list or a note still forgets the answer. A new circle's pass has the pile
+        // on that connector, and the answer is already gone.
+        if !matches!(idle, Idle::On(_) | Idle::NewCircle) {
+            if let Some(l) = self.laptop.as_mut() {
+                watch_laptop(&mut self.board, l);
+            }
+        }
         self.idle = match idle {
             Idle::Off => {
                 self.open_current = false;
@@ -2396,14 +2442,16 @@ impl<B: Board> Badge<B> {
                 ) {
                     MenuAction::Stay => Idle::On(menu),
                     MenuAction::Choose => {
-                        drop(menu);
+                        let Menu { laptop, .. } = *menu;
+                        self.laptop = Some(laptop);
                         self.show_chooser(self.current);
                         Idle::Choose {
                             index: self.current,
                         }
                     }
                     MenuAction::Forget => {
-                        drop(menu);
+                        let Menu { laptop, .. } = *menu;
+                        self.laptop = Some(laptop);
                         self.forget_current();
                         Idle::Off
                     }
@@ -2516,7 +2564,7 @@ impl<B: Board> Badge<B> {
                 match self.pair_accept(inbox) {
                     Ok(()) => {
                         self.board.tap_begin();
-                        self.note(&[&format!("paired with {name}"), "tap the phone again"], true)
+                        self.note(&[&format!("paired with {name}"), "hold the phone again"], true)
                     }
                     Err(BadgeError::NotAllUpdated) => {
                         self.board.tap_begin();
@@ -2603,17 +2651,24 @@ impl<B: Board> Badge<B> {
             },
             Press::Both => {
                 self.board.log("new circle: looking for the pile");
+                // The pile, or the bridge, sits on the down connector now: the laptop that
+                // was allowed there is asked again at its next request.
+                if let Some(l) = self.laptop.as_mut() {
+                    l.connected = false;
+                    l.rx.clear();
+                }
                 self.state = State::Idle;
                 Idle::NewCircle
             }
         }
     }
 
-    /// Run the pass for a new circle by one step. Kept opens the new circle's menu; anything
-    /// else that ends the pass goes back to the list.
+    /// Run the pass for a new circle by one step. Kept shows the keep's note, then home.
+    /// Anything else that ends the pass goes back to the list.
     fn new_circle_step(&mut self) -> Idle<B> {
         match self.step() {
-            Step::Kept => Idle::Off,
+            // The keep left its note in `self.idle`.
+            Step::Kept => core::mem::replace(&mut self.idle, Idle::Off),
             Step::Discarded => {
                 self.show_chooser(self.current);
                 Idle::Choose {
@@ -2697,8 +2752,21 @@ impl<B: Board> Badge<B> {
                 }
             }
         }
-        let (down, _up) = self.board.links();
-        let nonce = fresh_nonce(&mut self.board);
+        // The laptop's state stays while a laptop is plugged in. Otherwise the link is taken
+        // from the board again and the state starts over.
+        let laptop = match self.laptop.take() {
+            Some(l) if l.down.peer_present() => l,
+            _ => {
+                let (down, _up) = self.board.links();
+                Laptop {
+                    down,
+                    rx: Vec::new(),
+                    connected: false,
+                    peer_seen: false,
+                    nonce: fresh_nonce(&mut self.board),
+                }
+            }
+        };
         let tap_until = if open_tap && self.board.tap_open() {
             Some(self.board.uptime_secs() + TAP_WINDOW_SECS)
         } else {
@@ -2707,19 +2775,15 @@ impl<B: Board> Badge<B> {
         };
         let mut menu = Menu {
             pads: Pads { held, tier },
-            down,
-            rx: Vec::new(),
+            laptop,
             page,
-            connected: false,
             connect: None,
             pending: None,
-            peer_seen: false,
             covered: false,
             confirm_forget: false,
             grant_entries: Vec::new(),
             grant_index: 0,
             confirm_revoke: false,
-            nonce,
             tap_until,
             tap_minute_shown: false,
         };
@@ -2740,56 +2804,28 @@ impl<B: Board> Badge<B> {
         clock: &mut Clock,
     ) -> MenuAction {
         let c = &circles[current];
-        // The window for a phone's tap closes when its time is up, or as soon as a
-        // conversation of the badge's own has given the chip its power back. Home is drawn
-        // again only when what it says changes: at the close, and when one minute is left.
-        // Under a prompt or a cover the page waits: it is drawn as it is when that goes.
-        if let Some(t) = m.tap_until {
-            let now = board.uptime_secs();
-            let visible = m.page == Page::Home
-                && !m.covered
-                && m.pending.is_none()
-                && m.connect.is_none();
-            if !board.tap_open() || now >= t {
-                board.tap_end();
-                m.tap_until = None;
-                if visible {
-                    show_page(board, circles, current, m);
-                }
-            } else if t - now <= TAP_LAST_MINUTE_SECS && !m.tap_minute_shown {
-                m.tap_minute_shown = true;
-                if visible {
-                    show_page(board, circles, current, m);
-                }
-            }
+        // Home is drawn again by itself only when what it says about taps changes: at the
+        // close, and when one minute is left. Under a prompt or a cover the page waits: it is
+        // drawn as it is when that goes.
+        let visible =
+            m.page == Page::Home && !m.covered && m.pending.is_none() && m.connect.is_none();
+        if Self::tap_check(board, m) && visible {
+            show_page(board, circles, current, m);
         }
         let asked = m.pending.is_some() || m.connect.is_some();
-        let present = m.down.peer_present();
-        if present != m.peer_seen {
-            m.peer_seen = present;
-            board.log(if present {
-                "down link: a laptop is listening"
-            } else {
-                "down link: nothing plugged in"
-            });
-            if !present {
-                // Whatever was allowed was allowed for that laptop while it was plugged in.
-                m.connected = false;
-                if m.connect.take().is_some() {
-                    m.covered = false;
-                    show_page(board, circles, current, m);
-                }
-            }
+        if watch_laptop(board, &mut m.laptop) && m.connect.take().is_some() {
+            m.covered = false;
+            Self::redraw(board, circles, current, m);
         }
         // Read a chunk and decode after each, so `rx` never holds more than one request
         // frame and one chunk, whatever arrives.
         let mut buf = [0u8; 256];
         loop {
-            let n = m.down.recv(&mut buf);
+            let n = m.laptop.down.recv(&mut buf);
             if n == 0 {
                 break;
             }
-            m.rx.extend_from_slice(&buf[..n]);
+            m.laptop.rx.extend_from_slice(&buf[..n]);
             Self::menu_decode(board, circles, m, clock);
         }
         // A request's prompt drawn over the revoke or forget question replaces it. Once that
@@ -2802,7 +2838,7 @@ impl<B: Board> Badge<B> {
         // A gesture made before the prompt was on the screen is not an answer to it: on the
         // Nano the prompt's refresh blocks for hundreds of milliseconds. Drop the gesture
         // seen on this call and count only gestures seen on a later call.
-        if !asked && m.pending.is_some() {
+        if !asked && (m.pending.is_some() || m.connect.is_some()) {
             let _ = board.press();
             return MenuAction::Stay;
         }
@@ -2812,20 +2848,24 @@ impl<B: Board> Badge<B> {
             match gesture {
                 Press::None => m.connect = Some(p),
                 Press::Both => {
-                    m.connected = true;
+                    m.laptop.connected = true;
                     board.log("laptop allowed until unplugged");
                     m.covered = false;
-                    show_page(board, circles, current, m);
+                    // The held request first: it may ask, or use the chip and so end the
+                    // window for a tap. The page is drawn after, once, if nothing covers it.
                     Self::handle_request(board, circles, m, clock, p.seq, p.request);
+                    if m.pending.is_none() && !m.covered {
+                        Self::redraw(board, circles, current, m);
+                    }
                 }
                 Press::Left | Press::Right => {
                     board.log("laptop refused");
                     let busy = Response::Error {
                         code: ErrorCode::Busy,
                     };
-                    respond(&mut m.down, p.seq, &busy.encode());
+                    respond(&mut m.laptop.down, p.seq, &busy.encode());
                     m.covered = false;
-                    show_page(board, circles, current, m);
+                    Self::redraw(board, circles, current, m);
                 }
             }
             return MenuAction::Stay;
@@ -2838,11 +2878,11 @@ impl<B: Board> Badge<B> {
             };
             let mut served = Served {
                 custody: &mut m.pads,
-                apps: BadgeApps::on_board(circles, board, clock, m.nonce),
+                apps: BadgeApps::on_board(circles, board, clock, m.laptop.nonce),
                 signed_card: None,
             };
             let resp = serve(&mut served, &mut Answer(yes), &p.request);
-            respond(&mut m.down, p.seq, &resp);
+            respond(&mut m.laptop.down, p.seq, &resp);
             if let Some((circle, card)) = served.signed_card {
                 cards.retain(|(id, _)| *id != circle);
                 cards.push((circle, card));
@@ -2856,7 +2896,7 @@ impl<B: Board> Badge<B> {
             m.pending = None;
             // The prompt replaced whatever was on the screen; the page is back now.
             m.covered = false;
-            show_page(board, circles, current, m);
+            Self::redraw(board, circles, current, m);
             return MenuAction::Stay;
         }
 
@@ -2869,7 +2909,7 @@ impl<B: Board> Badge<B> {
                     Self::read_grants(board, clock, c, m);
                     m.grant_index = m.grant_index.min(m.grant_entries.len().saturating_sub(1));
                 }
-                show_page(board, circles, current, m);
+                Self::redraw(board, circles, current, m);
             }
             return MenuAction::Stay;
         }
@@ -2880,7 +2920,7 @@ impl<B: Board> Badge<B> {
                 Press::Both => return MenuAction::Forget,
                 Press::Left | Press::Right => {
                     m.confirm_forget = false;
-                    show_page(board, circles, current, m);
+                    Self::redraw(board, circles, current, m);
                 }
             }
             return MenuAction::Stay;
@@ -2900,12 +2940,12 @@ impl<B: Board> Badge<B> {
                     Self::read_grants(board, clock, c, m);
                     m.grant_index = m.grant_index.min(m.grant_entries.len().saturating_sub(1));
                     if !m.covered {
-                        show_page(board, circles, current, m);
+                        Self::redraw(board, circles, current, m);
                     }
                 }
                 Press::Left | Press::Right => {
                     m.confirm_revoke = false;
-                    show_page(board, circles, current, m);
+                    Self::redraw(board, circles, current, m);
                 }
             }
             return MenuAction::Stay;
@@ -2927,7 +2967,7 @@ impl<B: Board> Badge<B> {
                         m.tap_until = Some(board.uptime_secs() + TAP_WINDOW_SECS);
                         m.tap_minute_shown = false;
                     }
-                    show_page(board, circles, current, m);
+                    Self::redraw(board, circles, current, m);
                 }
                 Press::Right | Press::Both => return MenuAction::Choose,
             }
@@ -2944,12 +2984,12 @@ impl<B: Board> Badge<B> {
                     let last = m.grant_entries.len().saturating_sub(1);
                     if left && m.grant_index > 0 {
                         m.grant_index -= 1;
-                        show_page(board, circles, current, m);
+                        Self::redraw(board, circles, current, m);
                         return MenuAction::Stay;
                     }
                     if !left && m.grant_index < last {
                         m.grant_index += 1;
-                        show_page(board, circles, current, m);
+                        Self::redraw(board, circles, current, m);
                         return MenuAction::Stay;
                     }
                 }
@@ -2966,12 +3006,12 @@ impl<B: Board> Badge<B> {
                         0
                     };
                 }
-                show_page(board, circles, current, m);
+                Self::redraw(board, circles, current, m);
             }
             Press::Both => match m.page {
                 // Home's gestures are taken above.
                 Page::Home => {}
-                Page::Words => show_page(board, circles, current, m),
+                Page::Words => Self::redraw(board, circles, current, m),
                 Page::Key => {
                     match m.pads.spend(&c.circle_id, PSK_LEN) {
                         Ok((_, bytes)) => show(board, screens::code(&bytes)),
@@ -2984,7 +3024,7 @@ impl<B: Board> Badge<B> {
                         m.confirm_revoke = true;
                         show(board, screens::revoke_prompt(&e.agent));
                     }
-                    None => show_page(board, circles, current, m),
+                    None => Self::redraw(board, circles, current, m),
                 },
                 Page::Circles => return MenuAction::Choose,
                 Page::Forget => {
@@ -2994,6 +3034,33 @@ impl<B: Board> Badge<B> {
             },
         }
         MenuAction::Stay
+    }
+
+    /// Close the window for a phone's tap when its time is up, or as soon as a conversation of
+    /// the badge's own has given the chip its power back, and note when one minute is left.
+    /// True if what home says about taps changed.
+    fn tap_check(board: &mut B, m: &mut Menu<B>) -> bool {
+        let Some(t) = m.tap_until else {
+            return false;
+        };
+        let now = board.uptime_secs();
+        if !board.tap_open() || now >= t {
+            board.tap_end();
+            m.tap_until = None;
+            true
+        } else if t - now <= TAP_LAST_MINUTE_SECS && !m.tap_minute_shown {
+            m.tap_minute_shown = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Draw the menu's page, home saying truly whether a phone can tap: a conversation this
+    /// step may have given the chip its power back.
+    fn redraw(board: &mut B, circles: &[Circle], current: usize, m: &mut Menu<B>) {
+        Self::tap_check(board, m);
+        show_page(board, circles, current, m);
     }
 
     /// Read the live grants of the current circle into the menu.
@@ -3007,24 +3074,24 @@ impl<B: Board> Badge<B> {
     /// incomplete, a whole frame further on wins and the bytes before it are dropped.
     fn menu_decode(board: &mut B, circles: &[Circle], m: &mut Menu<B>, clock: &mut Clock) {
         loop {
-            let (kind, seq, payload, used) = match frame::decode_max(&m.rx, MAX_REQUEST_LEN) {
+            let (kind, seq, payload, used) = match frame::decode_max(&m.laptop.rx, MAX_REQUEST_LEN) {
                 Ok((f, used)) => (f.kind, f.seq, f.payload.to_vec(), used),
                 Err(FrameError::Incomplete) => {
-                    let whole = |i: &usize| frame::decode_max(&m.rx[*i..], MAX_REQUEST_LEN).is_ok();
-                    match (1..m.rx.len()).find(whole) {
+                    let whole = |i: &usize| frame::decode_max(&m.laptop.rx[*i..], MAX_REQUEST_LEN).is_ok();
+                    match (1..m.laptop.rx.len()).find(whole) {
                         Some(skip) => {
-                            m.rx.drain(..skip);
+                            m.laptop.rx.drain(..skip);
                             continue;
                         }
                         None => break,
                     }
                 }
                 Err(FrameError::Crc) => {
-                    m.rx.remove(0);
+                    m.laptop.rx.remove(0);
                     continue;
                 }
             };
-            m.rx.drain(..used);
+            m.laptop.rx.drain(..used);
             if kind != KIND_REQUEST {
                 continue;
             }
@@ -3032,10 +3099,10 @@ impl<B: Board> Badge<B> {
                 let busy = Response::Error {
                     code: ErrorCode::Busy,
                 };
-                respond(&mut m.down, seq, &busy.encode());
+                respond(&mut m.laptop.down, seq, &busy.encode());
                 continue;
             }
-            if !m.connected {
+            if !m.laptop.connected {
                 // The first request since the laptop was plugged in: ask about the laptop
                 // before anything else, and hold the request for the answer.
                 show(board, screens::connect_prompt());
@@ -3061,8 +3128,8 @@ impl<B: Board> Badge<B> {
         payload: Vec<u8>,
     ) {
         {
-            if m.nonce.is_none() {
-                m.nonce = fresh_nonce(board);
+            if m.laptop.nonce.is_none() {
+                m.laptop.nonce = fresh_nonce(board);
             }
             let req = Request::decode(&payload).ok();
             // A request longer than its kind allows is refused before the holder is asked:
@@ -3072,12 +3139,12 @@ impl<B: Board> Badge<B> {
                 let malformed = Response::Error {
                     code: ErrorCode::Malformed,
                 };
-                respond(&mut m.down, seq, &malformed.encode());
+                respond(&mut m.laptop.down, seq, &malformed.encode());
                 return;
             }
             let ask = match &req {
                 Some(Request::Chip { circle, op }) => {
-                    BadgeApps::on_board(circles, board, clock, m.nonce).prompt(circle, op)
+                    BadgeApps::on_board(circles, board, clock, m.laptop.nonce).prompt(circle, op)
                 }
                 Some(r) => match spends(r) {
                     // A spend for a circle the badge does not hold is refused before asking.
@@ -3118,17 +3185,17 @@ impl<B: Board> Badge<B> {
                 Ok(None) => {
                     let mut served = Served {
                         custody: &mut m.pads,
-                        apps: BadgeApps::on_board(circles, board, clock, m.nonce),
+                        apps: BadgeApps::on_board(circles, board, clock, m.laptop.nonce),
                         signed_card: None,
                     };
                     let resp = serve(&mut served, &mut Answer(false), &payload);
                     let used = served.apps.grant_use.take();
                     let spent = served.apps.nonce_spent;
-                    respond(&mut m.down, seq, &resp);
+                    respond(&mut m.laptop.down, seq, &resp);
                     // A proof under the nonce was accepted: the nonce is spent, whether or not
                     // the signature followed.
                     if spent {
-                        m.nonce = fresh_nonce(board);
+                        m.laptop.nonce = fresh_nonce(board);
                     }
                     // Signed under a grant: the badge shows what it signed until the next
                     // gesture or screen, without waiting.
@@ -3145,7 +3212,7 @@ impl<B: Board> Badge<B> {
                 // to sign that it cannot describe, one it cannot do yet.
                 Err(code) => {
                     board.log(&format!("request refused: {code:?}"));
-                    respond(&mut m.down, seq, &Response::Error { code }.encode());
+                    respond(&mut m.laptop.down, seq, &Response::Error { code }.encode());
                 }
             }
         }

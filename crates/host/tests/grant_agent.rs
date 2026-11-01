@@ -275,9 +275,7 @@ fn after_a_revoke_on_the_badge_one_commit_fails_and_the_next_asks() {
     press(&top, "B");
     wait_line(&top, "no grants");
 
-    // The circle's menu is a new one: the laptop's next request asks about the laptop again.
-    // Allowed, the next commit fails with nothing more asked, and the agent retires the grant.
-    serving.start();
+    // The next commit fails, with nobody asked, and the agent retires the grant.
     let two = tmp.path().join("two");
     std::fs::write(&two, COMMIT).unwrap();
     let out = git_sign(tmp.path(), &agent_sock, &keyfile, &two).wait_with_output().unwrap();

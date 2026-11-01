@@ -631,9 +631,12 @@ impl Board for FakeBoard {
         self.chip_end();
         self.chip_refused = true;
     }
-    /// Raises the pin, then opens the owner session if the chip has an owner object, as the
-    /// firmware does.
+    /// Gives the chip its power back if a tap had it cut, raises the pin, then opens the owner
+    /// session if the chip has an owner object, as the firmware does.
     fn chip_begin(&mut self) -> Option<&mut dyn ChipOps> {
+        if !self.chip_held {
+            self.tap_end();
+        }
         if !self.has_chip() {
             return None;
         }

@@ -39,6 +39,14 @@ fn press(badge: &mut Badge<FakeBoard>, gesture: Press) {
     badge.idle_step();
 }
 
+/// Right after a keep: the note names the circle `name`, and five seconds later home comes.
+fn home_after_keep(b: &mut Badge<FakeBoard>, name: &str) {
+    assert!(b.board().shows(&format!("saved {name}")), "{:?}", b.board().last());
+    b.board().uptime += 5;
+    b.idle_step();
+    assert!(b.board().shows("closed to taps"), "{:?}", b.board().last());
+}
+
 /// Card `b` at the bottom of a pile of two with a new top card seeded `seed`. Returns the top
 /// card. `b` has the lower end of the cable as its up link the next time it asks for links.
 fn pile_on(b: &mut Badge<FakeBoard>, seed: u64) -> Badge<FakeBoard> {
@@ -78,7 +86,8 @@ fn ceremony(
             prompt.1 = true;
             top.board().presses.push_back(Press::Both);
         }
-        kept.0 |= s1 == Some(Step::Kept) || (prompt.0 && bottom.board().shows("saved. read the words aloud"));
+        let saved = bottom.board().last().iter().any(|l| l.starts_with("saved "));
+        kept.0 |= s1 == Some(Step::Kept) || (prompt.0 && saved);
         kept.1 |= s2 == Step::Kept;
         if kept.0 && kept.1 {
             return top;
@@ -99,9 +108,8 @@ fn two_circles(chip: bool) -> (Badge<FakeBoard>, Badge<FakeBoard>, Badge<FakeBoa
     let t1 = ceremony(&mut b, 0xD1B5_4A32_D192_ED03, |b| Some(b.step()));
     assert_eq!(b.circles().len(), 1);
 
-    // Home, then the list, then "new circle".
-    b.idle_step();
-    assert!(b.board().shows("closed to taps"), "{:?}", b.board().last());
+    // The keep's note, then home, then the list, then "new circle".
+    home_after_keep(&mut b, "first");
     press(&mut b, Press::Both);
     assert!(b.board().shows("> first"), "{:?}", b.board().last());
     assert!(b.board().shows("  new circle"));
@@ -113,8 +121,8 @@ fn two_circles(chip: bool) -> (Badge<FakeBoard>, Badge<FakeBoard>, Badge<FakeBoa
         b.idle_step();
         None
     });
-    // Home opens, and lists both circles.
-    b.idle_step();
+    // The keep's note, then home, which lists both circles.
+    home_after_keep(&mut b, "second");
     assert!(b.board().shows("first") && b.board().shows("second"), "{:?}", b.board().last());
     (b, t1, t2)
 }

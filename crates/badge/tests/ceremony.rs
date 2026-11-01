@@ -100,10 +100,9 @@ fn two_fake_cards_complete_a_ceremony_and_keep_it() {
     assert_eq!(b1.board().load_circle().as_ref(), b1.circle());
     assert_eq!(b1.board().pad.len(), 192);
     assert_eq!(b1.board().pad, b2.board().pad);
-    assert_eq!(
-        b1.board().statuses().last().unwrap(),
-        "saved. read the words aloud"
-    );
+    // The keep prompt showed the words: the note after it names the circle.
+    let saved = format!("saved {}", b1.circle().unwrap().params.name);
+    assert_eq!(b1.board().statuses().last().unwrap(), &saved);
 }
 
 #[test]
