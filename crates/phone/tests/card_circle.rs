@@ -219,8 +219,10 @@ fn pair_then(
     let inbox = b.pair_read_inbox().unwrap().unwrap();
     let words: Vec<String> = b.pair_words(&inbox).unwrap().iter().map(|w| w.to_string()).collect();
     assert_eq!(preview.words, words);
-    assert_eq!(preview.words.len(), 4);
-    assert_eq!(preview.circles, vec!["fakes".to_string()]);
+    assert_eq!(preview.words.len(), 6);
+    // Before the press only the count is readable, and the badge gives no name.
+    assert_eq!(preview.circles, "1 circle");
+    assert_eq!(preview.badge_name, "your badge");
     // Before the owner presses both buttons the slot does not know this phone.
     let early = tap(b, d, |p| p.pair_card_finish()).err().unwrap();
     assert!(matches!(early, PhoneError::NotPaired), "{early:?}");

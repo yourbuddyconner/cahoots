@@ -251,11 +251,12 @@ pub struct CircleSummary {
 /// What the first tap of a pairing read from the badge, for the person to check.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct PairPreview {
-    /// The badge's name, from its pairing object.
+    /// The badge's name, from its pairing object, or "your badge" when it gives none.
     pub badge_name: String,
-    /// The names of the badge's circles, which become card circles on this phone.
-    pub circles: Vec<String>,
-    /// Four words the badge shows too. They must match before the owner presses both buttons.
+    /// How many circles the badge holds, as words: "1 circle", "3 circles". Their names are
+    /// read at the second tap, inside the slot's session.
+    pub circles: String,
+    /// Six words the badge shows too. They must match before the owner presses both buttons.
     pub words: Vec<String>,
 }
 

@@ -2,7 +2,9 @@
 //!
 //! Pairing takes two taps. The first ([`Phone::pair_card_start`]) draws a fresh slot key,
 //! seals it to the key the badge's open pairing shows, writes it to the badge's inbox signed
-//! with this phone's own key, and lists the badge's circles. The owner checks the four words
+//! with this phone's own key, and counts the badge's circles from its pairing object. Their
+//! public objects are not readable before the press: only the badge and its paired phone
+//! read them. The owner checks the six words
 //! on both screens and presses both buttons on the badge. The second tap
 //! ([`Phone::pair_card_finish`]) opens the phone slot with that key, which works only once the
 //! badge took it, keeps each circle as a card circle, fetches the keys its chat needs, posts
@@ -26,6 +28,17 @@ use zeroize::Zeroizing;
 
 /// What the reader shows while it looks for the card.
 const PROMPT: &str = "Hold the phone to the card.";
+/// What the phone calls a badge whose pairing object gives no name.
+pub const NO_BADGE_NAME: &str = "your badge";
+
+/// "1 circle", "3 circles".
+fn circle_count(n: usize) -> String {
+    match n {
+        1 => String::from("1 circle"),
+        n => format!("{n} circles"),
+    }
+}
+
 /// What the reader says while a card circle's chat waits for keys.
 const KEYS_PROMPT: &str = "Hold the phone to the card to fetch keys.";
 
@@ -310,8 +323,8 @@ impl Phone {
     /// The first tap of pairing with a badge, after the owner opened "pair a phone" on it:
     /// draw a fresh key for the badge's phone slot, seal it to the badge, write it to the
     /// badge's inbox under this phone's `name` (signed with this phone's key, which may ask
-    /// for Face ID), and list the badge's circles. Show the words: the badge shows the same
-    /// four, and the owner presses both buttons on the badge when they match. Then
+    /// for Face ID), and count the badge's circles. Show the words: the badge shows the same
+    /// six, and the owner presses both buttons on the badge when they match. Then
     /// `pair_card_finish`. Starting again forgets the key of an earlier start.
     pub fn pair_card_start(&self, name: String) -> Result<PairPreview, PhoneError> {
         let name = name.trim().to_string();
@@ -349,8 +362,8 @@ impl Phone {
             if let Some(e) = seat.error.take() {
                 return Err(e);
             }
-            let circles = tap.list_public()?;
-            if circles.is_empty() {
+            let circles = pairing.circle_slots().len();
+            if circles == 0 {
                 return Err(PhoneError::Nfc {
                     message: "This badge holds no circles yet. Make a circle with it first."
                         .into(),
@@ -371,23 +384,17 @@ impl Phone {
             .iter()
             .map(|w| w.to_string())
             .collect();
-        let names = circles
-            .iter()
-            .map(|(_, o)| {
-                SealedManifest::decode(&o.manifest)
-                    .ok()
-                    .and_then(|m| Manifest::decode(&m.body).ok())
-                    .map(|m| m.params.name)
-                    .unwrap_or_default()
-            })
-            .collect();
+        let badge_name = match pairing.name.as_str() {
+            "" => String::from(NO_BADGE_NAME),
+            name => String::from(name),
+        };
         self.lock().pairing = Some(crate::PendingPair {
             key,
-            badge_name: pairing.name.clone(),
+            badge_name: badge_name.clone(),
         });
         Ok(PairPreview {
-            badge_name: pairing.name,
-            circles: names,
+            badge_name,
+            circles: circle_count(circles),
             words,
         })
     }
@@ -468,6 +475,7 @@ impl Phone {
             let circle_id = c.circle_id;
             let slot = card.circle_slot;
             let keys = me.tap_slot(KEYS_PROMPT, &key, |s| {
+                // Only a slot the pairing object names: the badge wrote it.
                 let o = s.read_public(slot)?;
                 if o.circle_id != circle_id || o.phone_public != Some(mine) {
                     return Err(TapError::NotPaired);

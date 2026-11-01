@@ -1,12 +1,15 @@
 //! The badge's chip over NFC: one tap at a time, through the [`Nfc`] callback (Core NFC on
 //! iOS), with no state of its own beyond the tap.
 //!
-//! A [`Tap`] begins a reader session and selects the applet. In no session it reads what any
-//! tap may read ([`Tap::read_pairing`], [`Tap::read_public`], [`Tap::list_public`]) and writes
-//! the inbox ([`Tap::write_inbox`]). [`Tap::open_slot`] opens the phone slot's AESKey session
-//! with the key the phone drew at pairing, under SCP03 at C-MAC, C-ENC, R-MAC and R-ENC
-//! ([`crate::scp03`]), and the [`Session`] asks the chip for HMACs with a circle's root or
-//! hello objects. Nothing here touches the `Phone`'s records.
+//! A [`Tap`] begins a reader session and selects the applet. In no session it reads the
+//! pairing object ([`Tap::read_pairing`]), which any tap may read, and writes the inbox
+//! ([`Tap::write_inbox`]). [`Tap::open_slot`] opens the phone slot's AESKey session with the
+//! key the phone drew at pairing, under SCP03 at C-MAC, C-ENC, R-MAC and R-ENC
+//! ([`crate::scp03`]). The [`Session`] reads the public objects, which only the badge and its
+//! paired phone may read, and asks the chip for HMACs with a circle's root or hello objects.
+//! A phone reads only the public objects of the circle slots the pairing object names: the
+//! badge wrote those, and an object at any other public id may be a tap's. Nothing here
+//! touches the `Phone`'s records.
 
 use crate::apdu::{self, Apdu};
 use crate::scp03::{Scp03, StaticKeys, LEVEL_FULL};
@@ -73,6 +76,8 @@ pub enum TapError {
     NotScp03,
     /// The pairing object says no pairing is open.
     NoPairing,
+    /// Two public objects the badge vouches for name the same circle.
+    Disagree,
     /// Any other status word.
     Status(u16),
     /// The reader said so.
@@ -104,6 +109,7 @@ impl From<TapError> for PhoneError {
             }
             TapError::NotScp03 => nfc("The card does not offer the secure channel this app needs."),
             TapError::NoPairing => nfc("Open “pair a phone” on your badge, then hold the phone to the card again."),
+            TapError::Disagree => nfc("This card’s records disagree. Unpair and pair again."),
             TapError::Status(sw) => PhoneError::Nfc {
                 message: format!("The card answered with code {sw:04X}. Try again."),
             },
@@ -157,11 +163,24 @@ fn read_public(ch: &mut dyn Channel, circle_slot: u8) -> Result<PublicObject, Ta
     PublicObject::decode(&bytes).map_err(|_| TapError::Malformed)
 }
 
+fn read_pairing(ch: &mut dyn Channel) -> Result<PairingObject, TapError> {
+    PairingObject::decode(&read_binary(ch, KeyId::PAIRING)?).ok_or(TapError::Malformed)
+}
+
+/// The public objects of the circle slots the pairing object names, in slot order. A slot
+/// whose object is gone or does not read is passed over. Two that name one circle are
+/// `Disagree`: the badge writes one object per circle.
 fn list_public(ch: &mut dyn Channel) -> Result<Vec<(u8, PublicObject)>, TapError> {
-    let mut out = Vec::new();
-    for slot in 0..CIRCLE_SLOTS {
+    let vouched = read_pairing(ch)?.circle_slots();
+    let mut out: Vec<(u8, PublicObject)> = Vec::new();
+    for slot in vouched {
         match read_public(ch, slot) {
-            Ok(o) => out.push((slot, o)),
+            Ok(o) => {
+                if out.iter().any(|(_, x)| x.circle_id == o.circle_id) {
+                    return Err(TapError::Disagree);
+                }
+                out.push((slot, o));
+            }
             Err(TapError::NotFound | TapError::NotAllowed | TapError::Malformed) => {}
             Err(e) => return Err(e),
         }
@@ -228,18 +247,20 @@ impl<'a> Tap<'a> {
         Ok((data.to_vec(), sw))
     }
 
-    /// The pairing object: the nonce of the pairing the badge has open (zeros when none) and
-    /// the badge's name.
+    /// The pairing object: the nonce of the pairing the badge has open (zeros when none), the
+    /// badge's name, and the circle slots the badge vouches for.
     pub fn read_pairing(&mut self) -> Result<PairingObject, TapError> {
-        PairingObject::decode(&read_binary(self, KeyId::PAIRING)?).ok_or(TapError::Malformed)
+        read_pairing(self)
     }
 
-    /// The public object of the circle in `circle_slot` (0 to 15).
+    /// The public object of the circle in `circle_slot` (0 to 15). In no session the chip
+    /// refuses it (`NotAllowed`): only the badge and its paired phone read public objects.
     pub fn read_public(&mut self, circle_slot: u8) -> Result<PublicObject, TapError> {
         read_public(self, circle_slot)
     }
 
-    /// Every circle slot whose public object reads, in slot order.
+    /// The public objects of the circle slots the pairing object names ([`list_public`]). In
+    /// no session the chip refuses each, so this is empty.
     pub fn list_public(&mut self) -> Result<Vec<(u8, PublicObject)>, TapError> {
         list_public(self)
     }
@@ -368,12 +389,22 @@ impl Session<'_, '_> {
             .ok_or(TapError::BadAnswer)
     }
 
-    /// The public object of the circle in `circle_slot`, read in the session.
+    /// The pairing object, read in the session.
+    pub fn read_pairing(&mut self) -> Result<PairingObject, TapError> {
+        read_pairing(self)
+    }
+
+    /// The public object of the circle in `circle_slot`, read in the session, if the pairing
+    /// object names that slot. `NotFound` if it does not: the badge no longer vouches for it.
     pub fn read_public(&mut self, circle_slot: u8) -> Result<PublicObject, TapError> {
+        if !read_pairing(self)?.circle_slots().contains(&circle_slot) {
+            return Err(TapError::NotFound);
+        }
         read_public(self, circle_slot)
     }
 
-    /// Every circle slot whose public object reads, read in the session.
+    /// The public objects of the circle slots the pairing object names, read in the session
+    /// ([`list_public`]).
     pub fn list_public(&mut self) -> Result<Vec<(u8, PublicObject)>, TapError> {
         list_public(self)
     }

@@ -3,7 +3,7 @@
 //! and secure messaging, and the policies the badge writes.
 
 use cahoots_badge::chip::{first_boot, replace_slot, write_pairing};
-use cahoots_badge::pairing::{words, Inbox, PairingKey};
+use cahoots_badge::pairing::{words, Inbox, PairingKey, PairingObject};
 use cahoots_badge::public::PublicObject;
 use cahoots_chip::{ChipOps, Curve, KeyId, KeyKind, ObjectPolicy, SoftChip, TEST_OWNER_SECRET};
 use cahoots_core::seat::SeatKey;
@@ -108,6 +108,16 @@ fn public_object(phone: Option<[u8; 33]>) -> PublicObject {
     }
 }
 
+/// The pairing object of the open pairing, vouching for `circles`.
+fn open_pairing(circles: u16) -> PairingObject {
+    PairingObject {
+        nonce: NONCE,
+        badge_key: badge_key().public(),
+        name: String::new(),
+        circles,
+    }
+}
+
 /// A chip as a badge leaves it: owner object, placeholder slot, inbox and an open pairing,
 /// one circle in slot 3 with its seat key, root, a hello object for seat 1 and its public
 /// object, and with `paired`, the phone's key in the slot. The owner session is closed, as
@@ -115,7 +125,7 @@ fn public_object(phone: Option<[u8; 33]>) -> PublicObject {
 fn badge_chip(paired: bool) -> SoftChip {
     let mut chip = SoftChip::with_seed([9; 32]);
     first_boot(&mut chip, &TEST_OWNER_SECRET, [0x0B; 16]).unwrap();
-    write_pairing(&mut chip, &NONCE, &badge_key().public()).unwrap();
+    write_pairing(&mut chip, &open_pairing(1 << 3)).unwrap();
     chip.generate(KeyId::new(KeyKind::Seat, 3), Curve::P256, &ObjectPolicy::owner_only()).unwrap();
     chip.put_hmac_key(KeyId::new(KeyKind::Root, 3), &ROOT, &ObjectPolicy::owner_and_slot_mac())
         .unwrap();
@@ -133,14 +143,16 @@ fn badge_chip(paired: bool) -> SoftChip {
 }
 
 #[test]
-fn a_tap_in_no_session_lists_public_objects_and_writes_the_inbox() {
+fn a_tap_in_no_session_reads_the_pairing_object_and_writes_the_inbox() {
     let nfc = FakeNfc::with(badge_chip(false));
     let mut tap = Tap::begin(&nfc, "Hold the phone to the card").unwrap();
     let pairing = tap.read_pairing().unwrap();
     assert_eq!(pairing.nonce, NONCE);
     assert_eq!(pairing.badge_key, badge_key().public());
-    let list = tap.list_public().unwrap();
-    assert_eq!(list, vec![(3, public_object(None))]);
+    assert_eq!(pairing.circle_slots(), vec![3]);
+    // No public object reads in no session: a stranger learns no circle's manifest or phone.
+    assert!(matches!(tap.read_public(3), Err(TapError::NotAllowed)));
+    assert_eq!(tap.list_public().unwrap(), Vec::new());
 
     let phone = SeatKey::from_seed(&[5; 32]).unwrap();
     let inbox = sealed_inbox(&phone, &pairing, "Conner's phone", &PHONE_KEY).unwrap();
@@ -291,4 +303,42 @@ fn a_card_whose_secure_channel_is_not_scp03_is_refused() {
     let e = tap.open_slot(&PHONE_KEY).err().unwrap();
     assert!(matches!(e, TapError::NotScp03));
     assert!(matches!(PhoneError::from(e), PhoneError::Nfc { .. }));
+}
+
+/// In the session the phone reads only the slots the pairing object names: an object a tap
+/// planted at another public id is not read, and two vouched objects naming one circle are
+/// refused.
+#[test]
+fn the_session_reads_only_the_circle_slots_the_badge_vouches_for() {
+    let mut chip = badge_chip(true);
+    let planted = PublicObject { circle_id: [0xEE; 16], ..public_object(None) };
+    let bytes = planted.padded(planted.new_len().unwrap()).unwrap();
+    chip.write_binary(KeyId::new(KeyKind::Public, 5), &bytes, &ObjectPolicy::any_session())
+        .unwrap();
+    let nfc = FakeNfc::with(chip);
+    let mut tap = Tap::begin(&nfc, "Hold the phone to the card").unwrap();
+    let mut s = tap.open_slot(&PHONE_KEY).unwrap();
+    assert_eq!(s.list_public().unwrap(), vec![(3, public_object(None))]);
+    assert!(matches!(s.read_public(5), Err(TapError::NotFound)));
+    s.close().unwrap();
+    tap.end("Done", false).unwrap();
+
+    // The badge vouching for both, with one circle in each, disagrees with itself.
+    let mut chip = badge_chip(true);
+    let same = public_object(None);
+    let bytes = same.padded(same.new_len().unwrap()).unwrap();
+    chip.open_owner(&TEST_OWNER_SECRET).unwrap();
+    chip.write_binary(KeyId::new(KeyKind::Public, 5), &bytes, &ObjectPolicy::public_object())
+        .unwrap();
+    write_pairing(&mut chip, &open_pairing(1 << 3 | 1 << 5)).unwrap();
+    chip.close_session().unwrap();
+    let nfc = FakeNfc::with(chip);
+    let mut tap = Tap::begin(&nfc, "Hold the phone to the card").unwrap();
+    let mut s = tap.open_slot(&PHONE_KEY).unwrap();
+    let e = s.list_public().err().unwrap();
+    assert!(matches!(e, TapError::Disagree));
+    assert_eq!(
+        PhoneError::from(e).to_string(),
+        "This card’s records disagree. Unpair and pair again."
+    );
 }
