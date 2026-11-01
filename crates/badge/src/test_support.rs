@@ -222,6 +222,12 @@ pub struct FakeBoard {
     /// A chip that can be made to fail its signatures. When set, `chip_begin()` hands it out
     /// instead of `chip`.
     pub failing: Option<FailingChip>,
+    /// An older owner secret the board tries when [`TEST_OWNER_SECRET`] does not open the
+    /// chip's owner object, as the firmware tries the secret of builds before 2026-11-01.
+    pub legacy_secret: Option<[u8; 16]>,
+    /// Set once a conversation opened the owner session with `legacy_secret`: the board gives
+    /// that secret from then on. [`FakeBoard::power_cycle`] clears it.
+    pub using_legacy: bool,
 }
 
 /// A SoftChip whose P-256 signatures fail while `fail_sign` is set.
@@ -347,6 +353,8 @@ impl FakeBoard {
             grants: None,
             uptime: 0,
             failing: None,
+            legacy_secret: None,
+            using_legacy: false,
         }
     }
 
@@ -444,6 +452,7 @@ impl FakeBoard {
             self.pin_log.push(false);
         }
         self.chip_held = false;
+        self.using_legacy = false;
         if let Some(c) = self.chip.as_mut() {
             c.no_session_for_test();
         }
@@ -616,8 +625,21 @@ impl Board for FakeBoard {
             None => self.chip.as_mut().unwrap(),
         };
         if !up && c.exists(KeyId::OWNER) == Ok(true) {
-            let _ = c.open_owner(&TEST_OWNER_SECRET);
+            let current = if self.using_legacy { self.legacy_secret } else { Some(TEST_OWNER_SECRET) };
+            let opened = current.is_some_and(|s| c.open_owner(&s).is_ok());
+            if !opened && !self.using_legacy {
+                if let Some(legacy) = self.legacy_secret {
+                    if c.open_owner(&legacy).is_ok() {
+                        self.using_legacy = true;
+                        self.log.push(String::from("se051: owner session open with the older secret"));
+                    }
+                }
+            }
         }
+        let c: &mut dyn ChipOps = match self.failing.as_mut() {
+            Some(f) => f,
+            None => self.chip.as_mut().unwrap(),
+        };
         Some(c)
     }
     fn chip_end(&mut self) {
@@ -632,7 +654,10 @@ impl Board for FakeBoard {
         self.pin_log.push(false);
     }
     fn owner_secret(&self) -> Option<[u8; 16]> {
-        self.has_chip().then_some(TEST_OWNER_SECRET)
+        if !self.has_chip() {
+            return None;
+        }
+        if self.using_legacy { self.legacy_secret } else { Some(TEST_OWNER_SECRET) }
     }
     fn chip_record_load(&mut self) -> Result<Option<ChipRecord>, BoardError> {
         match &self.chip_record {

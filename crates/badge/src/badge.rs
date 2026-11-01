@@ -426,6 +426,10 @@ enum Owned {
     Refused,
     /// Not usable this boot: left unused, tried again at the next.
     NotNow,
+    /// Its owner object is another badge's or an older build's: left unused, and a restart
+    /// will not change that. No refused record is stored, so the build that owns it can
+    /// still use it.
+    Foreign,
 }
 
 /// What the badge says when it will never use its chip: a tap touched it before the badge
@@ -436,6 +440,8 @@ const REFUSED: &str =
 const NO_ANSWER: &str = "the chip did not answer. Try again.";
 /// What the badge says when it holds its chip until a restart.
 const RESTART: &str = "the chip needs a restart. Turn the badge off and on.";
+/// What the badge says when its chip's owner object opens with none of its secrets.
+const FOREIGN: &str = "this chip belongs to another badge or an older build. It cannot be used.";
 /// What the badge says when it cannot use its chip this time.
 const NOT_NOW: &str =
     "the chip could not be set up. Try turning the badge off and on. Circles made now keep software keys.";
@@ -1291,6 +1297,7 @@ impl<B: Board> Badge<B> {
             Owned::Upgraded => Some("updated for phones. Make a new circle."),
             Owned::Refused => Some(REFUSED),
             Owned::NotNow => Some(NOT_NOW),
+            Owned::Foreign => Some(FOREIGN),
             Owned::Kept => None,
         };
         if let Some(said) = said {
@@ -1490,6 +1497,14 @@ impl<B: Board> Badge<B> {
         if stored.as_ref().is_some_and(|r| r.is_refused()) {
             return self.refuse_chip("chip: refused at an earlier boot", true);
         }
+        // The conversation first: the board opens the owner session with whichever of its
+        // secrets the chip takes, and gives that secret from then on.
+        if self.board.chip_begin().is_none() {
+            if self.board.owner_refused() {
+                return self.refuse_foreign("chip: its owner object opens with no secret this badge has");
+            }
+            return self.refuse_chip("chip: no answer", false);
+        }
         let Some(secret) = self.board.owner_secret() else {
             return self.refuse_chip("chip: the board gives no owner secret", false);
         };
@@ -1548,10 +1563,7 @@ impl<B: Board> Badge<B> {
             return Owned::Kept;
         }
         if has_owner && !opens {
-            return self.refuse_chip(
-                "upgrade: the chip's owner object does not open with this badge's secret",
-                false,
-            );
+            return self.refuse_foreign("upgrade: the chip's owner object does not open with this badge's secret");
         }
         if !drawn {
             return self.refuse_chip("upgrade: the random source failed, chip left as it is", false);
@@ -1669,6 +1681,16 @@ impl<B: Board> Badge<B> {
         self.board.log(&format!(
             "chip: {made} public objects made again, read now by the badge and its phone only"
         ));
+    }
+
+    /// The chip's owner object opens with none of the board's secrets: log why, end the
+    /// conversation and stop the board handing the chip out for this boot. Nothing is stored.
+    fn refuse_foreign(&mut self, why: &str) -> Owned {
+        self.board.log(why);
+        self.board.chip_end();
+        self.board.chip_unusable();
+        self.board.log("chip: not this badge's, not used");
+        Owned::Foreign
     }
 
     /// The chip is not this badge's to use: log why, end the conversation and stop the board

@@ -241,8 +241,9 @@ fn an_owner_object_that_is_not_this_badges_leaves_the_chip_unowned() {
         .unwrap();
     let mut b = Badge::new(board);
     b.boot();
-    // Not this badge's: refused this boot, with nothing touched, and tried again at the next.
-    assert_eq!(not_now(&mut b), 1);
+    // Not this badge's: refused with nothing touched, and no restart is offered as a remedy.
+    assert_eq!(not_now(&mut b), 0);
+    assert_eq!(b.board().statuses().iter().filter(|s| *s == FOREIGN).count(), 1);
     assert!(!b.board().has_chip());
     assert_eq!(b.circles().len(), 1, "nothing wiped");
     let c = b.board().chip.as_mut().unwrap();
@@ -511,4 +512,54 @@ fn a_remake_cut_off_after_its_deletes_is_done_again_and_adopts_nothing() {
     assert_eq!(pairing_object(&mut b).nonce, [0; 16]);
     let r = b.board().chip_record_load().unwrap().unwrap();
     assert_eq!(r.generation, cahoots_badge::chip::GENERATION);
+}
+
+const FOREIGN: &str = "this chip belongs to another badge or an older build. It cannot be used.";
+/// The owner secret of a build before 2026-11-01, as the board keeps it beside the current one.
+const LEGACY: [u8; 16] = *b"older-owner-key!";
+
+/// A board whose chip was set up by a build that used `secret` as the owner secret.
+fn owned_under(secret: &[u8; 16]) -> FakeBoard {
+    let mut board = FakeBoard::new();
+    let mut c = SoftChip::with_seed([7; 32]);
+    let record = cahoots_badge::chip::first_boot(&mut c, secret, [0x5A; 16]).unwrap();
+    c.close_session().unwrap();
+    board.chip = Some(c);
+    board.chip_record = Some(record.to_stored());
+    board
+}
+
+#[test]
+fn a_chip_owned_under_the_older_secret_opens_with_it_and_is_used() {
+    let mut board = owned_under(&LEGACY);
+    board.legacy_secret = Some(LEGACY);
+    let mut b = Badge::new(board);
+    b.boot();
+    assert!(b.board().has_chip());
+    assert_eq!(refused(&mut b) + not_now(&mut b), 0);
+    assert_eq!(b.board().statuses().iter().filter(|s| *s == FOREIGN).count(), 0);
+    let older = |b: &mut Badge<FakeBoard>| {
+        b.board().log.iter().filter(|l| *l == "se051: owner session open with the older secret").count()
+    };
+    assert_eq!(older(&mut b), 1, "once per boot");
+    // Nothing was made again or wiped: the chip is used as it is, under the older secret.
+    assert!(!b.board().log.iter().any(|l| l.contains("made again") || l.starts_with("upgrade:")));
+    assert_eq!(b.board().owner_secret(), Some(LEGACY));
+    b.pair_open().unwrap();
+    b.pair_close();
+    pin_rests(&mut b);
+    assert_eq!(older(&mut b), 1);
+}
+
+#[test]
+fn a_chip_owned_under_neither_secret_is_not_used_and_says_whose_it_is() {
+    let mut board = owned_under(&[0x33; 16]);
+    board.legacy_secret = Some(LEGACY);
+    let mut b = Badge::new(board);
+    b.boot();
+    assert!(!b.board().has_chip());
+    assert_eq!(b.board().statuses().iter().filter(|s| *s == FOREIGN).count(), 1);
+    assert_eq!(not_now(&mut b), 0);
+    // Nothing is stored: the build that owns it can still use it.
+    assert!(!b.board().chip_record_load().unwrap().unwrap().is_refused());
 }

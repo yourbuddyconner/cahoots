@@ -430,10 +430,17 @@ pub trait Board {
     fn chip_hold(&mut self) {
         self.chip_unusable();
     }
-    /// The secret of the chip's owner object, the badge's identity to its chip. `None` on a
-    /// board without a chip.
+    /// The secret of the chip's owner object, the badge's identity to its chip: the one the
+    /// chip's owner object opened with, once a conversation has found out, where a board
+    /// keeps an older secret beside the current one. `None` on a board without a chip.
     fn owner_secret(&self) -> Option<[u8; 16]> {
         None
+    }
+    /// True when the last conversation found the chip's owner object and it opened with none
+    /// of the board's secrets, so `chip_begin` gave no chip. The default, for a board that
+    /// hands the chip out in no session then, is false.
+    fn owner_refused(&self) -> bool {
+        false
     }
     /// The chip record (see [`crate::chip`]): `Ok(None)` if none is stored, an error if one is
     /// stored but cannot be read or does not decode. The two differ: the badge deletes chip
