@@ -12,6 +12,10 @@
 # --keep leaves it on the badge.
 #
 # Logs land in $STATE/pair.log. The run ends with "pair bench: ok".
+#
+# Only the badge and its paired phone read a circle's public object. So the run reads them in
+# the slot's session while the laptop is paired, checks that a tap in no session is refused,
+# and after the unpair reads what the badge says it wrote from the badge's log.
 set -u
 PORT=/dev/cu.usbmodempico21
 STATE=/tmp/pbench
@@ -125,8 +129,10 @@ SLOT=$(sed -n 's/.*chip: slot \([0-9]*\) kept.*/\1/p' "$LOG" | tail -1)
 say "circle kept, its keys in the chip at slot $SLOT"
 
 say "an unpaired tap, in no session"
-chip public > "$STATE/public0.txt" || fail "reading the public objects"
-grep -q "^slot $SLOT: " "$STATE/public0.txt" || fail "the new circle has no public object"
+chip pairing > "$STATE/pairing0.txt" || fail "reading the pairing object"
+grep -Eq "^circles: (.* )?$SLOT( |$)" "$STATE/pairing0.txt" || fail "the pairing object does not name slot $SLOT"
+chip public > "$STATE/public0.txt" || fail "a tap in no session read a public object, see $LOG"
+grep -q "^slot $SLOT: refused in no session" "$STATE/public0.txt" || fail "the new circle's public object was not refused"
 chip refusals --circle "$SLOT" || fail "an unpaired tap was allowed something, see $LOG"
 
 say "opening pair a phone on the badge"
@@ -141,6 +147,7 @@ chip inbox --name "bench laptop" --key "$KEY" --state "$STATE" > "$STATE/inbox.t
 WORDS=$(sed -n 's/^words: //p' "$STATE/inbox.txt")
 PHONE=$(sed -n 's/^phone key: //p' "$STATE/inbox.txt")
 say "the laptop shows: $WORDS"
+[ "$(echo "$WORDS" | wc -w | tr -d ' ')" = 6 ] || fail "the laptop shows $(echo "$WORDS" | wc -w | tr -d ' ') words, not six"
 
 # Both reads the inbox and shows the words. Only if they are the laptop's, Both again, once
 # the question is drawn, pairs; any other words are answered no.
@@ -150,7 +157,7 @@ say "the badge showed the same words and paired"
 
 chip open --key "$KEY" || fail "the slot did not open with the paired key"
 chip hmac --key "$KEY" --circle "$SLOT" --label "chat/gen" || fail "no HMAC with the root of slot $SLOT"
-chip public > "$STATE/public1.txt" || fail "reading the public objects after pairing"
+chip public --key "$KEY" > "$STATE/public1.txt" || fail "reading the public objects in the slot's session"
 grep -q "^slot " "$STATE/public1.txt" || fail "no public objects after pairing"
 if grep "^slot " "$STATE/public1.txt" | grep -v "device grant yes, phone key $PHONE," >/dev/null; then
   fail "a public object does not carry the grant and the phone's key"
@@ -169,10 +176,11 @@ cat "$STATE/old-key.err" >>"$LOG"
 grep -q "the card does not open with this key" "$STATE/old-key.err" \
   || fail "the old key failed for another reason: $(tail -1 "$STATE/old-key.err")"
 say "the old key no longer opens the slot"
-chip public > "$STATE/public2.txt" || fail "reading the public objects after unpairing"
-grep -q "^slot " "$STATE/public2.txt" || fail "no public objects after unpairing"
-if grep "^slot " "$STATE/public2.txt" | grep -v "device grant no, phone key none, pending bumps [1-9]" >/dev/null; then
-  fail "a public object still names the phone or holds no pending bump"
+# Nothing outside the badge reads a public object now: the badge's log says what it wrote.
+grep -q "pairing: slot $SLOT public object written, [1-9] pending bumps, no phone" "$LOG" \
+  || fail "the badge did not write slot $SLOT's public object with a pending bump and no phone"
+if grep "pairing: slot [0-9]* public object written" "$LOG" | grep -v "pending bumps, no phone" >/dev/null; then
+  fail "a public object still names the phone"
 fi
 say "every public object names no phone and holds a pending bump"
 if [ "$FORGET" = 1 ]; then

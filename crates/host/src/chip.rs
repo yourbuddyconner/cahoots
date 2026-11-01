@@ -8,7 +8,7 @@
 //! cahoots-host chip inbox --serial <port> --name <text> --key <hex> [--state <dir>]
 //! cahoots-host chip open --serial <port> --key <hex>
 //! cahoots-host chip hmac --serial <port> --key <hex> --circle <slot> --label <text>
-//! cahoots-host chip public --serial <port>
+//! cahoots-host chip public --serial <port> [--key <hex>]
 //! cahoots-host chip refusals --serial <port> --circle <slot>
 //! cahoots-host chip raw --serial <port> --apdu <hex> [--apdu <hex>]...
 //! cahoots-host chip goto --serial <port> --entry <name>
@@ -24,14 +24,20 @@
 //! holding `--after` if given, sends one press, and waits for a line holding `--until` (see
 //! [`press`] for `--expect` and `--then`); `forget` forgets a circle through the badge's pages.
 //!
-//! What the bench showed an unpaired tap can do: read the public objects and the pairing
-//! object, write the inbox, and make a binary object at any id that holds nothing, under the
-//! applet's default policy (every right for every session). The badge never adopts such an
-//! object: it writes a circle's public object at the keep after deleting whatever stands at
-//! its id, and reads back only public objects it wrote. But a tap can fill the ids of circle
-//! slots not yet used with objects nobody may delete, and each such slot is then burnt: the
-//! badge passes it over when it picks a slot for a new circle (see `cahoots_badge::chip`).
-//! That is a denial of service on the badge's sixteen circle slots, not a way to any key.
+//! `public` reads the public objects of the circle slots the pairing object names: with
+//! `--key`, in the slot's session, as a paired phone reads them; without, in no session, where
+//! the chip refuses each and the command says so.
+//!
+//! What the bench showed an unpaired tap can do: read the pairing object, write the inbox,
+//! and make an object at any id that holds nothing, under the applet's default policy: a
+//! binary object, an HMAC key, an AES key (as an authentication object too), an EC key pair
+//! and a counter (SE051 applet 7.2.0, 2026-10-31). The badge never adopts such an object: it
+//! writes a circle's public object at the keep after deleting whatever stands at its id,
+//! reads back only public objects it wrote, and a phone reads only the circle slots the
+//! pairing object names. But a tap can fill the ids of circle slots not yet used with
+//! objects nobody may delete, and each such slot is then burnt: the badge passes it over when
+//! it picks a slot for a new circle (see `cahoots_badge::chip`). That is a denial of service
+//! on the badge's sixteen circle slots, not a way to any key.
 //!
 //! Every APDU and its answer are printed to stderr, as `-> ` and `<- ` hex lines.
 
@@ -174,6 +180,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 println!("badge key: {}", hex::encode(p.badge_key));
                 println!("badge name: {}", p.name);
             }
+            let slots: Vec<String> = p.circle_slots().iter().map(u8::to_string).collect();
+            println!("circles: {}", if slots.is_empty() { "none".into() } else { slots.join(" ") });
             Ok(())
         }
         "inbox" => {
@@ -212,16 +220,37 @@ pub fn run(args: &[String]) -> Result<(), String> {
             println!("hmac: {}", hex::encode(mac));
             Ok(())
         }
-        "public" => {
-            let all = tap.list_public().map_err(tap_error)?;
-            if all.is_empty() {
-                println!("no public objects");
+        "public" => match get("--key") {
+            Some(k) => {
+                let key = key16(k)?;
+                let mut s = tap.open_slot(&key).map_err(tap_error)?;
+                let all = s.list_public().map_err(tap_error)?;
+                s.close().map_err(tap_error)?;
+                if all.is_empty() {
+                    println!("no public objects");
+                }
+                for (slot, p) in &all {
+                    println!("{}", describe(*slot, p));
+                }
+                Ok(())
             }
-            for (slot, p) in &all {
-                println!("{}", describe(*slot, p));
+            None => {
+                let slots = tap.read_pairing().map_err(tap_error)?.circle_slots();
+                let mut read = Vec::new();
+                for slot in slots {
+                    match tap.read_public(slot) {
+                        Ok(_) => read.push(slot),
+                        Err(TapError::NotAllowed) => println!("slot {slot}: refused in no session"),
+                        Err(e) => return Err(format!("slot {slot}: {}", tap_error(e))),
+                    }
+                }
+                if read.is_empty() {
+                    Ok(())
+                } else {
+                    Err(format!("a tap in no session read the public objects of slots {read:?}"))
+                }
             }
-            Ok(())
-        }
+        },
         "refusals" => {
             let slot: u8 = req("--circle")?.parse().map_err(|_| "--circle: a slot, 0 to 15")?;
             refusals(&reader, slot)
@@ -272,6 +301,10 @@ fn refusals(reader: &SerialNfc, slot: u8) -> Result<(), String> {
         ("delete the owner object", cmd(0x04, 0x00, 0x28, tlv(0x41, &KeyId::OWNER.0.to_be_bytes()), None)),
         ("delete the circle's root", cmd(0x04, 0x00, 0x28, tlv(0x41, &id(KeyKind::Root, slot)), None)),
         ("read the inbox", cmd(0x02, 0x00, 0x00, tlv(0x41, &KeyId::INBOX.0.to_be_bytes()), Some(256))),
+        (
+            "read the circle's public object",
+            cmd(0x02, 0x00, 0x00, tlv(0x41, &id(KeyKind::Public, slot)), Some(256)),
+        ),
         (
             "write the circle's public object",
             cmd(0x01, 0x06, 0x00, cat(&[tlv(0x41, &id(KeyKind::Public, slot)), tlv(0x42, &[0, 0]), tlv(0x44, &[0])]), None),
