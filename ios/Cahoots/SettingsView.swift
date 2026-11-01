@@ -81,9 +81,9 @@ struct SettingsView: View {
             face = try? await core.run { $0.myFace() }
             name = (try? await core.run { $0.myName() }) ?? ""
             relay = (try? await core.run { $0.defaultRelay() }) ?? ""
-            // A card left unsigned by a cancelled Face ID is shared again on coming back here.
+            // A card left unsigned by a cancelled Face ID waits for a tap on Share again. Opening
+            // Settings never asks for Face ID by itself.
             await checkCard()
-            if cardWaiting { await share() }
         }
         .sheet(item: $export) { e in
             NavigationStack {
@@ -177,6 +177,12 @@ struct SettingsView: View {
             StatusLine(text: nameNote, problem: false)
             StatusLine(text: nameError)
             if cardWaiting {
+                if nameError == nil {
+                    Text(Self.waiting)
+                        .font(.footnote).foregroundStyle(Color.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("card-waiting")
+                }
                 Button("Share again") { Task { await share() } }
                     .buttonStyle(TextButtonStyle(full: false))
                     .disabled(working)
@@ -185,6 +191,7 @@ struct SettingsView: View {
         }
     }
 
+    private static let waiting = "Your name is saved on this phone and not shared yet."
     private static let notShared = "Saved on this phone, but not shared yet. Tap Share again and confirm with Face ID."
 
     private func saveName() async {
