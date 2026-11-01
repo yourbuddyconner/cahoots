@@ -263,6 +263,11 @@ impl ObjectPolicy {
 /// USB, BOOTSEL's PICOBOOT interface reads the whole of OTP page 0, RANDID included, and a USB
 /// host can reboot the badge into BOOTSEL. So a badge that has been plugged into a USB host
 /// that is not trusted is retired, as one whose board id has leaked is.
+///
+/// Chips owned by firmware before 2026-11-01 were keyed with the device and wafer ids alone,
+/// 8 bytes of `board_id`, and keep that weaker secret for good: nobody may delete the owner
+/// object, so such a chip cannot be keyed again. The firmware tries that legacy secret when
+/// the current one does not open the chip. The only such chip is the bench one.
 pub fn owner_secret(board_id: &[u8]) -> [u8; 16] {
     let mut extract = <Hmac<Sha256> as Mac>::new_from_slice(b"cahoots/owner/v1")
         .expect("HMAC takes a key of any length");

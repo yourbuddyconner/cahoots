@@ -233,12 +233,17 @@ fn main() -> ! {
         out[2 * i..2 * i + 2].copy_from_slice(&word.to_le_bytes());
         Some(out)
     });
+    // Builds before 2026-11-01 owned the chip with the device and wafer ids alone. The board
+    // keeps that secret too and tries it when the current one does not open the chip's owner
+    // object: such a chip cannot be keyed again, since nobody may delete its owner object.
+    let mut legacy_owner_secret = None;
     let owner_secret = match (hal::rom_data::sys_info_api::chip_info(), randid) {
         (Ok(Some(info)), Some(randid)) => {
             let mut id = [0u8; 24];
             id[..4].copy_from_slice(&info.device_id.to_le_bytes());
             id[4..8].copy_from_slice(&info.wafer_id.to_le_bytes());
             id[8..].copy_from_slice(&randid);
+            legacy_owner_secret = Some(cahoots_chip::owner_secret(&id[..8]));
             Some(cahoots_chip::owner_secret(&id))
         }
         (_, None) => {
@@ -268,6 +273,7 @@ fn main() -> ! {
         chip_up: false,
         chip_held: false,
         owner_secret,
+        legacy_owner_secret,
         owner_refused: false,
         #[cfg(feature = "bench")]
         bench_raw: None,

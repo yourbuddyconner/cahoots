@@ -64,8 +64,12 @@ pub struct PicoBoard {
     /// The secret of the chip's owner object, from the RP2350's unique id, or `None` if the
     /// ROM did not give the id.
     pub owner_secret: Option<[u8; 16]>,
-    /// The last conversation found the owner object and its session did not open with
-    /// `owner_secret`.
+    /// The owner secret of builds before 2026-11-01, from the device and wafer ids alone, tried
+    /// when `owner_secret` does not open the chip. Once it opens, it becomes `owner_secret`
+    /// for the rest of the boot.
+    pub legacy_owner_secret: Option<[u8; 16]>,
+    /// The last conversation found the owner object and its session opened with neither
+    /// secret.
     pub owner_refused: bool,
     /// Bench builds: the pin is high for the laptop's APDUs, in no session, since this moment
     /// (the last APDU). `None` when the pass-through holds nothing.
@@ -286,6 +290,10 @@ impl Board for PicoBoard {
         self.owner_secret
     }
 
+    fn owner_refused(&self) -> bool {
+        self.owner_refused
+    }
+
     /// `CAHC2` in the sector; the record of earlier firmware (`CAHC`) reads as none.
     fn chip_record_load(&mut self) -> Result<Option<ChipRecord>, BoardError> {
         match store::load_chip_record() {
@@ -359,10 +367,20 @@ impl PicoBoard {
                         log!("se051: owner session open");
                     }
                     Err(e) => {
-                        log!("se051: the owner session did not open ({e:?})");
-                        self.owner_refused = true;
-                        self.chip_end();
-                        return None;
+                        let legacy = self.legacy_owner_secret;
+                        if legacy.is_some_and(|l| chip.open_owner(&l).is_ok()) {
+                            // From now on this boot's conversations open with it, and say
+                            // so no more.
+                            self.owner_secret = legacy;
+                            self.legacy_owner_secret = None;
+                            self.owner_refused = false;
+                            log!("se051: owner session open with the older secret");
+                        } else {
+                            log!("se051: the owner session did not open ({e:?})");
+                            self.owner_refused = true;
+                            self.chip_end();
+                            return None;
+                        }
                     }
                 },
                 (_, Ok(false)) => log!("se051: no owner object yet, no session"),
