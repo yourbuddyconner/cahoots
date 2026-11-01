@@ -627,7 +627,14 @@ impl Board for FakeBoard {
         if !up && c.exists(KeyId::OWNER) == Ok(true) {
             let current = if self.using_legacy { self.legacy_secret } else { Some(TEST_OWNER_SECRET) };
             let opened = current.is_some_and(|s| c.open_owner(&s).is_ok());
-            if !opened && !self.using_legacy {
+            // As the firmware: the older secret only for a chip this badge already keeps a
+            // current record of, so a fresh badge never adopts a planted owner object.
+            let current_record = self
+                .chip_record
+                .as_ref()
+                .and_then(|b| ChipRecord::from_stored(b).ok().flatten())
+                .is_some_and(|r| r.is_current());
+            if !opened && !self.using_legacy && current_record {
                 if let Some(legacy) = self.legacy_secret {
                     if c.open_owner(&legacy).is_ok() {
                         self.using_legacy = true;

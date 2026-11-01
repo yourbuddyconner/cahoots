@@ -563,3 +563,17 @@ fn a_chip_owned_under_neither_secret_is_not_used_and_says_whose_it_is() {
     // Nothing is stored: the build that owns it can still use it.
     assert!(!b.board().chip_record_load().unwrap().unwrap().is_refused());
 }
+
+/// A fresh badge, with no chip record, never adopts an owner object made under the older
+/// secret: a tap that knew it could have planted one.
+#[test]
+fn a_chip_owned_under_the_older_secret_with_no_record_is_not_this_badges() {
+    let mut board = owned_under(&LEGACY);
+    board.chip_record = None;
+    board.legacy_secret = Some(LEGACY);
+    let mut b = Badge::new(board);
+    b.boot();
+    assert!(!b.board().has_chip());
+    assert_eq!(b.board().statuses().iter().filter(|s| *s == FOREIGN).count(), 1);
+    assert!(!b.board().log.iter().any(|l| l == "se051: owner session open with the older secret"));
+}

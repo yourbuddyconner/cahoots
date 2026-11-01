@@ -1520,7 +1520,8 @@ impl<B: Board> Badge<B> {
                 return self.refuse_chip(&format!("chip: could not look for the owner object: {e:?}"), false);
             }
         };
-        let opens = has_owner && chip.open_owner(&secret).is_ok();
+        let open = if has_owner { Some(chip.open_owner(&secret)) } else { None };
+        let opens = open == Some(Ok(()));
         if stored.as_ref().is_some_and(|r| r.is_current()) && opens {
             let Some(mut record) = stored else {
                 return Owned::Kept;
@@ -1562,8 +1563,15 @@ impl<B: Board> Badge<B> {
             }
             return Owned::Kept;
         }
-        if has_owner && !opens {
-            return self.refuse_foreign("upgrade: the chip's owner object does not open with this badge's secret");
+        match open {
+            Some(Err(ChipError::BadSession)) => {
+                return self.refuse_foreign("upgrade: the chip's owner object does not open with this badge's secret");
+            }
+            // Not a refusal of the secret: the next boot may open it.
+            Some(Err(e)) => {
+                return self.refuse_chip(&format!("chip: the owner session did not open: {e:?}"), false);
+            }
+            _ => {}
         }
         if !drawn {
             return self.refuse_chip("upgrade: the random source failed, chip left as it is", false);
