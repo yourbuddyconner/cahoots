@@ -7,6 +7,8 @@
 # Needs ios/Signing.xcconfig with DEVELOPMENT_TEAM (copy Signing.xcconfig.example), Xcode signed
 # into that team, and for the upload an App Store Connect API key:
 #   ASC_KEY_ID and ASC_ISSUER_ID set, the key at ~/.appstoreconnect/private_keys/AuthKey_<id>.p8
+# When the key is set, xcodebuild signs through it too, so a stale Xcode account does not stop
+# the archive or the export.
 # The build number is the UTC date and time, YYYYMMDDHHMM. The version is MARKETING_VERSION in
 # ios/project.yml. Output goes to $TARGET/ios: Cahoots.xcarchive and export/Cahoots.ipa.
 set -euo pipefail
@@ -23,6 +25,12 @@ if [ -z "$TEAM" ] || [ "$TEAM" = "YOUR_TEAM_ID" ]; then
   exit 1
 fi
 BUILD=$(date -u +%Y%m%d%H%M)
+# The App Store Connect key, for signing as well as for the upload.
+AUTH=()
+KEYFILE="$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID:-x}.p8"
+if [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ] && [ -f "$KEYFILE" ]; then
+  AUTH=(-authenticationKeyPath "$KEYFILE" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+fi
 OUT="$TARGET/ios"
 
 scripts/ios-framework.sh >/dev/null
@@ -32,13 +40,13 @@ echo "archiving build $BUILD for team $TEAM"
 rm -rf "$OUT/Cahoots.xcarchive" "$OUT/export"
 xcodebuild archive -project ios/Cahoots.xcodeproj -scheme Cahoots -configuration Release \
   -destination 'generic/platform=iOS' -archivePath "$OUT/Cahoots.xcarchive" \
-  -allowProvisioningUpdates DEVELOPMENT_TEAM="$TEAM" CURRENT_PROJECT_VERSION="$BUILD" \
+  -allowProvisioningUpdates "${AUTH[@]}" DEVELOPMENT_TEAM="$TEAM" CURRENT_PROJECT_VERSION="$BUILD" \
   >"$OUT/archive.log" 2>&1 || { grep -E "error:|error -" "$OUT/archive.log" | sort -u; echo "archive failed, log: $OUT/archive.log"; exit 1; }
 
 OPTIONS=$(mktemp -t ExportOptions).plist
 sed "s/TEAM_ID/$TEAM/" ios/ExportOptions.plist >"$OPTIONS"
 xcodebuild -exportArchive -archivePath "$OUT/Cahoots.xcarchive" -exportOptionsPlist "$OPTIONS" \
-  -exportPath "$OUT/export" -allowProvisioningUpdates \
+  -exportPath "$OUT/export" -allowProvisioningUpdates "${AUTH[@]}" \
   >"$OUT/export.log" 2>&1 || { grep -E "error:|error -" "$OUT/export.log" | sort -u; echo "export failed, log: $OUT/export.log"; exit 1; }
 rm -f "$OPTIONS"
 IPA="$OUT/export/Cahoots.ipa"
