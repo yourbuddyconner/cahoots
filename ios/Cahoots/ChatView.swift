@@ -18,6 +18,12 @@ final class ChatModel: ObservableObject {
     @Published private(set) var ownFace = false
     /// What became of the last change to this circle's face, when it needs saying.
     @Published var faceNote: String?
+    /// A circle from a badge this phone is paired with: its seat is the badge's.
+    @Published private(set) var card = false
+    /// A card circle whose chat waits for keys only a tap on the card can bring.
+    @Published private(set) var needsTap = false
+    /// A tap for the keys is under way.
+    @Published private(set) var tapping = false
 
     init(core: Core, circle: String) {
         self.core = core
@@ -75,12 +81,39 @@ final class ChatModel: ObservableObject {
         await loadMembers()
     }
 
+    /// Read again whether the chat waits for a tap. Only a card circle ever does.
+    func checkTap() async {
+        guard let summary = try? await core.run({ [circle] phone in
+            phone.circles().first { $0.id == circle }
+        }) else { return }
+        card = AppModel.isCard(summary)
+        needsTap = summary.needsTap
+    }
+
+    /// Tap the card for the keys the chat waits for, then read the relay with them.
+    func tapForKeys() async {
+        guard !tapping else { return }
+        tapping = true
+        defer { tapping = false }
+        do {
+            try await core.run { [circle] in try $0.tapForKeys(circle: circle) }
+            status = nil
+            await poll()
+            await load()
+        } catch {
+            status = plain(error)
+        }
+        await checkTap()
+    }
+
     func run() async {
         await load()
         await loadOwnFace()
+        await checkTap()
         while !Task.isCancelled {
             await poll()
             await loadMembers()
+            if card { await checkTap() }
             try? await Task.sleep(for: .seconds(3))
         }
     }
@@ -97,6 +130,7 @@ final class ChatModel: ObservableObject {
         } catch {
             status = "Not sent: \(plain(error))"
         }
+        if card { await checkTap() }
         await load()
     }
 
@@ -208,7 +242,15 @@ struct ChatView: View {
         .actionBar {
             if let notice { StatusLine(text: notice, problem: false) }
             StatusLine(text: model.status)
-            if summary?.hasRoot == false {
+            if model.needsTap {
+                Button { Task { await model.tapForKeys(); await app.refresh() } } label: {
+                    Working(busy: model.tapping, title: "Tap your card to catch up")
+                }
+                .buttonStyle(.filled)
+                .disabled(model.tapping)
+                .accessibilityLabel("Tap your card to catch up")
+                .accessibilityIdentifier("tap-for-keys")
+            } else if summary?.hasRoot == false && !model.card {
                 Text("This circle uses an older format that doesn’t support chat. Create a new circle together to start chatting.")
                     .font(.subheadline).foregroundStyle(Color.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -428,21 +470,23 @@ struct ConversationSettings: View {
                         }
                         .buttonStyle(RowButtonStyle())
                     }
-                    PaperSection(footer: "Show a face drawn only for this circle. Your other circles keep your face from Settings.") {
-                        HStack(spacing: Space.m) {
-                            FaceView(pixels: model.members.first(where: \.mine).flatMap { model.faces[$0.seat] },
-                                     size: 32)
-                            Toggle(isOn: Binding(get: { model.ownFace },
-                                                 set: { on in Task { await model.setOwnFace(on) } })) {
-                                Text("New face for this circle")
-                                    .foregroundStyle(Color.ink)
-                                    .fixedSize(horizontal: false, vertical: true)
+                    if !model.card {
+                        PaperSection(footer: "Show a face drawn only for this circle. Your other circles keep your face from Settings.") {
+                            HStack(spacing: Space.m) {
+                                FaceView(pixels: model.members.first(where: \.mine).flatMap { model.faces[$0.seat] },
+                                         size: 32)
+                                Toggle(isOn: Binding(get: { model.ownFace },
+                                                     set: { on in Task { await model.setOwnFace(on) } })) {
+                                    Text("New face for this circle")
+                                        .foregroundStyle(Color.ink)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .tint(Color.brand)
+                                .accessibilityIdentifier("circle-face")
                             }
-                            .tint(Color.brand)
-                            .accessibilityIdentifier("circle-face")
+                            .padding(.vertical, Space.m)
+                            StatusLine(text: model.faceNote)
                         }
-                        .padding(.vertical, Space.m)
-                        StatusLine(text: model.faceNote)
                     }
                     VStack(alignment: .leading, spacing: Space.s) {
                         Text("End-to-end encrypted").serifTitle(.title2)

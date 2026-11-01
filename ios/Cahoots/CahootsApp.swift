@@ -111,6 +111,7 @@ struct RootView: View {
         case let .people(id): PeopleView(core: core, circle: id)
         case let .hello(id, seat): HelloView(core: core, circle: id, seat: seat)
         case .settings: SettingsView(core: core)
+        case .pairCard: PairCardView(core: core)
         case let .channel(id): ChannelView(core: core, id: id)
         case let .joinChannel(link): JoinChannelView(core: core, link: link)
         case let .channelMembers(id): ChannelMembersView(core: core, id: id)

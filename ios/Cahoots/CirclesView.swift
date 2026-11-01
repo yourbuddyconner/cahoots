@@ -15,13 +15,21 @@ struct CirclesView: View {
                         ForEach(model.circles, id: \.id) { c in
                             NavigationLink(value: Route.chat(c.id)) {
                                 CircleRow(circle: c, faces: model.faces[c.id] ?? [],
-                                          others: model.others(circle: c.id, seats: (0..<c.members).filter { $0 != c.mySeat }))
+                                          others: model.others(circle: c.id, seats: (0..<c.members).filter { $0 != c.mySeat }),
+                                          badge: AppModel.isCard(c) ? model.seatName(circle: c.id, seat: c.mySeat) : nil)
                             }
                             .buttonStyle(RowButtonStyle())
                             Hairline().padding(.leading, Space.l)
                         }
                     }
                     .padding(.top, Space.s)
+                }
+                if !model.hasCardCircle {
+                    NavigationLink(value: Route.pairCard) { Text("Pair a card") }
+                        .buttonStyle(TextButtonStyle(full: false))
+                        .padding(.horizontal, Space.l)
+                        .padding(.top, Space.s)
+                        .accessibilityIdentifier("pair-card")
                 }
                 ChannelsSection()
                 Text("Circles and history are saved on this phone. No account needed.")
@@ -101,17 +109,32 @@ struct CircleRow: View {
     let faces: [Data]
     /// The other members' names, once any has one.
     var others: String?
+    /// For a card circle, the name of its badge.
+    var badge: String?
     @Environment(\.dynamicTypeSize) private var typeSize
 
-    private var meta: String {
-        var s = others.map { "With \($0)." } ?? "\(spelled(Int(circle.members))) people."
-        s += " You are seat \(circle.mySeat + 1)."
-        if !circle.hasRoot { s += " Needs a new ceremony to chat." }
+    private var meta: String { Self.meta(circle, others: others, badge: badge) }
+
+    /// The line under a circle's name. A card circle says so, and names its badge.
+    static func meta(_ circle: CircleSummary, others: String?, badge: String?) -> String {
+        var s = AppModel.isCard(circle) ? "Card circle on \(badge ?? "your badge"). " : ""
+        s += others.map { "With \($0)." } ?? "\(spelled(Int(circle.members))) people."
+        if !AppModel.isCard(circle) { s += " You are seat \(circle.mySeat + 1)." }
+        if !circle.hasRoot && !AppModel.isCard(circle) { s += " Needs a new ceremony to chat." }
+        if circle.needsTap { s += " Tap your card to catch up." }
         return s
+    }
+
+    /// A card circle's own seat is its badge's: the badge's face, from the card it published.
+    private var badgeFace: Data? {
+        AppModel.isCard(circle) && Int(circle.mySeat) < faces.count ? faces[Int(circle.mySeat)] : nil
     }
 
     var body: some View {
         HStack(alignment: .center, spacing: Space.m) {
+            if let badgeFace {
+                FaceView(pixels: badgeFace, size: 44, label: badge.map { "\($0)'s face" })
+            }
             VStack(alignment: .leading, spacing: Space.xs) {
                 Text(circle.name)
                     .serifTitle(.title2)

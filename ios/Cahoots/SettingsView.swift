@@ -20,6 +20,8 @@ struct SettingsView: View {
     @State private var removing: CircleSummary?
     @State private var error: String?
     @State private var showingGuide = false
+    @State private var confirmForget = false
+    @State private var cardError: String?
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -37,6 +39,7 @@ struct SettingsView: View {
                 .buttonStyle(RowButtonStyle())
                 phone
                 relaySection
+                cardSection
                 PaperSection(title: "Checking for messages") {
                     Text("iOS controls when Cahoots checks for messages in the background. The app icon’s badge shows the unread count from the last successful check.")
                         .font(.subheadline).foregroundStyle(Color.muted)
@@ -100,6 +103,15 @@ struct SettingsView: View {
                     ToolbarItem(placement: .primaryAction) { ShareLink(item: e.text) }
                 }
             }
+        }
+        .confirmationDialog("Forget this card?", isPresented: $confirmForget, titleVisibility: .visible) {
+            Button("Forget this card", role: .destructive) {
+                Task {
+                    do { try await app.forgetCard() } catch { cardError = plain(error) }
+                }
+            }
+        } message: {
+            Text("Its circles and their messages are deleted from this phone. The badge keeps them. To use the card again, pair it again.")
         }
         .confirmationDialog("Remove \(removing?.name ?? "this circle") from this phone? Its messages and keys will be deleted from this phone. You cannot undo this. Other members keep their copies.",
                             isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
@@ -275,6 +287,31 @@ struct SettingsView: View {
             Text("The host chooses the relay used during setup and for the circle’s chat. This setting applies to new circles you create. To change an existing circle’s relay, open its conversation settings.")
                 .font(.footnote).foregroundStyle(Color.muted)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Pairing with a badge, and forgetting it.
+    private var cardSection: some View {
+        PaperSection(title: "Card", footer: "Pair this phone with a badge to read and post in the badge’s circles.") {
+            NavigationLink(value: Route.pairCard) {
+                HStack {
+                    Label("Pair a card", systemImage: "wave.3.right")
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                }
+                .foregroundStyle(Color.brand)
+                .frame(minHeight: 44)
+            }
+            .buttonStyle(RowButtonStyle())
+            .accessibilityIdentifier("settings-pair-card")
+            if app.hasCardCircle {
+                Hairline()
+                Button("Forget this card") { confirmForget = true }
+                    .buttonStyle(TextButtonStyle(full: false, color: .ink))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("forget-card")
+            }
+            StatusLine(text: cardError)
         }
     }
 

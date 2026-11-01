@@ -34,10 +34,15 @@ struct PeopleView: View {
         }
     }
 
-    /// The tier, then the kind of device when the card says.
-    static func about(_ member: Member) -> String {
-        [tier(member.tier), device(member.device)].compactMap { $0 }.joined(separator: ", ")
+    /// The tier, then the kind of device when the card says. In a card circle this phone's
+    /// seat is its card's, and says so.
+    static func about(_ member: Member, card: Bool = false) -> String {
+        let device = card && member.mine ? "your card" : device(member.device)
+        return [tier(member.tier), device].compactMap { $0 }.joined(separator: ", ")
     }
+
+    /// A circle from a badge this phone is paired with.
+    private var card: Bool { app.circle(circle).map(AppModel.isCard) ?? false }
 
     var body: some View {
         ScrollView {
@@ -56,7 +61,10 @@ struct PeopleView: View {
                             if i > 0 { Hairline() }
                             let named = app.hasCardName(circle: circle, seat: member.seat)
                             HStack(spacing: Space.s) {
-                                if member.mine && named {
+                                if member.mine && card {
+                                    // The seat is the badge's, named on the badge.
+                                    row(member)
+                                } else if member.mine && named {
                                     NavigationLink(value: Route.settings) { row(member) }
                                         .buttonStyle(RowButtonStyle())
                                 } else if member.mine {
@@ -67,7 +75,7 @@ struct PeopleView: View {
                                         .buttonStyle(RowButtonStyle())
                                         .accessibilityIdentifier("hello-seat-\(member.seat)")
                                 }
-                                if !named {
+                                if !named && !(member.mine && card) {
                                     Button { editingSeat = member.seat } label: {
                                         Image(systemName: "pencil")
                                             .font(.body)
@@ -87,7 +95,7 @@ struct PeopleView: View {
                             ForEach(members, id: \.seat) { member in
                                 VStack(alignment: .leading, spacing: Space.xs) {
                                     Text(app.seatName(circle: circle, seat: member.seat)).font(.subheadline.weight(.semibold))
-                                    Text(Self.about(member)).font(.subheadline).foregroundStyle(Color.muted)
+                                    Text(Self.about(member, card: card)).font(.subheadline).foregroundStyle(Color.muted)
                                 }
                             }
                             Text("These are the protection levels each device reported when the circle was created. They have not been independently verified. Every member holds the circle’s secret.")
@@ -135,7 +143,7 @@ struct PeopleView: View {
                 Text(member.mine ? "Seat \(member.seat + 1). You" : "Seat \(member.seat + 1). Hello words")
                     .font(.subheadline).foregroundStyle(Color.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(Self.about(member))
+                Text(Self.about(member, card: card))
                     .font(.footnote).foregroundStyle(Color.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }

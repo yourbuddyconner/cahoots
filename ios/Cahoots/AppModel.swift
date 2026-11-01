@@ -10,6 +10,8 @@ enum Route: Hashable {
     case people(String)
     case hello(String, UInt8)
     case settings
+    /// Pair this phone with a badge, and bring its circles.
+    case pairCard
     /// A channel on this phone, by id.
     case channel(String)
     /// A channel link opened from outside, the whole URL.
@@ -129,6 +131,12 @@ final class AppModel: ObservableObject {
     func circle(_ id: String) -> CircleSummary? {
         circles.first { $0.id == id }
     }
+
+    /// Whether a circle came from a badge this phone is paired with (a card circle).
+    nonisolated static func isCard(_ c: CircleSummary) -> Bool { c.kind == "card" }
+
+    /// Whether any circle on this phone came from a badge.
+    var hasCardCircle: Bool { circles.contains(where: Self.isCard) }
 
     func channel(_ id: String) -> ChannelSummary? {
         channels.first { $0.id == id }
@@ -348,12 +356,22 @@ final class AppModel: ObservableObject {
         await updateBadge()
     }
 
+    /// Remove every card circle from this phone, and the key kept for its badge.
+    func forgetCard() async throws {
+        guard let core else { return }
+        try await core.run { try $0.forgetCard() }
+        path = []
+        await refresh()
+        await updateBadge()
+    }
+
     /// Delete a circle from this phone, and its seat key with it.
     func delete(_ circle: String) async throws {
         guard let core else { return }
         let label = try await core.run { try $0.circleSeatLabel(circle: circle) }
         try await core.run { try $0.deleteCircle(circle: circle) }
-        core.signer.deleteKey(label: label)
+        // A card circle has no seat key of its own: the seat is the badge's.
+        if !label.isEmpty { core.signer.deleteKey(label: label) }
         path = []
         await refresh()
         await updateBadge()
