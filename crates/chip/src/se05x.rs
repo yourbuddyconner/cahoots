@@ -659,15 +659,20 @@ impl<I: I2c, D: DelayNs> ChipOps for Se05xChip<I, D> {
         let sid = self
             .se
             .run_command(&CreateSession { object_id: oid(KeyId::OWNER) }, &mut self.buf)
-            .map_err(|_| ChipError::BadSession)?
+            .map_err(err)?
             .session_id;
         let verified = self
             .se
             .run_session_command(sid, &VerifySessionUserId { user_id: secret }, &mut self.buf)
             .map(|_| ());
-        if verified.is_err() {
+        if let Err(e) = verified {
             let _ = self.se.run_session_command(sid, &CloseSession {}, &mut self.buf);
-            return Err(ChipError::BadSession);
+            // A status word from VerifySessionUserId is the applet refusing the secret, so
+            // `BadSession`. A bus or framing error is not: it may pass at the next try.
+            return Err(match e {
+                SeError::Status(_) => ChipError::BadSession,
+                e => err(e),
+            });
         }
         self.session = Some(sid);
         Ok(())
