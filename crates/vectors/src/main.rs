@@ -843,7 +843,7 @@ fn root_vectors(case: &RootCase) -> Value {
         .map(|id| {
             json!({
                 "generation_id": hex::encode(id),
-                "key": hex::encode(root::chat_gen_key(&case.root, &case.circle_id, id)),
+                "key": hex::encode(*root::chat_gen_key(&case.root, &case.circle_id, id)),
             })
         })
         .collect();

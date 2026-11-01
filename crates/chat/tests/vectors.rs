@@ -122,24 +122,25 @@ fn vectors() -> Value {
     let ek = epoch_key(&root, &cid, EPOCH);
     let (senders, messages, tampered) = message_set(cid, eid, &ek, CHAT_ROOT_VERSION);
 
-    // A bump to BUMP_ID signed by seat 1 of the ceremony, and the same payload with the id
-    // changed, which must fail.
+    // A bump from generation 0 to BUMP_ID signed by seat 1 of the ceremony, and the same
+    // payload with the from id changed, which must fail.
     let cv = vectors_file("ceremony.json");
     assert_eq!(cv["circle_id"], rv["circle_id"]);
     let manifest =
         Manifest::decode(&hex::decode(cv["manifest"].as_str().unwrap()).unwrap()).unwrap();
     let seed: [u8; 32] = hex_array(&cv["seat_seeds"][1]);
     let seat_key = SeatKey::from_seed(&seed).unwrap();
-    let payload = sign_bump(&seat_key, 1, &cid, &BUMP_ID).unwrap();
+    let payload = sign_bump(&seat_key, 1, &cid, &gen0, &BUMP_ID).unwrap();
     assert_eq!(
         verify_bump(&payload, &cid, &manifest).unwrap(),
-        (BUMP_ID, 1)
+        (gen0, BUMP_ID, 1)
     );
     let mut bad_payload = payload.clone();
     bad_payload[0] ^= 1;
     assert!(verify_bump(&bad_payload, &cid, &manifest).is_err());
     let mut signed = b"cahoots/chat/bump/v1".to_vec();
     signed.extend_from_slice(&cid);
+    signed.extend_from_slice(&gen0);
     signed.extend_from_slice(&BUMP_ID);
     let bump_key = chat_gen_key(&root, &cid, &BUMP_ID);
 
@@ -147,7 +148,7 @@ fn vectors() -> Value {
         "description": "docs/chat.md section 1, generations. generation_id of generation 0 = SHA-256(\"cahoots/chat/gen0\" || circle_id). generation_key = HMAC-SHA256(root, \"chat/gen\" || circle_id || generation_id), as root.json publishes. epoch_key = HMAC-SHA256(generation_key, \"chat/epoch\" || n as u32 BE). epoch_id = 0xFE || tag || n as u16 LE, where tag is the first two bytes of SHA-256(generation_id). Byte 0 of every message is 2, the version the relay checks; a client reads version 3 from the 0xFE slice. Below the epoch key, chains, keys and the AEAD are as in the root-epoch case.",
         "generation": {
             "generation_id": hex::encode(gen0),
-            "generation_key": hex::encode(gen_key),
+            "generation_key": hex::encode(*gen_key),
             "tag": hex::encode(tag.to_le_bytes()),
             "epoch": EPOCH,
             "epoch_id": hex::encode(gen_eid.encode()),
@@ -157,10 +158,11 @@ fn vectors() -> Value {
             "tampered": g_tampered,
         },
         "bump": {
-            "description": "A bump's payload is generation_id || COSE_Sign1, a detached ES256 signature (RFC 6979, so it reproduces) with kid [seat] and empty external AAD over signed = \"cahoots/chat/bump/v1\" || circle_id || generation_id. The seat key is seat_seeds[1] of ceremony.json, and the manifest is that ceremony's. generation_key is the key every root holder derives for it. tampered has one bit of the id flipped and MUST fail.",
+            "description": "A bump's payload is from_id || to_id || COSE_Sign1, a detached ES256 signature (RFC 6979, so it reproduces) with kid [seat] and empty external AAD over signed = \"cahoots/chat/bump/v1\" || circle_id || from_id || to_id. This one moves from generation 0. The seat key is seat_seeds[1] of ceremony.json, and the manifest is that ceremony's. generation_key is the key every root holder derives for to_id. A receiver moves only when the bump was sealed in from_id and from_id is its current generation. tampered has one bit of from_id flipped and MUST fail.",
             "seat": 1,
+            "from_id": hex::encode(gen0),
             "generation_id": hex::encode(BUMP_ID),
-            "generation_key": hex::encode(bump_key),
+            "generation_key": hex::encode(*bump_key),
             "signed": hex::encode(&signed),
             "payload": hex::encode(&payload),
             "tampered": {"payload": hex::encode(&bad_payload), "expected": "reject: signature"},

@@ -94,7 +94,7 @@ impl EpochId {
 pub enum MessageType {
     Text = 0,
     Control = 1,
-    /// A signed move to a new generation: `generation_id || COSE_Sign1` (see `crate::bump`).
+    /// A signed move to a new generation: `from_id || to_id || COSE_Sign1` (see `crate::bump`).
     Bump = 2,
     /// A signed contact card.
     Card = 3,
@@ -144,7 +144,8 @@ pub enum ChatError {
     /// malformed.
     BadSignature,
     /// `send_bump` was refused: this session does not hold the root, so it cannot derive the
-    /// new generation's key or let the others follow, or it is already in that generation.
+    /// new generation's key or let the others follow, or the bump moves from a generation
+    /// other than the current one, or to one this session holds or dropped.
     CannotBump,
     /// Malformed exported state.
     State,

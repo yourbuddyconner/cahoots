@@ -461,7 +461,7 @@ fn the_root_vectors_are_reproduced() {
     m.update(&circle_id);
     m.update(&gen0);
     assert_eq!(
-        root::chat_gen_key(&root, &circle_id, &gen0),
+        *root::chat_gen_key(&root, &circle_id, &gen0),
         <[u8; 32]>::from(m.finalize().into_bytes())
     );
     let gens = v["generation_keys"].as_array().unwrap();

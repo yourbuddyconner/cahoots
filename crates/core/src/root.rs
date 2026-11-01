@@ -72,8 +72,12 @@ pub fn gen0_id(circle_id: &CircleId) -> [u8; 32] {
 /// The key of a chat generation:
 /// `HMAC-SHA256(root, "chat/gen" || circle_id || generation_id)`. Epoch keys derive from it,
 /// so a device that holds this key and not the root can chat in this generation only.
-pub fn chat_gen_key(root: &[u8; 32], circle_id: &CircleId, generation_id: &[u8; 32]) -> [u8; 32] {
-    hmac(root, &[CHAT_GEN_LABEL, circle_id, generation_id])
+pub fn chat_gen_key(
+    root: &[u8; 32],
+    circle_id: &CircleId,
+    generation_id: &[u8; 32],
+) -> Zeroizing<[u8; 32]> {
+    Zeroizing::new(hmac(root, &[CHAT_GEN_LABEL, circle_id, generation_id]))
 }
 
 /// A seal key named by `label`: `HMAC-SHA256(root, label || circle_id)`.

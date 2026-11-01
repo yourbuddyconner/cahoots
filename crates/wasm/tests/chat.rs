@@ -210,7 +210,8 @@ fn a_bump_moves_the_other_member_and_a_forged_one_is_ignored() {
     forger.start_epoch();
     let stranger = cahoots_core::seat::SeatKey::from_seed(&[0x55; 32]).unwrap();
     let fake_gen = [0xEE; 32];
-    let payload = cahoots_chat::sign_bump(&stranger, 0, &id, &fake_gen).unwrap();
+    let from = forger.generation_id();
+    let payload = cahoots_chat::sign_bump(&stranger, 0, &id, &from, &fake_gen).unwrap();
     let wire = b64_encode(&forger.send_bump(fake_gen, &payload).unwrap());
     let before = b.generation_id_hex();
     let ignored = b.chat_receive(&wire).unwrap();
@@ -285,6 +286,28 @@ fn an_old_bump_read_again_moves_nothing() {
     assert_ne!(newest, current);
     // The older bump's wire again is sealed in a generation b has dropped: refused, nothing moves.
     assert_eq!(b.chat_receive(&w0).unwrap_err(), "needs-generation");
+    assert_eq!(b.generation_id_hex(), newest);
+
+    // The older bump's signed payload sealed again by a member in the current generation: it
+    // moves from a generation the circle left, so it is stale and nothing moves.
+    let state = a.export();
+    let root: [u8; 32] = state[state.len() - 32..].try_into().unwrap();
+    let id: [u8; 16] = hex::decode(a.circle_id_hex()).unwrap().try_into().unwrap();
+    let mut other = cahoots_chat::ChatSession::new(&root, id, 2, 1);
+    other.mark_synced();
+    let (_, payload0) = other.receive(&b64_decode(&w0).unwrap()).unwrap();
+    let (from, to) = (payload0[..32].try_into().unwrap(), payload0[32..64].try_into().unwrap());
+    assert_eq!(other.apply_bump(from, to), Ok(true));
+    let (_, payload1) = other.receive(&b64_decode(&w1).unwrap()).unwrap();
+    let (from, to) = (payload1[..32].try_into().unwrap(), payload1[32..64].try_into().unwrap());
+    assert_eq!(other.apply_bump(from, to), Ok(true));
+    assert_eq!(Some(hex::encode(other.generation_id())), newest);
+    let replay = other
+        .send_typed(cahoots_chat::MessageType::Bump, &payload0)
+        .unwrap();
+    let got = b.chat_receive(&b64_encode(&replay)).unwrap();
+    assert_eq!(got.kind(), "bump");
+    assert!(got.ignored());
     assert_eq!(b.generation_id_hex(), newest);
 }
 

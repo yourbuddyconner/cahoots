@@ -357,14 +357,14 @@ impl Circle {
         cahoots_objects::Card::decode(&payload).ok()
     }
 
-    /// Verify a bump read from the relay against the manifest and move to its generation.
-    /// Returns the seat that signed it, or `None` when it does not verify.
+    /// Verify a bump just read from the relay against the manifest and follow it. Returns the
+    /// seat that signed it when this phone moved, or `None` when it does not verify, is stale
+    /// (it moves from a generation this phone is not in), or cannot be followed.
     fn apply_bump(&mut self, payload: &[u8]) -> Option<u8> {
         let sealed = cahoots_core::manifest::SealedManifest::decode(&self.record.manifest).ok()?;
         let manifest = cahoots_core::manifest::Manifest::decode(&sealed.body).ok()?;
-        let (id, seat) = verify_bump(payload, &self.circle_id, &manifest).ok()?;
-        self.session.bump(id).ok()?;
-        Some(seat)
+        let (from, to, seat) = verify_bump(payload, &self.circle_id, &manifest).ok()?;
+        self.session.apply_bump(from, to).ok()?.then_some(seat)
     }
 
     /// Move everyone in the circle to new keys: sign a bump with this seat's key, apply it,
@@ -400,7 +400,9 @@ impl Circle {
             public,
             error: None,
         };
-        let payload = sign_bump(&mut seat, self.record.seat, &self.circle_id, &id).map_err(chat_err)?;
+        let from = self.session.generation_id();
+        let payload = sign_bump(&mut seat, self.record.seat, &self.circle_id, &from, &id)
+            .map_err(chat_err)?;
         if let Some(e) = seat.error.take() {
             return Err(e);
         }

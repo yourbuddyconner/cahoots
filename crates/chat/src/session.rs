@@ -25,7 +25,7 @@ pub const MAX_OWN_SKIP: u32 = 1 << 16;
 /// by the browser's state version 5. It imports as generation 0, with its root epochs kept for
 /// reading old history.
 const STATE_MAGIC: &[u8; 4] = b"CHS3";
-const STATE_MAGIC_ROOT_EPOCHS: &[u8; 4] = b"CHS2";
+const STATE_MAGIC_ROOT_EPOCHS: &[u8; 4] = ChatSession::STATE_MAGIC_ROOT_EPOCHS;
 
 #[derive(Clone)]
 struct SenderChain {
@@ -278,11 +278,11 @@ struct Generation {
 }
 
 impl Generation {
-    fn new(id: [u8; 32], key: [u8; 32]) -> Self {
+    fn new(id: [u8; 32], key: Zeroizing<[u8; 32]>) -> Self {
         Generation {
             id,
             tag: generation_tag(&id),
-            key: Zeroizing::new(key),
+            key,
             epochs: Epochs::default(),
         }
     }
@@ -316,9 +316,17 @@ pub struct ChatSession {
     /// Whether the caller has read the relay to the end since this session was made or
     /// imported. Not exported: an imported session starts unsynced.
     synced: bool,
+    /// The id of the generation the last message `receive` opened was sealed in. `None` after
+    /// one in an old root epoch, or before any. Not exported.
+    opened_in: Option<[u8; 32]>,
 }
 
 impl ChatSession {
+    /// The first four bytes of a state written before generations. It imports, and the
+    /// caller may want to read its relay again from the start: the build that wrote it passed
+    /// over messages in generations it could not open.
+    pub const STATE_MAGIC_ROOT_EPOCHS: &'static [u8; 4] = b"CHS2";
+
     /// A member's session, holding the root. It starts in generation 0.
     pub fn new(root: &[u8; 32], circle_id: CircleId, members: u8, my_index: u8) -> Self {
         let id = gen0_id(&circle_id);
@@ -333,7 +341,7 @@ impl ChatSession {
     /// `install_generation`.
     pub fn from_generation(
         generation_id: [u8; 32],
-        generation_key: [u8; 32],
+        generation_key: Zeroizing<[u8; 32]>,
         circle_id: CircleId,
         members: u8,
         my_index: u8,
@@ -349,6 +357,7 @@ impl ChatSession {
             retired: Vec::new(),
             sent_in_current: 0,
             synced: false,
+            opened_in: None,
         }
     }
 
@@ -420,29 +429,45 @@ impl ChatSession {
         EpochId::generation(tag, n as u16)
     }
 
-    /// Move to the generation `generation_id` names, as a verified bump asks, and start its
-    /// epoch 1. With the root the key is derived. Without it the answer is
-    /// `NeedsGeneration(generation_id)`: fetch the key and call `install_generation`.
-    /// A generation already held or dropped moves nothing, so reading an old bump again does
-    /// not take the session back.
-    pub fn bump(&mut self, generation_id: [u8; 32]) -> Result<(), ChatError> {
-        if self.knows(&generation_id) {
-            return Ok(());
+    /// Follow a verified bump from `from` to `to`, read with the last call to `receive`, and
+    /// start epoch 1 of `to`. Returns true when the session moved.
+    ///
+    /// The session moves only when the bump was sealed in generation `from` and `from` is the
+    /// current generation. Any other bump is stale and moves nothing (false): one read again
+    /// after the circle moved on, one sealed in a generation it does not name, or one to a
+    /// generation already held or dropped. So an old bump replayed never takes the session
+    /// back or sideways.
+    ///
+    /// With the root the key of `to` is derived. Without it the answer is
+    /// `NeedsGeneration(to)`: fetch the key and call `install_generation`.
+    pub fn apply_bump(&mut self, from: [u8; 32], to: [u8; 32]) -> Result<bool, ChatError> {
+        if self.opened_in != Some(from) || self.current().id != from || self.knows(&to) {
+            return Ok(false);
         }
+        self.follow(to)?;
+        Ok(true)
+    }
+
+    /// Move to `to`, deriving its key with the root.
+    fn follow(&mut self, to: [u8; 32]) -> Result<(), ChatError> {
         let key = match &self.root {
-            Some(root) => chat_gen_key(root, &self.circle_id, &generation_id),
+            Some(root) => chat_gen_key(root, &self.circle_id, &to),
             None => {
-                self.pending = Some(generation_id);
-                return Err(ChatError::NeedsGeneration(generation_id));
+                self.pending = Some(to);
+                return Err(ChatError::NeedsGeneration(to));
             }
         };
-        self.enter(generation_id, key);
+        self.enter(to, key);
         Ok(())
     }
 
     /// Move to a generation whose key this device was given, and start its epoch 1. A
     /// generation already held or dropped moves nothing.
-    pub fn install_generation(&mut self, generation_id: [u8; 32], generation_key: [u8; 32]) {
+    pub fn install_generation(
+        &mut self,
+        generation_id: [u8; 32],
+        generation_key: Zeroizing<[u8; 32]>,
+    ) {
         if !self.knows(&generation_id) {
             self.enter(generation_id, generation_key);
         }
@@ -452,7 +477,7 @@ impl ChatSession {
         self.gens.iter().any(|g| &g.id == generation_id) || self.retired.contains(generation_id)
     }
 
-    fn enter(&mut self, generation_id: [u8; 32], generation_key: [u8; 32]) {
+    fn enter(&mut self, generation_id: [u8; 32], generation_key: Zeroizing<[u8; 32]>) {
         self.gens
             .push(Generation::new(generation_id, generation_key));
         while self.gens.len() > MAX_GENERATIONS {
@@ -469,27 +494,33 @@ impl ChatSession {
         self.start_epoch();
     }
 
-    /// Send a bump in the current epoch, then move this session to `generation_id`.
-    /// `payload` is what `crate::bump::sign_bump` returned for this id.
+    /// Send a bump in the current epoch of the current generation, then move this session to
+    /// `generation_id`. `payload` is what `crate::bump::sign_bump` returned for a move from the
+    /// current generation to this id.
     ///
     /// Only a session with the root sends a bump: it seals the bump in the generation the
     /// others are in and derives the new key itself. Without the root this refuses with
-    /// `CannotBump`. It refuses with `CannotBump` too for a generation this session holds or
-    /// dropped, the current one included, because the bump would move nobody. Nothing is sent
-    /// when it refuses.
+    /// `CannotBump`. It refuses with `CannotBump` too when the payload moves from a generation
+    /// other than the current one, or to a generation this session holds or dropped, because
+    /// the bump would move nobody. `BadSignature` when the payload does not name
+    /// `generation_id`. Nothing is sent when it refuses.
     pub fn send_bump(
         &mut self,
         generation_id: [u8; 32],
         payload: &[u8],
     ) -> Result<Vec<u8>, ChatError> {
-        if payload.get(..32) != Some(&generation_id[..]) {
+        if payload.get(32..64) != Some(&generation_id[..]) {
             return Err(ChatError::BadSignature);
         }
-        if self.root.is_none() || self.knows(&generation_id) {
+        let current = self.current().id;
+        if self.root.is_none()
+            || payload.get(..32) != Some(&current[..])
+            || self.knows(&generation_id)
+        {
             return Err(ChatError::CannotBump);
         }
         let wire = self.send_typed(MessageType::Bump, payload)?;
-        self.bump(generation_id)?;
+        self.follow(generation_id)?;
         Ok(wire)
     }
 
@@ -549,6 +580,7 @@ impl ChatSession {
     /// we are already past it, nothing changes and the plaintext is empty. This is how a
     /// device that lost or rolled back its chat state finds its place again.
     pub fn receive(&mut self, wire: &[u8]) -> Result<(Header, Vec<u8>), ChatError> {
+        self.opened_in = None;
         let (header, body) = parse(wire)?;
         if header.circle_id != self.circle_id {
             return Err(ChatError::WrongCircle);
@@ -558,6 +590,7 @@ impl ChatSession {
         }
         let own = header.sender == self.my_index;
         let members = self.members;
+        let mut opened = None;
         let pt = if let Some((tag, n)) = header.epoch.generation_parts() {
             let current = self.gens.len() - 1;
             let mut result = Err(self.missing(tag));
@@ -570,7 +603,10 @@ impl ChatSession {
                 .filter(|&i| self.gens[i].tag == tag)
                 .collect();
             for i in matching {
-                let Generation { key, epochs, .. } = &mut self.gens[i];
+                let Generation {
+                    id, key, epochs, ..
+                } = &mut self.gens[i];
+                let id = *id;
                 let key: &Key = key;
                 result = epochs.receive(
                     u32::from(n),
@@ -584,6 +620,7 @@ impl ChatSession {
                     if *moved && i == current {
                         self.sent_in_current = 0;
                     }
+                    opened = Some(id);
                     break;
                 }
             }
@@ -604,6 +641,7 @@ impl ChatSession {
         } else {
             return Err(ChatError::PadEpoch);
         };
+        self.opened_in = opened;
         let keep = !own || header.msg_type == MessageType::Bump;
         Ok((header, if keep { pt } else { Vec::new() }))
     }
@@ -728,7 +766,7 @@ impl ChatSession {
                 {
                     return Err(ChatError::State);
                 }
-                let mut g = Generation::new(id, *key);
+                let mut g = Generation::new(id, Zeroizing::new(*key));
                 g.epochs = epochs;
                 gens.push(g);
             }
@@ -743,6 +781,7 @@ impl ChatSession {
                 retired,
                 sent_in_current,
                 synced: false,
+                opened_in: None,
             }
         } else {
             return Err(ChatError::State);

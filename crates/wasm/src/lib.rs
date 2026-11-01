@@ -810,7 +810,7 @@ pub struct Circle {
 pub struct ChatReceived {
     /// `text`, `control`, `bump` or `card`.
     kind: &'static str,
-    /// A bump whose signature did not verify: nothing moved.
+    /// A bump that did not verify, was stale, or could not be followed: nothing moved.
     ignored: bool,
     text: Vec<u8>,
     sender: u8,
@@ -826,7 +826,8 @@ impl ChatReceived {
     pub fn kind(&self) -> String {
         self.kind.into()
     }
-    /// True for a bump that did not verify against the circle's manifest. It changed nothing.
+    /// True for a bump that changed nothing: it did not verify against the circle's manifest,
+    /// it moves from a generation this device is not in, or this device cannot follow it.
     pub fn ignored(&self) -> bool {
         self.ignored
     }
@@ -1055,13 +1056,15 @@ impl Circle {
                 "card"
             }
             chat::MessageType::Bump => {
-                // Our own copy is empty and moves nothing: we moved when we sent it.
+                // Our own bump moves us only if we have not moved already: a device restored
+                // from older state follows its own reset. A stale bump, one that moves from a
+                // generation this device is not in, moves nothing.
                 let verified = manifest
                     .as_ref()
                     .and_then(|m| chat::verify_bump(&text, &circle_id, m).ok());
                 match verified {
                     // A bump that cannot be applied is consumed, not retried forever.
-                    Some((generation_id, _)) => ignored = chat.bump(generation_id).is_err(),
+                    Some((from, to, _)) => ignored = chat.apply_bump(from, to) != Ok(true),
                     None => ignored = true,
                 }
                 "bump"
@@ -1153,10 +1156,11 @@ impl Circle {
         let (circle_id, me) = (self.pad().circle_id(), self.pad().my_slice());
         let mut generation_id = [0u8; 32];
         OsRng.fill_bytes(&mut generation_id);
+        let chat = self.chat_mut()?;
+        let from = chat.generation_id();
         let payload =
-            chat::sign_bump(&key, me, &circle_id, &generation_id).map_err(chat_err)?;
-        let wire = self
-            .chat_mut()?
+            chat::sign_bump(&key, me, &circle_id, &from, &generation_id).map_err(chat_err)?;
+        let wire = chat
             .send_bump(generation_id, &payload)
             .map_err(chat_err)?;
         self.pending_bump = Some(wire.clone());

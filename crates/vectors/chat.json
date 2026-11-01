@@ -1,14 +1,15 @@
 {
   "bump": {
-    "description": "A bump's payload is generation_id || COSE_Sign1, a detached ES256 signature (RFC 6979, so it reproduces) with kid [seat] and empty external AAD over signed = \"cahoots/chat/bump/v1\" || circle_id || generation_id. The seat key is seat_seeds[1] of ceremony.json, and the manifest is that ceremony's. generation_key is the key every root holder derives for it. tampered has one bit of the id flipped and MUST fail.",
+    "description": "A bump's payload is from_id || to_id || COSE_Sign1, a detached ES256 signature (RFC 6979, so it reproduces) with kid [seat] and empty external AAD over signed = \"cahoots/chat/bump/v1\" || circle_id || from_id || to_id. This one moves from generation 0. The seat key is seat_seeds[1] of ceremony.json, and the manifest is that ceremony's. generation_key is the key every root holder derives for to_id. A receiver moves only when the bump was sealed in from_id and from_id is its current generation. tampered has one bit of from_id flipped and MUST fail.",
+    "from_id": "c29a2d181acd420b24ae8839f576e6c23c9b029c8c3b69c2db2f61735ac10e18",
     "generation_id": "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
     "generation_key": "a7d3f3f1b9e8bcd26b5ee5e41e980e08aed7dd42f243e1aa4c7e103cb7e4a2b7",
-    "payload": "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b18446a20126044101a0f65840fa5d7b4be89a7b0b437f42cc8fc8f00bc10408e78ef5e897744a59187fc24754aea2d7ad07d2f0b525023e5ebd04ee1f7b9d4669d58cd797f8d8cfadd91b0b38",
+    "payload": "c29a2d181acd420b24ae8839f576e6c23c9b029c8c3b69c2db2f61735ac10e18b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b18446a20126044101a0f65840038fe3ae5372c484c7b877034bc37ec0f9d7b267a9ef15f4e5a72b0cd66b625e875db2778412e6401fca29fe8ce912718e6879f5464b53c081ae8ba67fb2f436",
     "seat": 1,
-    "signed": "6361686f6f74732f636861742f62756d702f76316f8648f8add6df732cae1325a1fe798fb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+    "signed": "6361686f6f74732f636861742f62756d702f76316f8648f8add6df732cae1325a1fe798fc29a2d181acd420b24ae8839f576e6c23c9b029c8c3b69c2db2f61735ac10e18b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
     "tampered": {
       "expected": "reject: signature",
-      "payload": "b0b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b18446a20126044101a0f65840fa5d7b4be89a7b0b437f42cc8fc8f00bc10408e78ef5e897744a59187fc24754aea2d7ad07d2f0b525023e5ebd04ee1f7b9d4669d58cd797f8d8cfadd91b0b38"
+      "payload": "c39a2d181acd420b24ae8839f576e6c23c9b029c8c3b69c2db2f61735ac10e18b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b18446a20126044101a0f65840038fe3ae5372c484c7b877034bc37ec0f9d7b267a9ef15f4e5a72b0cd66b625e875db2778412e6401fca29fe8ce912718e6879f5464b53c081ae8ba67fb2f436"
     }
   },
   "description": "docs/chat.md section 1, generations. generation_id of generation 0 = SHA-256(\"cahoots/chat/gen0\" || circle_id). generation_key = HMAC-SHA256(root, \"chat/gen\" || circle_id || generation_id), as root.json publishes. epoch_key = HMAC-SHA256(generation_key, \"chat/epoch\" || n as u32 BE). epoch_id = 0xFE || tag || n as u16 LE, where tag is the first two bytes of SHA-256(generation_id). Byte 0 of every message is 2, the version the relay checks; a client reads version 3 from the 0xFE slice. Below the epoch key, chains, keys and the AEAD are as in the root-epoch case.",

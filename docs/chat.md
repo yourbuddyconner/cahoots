@@ -28,13 +28,13 @@ The tag lets a receiver pick the generation without the id on the wire. Two gene
 **Bump.** A member moves the circle to a new generation by sending a message of type `2` (bump) in the current epoch. Its plaintext is:
 
 ```
-payload = generation_id (32 B) || COSE_Sign1
-signed  = "cahoots/chat/bump/v1" || circle_id || generation_id
+payload = from_id (32 B) || to_id (32 B) || COSE_Sign1
+signed  = "cahoots/chat/bump/v1" || circle_id || from_id || to_id
 ```
 
-The COSE_Sign1 is a detached ES256 seat signature over `signed`, with kid `[seat]` and empty external AAD. A receiver MUST verify it against the seat keys of the circle's manifest before it moves. A bump that does not verify is ignored, and the chat continues in the generation it was in. A member who holds the root then derives the new key and moves. Its epoch 1 starts at once. A device without the root has to fetch the new key. Until it does, a message in the new generation is refused as `NeedsGeneration`, with the id.
+The COSE_Sign1 is a detached ES256 seat signature over `signed`, with kid `[seat]` and empty external AAD. A receiver MUST verify it against the seat keys of the circle's manifest before it moves. A bump that does not verify is ignored, and the chat continues in the generation it was in. `from_id` is the generation the bump moves from, and the sender seals the bump in that generation. A receiver moves only when the bump was sealed in `from_id` and `from_id` is its current generation. Any other bump is stale and is ignored. A member who holds the root then derives the key of `to_id` and moves. Its epoch 1 starts at once. A device without the root has to fetch the new key. Until it does, a message in the new generation is refused as `NeedsGeneration`, with the id.
 
-A receiver keeps the keys of the current generation and the one before it, so a message sent by a member who had not yet read the bump still opens. A message from two or more generations back is refused as `NeedsGeneration`. A session never moves back to a generation it has held.
+A receiver keeps the keys of the current generation and the one before it, so a message sent by a member who had not yet read the bump still opens. A message from two or more generations back is refused as `NeedsGeneration`. A bump read again later, or sealed again by a member in a later generation, names a generation the circle has left, so it moves nobody. A session never moves back to a generation it has held or dropped.
 
 **Root epochs, the old form.** Before generations, the epoch key came from the root directly, and the epoch id began with `0xFF`:
 
@@ -87,7 +87,7 @@ The first byte is `2` in every chat message, the version the relay checks. It di
 |---|---|---|
 | `0` | text | The message text |
 | `1` | control | Reserved |
-| `2` | bump | `generation_id` and a seat's signature, section 1 |
+| `2` | bump | `from_id`, `to_id` and a seat's signature, section 1 |
 | `3` | card | A seat-signed contact card |
 
 `len` is the plaintext length. Plaintext SHOULD be bucket-padded to 64, 256, 1024, or 4096 bytes.
@@ -120,4 +120,4 @@ Chat messages travel over the Numbers Station: an append-only, hash-chained publ
 
 ## 8. Vectors
 
-`crates/vectors/chat.json` covers epoch 7 of generation 0 for the root and circle of `crates/vectors/root.json`: the generation id and key, the epoch id and key, chain and message keys for two senders, three encrypted messages including one out of order, and a tampered message that MUST fail. Its generation key equals the one `root.json` publishes for generation 0. It covers a bump signed by seat 1 of the ceremony in `crates/vectors/ceremony.json`, with a tampered bump that MUST fail. Under `root_epochs` it keeps the same set for root epoch 7, the old form, whose epoch key equals the chat key `root.json` publishes for epoch 7.
+`crates/vectors/chat.json` covers epoch 7 of generation 0 for the root and circle of `crates/vectors/root.json`: the generation id and key, the epoch id and key, chain and message keys for two senders, three encrypted messages including one out of order, and a tampered message that MUST fail. Its generation key equals the one `root.json` publishes for generation 0. It covers a bump from generation 0, signed by seat 1 of the ceremony in `crates/vectors/ceremony.json`, with a tampered bump that MUST fail. Under `root_epochs` it keeps the same set for root epoch 7, the old form, whose epoch key equals the chat key `root.json` publishes for epoch 7.

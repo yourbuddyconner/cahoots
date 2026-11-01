@@ -14,6 +14,11 @@ const ROOT: [u8; 32] = [0x42; 32];
 const CID: CircleId = [0x0c; 16];
 const ID1: [u8; 32] = [0x11; 32];
 const ID2: [u8; 32] = [0x22; 32];
+const ID3: [u8; 32] = [0x33; 32];
+
+fn g0() -> [u8; 32] {
+    gen0_id(&CID)
+}
 
 fn synced(mut s: ChatSession) -> ChatSession {
     s.mark_synced();
@@ -100,20 +105,23 @@ fn a_bump_moves_every_root_holder_and_locks_out_a_device_without_the_key() {
     let hello = a.send(b"before").unwrap();
     assert_eq!(d.receive(&hello).unwrap().1, b"before");
 
-    let payload = sign_bump(&seat_key(0), 0, &CID, &ID1).unwrap();
+    let payload = sign_bump(&seat_key(0), 0, &CID, &g0(), &ID1).unwrap();
     let wire = a.send_bump(ID1, &payload).unwrap();
     assert_eq!(a.generation_id(), ID1);
 
     let (h, got) = b.receive(&wire).unwrap();
     assert_eq!(h.msg_type, MessageType::Bump);
-    assert_eq!(verify_bump(&got, &CID, &manifest()).unwrap(), (ID1, 0));
-    b.bump(ID1).unwrap();
+    assert_eq!(
+        verify_bump(&got, &CID, &manifest()).unwrap(),
+        (g0(), ID1, 0)
+    );
+    assert_eq!(b.apply_bump(g0(), ID1), Ok(true));
     assert_eq!(b.generation_id(), ID1);
 
     let (h, got) = d.receive(&wire).unwrap();
     assert_eq!(h.msg_type, MessageType::Bump);
-    let (id, _) = verify_bump(&got, &CID, &manifest()).unwrap();
-    assert_eq!(d.bump(id), Err(ChatError::NeedsGeneration(ID1)));
+    let (from, to, _) = verify_bump(&got, &CID, &manifest()).unwrap();
+    assert_eq!(d.apply_bump(from, to), Err(ChatError::NeedsGeneration(ID1)));
     assert_eq!(d.generation_id(), gen0_id(&CID));
 
     let w = a.send(b"after").unwrap();
@@ -133,20 +141,25 @@ fn a_bump_from_a_key_that_is_not_a_seat_is_refused() {
     let m = manifest();
     let stranger = SeatKey::from_seed(&[0x99; 32]).unwrap();
     // Claims seat 1 but is signed by a key the manifest does not hold.
-    let forged = sign_bump(&stranger, 1, &CID, &ID1).unwrap();
+    let forged = sign_bump(&stranger, 1, &CID, &g0(), &ID1).unwrap();
     assert!(verify_bump(&forged, &CID, &m).is_err());
     // A seat the manifest does not have.
-    let no_seat = sign_bump(&seat_key(0), 7, &CID, &ID1).unwrap();
+    let no_seat = sign_bump(&seat_key(0), 7, &CID, &g0(), &ID1).unwrap();
     assert!(verify_bump(&no_seat, &CID, &m).is_err());
-    // A real seat's signature with the id swapped.
-    let mut swapped = sign_bump(&seat_key(1), 1, &CID, &ID1).unwrap();
+    // A real seat's signature with either id swapped.
+    let good = sign_bump(&seat_key(1), 1, &CID, &g0(), &ID1).unwrap();
+    let mut swapped = good.clone();
+    swapped[32..64].copy_from_slice(&ID2);
+    assert!(verify_bump(&swapped, &CID, &m).is_err());
+    let mut swapped = good.clone();
     swapped[..32].copy_from_slice(&ID2);
     assert!(verify_bump(&swapped, &CID, &m).is_err());
     // A real seat's signature for another circle.
-    let other = sign_bump(&seat_key(1), 1, &[0x0d; 16], &ID1).unwrap();
+    let other = sign_bump(&seat_key(1), 1, &[0x0d; 16], &g0(), &ID1).unwrap();
     assert!(verify_bump(&other, &CID, &m).is_err());
     assert!(verify_bump(&forged[..20], &CID, &m).is_err());
-    // The refused bump moves nobody: the caller does not call bump, and chat goes on.
+    assert!(verify_bump(&forged[..60], &CID, &m).is_err());
+    // The refused bump moves nobody: the caller does not apply it, and chat goes on.
     let mut a = member(0);
     let mut b = member(1);
     let w = a.send_typed(MessageType::Bump, &forged).unwrap();
@@ -157,8 +170,8 @@ fn a_bump_from_a_key_that_is_not_a_seat_is_refused() {
     assert_eq!(b.receive(&w).unwrap().1, b"same generation");
     assert_eq!(b.generation_id(), gen0_id(&CID));
     // A good one verifies and names its seat.
-    let good = sign_bump(&seat_key(2), 2, &CID, &ID1).unwrap();
-    assert_eq!(verify_bump(&good, &CID, &m).unwrap(), (ID1, 2));
+    let good = sign_bump(&seat_key(2), 2, &CID, &g0(), &ID1).unwrap();
+    assert_eq!(verify_bump(&good, &CID, &m).unwrap(), (g0(), ID1, 2));
 }
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -233,14 +246,14 @@ fn the_last_two_generations_stay_open() {
     // c sends in generation 0 before it reads the bump.
     let straggler0 = c.send(b"late in gen 0").unwrap();
     let wire = a
-        .send_bump(ID1, &sign_bump(&seat_key(0), 0, &CID, &ID1).unwrap())
+        .send_bump(ID1, &sign_bump(&seat_key(0), 0, &CID, &g0(), &ID1).unwrap())
         .unwrap();
     b.receive(&wire).unwrap();
-    b.bump(ID1).unwrap();
+    assert_eq!(b.apply_bump(g0(), ID1), Ok(true));
     assert_eq!(b.receive(&straggler0).unwrap().1, b"late in gen 0");
 
     c.receive(&wire).unwrap();
-    c.bump(ID1).unwrap();
+    assert_eq!(c.apply_bump(g0(), ID1), Ok(true));
     let another0 = {
         // A second straggler, sealed by a member still in generation 0.
         let mut late = member(2);
@@ -249,10 +262,10 @@ fn the_last_two_generations_stay_open() {
     };
     let straggler1 = c.send(b"late in gen 1").unwrap();
     let wire2 = a
-        .send_bump(ID2, &sign_bump(&seat_key(0), 0, &CID, &ID2).unwrap())
+        .send_bump(ID2, &sign_bump(&seat_key(0), 0, &CID, &ID1, &ID2).unwrap())
         .unwrap();
     b.receive(&wire2).unwrap();
-    b.bump(ID2).unwrap();
+    assert_eq!(b.apply_bump(ID1, ID2), Ok(true));
     assert_eq!(b.generation_id(), ID2);
     // One generation back still opens. Two back is gone.
     assert_eq!(b.receive(&straggler1).unwrap().1, b"late in gen 1");
@@ -296,22 +309,28 @@ fn only_a_root_holder_sends_a_bump_and_only_to_a_new_generation() {
     // A device without the root never sends a bump: its key would be one nobody else has.
     let key0 = chat_gen_key(&ROOT, &CID, &gen0_id(&CID));
     let mut d = synced(ChatSession::from_generation(gen0_id(&CID), key0, CID, 3, 2));
-    let payload = sign_bump(&seat_key(2), 2, &CID, &ID1).unwrap();
+    let payload = sign_bump(&seat_key(2), 2, &CID, &g0(), &ID1).unwrap();
     assert_eq!(d.send_bump(ID1, &payload), Err(ChatError::CannotBump));
     // Even with the next key installed, a device does not originate the bump.
     d.install_generation(ID1, chat_gen_key(&ROOT, &CID, &ID1));
-    assert_eq!(d.send_bump(ID1, &payload), Err(ChatError::CannotBump));
+    let payload = sign_bump(&seat_key(2), 2, &CID, &ID1, &ID2).unwrap();
+    assert_eq!(d.send_bump(ID2, &payload), Err(ChatError::CannotBump));
 
     // A root holder refuses a bump to the generation it is already in, and to one it has left.
     let mut a = member(0);
-    let to_gen0 = sign_bump(&seat_key(0), 0, &CID, &gen0_id(&CID)).unwrap();
-    assert_eq!(a.send_bump(gen0_id(&CID), &to_gen0), Err(ChatError::CannotBump));
-    let to_1 = sign_bump(&seat_key(0), 0, &CID, &ID1).unwrap();
+    let to_gen0 = sign_bump(&seat_key(0), 0, &CID, &g0(), &g0()).unwrap();
+    assert_eq!(a.send_bump(g0(), &to_gen0), Err(ChatError::CannotBump));
+    let to_1 = sign_bump(&seat_key(0), 0, &CID, &g0(), &ID1).unwrap();
     a.send_bump(ID1, &to_1).unwrap();
     assert_eq!(a.send_bump(ID1, &to_1), Err(ChatError::CannotBump));
-    assert_eq!(a.send_bump(gen0_id(&CID), &to_gen0), Err(ChatError::CannotBump));
+    let back_to_0 = sign_bump(&seat_key(0), 0, &CID, &ID1, &g0()).unwrap();
+    assert_eq!(a.send_bump(g0(), &back_to_0), Err(ChatError::CannotBump));
+    // A payload that moves from a generation other than the current one is refused.
+    let from_old = sign_bump(&seat_key(0), 0, &CID, &g0(), &ID2).unwrap();
+    assert_eq!(a.send_bump(ID2, &from_old), Err(ChatError::CannotBump));
     // A payload for another id is refused before anything is sent.
-    assert_eq!(a.send_bump(ID2, &to_1), Err(ChatError::BadSignature));
+    let to_2 = sign_bump(&seat_key(0), 0, &CID, &ID1, &ID2).unwrap();
+    assert_eq!(a.send_bump(ID3, &to_2), Err(ChatError::BadSignature));
     // Nothing was sent by the refusals: a's next message is counter 0 of generation ID1.
     let w = a.send(b"still here").unwrap();
     let h = parse(&w).unwrap().0;
@@ -346,7 +365,10 @@ fn a_damaged_state_does_not_import() {
     let import = |s: &[u8]| ChatSession::import_generation_state(CID, 3, 2, s).err();
     // The well-formed state imports, so each failure below is the change it makes.
     assert_eq!(import(&chs3(&[], &[(ID1, k)])), None);
-    assert_eq!(import(&chs3(&[ID2], &[(ID1, k), (ID2.map(|b| b ^ 1), k)])), None);
+    assert_eq!(
+        import(&chs3(&[ID2], &[(ID1, k), (ID2.map(|b| b ^ 1), k)])),
+        None
+    );
     // No generation, or more than two.
     assert_eq!(import(&chs3(&[], &[])), Some(ChatError::State));
     assert_eq!(
@@ -354,7 +376,10 @@ fn a_damaged_state_does_not_import() {
         Some(ChatError::State)
     );
     // The same generation twice, or a held generation also listed as dropped.
-    assert_eq!(import(&chs3(&[], &[(ID1, k), (ID1, k)])), Some(ChatError::State));
+    assert_eq!(
+        import(&chs3(&[], &[(ID1, k), (ID1, k)])),
+        Some(ChatError::State)
+    );
     assert_eq!(import(&chs3(&[ID1], &[(ID1, k)])), Some(ChatError::State));
     // More than four dropped generations.
     let five: Vec<[u8; 32]> = (0..5u8).map(|i| [0x40 + i; 32]).collect();
@@ -375,4 +400,43 @@ fn a_damaged_state_does_not_import() {
         ChatSession::import_generation_state(CID, 3, 1, &fixture("chat-v5.bin")).err(),
         Some(ChatError::State)
     );
+}
+
+#[test]
+fn a_bump_moves_only_from_the_generation_it_was_sealed_in_and_names() {
+    let mut a = member(0);
+    let mut b = member(1);
+    let first = sign_bump(&seat_key(0), 0, &CID, &g0(), &ID1).unwrap();
+    let w1 = a.send_bump(ID1, &first).unwrap();
+    b.receive(&w1).unwrap();
+    assert_eq!(b.apply_bump(g0(), ID1), Ok(true));
+    let w2 = a
+        .send_bump(ID2, &sign_bump(&seat_key(0), 0, &CID, &ID1, &ID2).unwrap())
+        .unwrap();
+    b.receive(&w2).unwrap();
+    assert_eq!(b.apply_bump(ID1, ID2), Ok(true));
+
+    // The first bump's payload sealed again in the current generation: it moves from a
+    // generation the circle left, so it is stale and moves nothing.
+    let replay = a.send_typed(MessageType::Bump, &first).unwrap();
+    let (_, got) = b.receive(&replay).unwrap();
+    let (from, to, _) = verify_bump(&got, &CID, &manifest()).unwrap();
+    assert_eq!(b.apply_bump(from, to), Ok(false));
+    assert_eq!(b.generation_id(), ID2);
+
+    // A bump that names the current generation but was sealed in the one before: stale.
+    let mut c = member(2);
+    c.receive(&w1).unwrap();
+    assert_eq!(c.apply_bump(g0(), ID1), Ok(true));
+    let sideways = sign_bump(&seat_key(0), 0, &CID, &ID2, &ID3).unwrap();
+    let in_old = c.send_typed(MessageType::Bump, &sideways).unwrap();
+    assert_eq!(b.receive(&in_old).unwrap().0.msg_type, MessageType::Bump);
+    assert_eq!(b.apply_bump(ID2, ID3), Ok(false));
+    assert_eq!(b.generation_id(), ID2);
+
+    // The same bump sealed in the generation it names moves.
+    let in_current = a.send_typed(MessageType::Bump, &sideways).unwrap();
+    b.receive(&in_current).unwrap();
+    assert_eq!(b.apply_bump(ID2, ID3), Ok(true));
+    assert_eq!(b.generation_id(), ID3);
 }
