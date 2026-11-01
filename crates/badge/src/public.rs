@@ -13,7 +13,7 @@
 //! | 3 | the signed contact card, bstr, or null |
 //! | 4 | the device grant for the paired phone, bstr, or null |
 //! | 5 | the chat generation after the pending bump, bstr 32: the one a newly paired phone fetches |
-//! | 6 | the bump the badge signed at its last unpair that a device has to post, bstr, or null. At most one: a later unpair replaces it with one bump from the same generation to its own |
+//! | 6 | the bumps the badge signed at unpairs that a device has to post, oldest first, each moving from the generation the one before moves to: an array of at most [`MAX_PENDING_BUMPS`] bstr, empty when there are none |
 //! | 7 | the badge nonce drawn at first boot, bstr 16, kept for the record (pairing draws its own) |
 //! | 8 | the paired phone's public key, bstr 33, or null |
 //!
@@ -27,6 +27,10 @@ use cahoots_core::circle_id::CircleId;
 use core::convert::Infallible;
 use minicbor::data::Type;
 use minicbor::{Decoder, Encoder};
+
+/// The most bumps a public object carries. See `crate::Badge::unpair` for how a list at the cap
+/// is shortened.
+pub const MAX_PENDING_BUMPS: usize = 4;
 
 /// The most bytes a public object holds.
 pub const MAX_PUBLIC: usize = 8192;
@@ -46,8 +50,8 @@ pub struct PublicObject {
     pub grant: Option<Vec<u8>>,
     /// The generation after the pending bump.
     pub generation: [u8; 32],
-    /// The bump the badge signed and no device is known to have posted.
-    pub pending_bump: Option<Vec<u8>>,
+    /// The bumps the badge signed and no device is known to have posted, oldest first.
+    pub pending_bumps: Vec<Vec<u8>>,
     pub badge_nonce: [u8; 16],
     pub phone_public: Option<[u8; 33]>,
 }
@@ -84,8 +88,10 @@ impl PublicObject {
         e.u8(4)?;
         opt(e, self.grant.as_deref())?;
         e.u8(5)?.bytes(&self.generation)?;
-        e.u8(6)?;
-        opt(e, self.pending_bump.as_deref())?;
+        e.u8(6)?.array(self.pending_bumps.len() as u64)?;
+        for b in &self.pending_bumps {
+            e.bytes(b)?;
+        }
         e.u8(7)?.bytes(&self.badge_nonce)?;
         e.u8(8)?;
         opt(e, self.phone_public.as_ref().map(|p| p.as_slice()))?;
@@ -146,7 +152,14 @@ impl PublicObject {
         key(&mut d, 5)?;
         let generation: [u8; 32] = fixed(&mut d, 32)?.try_into().map_err(|_| Malformed)?;
         key(&mut d, 6)?;
-        let pending_bump = opt(&mut d)?;
+        let n = d.array().map_err(|_| Malformed)?.ok_or(Malformed)?;
+        if n > MAX_PENDING_BUMPS as u64 {
+            return Err(Malformed);
+        }
+        let mut pending_bumps = Vec::new();
+        for _ in 0..n {
+            pending_bumps.push(d.bytes().map_err(|_| Malformed)?.to_vec());
+        }
         key(&mut d, 7)?;
         let badge_nonce: [u8; 16] = fixed(&mut d, 16)?.try_into().map_err(|_| Malformed)?;
         key(&mut d, 8)?;
@@ -162,7 +175,7 @@ impl PublicObject {
             card,
             grant,
             generation,
-            pending_bump,
+            pending_bumps,
             badge_nonce,
             phone_public,
         };

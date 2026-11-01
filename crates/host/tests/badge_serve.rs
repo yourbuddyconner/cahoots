@@ -177,6 +177,7 @@ fn a_host_board_keeps_the_chip_slot_the_root_and_the_chip_record() {
         generation: cahoots_badge::chip::GENERATION,
         stuck: None,
         pending_unpair: None,
+        paired_since_bump: None,
     };
     board.chip_record_store(&record).unwrap();
     assert_eq!(board.chip_record_load(), Ok(Some(record.clone())));

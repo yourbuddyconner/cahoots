@@ -156,16 +156,17 @@ pub const RECORD_MAGIC: &[u8; 5] = b"CAHC2";
 /// CBOR ([`crate::pairing::Inbox`]).
 pub const INBOX_LEN: usize = 256;
 
-/// One bump signed at an unpair, kept in the chip record until its circle's public object
-/// carries it: the circle slot, the generation it moves to, and the payload.
+/// One circle's bumps after an unpair, kept in the chip record until its public object carries
+/// them: the circle slot, the generation the last moves to, and the whole list for field 6,
+/// oldest first.
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
 pub struct PendingBump {
     #[n(0)]
     pub slot: u8,
     #[cbor(n(1), with = "minicbor::bytes")]
     pub to: [u8; 32],
-    #[cbor(n(2), with = "minicbor::bytes")]
-    pub payload: Vec<u8>,
+    #[n(2)]
+    pub bumps: Vec<minicbor::bytes::ByteVec>,
 }
 
 /// The phone paired to this badge.
@@ -198,6 +199,10 @@ pub struct ChipRecord {
     /// circle's public object, and the entry goes once every one is written.
     #[n(5)]
     pub pending_unpair: Option<Vec<PendingBump>>,
+    /// The circle slots where a phone was paired since the circle's last bump was made: that
+    /// phone may have posted it, so the next unpair appends rather than replaces. In order.
+    #[n(6)]
+    pub paired_since_bump: Option<Vec<u8>>,
 }
 
 /// The record of earlier firmware, which only [`ChipRecord::from_stored`] reads, to know it.
@@ -224,7 +229,11 @@ impl ChipRecord {
             .stuck
             .as_ref()
             .is_none_or(|v| !v.is_empty() && v.windows(2).all(|w| w[0] < w[1]));
-        let unpair_ok = r.pending_unpair.as_ref().is_none_or(|v| !v.is_empty());
+        let unpair_ok = r.pending_unpair.as_ref().is_none_or(|v| !v.is_empty())
+            && r
+                .paired_since_bump
+                .as_ref()
+                .is_none_or(|v| !v.is_empty() && v.windows(2).all(|w| w[0] < w[1]));
         if r.encode() != bytes
             || r.slots.windows(2).any(|w| w[0].slot >= w[1].slot)
             || !stuck_ok
@@ -267,6 +276,22 @@ impl ChipRecord {
     /// True for the record of a chip the badge refused for good.
     pub fn is_refused(&self) -> bool {
         self.generation == REFUSED_GENERATION
+    }
+
+    /// True if a phone was paired since circle slot `slot`'s last bump was made.
+    pub fn paired_since_bump(&self, slot: u8) -> bool {
+        self.paired_since_bump.as_ref().is_some_and(|v| v.contains(&slot))
+    }
+
+    /// Mark or unmark circle slot `slot` as having had a phone paired since its last bump.
+    pub fn set_paired_since_bump(&mut self, slot: u8, paired: bool) {
+        let mut v = self.paired_since_bump.take().unwrap_or_default();
+        v.retain(|&s| s != slot);
+        if paired {
+            v.push(slot);
+            v.sort_unstable();
+        }
+        self.paired_since_bump = (!v.is_empty()).then_some(v);
     }
 
     /// True if a wipe left an object in circle slot `slot`.
@@ -759,5 +784,6 @@ pub fn first_boot(
         generation: GENERATION,
         stuck: None,
         pending_unpair: None,
+        paired_since_bump: None,
     })
 }

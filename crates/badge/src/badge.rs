@@ -490,7 +490,7 @@ impl<B: Board> Badge<B> {
         c: &Circle,
         generation: [u8; 32],
         grant: Option<Vec<u8>>,
-        pending_bump: Option<Vec<u8>>,
+        pending_bumps: Vec<Vec<u8>>,
         phone_public: Option<[u8; 33]>,
     ) -> PublicObject {
         PublicObject {
@@ -504,7 +504,7 @@ impl<B: Board> Badge<B> {
                 .map(|(_, card)| card.clone()),
             grant,
             generation,
-            pending_bump,
+            pending_bumps,
             badge_nonce: record.badge_nonce,
             phone_public,
         }
@@ -700,11 +700,12 @@ impl<B: Board> Badge<B> {
                 return Err(BadgeError::Chip(e));
             }
             let old = chip.read_binary(chip::public_id(*slot)).ok();
-            // A bump signed at an earlier unpair stays for this phone to post.
+            // Bumps signed at earlier unpairs stay, in order, for this phone to post.
             let pending = old
                 .as_deref()
                 .and_then(|b| PublicObject::decode(b).ok())
-                .and_then(|o| o.pending_bump);
+                .map(|o| o.pending_bumps)
+                .unwrap_or_default();
             let generation = Self::generation_of(&record, *slot, c);
             let object =
                 self.public_object(&record, c, generation, Some(grant), pending, Some(inbox.public));
@@ -742,6 +743,10 @@ impl<B: Board> Badge<B> {
             }
         }
         record.generation = chip::GENERATION;
+        // This phone may post the pending bumps: the next unpair must not replace them.
+        for (slot, _) in &circles {
+            record.set_paired_since_bump(*slot, true);
+        }
         record.phone = Some(PhoneSlot {
             name: inbox.name.clone(),
             public: inbox.public,
@@ -822,27 +827,46 @@ impl<B: Board> Badge<B> {
         }
         let mut bumps = Vec::new();
         for ((slot, c), to) in circles.iter().zip(ids) {
-            let mut from = Self::generation_of(&record, *slot, c);
+            let from = Self::generation_of(&record, *slot, c);
             let chip = self.board.chip_begin().ok_or(BadgeError::NoChip)?;
-            // A bump W to X still pending is replaced by one bump W to the new generation, so
-            // a circle has at most one: members are still in W, and X was never posted to.
-            if let Some(p) = chip::read_public(chip, *slot).ok().flatten().and_then(|o| o.pending_bump) {
-                if p.get(32..64) == Some(&from[..]) {
-                    if let Some(w) = p.get(..32).and_then(|w| <[u8; 32]>::try_from(w).ok()) {
-                        from = w;
-                    }
+            let mut list = chip::read_public(chip, *slot)
+                .ok()
+                .flatten()
+                .map(|o| o.pending_bumps)
+                .unwrap_or_default();
+            match list.last().map(|b| bump_ends(b)) {
+                // The last bump W to X moves to the generation the record has: replace it with
+                // W to the new one if no phone was paired since, which nobody can have posted.
+                Some(Some((w, x))) if x == from && !record.paired_since_bump(*slot) => {
+                    list.pop();
+                    list.push(self.sign_bump_in_chip(*slot, c, &w, &to)?);
+                }
+                // A phone paired since may have posted it: add X to the new one after it.
+                Some(Some((_, x))) if x == from => {
+                    list.push(self.sign_bump_in_chip(*slot, c, &from, &to)?);
+                }
+                // No bump, or one that does not end where the record is: start again.
+                _ => {
+                    list.clear();
+                    list.push(self.sign_bump_in_chip(*slot, c, &from, &to)?);
                 }
             }
-            let mut signer = ChipSeat::new(chip, KeyId::new(KeyKind::Seat, *slot));
-            let payload = cahoots_chat::sign_bump(&mut signer, c.seat, &c.circle_id, &from, &to);
-            if let Some(e) = signer.error {
-                return Err(BadgeError::Chip(e));
+            // At the cap the two oldest, A to B and B to C, become one, A to C. Members already
+            // in B, who followed A to B and not B to C, are stranded by that: it needs four
+            // cycles of pairing a phone that never taps and unpairing it, with nobody posting
+            // in between. A reset by any member with the root (a bump of its own) recovers
+            // them.
+            while list.len() > crate::public::MAX_PENDING_BUMPS {
+                let (a, _) = bump_ends(&list[0]).ok_or(BadgeError::Bump)?;
+                let (_, cc) = bump_ends(&list[1]).ok_or(BadgeError::Bump)?;
+                let joined = self.sign_bump_in_chip(*slot, c, &a, &cc)?;
+                list.splice(0..2, [joined]);
             }
-            let payload = payload.map_err(|_| BadgeError::Bump)?;
+            record.set_paired_since_bump(*slot, false);
             bumps.push(chip::PendingBump {
                 slot: *slot,
                 to,
-                payload,
+                bumps: list.into_iter().map(Into::into).collect(),
             });
         }
         // The unpair is stored before anything is touched, flagged for the slot.
@@ -900,7 +924,7 @@ impl<B: Board> Badge<B> {
             let circle = circles.iter().find(|c| c.chip_slot == Some(b.slot));
             let object = match (old, circle) {
                 (Some(mut o), _) => {
-                    o.pending_bump = Some(b.payload.clone());
+                    o.pending_bumps = b.bumps.iter().map(|x| x.to_vec()).collect();
                     o.generation = b.to;
                     // A phone paired since keeps its grant and its key here.
                     if record.phone.is_none() {
@@ -911,7 +935,8 @@ impl<B: Board> Badge<B> {
                 }
                 (None, Some(c)) => {
                     let phone = record.phone.as_ref().map(|p| p.public);
-                    self.public_object(record, c, b.to, None, Some(b.payload.clone()), phone)
+                    let list = b.bumps.iter().map(|x| x.to_vec()).collect();
+                    self.public_object(record, c, b.to, None, list, phone)
                 }
                 (None, None) => {
                     self.board.log(&format!(
@@ -946,6 +971,23 @@ impl<B: Board> Badge<B> {
             self.board.log("chip record: write failed");
         }
         n
+    }
+
+    /// A bump from `from` to `to` in circle `c`, signed with its seat key in slot `slot`.
+    fn sign_bump_in_chip(
+        &mut self,
+        slot: u8,
+        c: &Circle,
+        from: &[u8; 32],
+        to: &[u8; 32],
+    ) -> Result<Vec<u8>, BadgeError> {
+        let chip = self.board.chip_begin().ok_or(BadgeError::NoChip)?;
+        let mut signer = ChipSeat::new(chip, KeyId::new(KeyKind::Seat, slot));
+        let payload = cahoots_chat::sign_bump(&mut signer, c.seat, &c.circle_id, from, to);
+        if let Some(e) = signer.error {
+            return Err(BadgeError::Chip(e));
+        }
+        payload.map_err(|_| BadgeError::Bump)
     }
 
     /// At boot: finish an unpair a cut-off conversation left under way.
@@ -1558,7 +1600,7 @@ impl<B: Board> Badge<B> {
             card: None,
             grant,
             generation: gen0_id(&circle_id),
-            pending_bump: None,
+            pending_bumps: Vec::new(),
             badge_nonce: record.badge_nonce,
             phone_public: phone.map(|p| p.public),
         };
@@ -2663,6 +2705,15 @@ fn fresh_nonce<B: Board>(board: &mut B) -> Option<[u8; 16]> {
             None
         }
     }
+}
+
+/// The generations a bump payload moves from and to: its first 64 bytes. The badge reads only
+/// bumps it signed itself, from its own public objects.
+fn bump_ends(payload: &[u8]) -> Option<([u8; 32], [u8; 32])> {
+    Some((
+        payload.get(..32)?.try_into().ok()?,
+        payload.get(32..64)?.try_into().ok()?,
+    ))
 }
 
 /// Send `response` back as a response frame echoing the request's `seq`.

@@ -368,8 +368,9 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
         pending_unpair: Some(vec![cahoots_badge::chip::PendingBump {
             slot: 3,
             to: [4; 32],
-            payload: vec![1, 2, 3],
+            bumps: vec![vec![1, 2, 3].into()],
         }]),
+        paired_since_bump: Some(vec![3]),
     };
     let bytes = r.encode();
     assert_eq!(ChipRecord::decode(&bytes), Ok(r.clone()));
@@ -400,6 +401,7 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
     let mut plain = r.clone();
     plain.stuck = None;
     plain.pending_unpair = None;
+    plain.paired_since_bump = None;
     assert_eq!(plain.encode()[0], 0x84);
     let mut cut = stored.clone();
     cut.pop();
