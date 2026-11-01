@@ -3,13 +3,30 @@ import SwiftUI
 /// The two taps of pairing with a badge, as the pairing screen asks for them. `Core` does them
 /// on the phone's queue; the tests stand in for it.
 protocol CardPairing: Sendable {
+    /// Face ID or the passcode, before the first tap, so the tap itself asks nothing while
+    /// the phone is held to the badge. `endAuthorization` follows, tap or no tap.
+    func authorizeForPairing() async throws
+    func endAuthorization()
     /// The first tap: the badge's name, how many circles it holds, and the six words.
     func startPairing(name: String) async throws -> PairPreview
     /// The second tap, after both buttons on the badge: the names of the circles kept.
     func finishPairing() async throws -> [String]
 }
 
+extension CardPairing {
+    func authorizeForPairing() async throws {}
+    func endAuthorization() {}
+}
+
 extension Core: CardPairing {
+    func authorizeForPairing() async throws {
+        try await signer.authorize(reason: "Pair this phone with a badge")
+    }
+
+    func endAuthorization() {
+        signer.endBatch()
+    }
+
     func startPairing(name: String) async throws -> PairPreview {
         try await run { try $0.pairCardStart(name: name) }
     }
@@ -49,6 +66,8 @@ final class PairCardModel: ObservableObject {
         defer { working = false }
         error = nil
         do {
+            try await pairing.authorizeForPairing()
+            defer { pairing.endAuthorization() }
             step = .check(try await pairing.startPairing(name: name))
         } catch {
             self.error = plain(error)

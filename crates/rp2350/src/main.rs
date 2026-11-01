@@ -210,9 +210,11 @@ fn main() -> ! {
     // a chip answers at all. No answer leaves the badge without a chip: seat keys and roots
     // stay in software, as before the chip.
     let mut ena = pins.gpio2.into_push_pull_output_in_state(hal::gpio::PinState::High);
+    // The Click board's 3.3 V through a PNP transistor (S8550 on the bench): low powers it.
+    let rail = pins.gpio3.into_push_pull_output_in_state(hal::gpio::PinState::Low);
     let sda: board::Sda = pins.gpio8.reconfigure();
     let scl: board::Scl = pins.gpio9.reconfigure();
-    let i2c = hal::I2C::i2c0(pac.I2C0, sda, scl, 400.kHz(), &mut pac.RESETS, &clocks.system_clock);
+    let i2c = hal::I2C::i2c0_with_external_pull_up(pac.I2C0, sda, scl, 400.kHz(), &mut pac.RESETS, &clocks.system_clock);
     {
         let mut d = timer;
         d.delay_ms(board::CHIP_START_MS);
@@ -284,6 +286,8 @@ fn main() -> ! {
         pending: None,
         chip,
         chip_enable: ena,
+        chip_rail: rail,
+        tap_open: false,
         chip_up: false,
         chip_held: false,
         owner_secret,
@@ -293,10 +297,6 @@ fn main() -> ! {
         bench_raw: None,
         #[cfg(feature = "bench")]
         bench_window: false,
-        #[cfg(feature = "bench")]
-        bench_pulse: None,
-        #[cfg(feature = "bench")]
-        bench_boots: 0,
     });
     badge.boot();
     loop {

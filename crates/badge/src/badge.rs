@@ -2434,6 +2434,7 @@ impl<B: Board> Badge<B> {
     fn pair_start(&mut self, index: usize) -> Idle<B> {
         match self.pair_open() {
             Ok(_) => {
+                self.board.tap_begin();
                 show(&mut self.board, screens::pair_wait(None));
                 Idle::PairWait { index }
             }
@@ -2490,11 +2491,14 @@ impl<B: Board> Badge<B> {
             Press::Both => {
                 let name = screens::phone_name(&inbox.name);
                 match self.pair_accept(inbox) {
-                    Ok(()) => self.note(&[&format!("paired with {name}"), "tap the phone again"], index),
-                    Err(BadgeError::NotAllUpdated) => self.note(
-                        &[&format!("paired with {name}"), "some circles not updated"],
-                        index,
-                    ),
+                    Ok(()) => {
+                        self.board.tap_begin();
+                        self.note(&[&format!("paired with {name}"), "tap the phone again"], index)
+                    }
+                    Err(BadgeError::NotAllUpdated) => {
+                        self.board.tap_begin();
+                        self.note(&[&format!("paired with {name}"), "some circles not updated"], index)
+                    }
                     Err(BadgeError::ChipHeld) => self.note(&[RESTART], index),
                     Err(BadgeError::UnpairUnfinished) => self.note(
                         &["finish the last unpair first, turn the badge off and on"],
@@ -2535,6 +2539,8 @@ impl<B: Board> Badge<B> {
     }
 
     fn show_chooser(&mut self, index: usize) {
+        // The list is where every tap page ends: the chip gets its power back here.
+        self.board.tap_end();
         let names = self.chooser_names();
         let title = if self.chip_held { "chip needs a restart" } else { "circles" };
         show(&mut self.board, screens::chooser_titled(title, &names, index));
@@ -2562,6 +2568,7 @@ impl<B: Board> Badge<B> {
             Press::Both if self.chooser_names()[index] == PAIR_PHONE => self.pair_start(index),
             Press::Both if self.chooser_names()[index] == PHONE => match self.paired_phone() {
                 Some(name) => {
+                    self.board.tap_begin();
                     show(&mut self.board, screens::phone_page(&name));
                     Idle::Phone { index }
                 }

@@ -213,6 +213,11 @@ pub struct FakeBoard {
     /// Set when the badge held the chip until a restart: the pin stays high and the board no
     /// longer hands the chip out. [`FakeBoard::power_cycle`] clears it.
     pub chip_held: bool,
+    /// True while the badge has cut the chip's power for a phone's tap (`tap_begin` to
+    /// `tap_end`), as the firmware does on the pages where a phone taps.
+    pub tap_open: bool,
+    /// How many times the badge has cut the chip's power for a tap.
+    pub taps_begun: u32,
     /// The chip record as stored, as a board keeps it (`CAHC2` and the CBOR).
     pub chip_record: Option<Vec<u8>>,
     /// The grants record as stored, its CBOR encoding.
@@ -349,6 +354,8 @@ impl FakeBoard {
             pin_log: Vec::new(),
             chip_refused: false,
             chip_held: false,
+            tap_open: false,
+            taps_begun: 0,
             chip_record: None,
             grants: None,
             uptime: 0,
@@ -605,6 +612,17 @@ impl Board for FakeBoard {
     }
     fn chip_hold(&mut self) {
         self.chip_held = true;
+    }
+    fn tap_begin(&mut self) {
+        if self.tap_open || self.chip_held {
+            return;
+        }
+        self.chip_end();
+        self.tap_open = true;
+        self.taps_begun += 1;
+    }
+    fn tap_end(&mut self) {
+        self.tap_open = false;
     }
     fn chip_unusable(&mut self) {
         self.chip_end();

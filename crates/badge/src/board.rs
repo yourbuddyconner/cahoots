@@ -430,6 +430,15 @@ pub trait Board {
     fn chip_hold(&mut self) {
         self.chip_unusable();
     }
+    /// Give the chip to a phone: end any conversation and cut the chip's power, so that the
+    /// phone's field is what starts it. The chip takes its antenna only when the field boots
+    /// it; a chip the board powers boots onto the wire and a tap finds no tag. The badge
+    /// calls this on the pages where a phone taps and [`Board::tap_end`] when it leaves them.
+    /// A board gives the chip power again before any conversation of its own. The default,
+    /// for a board without a power switch, does nothing.
+    fn tap_begin(&mut self) {}
+    /// Power the chip again after [`Board::tap_begin`]. Nothing happens if no tap was begun.
+    fn tap_end(&mut self) {}
     /// The secret of the chip's owner object, the badge's identity to its chip: the one the
     /// chip's owner object opened with, once a conversation has found out, where a board
     /// keeps an older secret beside the current one. `None` on a board without a chip.

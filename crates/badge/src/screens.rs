@@ -376,8 +376,8 @@ pub fn phone_page(name: &str) -> Screen {
     let mut s = Draw::new();
     s.title("phone");
     s.centered(&FONT_9X18_BOLD, 46, &fit("", &phone_name(name), "", cols(&FONT_9X18_BOLD)));
-    s.centered(&FONT_8X13, 80, "reads and posts in");
-    s.centered(&FONT_8X13, 96, "this badge's circles");
+    s.centered(&FONT_8X13, 80, "hold the phone to the chip");
+    s.centered(&FONT_8X13, 96, "for its taps");
     s.centered(&FONT_8X13, 124, "unpairing ends its taps");
     s.footer(Some("back"), Some("A+B  unpair"), Some("back"));
     s.done()

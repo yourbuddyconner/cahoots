@@ -946,6 +946,8 @@ fn pairing_from_the_list_shows_the_name_and_the_six_words() {
     press(&mut b1, Press::Both);
     assert!(b1.board().shows("hold the phone"), "{:?}", b1.board().last());
     assert!(!b1.board().pin_high());
+    // The page cuts the chip's power, so the phone's field is what starts the chip.
+    assert!(b1.board().tap_open);
     assert_ne!(tapped_nonce(&mut b1), [0; 16]);
     // Both before a tap: nothing there yet.
     press(&mut b1, Press::Both);
@@ -990,10 +992,14 @@ fn pairing_from_the_list_shows_the_name_and_the_six_words() {
     assert_eq!(b1.paired_phone().as_deref(), Some("Conner's phone"));
     assert_eq!(tapped_nonce(&mut b1), [0; 16]);
     assert!(!b1.board().pin_high());
+    // "tap the phone again": the chip's power is cut for that second tap.
+    assert!(b1.board().tap_open);
 
-    // Back on the list, "pair a phone" says to unpair first, and "phone" is there.
+    // Back on the list, "pair a phone" says to unpair first, and "phone" is there. The list
+    // gives the chip its power back.
     press(&mut b1, Press::Right);
     assert!(b1.board().shows("> pair a phone"));
+    assert!(!b1.board().tap_open);
     press(&mut b1, Press::Both);
     assert!(b1.board().shows("unpair the current phone first"));
     press(&mut b1, Press::Right);
@@ -1001,6 +1007,9 @@ fn pairing_from_the_list_shows_the_name_and_the_six_words() {
     assert!(b1.board().shows("> phone"), "{:?}", b1.board().last());
     press(&mut b1, Press::Both);
     assert!(b1.board().shows("Conner's phone"), "{:?}", b1.board().last());
+    // The phone's page is where its later taps happen: the chip's power is cut here too.
+    assert!(b1.board().shows("hold the phone to the chip"), "{:?}", b1.board().last());
+    assert!(b1.board().tap_open);
     // Left goes back without unpairing.
     press(&mut b1, Press::Left);
     assert_eq!(b1.paired_phone().as_deref(), Some("Conner's phone"));

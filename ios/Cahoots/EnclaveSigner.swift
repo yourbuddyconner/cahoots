@@ -90,6 +90,28 @@ final class EnclaveSigner: Signer {
         batchDepth += 1
     }
 
+    /// Ask for Face ID or the passcode now and open a batch with the proof, so a signature
+    /// made inside a tap does not ask while the phone is held to a badge, where the camera
+    /// cannot see a face. `endBatch` lets the proof go. Without the enclave there is nothing
+    /// to ask for and only the batch opens.
+    func authorize(reason: String) async throws {
+        guard usesEnclave else {
+            beginBatch()
+            return
+        }
+        let context = LAContext()
+        context.localizedReason = reason
+        do {
+            _ = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
+        } catch {
+            throw mapped(error)
+        }
+        batchLock.lock()
+        defer { batchLock.unlock() }
+        if batchDepth == 0 { batchContext = context }
+        batchDepth += 1
+    }
+
     /// Let the batch's context go. The next signature asks again.
     func endBatch() {
         batchLock.lock()

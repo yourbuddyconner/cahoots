@@ -23,14 +23,16 @@ use cahoots_core::circle_id::CircleId;
 use cahoots_hal::health::Tested;
 use cahoots_hal::{Display, Link};
 use embedded_hal::delay::DelayNs;
-use rp235x_hal::gpio::bank0::{Gpio2, Gpio8, Gpio9};
-use rp235x_hal::gpio::{FunctionI2C, FunctionSioOutput, Pin, PullDown, PullUp};
+use rp235x_hal::gpio::bank0::{Gpio2, Gpio3, Gpio8, Gpio9};
+use rp235x_hal::gpio::{FunctionI2C, FunctionSioOutput, Pin, PullDown, PullNone};
 use rp235x_hal::pac::I2C0;
 use rp235x_hal::timer::{CopyableTimer0, Timer};
 
 /// The SE051's bus: I2C0 on GP8 (SDA) and GP9 (SCL).
-pub type Sda = Pin<Gpio8, FunctionI2C, PullUp>;
-pub type Scl = Pin<Gpio9, FunctionI2C, PullUp>;
+// No pull-ups on the Pico's side: the Click board has its own, and a pull-up here would
+// feed the chip through its data pads while its power is cut for a phone's tap.
+pub type Sda = Pin<Gpio8, FunctionI2C, PullNone>;
+pub type Scl = Pin<Gpio9, FunctionI2C, PullNone>;
 pub type ChipBus = rp235x_hal::I2C<I2C0, (Sda, Scl)>;
 /// The SE051 through the `se05x` driver.
 pub type Chip = Se05xChip<ChipBus, Timer<CopyableTimer0>>;
@@ -56,6 +58,13 @@ pub struct PicoBoard {
     /// antenna; high only between `chip_begin` and `chip_end`, when the chip answers on I2C
     /// alone and a tap finds no tag.
     pub chip_enable: Pin<Gpio2, FunctionSioOutput, PullDown>,
+    /// The Click board's 3.3 V, through a PNP transistor whose base this pin drives: low
+    /// powers the board, high cuts it. A phone's tap reaches the chip only while it is cut,
+    /// since a chip the badge powers boots onto the wire. Without the transistor the pin
+    /// does nothing and the chip stays powered.
+    pub chip_rail: Pin<Gpio3, FunctionSioOutput, PullDown>,
+    /// True while the chip's power is cut for a phone's tap (`tap_begin` to `tap_end`).
+    pub tap_open: bool,
     /// True while the pin is high.
     pub chip_up: bool,
     /// The badge held the chip until a restart: the pin stays high and no conversation ends
@@ -80,13 +89,6 @@ pub struct PicoBoard {
     /// powered. Set by the laptop's window request, cleared by its first APDU or the idle.
     #[cfg(feature = "bench")]
     pub bench_window: bool,
-    /// Bench builds: when the window last restarted the chip. The chip chooses its interface
-    /// as it boots, so the window boots it again and again until a phone's field is there.
-    #[cfg(feature = "bench")]
-    pub bench_pulse: Option<crate::clock::Instant>,
-    /// Bench builds: how many times the window has booted the chip.
-    #[cfg(feature = "bench")]
-    pub bench_boots: u32,
 }
 
 impl PicoBoard {
@@ -267,10 +269,32 @@ impl Board for PicoBoard {
         if self.chip_held {
             return None;
         }
+        self.tap_end();
         // The badge's own conversation starts on a chip that the laptop's session is gone from.
         #[cfg(feature = "bench")]
         self.chip_raw_end();
         self.wake().map(|c| c as &mut dyn ChipOps)
+    }
+
+    fn tap_begin(&mut self) {
+        if self.tap_open || self.chip_held || self.chip.is_none() {
+            return;
+        }
+        self.chip_end();
+        let _ = self.chip_enable.set_low();
+        let _ = self.chip_rail.set_high();
+        self.tap_open = true;
+        log!("se051: power cut for a phone's tap");
+    }
+
+    fn tap_end(&mut self) {
+        if !self.tap_open {
+            return;
+        }
+        let _ = self.chip_rail.set_low();
+        self.tap_open = false;
+        self.delay.delay_ms(RAIL_START_MS);
+        log!("se051: power back");
     }
 
     /// Close the session and drop the pin.
@@ -464,14 +488,6 @@ pub const BENCH_PIN_TEST: u8 = 0x02;
 #[cfg(feature = "bench")]
 pub const BENCH_START_TIME: u8 = 0x03;
 
-/// Inside a window the chip is booted again this often, so that a phone's field present at
-/// one of those boots is what the chip chooses.
-#[cfg(feature = "bench")]
-const BENCH_PULSE_EVERY: crate::clock::Duration = crate::clock::Duration::from_millis(250);
-
-/// How long the pin stays low at each of those boots: long enough for a power-down.
-#[cfg(feature = "bench")]
-const BENCH_PULSE_LOW_MS: u32 = 30;
 
 #[cfg(feature = "bench")]
 impl PicoBoard {
@@ -482,21 +498,16 @@ impl PicoBoard {
         if self.chip.is_none() || self.chip_held || self.chip_up {
             return None;
         }
-        if self.bench_raw.is_none() || self.bench_window {
-            if !self.bench_window {
-                let _ = self.chip_enable.set_high();
-                log!("bench: pin high for the laptop, no session");
-                self.delay.delay_ms(CHIP_START_MS);
-            } else {
-                log!("bench: the laptop speaks on the wire inside the window");
-                self.bench_window = false;
-                self.bench_pulse = None;
-                // The chip may have booted onto the antenna: boot it again for the wire.
-                let _ = self.chip_enable.set_low();
-                self.delay.delay_ms(BENCH_PULSE_LOW_MS);
-                let _ = self.chip_enable.set_high();
-                self.delay.delay_ms(CHIP_START_MS);
-            }
+        if self.bench_window {
+            log!("bench: the laptop speaks on the wire inside the window, which ends");
+            self.tap_end();
+            self.bench_window = false;
+            self.bench_raw = None;
+        }
+        if self.bench_raw.is_none() {
+            let _ = self.chip_enable.set_high();
+            log!("bench: pin high for the laptop, no session");
+            self.delay.delay_ms(CHIP_START_MS);
             if let Err(e) = self.chip.as_mut()?.restart() {
                 log!("bench: the chip did not answer after the pin rose ({e:?})");
                 let _ = self.chip_enable.set_low();
@@ -513,17 +524,18 @@ impl PicoBoard {
         if self.bench_raw.take().is_some() {
             let _ = self.chip_enable.set_low();
             if self.bench_window {
-                log!("bench: the window booted the chip {} times", self.bench_boots);
+                self.bench_window = false;
+                self.tap_end();
+                log!("bench: the window is over");
             }
-            self.bench_window = false;
-            self.bench_pulse = None;
             log!("bench: pin low, the laptop's exchange is over");
             self.delay.delay_ms(BENCH_RAW_GAP_MS);
         }
     }
 
-    /// Raise the pin and say nothing on the wire, so a phone's field is the first thing the
-    /// powered chip hears. For finding out whether the chip then takes the antenna.
+    /// Cut the chip's power for a phone's tap, as the badge's own tap pages do, and keep it
+    /// cut until the laptop's next APDU or the idle. For checking the power switch on the
+    /// bench: a phone's NFC check should find the chip while the window is open.
     fn chip_window(&mut self) {
         if self.chip.is_none() || self.chip_held || self.chip_up {
             log!("bench: no window, the badge holds its chip");
@@ -532,12 +544,10 @@ impl PicoBoard {
         if self.bench_raw.is_some() {
             self.chip_raw_end();
         }
-        let _ = self.chip_enable.set_high();
+        self.tap_begin();
         self.bench_raw = Some(crate::clock::Instant::now());
-        self.bench_pulse = Some(crate::clock::Instant::now());
-        self.bench_boots = 0;
         self.bench_window = true;
-        log!("bench: pin high, the wire silent, the chip booted every 250 ms until one boot takes the antenna, a phone may tap");
+        log!("bench: window open, the chip's power is cut, a phone may tap");
     }
 
     /// With the pin low for 200 ms, ask the chip for its version over the wire. A chip whose
@@ -597,29 +607,6 @@ impl PicoBoard {
         self.delay.delay_ms(BENCH_RAW_GAP_MS);
     }
 
-    /// Boot the chip again inside a window, so it looks for a phone's field afresh. After
-    /// each boot the badge asks the chip for its version over the wire. A chip that answers
-    /// booted onto the wire, so the next boot follows. A chip that does not answer took the
-    /// antenna, which it only does when a phone's field was there at boot: the window then
-    /// leaves it powered and silent for the phone, and stops booting it.
-    fn chip_pulse(&mut self) {
-        if !self.bench_window || !self.bench_pulse.is_some_and(|t| t.elapsed() > BENCH_PULSE_EVERY) {
-            return;
-        }
-        let _ = self.chip_enable.set_low();
-        self.delay.delay_ms(BENCH_PULSE_LOW_MS);
-        let _ = self.chip_enable.set_high();
-        self.delay.delay_ms(CHIP_START_MS);
-        self.bench_boots += 1;
-        let on_wire = self.chip.as_mut().map(|c| c.restart().is_ok()).unwrap_or(false);
-        if on_wire {
-            self.bench_pulse = Some(crate::clock::Instant::now());
-        } else {
-            log!("bench: boot {} did not answer the wire: the chip took the antenna, left powered for the phone", self.bench_boots);
-            self.bench_pulse = None;
-        }
-    }
-
     /// Answer the laptop's APDUs. Between the badge's own conversations only: while one is
     /// open the APDUs wait for its end.
     fn bench_serve(&mut self) {
@@ -630,7 +617,6 @@ impl PicoBoard {
         if self.bench_raw.is_some_and(|t| t.elapsed() > idle) {
             self.chip_raw_end();
         }
-        self.chip_pulse();
         while let Some(apdu) = link::bench_apdu() {
             if apdu.is_empty() {
                 self.chip_raw_end();
@@ -675,6 +661,10 @@ impl PicoBoard {
 /// How long the pin stays low after the laptop's exchange, so the chip powers down.
 #[cfg(feature = "bench")]
 const BENCH_RAW_GAP_MS: u32 = 100;
+
+/// The Click board's rail wants this long after the transistor turns on, before the enable
+/// pin may rise.
+const RAIL_START_MS: u32 = 20;
 
 /// The chip wants this long after its enable pin rises before it answers. From a real
 /// power-down (the pin low with the Click board's ENA SEL switch on EN) the bench chip first
