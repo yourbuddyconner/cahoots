@@ -239,6 +239,10 @@ impl ObjectPolicy {
 /// The badge's owner secret from the board's unique id:
 /// `HKDF-SHA256(ikm = board_id, salt = "cahoots/owner/v1", info = empty)`, 16 bytes. A
 /// reflash recovers it, so nothing has to be stored.
+///
+/// The risk, accepted for V1: the board id is exposed only to someone with USB access to the
+/// board, which already allows a reflash, and a badge whose id has leaked must be retired. V2
+/// adds a random input kept in the RP2350's OTP.
 pub fn owner_secret(board_id: &[u8]) -> [u8; 16] {
     let mut extract = <Hmac<Sha256> as Mac>::new_from_slice(b"cahoots/owner/v1")
         .expect("HMAC takes a key of any length");

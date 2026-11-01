@@ -254,6 +254,11 @@ impl Board for PicoBoard {
         log!("se051: pin low");
     }
 
+    fn chip_unusable(&mut self) {
+        self.chip_end();
+        self.chip = None;
+    }
+
     fn owner_secret(&self) -> Option<[u8; 16]> {
         self.owner_secret
     }

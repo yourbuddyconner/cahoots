@@ -21,11 +21,11 @@ fn id(kind: KeyKind, slot: u8) -> KeyId {
     KeyId::new(kind, slot)
 }
 
-/// The chip's objects that belong to circles: all but the owner object, the phone slot and
-/// the inbox.
+/// The chip's objects that belong to circles: all but the owner object, the phone slot, the
+/// inbox and the grant issue counter.
 fn circle_objects(b: &mut Badge<FakeBoard>) -> Vec<KeyId> {
     let ids = b.board().owner_chip().ids().unwrap();
-    ids.into_iter().filter(|id| !id.is_badge_wide()).collect()
+    ids.into_iter().filter(|id| id.circle_slot().is_some()).collect()
 }
 
 fn has_seat(b: &mut Badge<FakeBoard>) -> bool {

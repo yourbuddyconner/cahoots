@@ -32,7 +32,7 @@ use crate::ssh::{self, Signed};
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use cahoots_chip::{ChipOps, KeyId, KeyKind, ObjectPolicy};
+use cahoots_chip::{ChipError, ChipOps, KeyId, KeyKind, ObjectPolicy};
 use cahoots_core::circle_id::CircleId;
 use cahoots_core::seat::SeatPublic;
 use cahoots_custodian::wire::{ErrorCode, GrantRequestFields, UnderGrantFields};
@@ -259,15 +259,16 @@ fn counter_id(slot: u8) -> KeyId {
     KeyId::new(KeyKind::Grant, slot)
 }
 
-/// Move the issue counter on by one, making it at 0 first if the chip has none, and return
-/// its new value: this issue's number, never given before on this chip.
-fn next_issue(chip: &mut dyn ChipOps) -> Result<u64, ErrorCode> {
+/// Move the issue counter on by one and return its new value: this issue's number, never
+/// given before on this chip. The counter is made at the chip's first boot
+/// ([`crate::chip::first_boot`]); a missing one is a fault, `NoSuchKey`, never made again
+/// here, where it could be one a tap left.
+fn next_issue(chip: &mut dyn ChipOps) -> Result<u64, ChipError> {
     let id = counter_id(ISSUE_SLOT);
-    if !chip.exists(id).map_err(|_| ErrorCode::ChipError)? {
-        chip.put_counter(id, 0, &ObjectPolicy::owner_counter())
-            .map_err(|_| ErrorCode::ChipError)?;
+    if !chip.exists(id)? {
+        return Err(ChipError::NoSuchKey);
     }
-    chip.counter_next(id).map_err(|_| ErrorCode::ChipError)
+    chip.counter_next(id)
 }
 
 /// A base the badge gives on a chip: a nonzero issue number shifted up 32 bits. Only one such
@@ -532,7 +533,18 @@ pub fn issue<G: GrantBoard + ?Sized>(
     }
     // The base comes first: it is signed into the grant.
     if let Some(chip) = board.chip_begin() {
-        let issue_no = next_issue(chip)?;
+        let issue_no = match next_issue(chip) {
+            Ok(n) => n,
+            Err(e) => {
+                board.log(&match e {
+                    ChipError::NoSuchKey => {
+                        String::from("grant request refused: the badge's grant counter is missing")
+                    }
+                    e => format!("grant request refused: the grant counter failed: {e:?}"),
+                });
+                return Err(ErrorCode::ChipError);
+            }
+        };
         // An issue number past 32 bits would lose its high bits in the base: refuse.
         grant.base = match u32::try_from(issue_no) {
             Ok(n) if n != 0 => u64::from(n) << 32,

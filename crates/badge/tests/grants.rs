@@ -803,6 +803,8 @@ fn sweep_deletes_orphans() {
     // which stays. Slot 2: both, expired by the stored time.
     chip.put_counter(KeyId::new(KeyKind::Grant, 5), 0, &ObjectPolicy::owner_counter())
 .unwrap();
+    // First boot made it at 0: these tests set it.
+    chip.delete(KeyId::new(KeyKind::Grant, ISSUE_SLOT)).unwrap();
     chip.put_counter(KeyId::new(KeyKind::Grant, ISSUE_SLOT), 7, &ObjectPolicy::owner_counter())
 .unwrap();
     chip.put_counter(KeyId::new(KeyKind::Grant, 1), BASE + 3, &ObjectPolicy::owner_counter())
@@ -1146,6 +1148,8 @@ fn a_record_pointing_an_old_grant_at_a_live_grants_slot_and_base_is_refused() {
 fn a_wipe_keeps_the_issue_counter() {
     let (mut board, _, _) = board(true);
     let chip = board.owner_chip();
+    // First boot made it at 0: these tests set it.
+    chip.delete(KeyId::new(KeyKind::Grant, ISSUE_SLOT)).unwrap();
     chip.put_counter(KeyId::new(KeyKind::Grant, ISSUE_SLOT), 5, &ObjectPolicy::owner_counter())
 .unwrap();
     chip.put_counter(KeyId::new(KeyKind::Grant, 0), 5 * BASE, &ObjectPolicy::owner_counter())
@@ -1255,4 +1259,39 @@ fn the_sweep_drops_the_grants_of_a_circle_the_badge_no_longer_holds() {
     let log = badge.board().log.join("\n");
     assert!(log.contains("in slot 2: its circle is gone, removed"), "{log}");
     assert!(log.contains("in slot 3: its circle is gone, removed"), "{log}");
+}
+
+#[test]
+fn a_missing_issue_counter_is_a_fault_and_is_not_made_again() {
+    let (mut badge, mut laptop, id, _) = serving(true);
+    // The counter first boot made is gone: only something that broke the chip does that.
+    badge
+        .board()
+        .owner_chip()
+        .delete(KeyId::new(KeyKind::Grant, ISSUE_SLOT))
+        .unwrap();
+    let r = ask(
+        &mut badge,
+        &mut laptop,
+        id,
+        grant_request(50, Some(EXP), false, NOW),
+        Press::Both,
+    );
+    assert_eq!(
+        r,
+        Response::Error {
+            code: ErrorCode::ChipError
+        }
+    );
+    let log = badge.board().log.join("\n");
+    assert!(
+        log.contains("grant request refused: the badge's grant counter is missing"),
+        "{log}"
+    );
+    assert!(!badge
+        .board()
+        .owner_chip()
+        .exists(KeyId::new(KeyKind::Grant, ISSUE_SLOT))
+        .unwrap());
+    assert!(record(&mut badge).grants.is_empty());
 }

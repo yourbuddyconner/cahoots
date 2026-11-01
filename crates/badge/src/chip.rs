@@ -300,50 +300,87 @@ fn delete_quietly(chip: &mut dyn ChipOps, id: KeyId) -> Result<(), ChipError> {
     }
 }
 
+/// The objects a wipe could not delete, with why. A tap can make an object whose policy lets
+/// nobody delete it, so a wipe tries every object and reports what stayed.
+pub type Left = Vec<(KeyId, ChipError)>;
+
+/// The circle slots the badge makes objects in: 0 to 15, one for each place a board keeps a
+/// circle in. A hello object's slot byte is `circle_slot * 8 + other_seat`, so a circle slot
+/// above 31 would not fit it.
+pub const CIRCLE_SLOTS: u8 = 16;
+const _: () = assert!((CIRCLE_SLOTS as usize) * 8 <= 256);
+
+fn delete_into(chip: &mut dyn ChipOps, id: KeyId, left: &mut Left) {
+    if let Err(e) = delete_quietly(chip, id) {
+        if !left.iter().any(|(x, _)| *x == id) {
+            left.push((id, e));
+        }
+    }
+}
+
 /// Delete every object of circle slot `slot`: the seat key, the root, the epoch counter, the
-/// public object and the hello objects. An object that is not there is not an error.
-pub fn delete_slot(chip: &mut dyn ChipOps, slot: u8) -> Result<(), ChipError> {
+/// public object and the hello objects. An object that is not there is not an error. Every
+/// object is tried; the ones that stay are returned.
+pub fn delete_slot(chip: &mut dyn ChipOps, slot: u8) -> Result<Left, ChipError> {
+    let mut left = Left::new();
     for kind in SLOT_KINDS {
-        delete_quietly(chip, KeyId::new(kind, slot))?;
+        delete_into(chip, KeyId::new(kind, slot), &mut left);
     }
     for id in chip.ids()? {
         if circle_slot(id) == Some(slot) {
-            delete_quietly(chip, id)?;
+            delete_into(chip, id, &mut left);
         }
     }
-    Ok(())
+    Ok(left)
 }
 
-/// Delete every object in the Cahoots range but the grant issue counter and the badge-wide
-/// objects: the wipe at boot. The issue counter stays so a grant base is never given twice on
-/// one chip.
-pub fn delete_all(chip: &mut dyn ChipOps) -> Result<(), ChipError> {
-    let issue = KeyId::new(KeyKind::Grant, crate::grants::ISSUE_SLOT);
+/// Delete every circle object and grant counter in the Cahoots range: the wipe at boot. The
+/// grant issue counter stays, so a grant base is never given twice on one chip, and so do the
+/// badge-wide objects and objects of kinds this firmware does not know. Every object is
+/// tried; the ones that stay are returned.
+pub fn delete_all(chip: &mut dyn ChipOps) -> Result<Left, ChipError> {
+    let issue = issue_id();
+    let mut left = Left::new();
     for id in chip.ids()? {
-        if id != issue && !id.is_badge_wide() {
-            delete_quietly(chip, id)?;
+        if id == issue || id.is_badge_wide() || KeyId::parse(id.0).is_none() {
+            continue;
         }
+        delete_into(chip, id, &mut left);
     }
-    Ok(())
+    Ok(left)
 }
 
-/// The upgrade wipe: delete every object in the Cahoots range but the badge-wide ones,
-/// the issue counter too, since every object made before the badge owned its chip is
-/// reachable by any session. Every object is tried. Returns how many went, and the ones that
+/// The grant issue counter's id.
+pub fn issue_id() -> KeyId {
+    KeyId::new(KeyKind::Grant, crate::grants::ISSUE_SLOT)
+}
+
+/// The ids a tap reaches or the badge relies on and must find its own: the phone slot, the
+/// inbox and the grant issue counter.
+pub const ANTENNA_IDS: [KeyId; 3] = [
+    KeyId::SLOT,
+    KeyId::INBOX,
+    KeyId::new(KeyKind::Grant, crate::grants::ISSUE_SLOT),
+];
+
+/// The upgrade wipe: delete every object in the Cahoots range but the owner object, of every
+/// kind, the phone slot, the inbox and the issue counter included, since every object made
+/// before the badge owned its chip is reachable by any session, and one at the slot or the
+/// inbox id may be a tap's. Every object is tried. Returns how many went, and the ones that
 /// did not with why.
-pub fn delete_for_upgrade(chip: &mut dyn ChipOps) -> Result<(usize, Vec<(KeyId, ChipError)>), ChipError> {
+pub fn delete_for_upgrade(chip: &mut dyn ChipOps) -> Result<(usize, Left), ChipError> {
     let mut deleted = 0;
-    let mut failed = Vec::new();
+    let mut left = Left::new();
     for id in chip.ids()? {
-        if id.is_badge_wide() {
+        if id == KeyId::OWNER {
             continue;
         }
         match delete_quietly(chip, id) {
             Ok(()) => deleted += 1,
-            Err(e) => failed.push((id, e)),
+            Err(e) => left.push((id, e)),
         }
     }
-    Ok((deleted, failed))
+    Ok((deleted, left))
 }
 
 /// Make the objects the badge owns its chip by, where they are missing, and open the owner
@@ -369,14 +406,25 @@ pub fn ensure_owned(chip: &mut dyn ChipOps, owner_secret: &[u8; 16]) -> Result<(
     Ok(())
 }
 
-/// The first boot of a chip under this firmware: [`ensure_owned`], and the new record, with no
-/// circle slots, no phone and `badge_nonce`.
+/// The first boot of a chip under this firmware: [`ensure_owned`], the grant issue counter at
+/// 0 for the owner alone, and the new record, with no circle slots, no phone and
+/// `badge_nonce`. The caller has emptied the phone slot, inbox and issue counter ids first
+/// ([`delete_for_upgrade`]), so nothing a tap made there is adopted.
+///
+/// No factory reset undoes this, on the bench chip (SE051, applet 7.2.0, 2026-10-31): it has
+/// no factory-reset authentication object (`7FFF0205` does not exist), and `DeleteAll` is
+/// refused with 6985 in no session and in the owner session. So a tap cannot wipe a badge's
+/// chip, and the owner object, which nobody may delete, is the chip's for good: a badge that
+/// lost its owner secret cannot get its chip back.
 pub fn first_boot(
     chip: &mut dyn ChipOps,
     owner_secret: &[u8; 16],
     badge_nonce: [u8; 16],
 ) -> Result<ChipRecord, ChipError> {
     ensure_owned(chip, owner_secret)?;
+    if !chip.exists(issue_id())? {
+        chip.put_counter(issue_id(), 0, &ObjectPolicy::owner_counter())?;
+    }
     Ok(ChipRecord {
         slots: Vec::new(),
         phone: None,

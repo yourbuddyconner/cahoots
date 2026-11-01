@@ -90,11 +90,11 @@ fn chip(b: &mut Badge<FakeBoard>) -> &mut SoftChip {
     b.board().owner_chip()
 }
 
-/// The chip's objects that belong to circles: all but the owner object, the phone slot and
-/// the inbox.
+/// The chip's objects that belong to circles: all but the owner object, the phone slot, the
+/// inbox and the grant issue counter.
 fn circle_objects(b: &mut Badge<FakeBoard>) -> Vec<KeyId> {
     let ids = chip(b).ids().unwrap();
-    ids.into_iter().filter(|id| !id.is_badge_wide()).collect()
+    ids.into_iter().filter(|id| id.circle_slot().is_some()).collect()
 }
 
 /// A software chip set up as a badge's first boot sets it up, in the owner session.
@@ -237,7 +237,7 @@ fn forget_deletes_slot_objects() {
     assert!(circle_objects(&mut b1).is_empty());
     // The badge's own objects stay: it still owns its chip.
     let ids = chip(&mut b1).ids().unwrap();
-    assert_eq!(ids, vec![KeyId::SLOT, KeyId::INBOX, KeyId::OWNER]);
+    assert_eq!(ids, vec![id(KeyKind::Grant, 255), KeyId::SLOT, KeyId::INBOX, KeyId::OWNER]);
     assert!(b1
         .board()
         .chip_record_load()
@@ -269,7 +269,14 @@ fn reconcile_deletes_unknown_slot_and_logs() {
     // The badge-wide objects belong to no circle slot and stay.
     assert_eq!(
         c.ids().unwrap(),
-        vec![id(KeyKind::Seat, 0), KeyId::SLOT, KeyId::INBOX, KeyId::OWNER, unknown]
+        vec![
+            id(KeyKind::Seat, 0),
+            id(KeyKind::Grant, 255),
+            KeyId::SLOT,
+            KeyId::INBOX,
+            KeyId::OWNER,
+            unknown
+        ]
     );
     assert_eq!(lines.len(), 2, "{lines:?}");
     assert!(lines.iter().all(|l| l.contains("slot 2")), "{lines:?}");
@@ -478,4 +485,52 @@ fn an_unreadable_chip_record_makes_no_key() {
     assert!(failed.expect("the pass fails").contains("chip record: unreadable"));
     assert!(circle_objects(&mut b1).is_empty());
     assert_eq!(b1.board().chip_record, Some(vec![0xFF; 5]));
+}
+
+#[test]
+fn a_wipe_deletes_every_object_it_can_and_says_what_stayed() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    // An object nobody may delete, as a tap could make one, listed before the circle's root
+    // and counter: a wipe that stopped at it would leave them.
+    let stuck = id(KeyKind::Seat, 7);
+    let policy = ObjectPolicy {
+        delete: Vec::new(),
+        ..ObjectPolicy::any_session()
+    };
+    chip(&mut b1).generate(stuck, Curve::P256, &policy).unwrap();
+    let board = b1.board();
+    board.a_down = true;
+    board.release_at_ms = board.elapsed_ms + 3000;
+    b1.boot();
+    assert!(b1.circle().is_none());
+    // The seat key, root and counter went; the stuck object stayed, and the badge said so.
+    assert_eq!(circle_objects(&mut b1), vec![stuck]);
+    let log = b1.board().log.join("\n");
+    assert!(log.contains("chip: object 4c410107 could not be deleted: NotAllowed"), "{log}");
+    assert!(b1
+        .board()
+        .statuses()
+        .iter()
+        .any(|s| s == "circle forgotten\n1 chip object could not be deleted\nrelease A"));
+    let record = b1.board().chip_record_load().unwrap().unwrap();
+    assert!(record.slots.is_empty());
+}
+
+#[test]
+fn a_slot_holding_an_object_that_cannot_be_deleted_is_passed_over() {
+    let (mut b1, mut b2) = pile_of_two((true, false));
+    let policy = ObjectPolicy {
+        delete: Vec::new(),
+        ..ObjectPolicy::any_session()
+    };
+    b1.board()
+        .owner_chip()
+        .put_hmac_key(id(KeyKind::Hello, 3), &[3; 32], &policy)
+        .unwrap();
+    drive(&mut b1, &mut b2, |b1, b2, _, _| has_seat(b1) && has_seat(b2));
+    b2.board().presses.push_back(Press::Both);
+    drive(&mut b1, &mut b2, |b1, _, s1, _| {
+        *s1 == Step::InCeremony && b1.board().log.iter().any(|l| l.starts_with("seat key made"))
+    });
+    assert!(b1.board().log.iter().any(|l| l == "seat key made in the chip, slot 1"));
 }

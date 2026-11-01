@@ -635,6 +635,11 @@ impl Board for HostBoard {
         self.chip_up = false;
     }
 
+    fn chip_unusable(&mut self) {
+        self.chip_end();
+        self.chip = None;
+    }
+
     fn owner_secret(&self) -> Option<[u8; 16]> {
         self.chip.as_ref().map(|_| TEST_OWNER_SECRET)
     }

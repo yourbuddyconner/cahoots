@@ -13,6 +13,20 @@ use cahoots_chip::{
 use common::FakeBoard;
 
 const SCREEN: &str = "updated for phones. Make a new circle.";
+const REFUSED: &str = "this chip was touched before the badge owned it. It cannot be used.";
+
+fn refused(b: &mut Badge<FakeBoard>) -> usize {
+    b.board().statuses().iter().filter(|s| *s == REFUSED).count()
+}
+
+/// Every right for every session but delete, which nobody has: an object a tap made so that
+/// it stays.
+fn stuck() -> ObjectPolicy {
+    ObjectPolicy {
+        delete: Vec::new(),
+        ..ObjectPolicy::any_session()
+    }
+}
 
 /// A board as earlier firmware left it: a circle in chip slot 0, its seat key, root and epoch
 /// counter and the grant issue counter made with every right for every session, and the chip
@@ -74,7 +88,12 @@ fn the_first_boot_wipes_what_was_made_the_old_way_and_says_so_once() {
     assert!(b.board().load_circles().is_empty());
     assert!(b.board().pad.iter().all(|&x| x == 0));
     let ids = b.board().owner_chip().ids().unwrap();
-    assert_eq!(ids, vec![KeyId::SLOT, KeyId::INBOX, KeyId::OWNER]);
+    assert_eq!(
+        ids,
+        vec![KeyId::new(KeyKind::Grant, 255), KeyId::SLOT, KeyId::INBOX, KeyId::OWNER]
+    );
+    // The issue counter is new, at 0, for the owner alone.
+    assert_eq!(b.board().owner_chip().counter_get(KeyId::new(KeyKind::Grant, 255)), Ok(0));
 
     // The record is CAHC2, of this generation, with no slot and a nonce.
     let stored = b.board().chip_record.clone().unwrap();
@@ -130,7 +149,10 @@ fn a_new_badge_is_set_up_without_a_word() {
     pin_rests(&mut b);
     assert_eq!(shown(&mut b), 0);
     let ids = b.board().owner_chip().ids().unwrap();
-    assert_eq!(ids, vec![KeyId::SLOT, KeyId::INBOX, KeyId::OWNER]);
+    assert_eq!(
+        ids,
+        vec![KeyId::new(KeyKind::Grant, 255), KeyId::SLOT, KeyId::INBOX, KeyId::OWNER]
+    );
     assert!(b.board().chip_record_load().unwrap().unwrap().is_current());
 }
 
@@ -144,4 +166,98 @@ fn a_lost_badge_wide_object_is_made_again_at_boot() {
     assert!(b.board().owner_chip().exists(KeyId::INBOX).unwrap());
     assert_eq!(b.board().chip_record, before, "no wipe, the same record");
     assert_eq!(shown(&mut b), 0);
+}
+
+#[test]
+fn a_slot_and_an_inbox_a_tap_made_before_the_first_boot_are_not_adopted() {
+    let mut board = old_board();
+    let c = board.chip.as_mut().unwrap();
+    // A tap, in no session, made a phone slot with a key it knows and an inbox anyone reads.
+    c.put_aes_auth(KeyId::SLOT, &[0x42; 16], &ObjectPolicy::any_session())
+        .unwrap();
+    c.write_binary(KeyId::INBOX, b"planted", &ObjectPolicy::any_session())
+        .unwrap();
+    let mut b = Badge::new(board);
+    b.boot();
+    assert_eq!(shown(&mut b), 1);
+    assert_eq!(refused(&mut b), 0);
+    // Both were deleted and made again by the badge, with its policies: a tap in no session
+    // can neither delete the slot nor read the inbox now.
+    let c = b.board().chip.as_mut().unwrap();
+    assert_eq!(c.session(), Session::None);
+    assert_eq!(c.delete(KeyId::SLOT), Err(ChipError::NotAllowed));
+    assert_eq!(c.read_binary(KeyId::INBOX), Err(ChipError::NotAllowed));
+    let inbox = b.board().owner_chip().read_binary(KeyId::INBOX).unwrap();
+    assert!(inbox.iter().all(|&x| x == 0), "a new, empty inbox");
+    let log = b.board().log.join("\n");
+    assert!(log.contains("upgrade: 6 chip objects made before the badge owned its chip deleted"), "{log}");
+}
+
+#[test]
+fn an_object_a_tap_made_that_cannot_be_deleted_leaves_the_chip_unowned() {
+    for planted in [KeyId::SLOT, KeyId::INBOX, KeyId::new(KeyKind::Grant, 255)] {
+        let mut board = old_board();
+        let c = board.chip.as_mut().unwrap();
+        // The old issue counter goes first, so the tap's stuck one can sit at its id.
+        c.delete(KeyId::new(KeyKind::Grant, 255)).unwrap();
+        match planted {
+            KeyId::SLOT => c.put_aes_auth(planted, &[0x42; 16], &stuck()).unwrap(),
+            KeyId::INBOX => c.write_binary(planted, b"planted", &stuck()).unwrap(),
+            _ => c
+                .put_counter(planted, 0, &ObjectPolicy { sign: Vec::new(), attest: Vec::new(), ..stuck() })
+                .unwrap(),
+        }
+        let mut b = Badge::new(board);
+        b.boot();
+        assert_eq!(refused(&mut b), 1, "{planted:?}");
+        assert_eq!(shown(&mut b), 0);
+        // The circles still go: their keys were reachable by any session.
+        assert!(b.circles().is_empty());
+        // No owner object, no record, and none of the objects a tap reaches made; the board
+        // hands the chip out no more.
+        let c = b.board().chip.as_mut().unwrap();
+        assert!(!c.exists(KeyId::OWNER).unwrap(), "{planted:?}");
+        for id in [KeyId::SLOT, KeyId::INBOX] {
+            assert_eq!(c.exists(id).unwrap(), id == planted, "{planted:?} {id:?}");
+        }
+        assert_eq!(b.board().chip_record_load(), Ok(None));
+        assert!(!b.board().has_chip());
+        assert!(b.board().chip_begin().is_none());
+        assert!(!b.board().pin_high());
+        let log = b.board().log.join("\n");
+        assert!(log.contains("chip: not owned, not used"), "{log}");
+    }
+}
+
+#[test]
+fn an_owner_object_that_is_not_this_badges_leaves_the_chip_unowned() {
+    let mut board = old_board();
+    board
+        .chip
+        .as_mut()
+        .unwrap()
+        .put_user_id(KeyId::OWNER, &[0x42; 16], &ObjectPolicy::owner_object())
+        .unwrap();
+    let mut b = Badge::new(board);
+    b.boot();
+    assert_eq!(refused(&mut b), 1);
+    assert!(!b.board().has_chip());
+    let c = b.board().chip.as_mut().unwrap();
+    assert!(!c.exists(KeyId::SLOT).unwrap());
+    assert!(!c.exists(KeyId::INBOX).unwrap());
+    // The old objects are left as they are: nothing was done in a chip the badge does not own.
+    assert!(c.exists(KeyId::new(KeyKind::Seat, 0)).unwrap());
+}
+
+#[test]
+fn a_current_record_on_a_chip_with_no_owner_object_is_set_up_again() {
+    // The chip lost every object (a factory reset, or another chip): the record cannot be
+    // trusted, so the badge starts over.
+    let mut board = FakeBoard::new().with_soft_chip([6; 32]);
+    board.chip = Some(SoftChip::with_seed([7; 32]));
+    let mut b = Badge::new(board);
+    b.boot();
+    assert!(b.board().owner_chip().exists(KeyId::INBOX).unwrap());
+    assert!(b.board().owner_chip().exists(KeyId::new(KeyKind::Grant, 255)).unwrap());
+    assert_eq!(refused(&mut b), 0);
 }

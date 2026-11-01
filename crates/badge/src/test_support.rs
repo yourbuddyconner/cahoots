@@ -208,6 +208,8 @@ pub struct FakeBoard {
     /// The chip's enable pin, every change in order: `true` when `chip_begin` raised it,
     /// `false` when `chip_end` dropped it.
     pub pin_log: Vec<bool>,
+    /// Set when the badge refused the chip: the board no longer hands it out.
+    pub chip_refused: bool,
     /// The chip record as stored, as a board keeps it (`CAHC2` and the CBOR).
     pub chip_record: Option<Vec<u8>>,
     /// The grants record as stored, its CBOR encoding.
@@ -336,6 +338,7 @@ impl FakeBoard {
             links: None,
             chip: None,
             pin_log: Vec::new(),
+            chip_refused: false,
             chip_record: None,
             grants: None,
             uptime: 0,
@@ -573,7 +576,11 @@ impl Board for FakeBoard {
         self.screens.push(lines.to_vec());
     }
     fn has_chip(&self) -> bool {
-        self.chip.is_some() || self.failing.is_some()
+        (self.chip.is_some() || self.failing.is_some()) && !self.chip_refused
+    }
+    fn chip_unusable(&mut self) {
+        self.chip_end();
+        self.chip_refused = true;
     }
     /// Raises the pin, then opens the owner session if the chip has an owner object, as the
     /// firmware does.

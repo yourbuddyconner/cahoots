@@ -418,6 +418,10 @@ pub trait Board {
     /// phone's field can start it on its antenna. Nothing happens if none was begun. The
     /// badge ends every conversation it begins, at the latest at the end of each step.
     fn chip_end(&mut self) {}
+    /// Stop handing the chip out for the rest of this boot: the badge found a chip it cannot
+    /// own. Afterwards `has_chip` is false and `chip_begin` is `None`. A board with a chip
+    /// must do this; the default, for a board without one, does nothing.
+    fn chip_unusable(&mut self) {}
     /// The secret of the chip's owner object, the badge's identity to its chip. `None` on a
     /// board without a chip.
     fn owner_secret(&self) -> Option<[u8; 16]> {
