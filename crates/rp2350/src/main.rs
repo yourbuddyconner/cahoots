@@ -99,6 +99,13 @@ unsafe extern "C" {
     static mut __ebss: u32;
 }
 
+/// The OTP row of RANDID0, the first of the eight rows of the factory's 128-bit random id.
+/// `rp235x-pac`'s `otp_data` block, the ECC alias of OTP, puts RANDID0 at byte offset 0x08
+/// and RANDID7 at 0x16, two bytes a row, after CHIPID0 to CHIPID3 at 0x00 to 0x06. So RANDID0
+/// to RANDID7 are rows 0x004 to 0x00B, which `hal::otp::read_ecc_word` takes as row numbers.
+const RANDID_ROW: usize = 0x08 / 2;
+const _: () = assert!(RANDID_ROW == 0x004 && RANDID_ROW + 7 == 0x00B && 0x16 / 2 == RANDID_ROW + 7);
+
 #[hal::entry]
 fn main() -> ! {
     // The stack grows down towards `.bss`, where the heap arena is. A limit just above it
@@ -223,13 +230,12 @@ fn main() -> ! {
         log!("se051: pin low");
     }
     // The badge's identity to its chip, so a reflash recovers it: the device and wafer ids
-    // the boot ROM reports, each little-endian, then the factory's 128-bit random id from OTP
-    // (RANDID0 to RANDID7, ECC rows 0x008 to 0x00F, 16 bits each, read little-endian in row
-    // order. See the RP2350 datasheet's OTP chapter, its list of OTP_DATA rows, and
-    // `rp235x-pac`'s `otp_data::RANDID0` to `RANDID7`). The boot ROM's `get_sys_info` does not report
-    // RANDID, so the device and wafer ids alone, which it does, are not the whole secret.
+    // the boot ROM reports, each little-endian, then the factory's 128-bit random id from OTP,
+    // RANDID0 to RANDID7, 16 bits a row, read little-endian in row order (see `RANDID_ROW`).
+    // The boot ROM's `get_sys_info` does not report RANDID, so the device and wafer ids
+    // alone, which it does, are not the whole secret.
     let randid = (0..8).try_fold([0u8; 16], |mut out, i| {
-        let word = hal::otp::read_ecc_word(0x008 + i).ok()?;
+        let word = hal::otp::read_ecc_word(RANDID_ROW + i).ok()?;
         out[2 * i..2 * i + 2].copy_from_slice(&word.to_le_bytes());
         Some(out)
     });
