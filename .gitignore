@@ -30,3 +30,4 @@ out/
 /ios/Cahoots.xcodeproj
 /ios/Signing.xcconfig
 /target/ios
+.claude/settings.local.json

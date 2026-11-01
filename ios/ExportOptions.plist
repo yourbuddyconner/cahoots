@@ -7,7 +7,14 @@
 	<key>destination</key>
 	<string>export</string>
 	<key>signingStyle</key>
-	<string>automatic</string>
+	<string>manual</string>
+	<key>signingCertificate</key>
+	<string>Apple Distribution</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>network.cahoots.app</key>
+		<string>Cahoots App Store</string>
+	</dict>
 	<key>teamID</key>
 	<string>TEAM_ID</string>
 	<key>uploadSymbols</key>
