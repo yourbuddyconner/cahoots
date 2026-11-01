@@ -4,9 +4,8 @@
 
 mod common;
 
-use cahoots_badge::chip::ChipRecord;
 use cahoots_badge::{Badge, Board, BoardError, Circle, Press, Step};
-use cahoots_chip::{ChipOps, KeyId, KeyKind, SoftChip};
+use cahoots_chip::{ChipOps, KeyId, KeyKind, ObjectPolicy};
 use cahoots_core::checkwords::check_words;
 use cahoots_core::circle_id::{circle_id, CircleId};
 use cahoots_core::frame::{self, Frame};
@@ -20,6 +19,13 @@ use common::{cable, FakeBoard, FakeLink, FakePlace, FAKE_TIER};
 
 fn id(kind: KeyKind, slot: u8) -> KeyId {
     KeyId::new(kind, slot)
+}
+
+/// The chip's objects that belong to circles: all but the owner object, the phone slot and
+/// the inbox.
+fn circle_objects(b: &mut Badge<FakeBoard>) -> Vec<KeyId> {
+    let ids = b.board().owner_chip().ids().unwrap();
+    ids.into_iter().filter(|id| !id.is_badge_wide()).collect()
 }
 
 fn has_seat(b: &mut Badge<FakeBoard>) -> bool {
@@ -87,7 +93,7 @@ fn two_circles(chip: bool) -> (Badge<FakeBoard>, Badge<FakeBoard>, Badge<FakeBoa
     let mut board = FakeBoard::seeded(0x9E37_79B9_7F4A_7C15);
     board.name = "first".into();
     if chip {
-        board.chip = Some(SoftChip::with_seed([1; 32]));
+        board = board.with_soft_chip([1; 32]);
     }
     let mut b = Badge::new(board);
     let t1 = ceremony(&mut b, 0xD1B5_4A32_D192_ED03, |b| Some(b.step()));
@@ -217,8 +223,8 @@ fn two_ceremonies_two_records() {
     assert_eq!((a.chip_slot, c.chip_slot), (Some(0), Some(1)));
 
     // Slots 0 and 1, each with a seat key, a root and a counter; different keys and roots.
-    let chip = b.board().chip.as_mut().unwrap();
-    assert_eq!(chip.ids().unwrap().len(), 6);
+    assert_eq!(circle_objects(&mut b).len(), 6);
+    let chip = b.board().owner_chip();
     let k0 = chip.public(id(KeyKind::Seat, 0)).unwrap();
     let k1 = chip.public(id(KeyKind::Seat, 1)).unwrap();
     assert_ne!(k0, k1);
@@ -275,7 +281,7 @@ fn two_ceremonies_two_records() {
     // A reboot opens the first circle's menu, and its list shows both.
     b.boot();
     assert_eq!(b.circles(), &circles[..]);
-    assert_eq!(b.board().chip.as_mut().unwrap().ids().unwrap().len(), 6);
+    assert_eq!(circle_objects(&mut b).len(), 6);
     b.idle_step();
     assert!(b.board().shows("first  tier 1"), "{:?}", b.board().last());
     to_the_list(&mut b);
@@ -444,8 +450,7 @@ fn forget_one_keeps_the_other() {
     assert_ne!(first_pad, b.board().pad);
     assert!(b.board().records.iter().all(|&x| x == 0xFF), "its ledger too");
     assert_eq!(b.board().more[0].pad, second_pad);
-    let chip = b.board().chip.as_mut().unwrap();
-    let mut ids = chip.ids().unwrap();
+    let mut ids = circle_objects(&mut b);
     ids.sort_by_key(|k| k.0);
     let mut want = vec![id(KeyKind::Seat, 1), id(KeyKind::Root, 1), id(KeyKind::Epoch, 1)];
     want.sort_by_key(|k| k.0);
@@ -459,7 +464,7 @@ fn forget_one_keeps_the_other() {
     assert!(b.board().shows("second  tier 1"));
     b.boot();
     assert_eq!(b.circles(), [kept]);
-    assert_eq!(b.board().chip.as_mut().unwrap().ids().unwrap().len(), 3);
+    assert_eq!(circle_objects(&mut b).len(), 3);
 }
 
 #[test]
@@ -474,8 +479,10 @@ fn a_held_at_boot_forgets_every_circle() {
     assert!(b.board().load_circles().is_empty());
     assert!(b.board().pad.iter().all(|&x| x == 0));
     assert!(b.board().more[0].pad.iter().all(|&x| x == 0));
-    assert!(b.board().chip.as_mut().unwrap().ids().unwrap().is_empty());
-    assert_eq!(b.board().chip_record_load(), Ok(Some(ChipRecord::default())));
+    assert!(circle_objects(&mut b).is_empty());
+    let record = b.board().chip_record_load().unwrap().unwrap();
+    assert!(record.slots.is_empty());
+    assert!(record.is_current(), "the badge still owns its chip");
     assert!(b.board().shows("circles forgotten"));
 }
 
@@ -497,8 +504,10 @@ fn values(b: &mut Badge<FakeBoard>, c: &Circle) -> Vec<Vec<u8>> {
         .map(<[u8]>::to_vec)
         .collect();
     assert!(out.len() > 100, "the record holds keys and signatures");
-    match (c.chip_slot, b.board().chip.as_mut()) {
-        (Some(slot), Some(chip)) => {
+    let has_chip = b.board().chip.is_some();
+    match (c.chip_slot, has_chip) {
+        (Some(slot), true) => {
+            let chip = b.board().owner_chip();
             out.push(chip.public(id(KeyKind::Seat, slot)).unwrap()[1..].to_vec());
             out.push(chip.hmac(id(KeyKind::Root, slot), &chat(&c.circle_id)).unwrap().to_vec());
             out.push(chip.hmac(id(KeyKind::Root, slot), &msg(b"seal/card", &c.circle_id)).unwrap().to_vec());
@@ -713,14 +722,13 @@ fn a_held_at_boot_forgets_every_record_even_when_an_erase_fails() {
 #[test]
 fn boot_deletes_a_stray_slot_and_the_next_circle_gets_a_clean_one() {
     let (mut b, _t1, _t2) = two_circles(true);
-    let chip = b.board().chip.as_mut().unwrap();
-    let stray = chip.generate(id(KeyKind::Seat, 2), cahoots_chip::Curve::P256).unwrap();
-    chip.put_hmac_key(id(KeyKind::Root, 2), &[7; 32]).unwrap();
-    assert_eq!(chip.ids().unwrap().len(), 8);
+    let chip = b.board().owner_chip();
+    let stray = chip.generate(id(KeyKind::Seat, 2), cahoots_chip::Curve::P256, &ObjectPolicy::owner_only()).unwrap();
+    chip.put_hmac_key(id(KeyKind::Root, 2), &[7; 32], &ObjectPolicy::owner_and_slot_mac()).unwrap();
+    assert_eq!(circle_objects(&mut b).len(), 8);
     b.boot();
     // Slot 2 is deleted and logged; slots 0 and 1 stay with their circles.
-    let chip = b.board().chip.as_mut().unwrap();
-    let mut slots: Vec<u8> = chip.ids().unwrap().iter().map(|k| k.0 as u8).collect();
+    let mut slots: Vec<u8> = circle_objects(&mut b).iter().map(|k| k.0 as u8).collect();
     slots.sort();
     assert_eq!(slots, vec![0, 0, 0, 1, 1, 1]);
     let log = &b.board().log;
@@ -744,7 +752,7 @@ fn boot_deletes_a_stray_slot_and_the_next_circle_gets_a_clean_one() {
     });
     let third = b.circles().iter().find(|c| c.params.name == "third").unwrap().clone();
     assert_eq!(third.chip_slot, Some(2));
-    let chip = b.board().chip.as_mut().unwrap();
+    let chip = b.board().owner_chip();
     assert_ne!(chip.public(id(KeyKind::Seat, 2)).unwrap(), stray);
     let from_chip = chip.hmac(id(KeyKind::Root, 2), &chat(&third.circle_id)).unwrap();
     assert_eq!(from_chip, chat_key(&t3.circle().unwrap().root.unwrap(), &third.circle_id, 0));

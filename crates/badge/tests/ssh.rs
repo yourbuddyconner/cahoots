@@ -3,11 +3,11 @@
 
 mod common;
 
-use cahoots_badge::chip::{ChipRecord, SlotEntry};
+use cahoots_badge::chip::SlotEntry;
 use cahoots_badge::screens;
 use cahoots_badge::ssh::{self, HostCheck, Signed};
 use cahoots_badge::{Badge, Press};
-use cahoots_chip::{ChipOps, Curve, KeyId, KeyKind, SoftChip};
+use cahoots_chip::{ObjectPolicy, ChipOps, Curve, KeyId, KeyKind, SoftChip};
 use cahoots_core::frame::{self, Frame};
 use cahoots_core::seat::{SeatKey, SeatPublic};
 use cahoots_custodian::wire::{
@@ -480,20 +480,18 @@ fn serving(chip: bool) -> (Badge<FakeBoard>, FakeLink, CircleId, SeatPublic) {
     let (mut board, _, _) = FakeBoard::with_circle();
     let id = board.circle.as_ref().unwrap().circle_id;
     let public = if chip {
-        let mut c = SoftChip::with_seed([9; 32]);
+        board = board.with_soft_chip([9; 32]);
+        let c = board.owner_chip();
         let p = c
-            .generate(KeyId::new(KeyKind::Seat, 0), Curve::P256)
+            .generate(KeyId::new(KeyKind::Seat, 0), Curve::P256, &ObjectPolicy::owner_only())
             .unwrap();
-        let mut record = ChipRecord::default();
-        record.insert(SlotEntry {
+        board.record_slot(SlotEntry {
             slot: 0,
             circle_id: id,
             has_seat: true,
             has_root: false,
             has_epoch: false,
         });
-        board.chip_record = Some(record.encode());
-        board.chip = Some(c);
         let circle = board.circle.as_mut().unwrap();
         circle.chip_slot = Some(0);
         circle.seat_key = [0; 32];
@@ -887,14 +885,35 @@ fn other_chip_requests_are_answered_without_a_prompt() {
 struct Lying(SoftChip);
 
 impl ChipOps for Lying {
+    fn open_owner(&mut self, secret: &[u8; 16]) -> Result<(), cahoots_chip::ChipError> {
+        self.0.open_owner(secret)
+    }
+    fn close_session(&mut self) -> Result<(), cahoots_chip::ChipError> {
+        self.0.close_session()
+    }
+    fn put_user_id(&mut self, id: KeyId, s: &[u8; 16], p: &ObjectPolicy) -> Result<(), cahoots_chip::ChipError> {
+        self.0.put_user_id(id, s, p)
+    }
+    fn put_aes_auth(&mut self, id: KeyId, k: &[u8; 16], p: &ObjectPolicy) -> Result<(), cahoots_chip::ChipError> {
+        self.0.put_aes_auth(id, k, p)
+    }
+    fn write_binary(&mut self, id: KeyId, d: &[u8], p: &ObjectPolicy) -> Result<(), cahoots_chip::ChipError> {
+        self.0.write_binary(id, d, p)
+    }
+    fn rewrite_binary(&mut self, id: KeyId, d: &[u8]) -> Result<(), cahoots_chip::ChipError> {
+        self.0.rewrite_binary(id, d)
+    }
+    fn read_binary(&mut self, id: KeyId) -> Result<Vec<u8>, cahoots_chip::ChipError> {
+        self.0.read_binary(id)
+    }
     fn version(&mut self) -> Result<cahoots_chip::Version, cahoots_chip::ChipError> {
         self.0.version()
     }
     fn random(&mut self, n: usize) -> Result<Vec<u8>, cahoots_chip::ChipError> {
         self.0.random(n)
     }
-    fn generate(&mut self, id: KeyId, curve: Curve) -> Result<Vec<u8>, cahoots_chip::ChipError> {
-        self.0.generate(id, curve)
+    fn generate(&mut self, id: KeyId, curve: Curve, p: &ObjectPolicy) -> Result<Vec<u8>, cahoots_chip::ChipError> {
+        self.0.generate(id, curve, p)
     }
     fn public(&mut self, id: KeyId) -> Result<Vec<u8>, cahoots_chip::ChipError> {
         self.0.public(id)
@@ -921,14 +940,14 @@ impl ChipOps for Lying {
     ) -> Result<cahoots_chip::Attested, cahoots_chip::ChipError> {
         self.0.attest(id, f)
     }
-    fn put_hmac_key(&mut self, id: KeyId, key: &[u8; 32]) -> Result<(), cahoots_chip::ChipError> {
-        self.0.put_hmac_key(id, key)
+    fn put_hmac_key(&mut self, id: KeyId, key: &[u8; 32], p: &ObjectPolicy) -> Result<(), cahoots_chip::ChipError> {
+        self.0.put_hmac_key(id, key, p)
     }
     fn hmac(&mut self, id: KeyId, data: &[u8]) -> Result<[u8; 32], cahoots_chip::ChipError> {
         self.0.hmac(id, data)
     }
-    fn put_counter(&mut self, id: KeyId, value: u64) -> Result<(), cahoots_chip::ChipError> {
-        self.0.put_counter(id, value)
+    fn put_counter(&mut self, id: KeyId, value: u64, p: &ObjectPolicy) -> Result<(), cahoots_chip::ChipError> {
+        self.0.put_counter(id, value, p)
     }
     fn counter_next(&mut self, id: KeyId) -> Result<u64, cahoots_chip::ChipError> {
         self.0.counter_next(id)
@@ -947,8 +966,9 @@ fn a_signature_that_does_not_verify_is_never_returned() {
     circle.chip_slot = Some(0);
     circle.seat_key = [0; 32];
     let mut chip = Lying(SoftChip::with_seed([5; 32]));
+    cahoots_badge::chip::ensure_owned(&mut chip, &cahoots_chip::TEST_OWNER_SECRET).unwrap();
     let p = chip
-        .generate(KeyId::new(KeyKind::Seat, 0), Curve::P256)
+        .generate(KeyId::new(KeyKind::Seat, 0), Curve::P256, &ObjectPolicy::owner_only())
         .unwrap();
     let data = userauth(SESSION, "git", &seat_blob(&SeatPublic::parse(&p).unwrap()));
     let mut apps = BadgeApps::new(core::slice::from_ref(&circle), Some(&mut chip), [0u8; 16]);
@@ -959,7 +979,7 @@ fn a_signature_that_does_not_verify_is_never_returned() {
 #[test]
 fn a_seat_key_missing_from_the_chip_is_a_chip_error_before_asking() {
     let (mut badge, mut laptop, id, public) = serving(true);
-    let chip = badge.board().chip.as_mut().unwrap();
+    let chip = badge.board().owner_chip();
     chip.delete(KeyId::new(KeyKind::Seat, 0)).unwrap();
     let op = ChipRequest::SshSign {
         data: userauth(SESSION, "git", &seat_blob(&public)),

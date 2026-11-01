@@ -29,7 +29,10 @@ use cahoots_badge::grants::GrantsRecord;
 use cahoots_badge::board::{assign_places, place_for};
 use cahoots_badge::{word_indices, Board, BoardError, Circle, Press};
 use cahoots_core::circle_id::CircleId;
-use cahoots_chip::{Attested, ChipError, ChipOps, Curve, KeyId, Signature64, SoftChip, Version};
+use cahoots_chip::{
+    Attested, ChipError, ChipOps, Curve, KeyId, ObjectPolicy, Signature64, SoftChip, Version,
+    TEST_OWNER_SECRET,
+};
 use cahoots_core::checkwords::WORDLIST;
 use cahoots_core::params::CircleParams;
 use cahoots_hal::health::{HealthTests, Tested};
@@ -164,6 +167,8 @@ pub struct HostBoard {
     links: (HostLink, HostLink),
     seed: Option<u64>,
     chip: Option<HostChip>,
+    /// True while a chip conversation is open (the real board's enable pin is high).
+    chip_up: bool,
     /// The place a pad was written to for a circle not stored yet.
     pending: Option<(CircleId, usize)>,
     /// When the board was made: `uptime_secs` counts from here.
@@ -239,6 +244,31 @@ impl HostChip {
 }
 
 impl ChipOps for HostChip {
+    fn open_owner(&mut self, secret: &[u8; 16]) -> Result<(), ChipError> {
+        self.chip.open_owner(secret)
+    }
+    fn close_session(&mut self) -> Result<(), ChipError> {
+        self.chip.close_session()
+    }
+    fn put_user_id(&mut self, id: KeyId, secret: &[u8; 16], policy: &ObjectPolicy) -> Result<(), ChipError> {
+        let r = self.chip.put_user_id(id, secret, policy);
+        self.kept(r)
+    }
+    fn put_aes_auth(&mut self, id: KeyId, key: &[u8; 16], policy: &ObjectPolicy) -> Result<(), ChipError> {
+        let r = self.chip.put_aes_auth(id, key, policy);
+        self.kept(r)
+    }
+    fn write_binary(&mut self, id: KeyId, data: &[u8], policy: &ObjectPolicy) -> Result<(), ChipError> {
+        let r = self.chip.write_binary(id, data, policy);
+        self.kept(r)
+    }
+    fn rewrite_binary(&mut self, id: KeyId, data: &[u8]) -> Result<(), ChipError> {
+        let r = self.chip.rewrite_binary(id, data);
+        self.kept(r)
+    }
+    fn read_binary(&mut self, id: KeyId) -> Result<Vec<u8>, ChipError> {
+        self.chip.read_binary(id)
+    }
     fn version(&mut self) -> Result<Version, ChipError> {
         self.chip.version()
     }
@@ -246,8 +276,8 @@ impl ChipOps for HostChip {
         let r = self.chip.random(n);
         self.kept(r)
     }
-    fn generate(&mut self, id: KeyId, curve: Curve) -> Result<Vec<u8>, ChipError> {
-        let r = self.chip.generate(id, curve);
+    fn generate(&mut self, id: KeyId, curve: Curve, policy: &ObjectPolicy) -> Result<Vec<u8>, ChipError> {
+        let r = self.chip.generate(id, curve, policy);
         self.kept(r)
     }
     fn public(&mut self, id: KeyId) -> Result<Vec<u8>, ChipError> {
@@ -274,15 +304,15 @@ impl ChipOps for HostChip {
         let r = self.chip.attest(id, freshness);
         self.kept(r)
     }
-    fn put_hmac_key(&mut self, id: KeyId, key: &[u8; 32]) -> Result<(), ChipError> {
-        let r = self.chip.put_hmac_key(id, key);
+    fn put_hmac_key(&mut self, id: KeyId, key: &[u8; 32], policy: &ObjectPolicy) -> Result<(), ChipError> {
+        let r = self.chip.put_hmac_key(id, key, policy);
         self.kept(r)
     }
     fn hmac(&mut self, id: KeyId, data: &[u8]) -> Result<[u8; 32], ChipError> {
         self.chip.hmac(id, data)
     }
-    fn put_counter(&mut self, id: KeyId, value: u64) -> Result<(), ChipError> {
-        let r = self.chip.put_counter(id, value);
+    fn put_counter(&mut self, id: KeyId, value: u64, policy: &ObjectPolicy) -> Result<(), ChipError> {
+        let r = self.chip.put_counter(id, value, policy);
         self.kept(r)
     }
     fn counter_next(&mut self, id: KeyId) -> Result<u64, ChipError> {
@@ -330,6 +360,7 @@ impl HostBoard {
             links,
             seed,
             chip: None,
+            chip_up: false,
             pending: None,
             started: Instant::now(),
         }
@@ -578,25 +609,49 @@ impl Board for HostBoard {
         self.display.note(lines);
     }
 
-    fn chip(&mut self) -> Option<&mut dyn ChipOps> {
-        self.chip.as_mut().map(|c| c as &mut dyn ChipOps)
+    fn has_chip(&self) -> bool {
+        self.chip.is_some()
     }
 
-    /// `chip.cbor`: `Ok(None)` if it is missing, an error if it cannot be read or does not
-    /// decode.
+    /// The software chip, in the owner session once the chip has an owner object. The
+    /// simulated badge's owner secret is the fixed test secret.
+    fn chip_begin(&mut self) -> Option<&mut dyn ChipOps> {
+        let chip = self.chip.as_mut()?;
+        if !self.chip_up {
+            self.chip_up = true;
+            if chip.exists(KeyId::OWNER) == Ok(true) {
+                if let Err(e) = chip.open_owner(&TEST_OWNER_SECRET) {
+                    eprintln!("[{}] chip: the owner session did not open: {e:?}", self.name);
+                }
+            }
+        }
+        Some(chip as &mut dyn ChipOps)
+    }
+
+    fn chip_end(&mut self) {
+        if let (true, Some(chip)) = (self.chip_up, self.chip.as_mut()) {
+            let _ = chip.close_session();
+        }
+        self.chip_up = false;
+    }
+
+    fn owner_secret(&self) -> Option<[u8; 16]> {
+        self.chip.as_ref().map(|_| TEST_OWNER_SECRET)
+    }
+
+    /// `chip.cbor`: `Ok(None)` if it is missing or holds the record of earlier firmware, an
+    /// error if it cannot be read or does not decode.
     fn chip_record_load(&mut self) -> Result<Option<ChipRecord>, BoardError> {
         let bytes = match std::fs::read(self.dir.join("chip.cbor")) {
             Ok(b) => b,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(_) => return Err(BoardError::Storage),
         };
-        ChipRecord::decode(&bytes)
-            .map(Some)
-            .map_err(|_| BoardError::Storage)
+        ChipRecord::from_stored(&bytes).map_err(|_| BoardError::Storage)
     }
 
     fn chip_record_store(&mut self, r: &ChipRecord) -> Result<(), BoardError> {
-        std::fs::write(self.dir.join("chip.cbor"), r.encode()).map_err(|_| BoardError::Storage)
+        std::fs::write(self.dir.join("chip.cbor"), r.to_stored()).map_err(|_| BoardError::Storage)
     }
 
     /// `grants.cbor`: `Ok(None)` if it is missing, an error if it cannot be read or does not

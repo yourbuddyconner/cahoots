@@ -13,5 +13,8 @@ pub mod soft;
 pub mod testca;
 
 pub use ids::{KeyId, KeyKind};
-pub use ops::{Attested, ChipError, ChipOps, Curve, Signature64, Version};
+pub use ops::{
+    owner_secret, Attested, ChipError, ChipOps, Curve, Identity, ObjectPolicy, Session, Signature64,
+    Version, TEST_OWNER_SECRET,
+};
 pub use soft::SoftChip;

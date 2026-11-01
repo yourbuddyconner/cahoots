@@ -1,10 +1,12 @@
-use cahoots_chip::{ChipError, ChipOps, KeyId, KeyKind, SoftChip};
+use cahoots_chip::{ChipError, ChipOps, KeyId, KeyKind, ObjectPolicy, SoftChip, TEST_OWNER_SECRET};
 
 #[test]
 fn counter_get_reads_without_incrementing() {
     let mut chip = SoftChip::new();
+    chip.put_user_id(KeyId::OWNER, &TEST_OWNER_SECRET, &ObjectPolicy::owner_object()).unwrap();
+    chip.open_owner(&TEST_OWNER_SECRET).unwrap();
     let id = KeyId::new(KeyKind::Grant, 3);
-    chip.put_counter(id, 0).unwrap();
+    chip.put_counter(id, 0, &ObjectPolicy::owner_counter()).unwrap();
     assert_eq!(chip.counter_get(id).unwrap(), 0);
     assert_eq!(chip.counter_next(id).unwrap(), 1);
     assert_eq!(chip.counter_get(id).unwrap(), 1);

@@ -32,7 +32,7 @@ use crate::ssh::{self, Signed};
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use cahoots_chip::{ChipOps, KeyId, KeyKind};
+use cahoots_chip::{ChipOps, KeyId, KeyKind, ObjectPolicy};
 use cahoots_core::circle_id::CircleId;
 use cahoots_core::seat::SeatPublic;
 use cahoots_custodian::wire::{ErrorCode, GrantRequestFields, UnderGrantFields};
@@ -186,7 +186,9 @@ impl Clock {
 
 /// What the grant functions need of a board. Every [`Board`] is one.
 pub trait GrantBoard {
-    fn chip(&mut self) -> Option<&mut dyn ChipOps>;
+    fn has_chip(&self) -> bool;
+    /// See [`Board::chip_begin`]: the badge ends the conversation after the step.
+    fn chip_begin(&mut self) -> Option<&mut dyn ChipOps>;
     fn grants_load(&mut self) -> Result<Option<GrantsRecord>, BoardError>;
     fn grants_store(&mut self, r: &GrantsRecord) -> Result<(), BoardError>;
     /// Fill `buf` from the board's random source; false if it failed its health tests.
@@ -196,8 +198,11 @@ pub trait GrantBoard {
 }
 
 impl<B: Board> GrantBoard for B {
-    fn chip(&mut self) -> Option<&mut dyn ChipOps> {
-        Board::chip(self)
+    fn has_chip(&self) -> bool {
+        Board::has_chip(self)
+    }
+    fn chip_begin(&mut self) -> Option<&mut dyn ChipOps> {
+        Board::chip_begin(self)
     }
     fn grants_load(&mut self) -> Result<Option<GrantsRecord>, BoardError> {
         Board::grants_load(self)
@@ -259,7 +264,8 @@ fn counter_id(slot: u8) -> KeyId {
 fn next_issue(chip: &mut dyn ChipOps) -> Result<u64, ErrorCode> {
     let id = counter_id(ISSUE_SLOT);
     if !chip.exists(id).map_err(|_| ErrorCode::ChipError)? {
-        chip.put_counter(id, 0).map_err(|_| ErrorCode::ChipError)?;
+        chip.put_counter(id, 0, &ObjectPolicy::owner_counter())
+            .map_err(|_| ErrorCode::ChipError)?;
     }
     chip.counter_next(id).map_err(|_| ErrorCode::ChipError)
 }
@@ -311,7 +317,7 @@ fn store<G: GrantBoard + ?Sized>(
 
 /// Delete a grant's counter. One that is not there is not an error.
 fn delete_counter<G: GrantBoard + ?Sized>(board: &mut G, slot: u8) {
-    if let Some(chip) = board.chip() {
+    if let Some(chip) = board.chip_begin() {
         let _ = chip.delete(counter_id(slot));
     }
 }
@@ -408,7 +414,7 @@ pub fn page_entries<G: GrantBoard + ?Sized>(
         .iter()
         .filter(|g| g.circle_id == *circle && !g.revoked && g.exp.is_none_or(|e| now < e))
     {
-        let used = match board.chip() {
+        let used = match board.chip_begin() {
             Some(chip) => chip
                 .counter_get(counter_id(g.slot))
                 .ok()
@@ -484,7 +490,7 @@ fn sign_grant<G: GrantBoard + ?Sized>(
     c: &Circle,
     grant: &SignGrant,
 ) -> Result<Vec<u8>, ErrorCode> {
-    let mut seat = seat_of(board.chip(), c)?;
+    let mut seat = seat_of(board.chip_begin(), c)?;
     let public = seat.public()?;
     let signed = grant.sign(&mut seat, c.seat);
     if seat.failed() {
@@ -525,7 +531,7 @@ pub fn issue<G: GrantBoard + ?Sized>(
         return Err(ErrorCode::Denied);
     }
     // The base comes first: it is signed into the grant.
-    if let Some(chip) = board.chip() {
+    if let Some(chip) = board.chip_begin() {
         let issue_no = next_issue(chip)?;
         // An issue number past 32 bits would lose its high bits in the base: refuse.
         grant.base = match u32::try_from(issue_no) {
@@ -538,10 +544,10 @@ pub fn issue<G: GrantBoard + ?Sized>(
     }
     let base = grant.base;
     let signed = sign_grant(board, c, &grant)?;
-    if let Some(chip) = board.chip() {
+    if let Some(chip) = board.chip_begin() {
         // Anything left in a free slot is stale: the record does not know it.
         let _ = chip.delete(counter_id(slot));
-        chip.put_counter(counter_id(slot), base)
+        chip.put_counter(counter_id(slot), base, &ObjectPolicy::owner_counter())
             .map_err(|_| ErrorCode::ChipError)?;
     }
     record.grants.push(GrantRecord {
@@ -592,7 +598,7 @@ pub fn evaluate_request<G: GrantBoard + ?Sized>(
     nonce: &[u8; 16],
 ) -> Result<Allowed, Fallback> {
     use Fallback::{Prompt, Refuse};
-    let public = seat_of(board.chip(), c)
+    let public = seat_of(board.chip_begin(), c)
         .and_then(|mut s| s.public())
         .map_err(Refuse)?;
     let Ok(grant) = SignGrant::verify(&req.grant, &public, &c.circle_id, c.seat) else {
@@ -614,7 +620,7 @@ pub fn evaluate_request<G: GrantBoard + ?Sized>(
     let rec = record.grants[index].clone();
     // The base is the signed grant's. A record that says otherwise is not this grant's: it
     // could point the grant at another grant's counter.
-    if rec.base != grant.base || (board.chip().is_some() && !base_ok(grant.base)) {
+    if rec.base != grant.base || (board.has_chip() && !base_ok(grant.base)) {
         return say(
             board,
             "grant unknown, the record's base is not the grant's",
@@ -648,7 +654,7 @@ pub fn evaluate_request<G: GrantBoard + ?Sized>(
             Prompt(ErrorCode::Unparseable),
         );
     };
-    let used = match board.chip() {
+    let used = match board.chip_begin() {
         Some(chip) => match chip.counter_get(counter_id(rec.slot)) {
             Ok(raw) => match uses(raw, grant.base, grant.budget) {
                 Some(n) => n,
@@ -760,7 +766,7 @@ pub fn sign_under_grant<G: GrantBoard + ?Sized>(
     let (slot, budget, base) = (record.grants[a.index].slot, a.grant.budget, a.grant.base);
     // Without a chip the count is in the record, which must be written before the signature.
     let mut counted_here = false;
-    let used = match board.chip() {
+    let used = match board.chip_begin() {
         Some(chip) => {
             let raw = chip
                 .counter_next(counter_id(slot))
@@ -785,7 +791,7 @@ pub fn sign_under_grant<G: GrantBoard + ?Sized>(
         // Only the time: a failed write is logged and the signature goes ahead.
         let _ = store(board, clock, &mut record);
     }
-    let mut seat = seat_of(board.chip(), c)?;
+    let mut seat = seat_of(board.chip_begin(), c)?;
     let public = seat.public()?;
     let sig = seat.sign(&req.data)?;
     if !public.verify(&req.data, &sig) {
@@ -826,7 +832,7 @@ pub fn sweep<G: GrantBoard + ?Sized>(board: &mut G, held: &[CircleId]) -> Vec<St
     };
     let mut record = stored.clone().unwrap_or_default();
     let now = record.known_time;
-    let counters: Option<Vec<u8>> = match board.chip() {
+    let counters: Option<Vec<u8>> = match board.chip_begin() {
         None => None,
         Some(chip) => match chip.ids() {
             Ok(ids) => Some(
@@ -845,7 +851,7 @@ pub fn sweep<G: GrantBoard + ?Sized>(board: &mut G, held: &[CircleId]) -> Vec<St
     };
     let mut kept = Vec::new();
     for g in core::mem::take(&mut record.grants) {
-        let used = match (&counters, board.chip()) {
+        let used = match (&counters, board.chip_begin()) {
             (Some(slots), Some(chip)) if slots.contains(&g.slot) => {
                 // A counter that cannot be this grant's reads as spent.
                 chip.counter_get(counter_id(g.slot))
@@ -885,7 +891,7 @@ pub fn sweep<G: GrantBoard + ?Sized>(board: &mut G, held: &[CircleId]) -> Vec<St
         if record.grants.iter().any(|g| g.slot == slot && !g.revoked) {
             continue;
         }
-        let Some(chip) = board.chip() else { break };
+        let Some(chip) = board.chip_begin() else { break };
         lines.push(match chip.delete(counter_id(slot)) {
             Ok(()) => format!("grant counter in slot {slot}: no live grant, deleted"),
             Err(e) => {

@@ -188,17 +188,27 @@ fn main() -> ! {
     let _b = pins.gpio15.into_pull_up_input();
     let btn = Buttons::new(Button::new(14), Button::new(15));
 
-    // The SE051 (for now the Click board) on I2C0, V1's pins: SDA GP8, SCL GP9, ENA GP2 held
-    // high for as long as the board runs. No answer leaves the badge without a chip: seat
-    // keys and roots stay in software, as before the chip.
-    let ena = pins.gpio2.into_push_pull_output_in_state(hal::gpio::PinState::High);
+    // A bench build gives the laptop time to open the port first, or the chip's boot lines
+    // are gone before anyone reads them.
+    #[cfg(feature = "bench")]
+    for _ in 0..80 {
+        link::usb_pump();
+        let mut d = timer;
+        d.delay_ms(100);
+    }
+
+    // The SE051 (for now the Click board) on I2C0, V1's pins: SDA GP8, SCL GP9, ENA GP2. The
+    // pin rests low, so a phone's field can start the chip on its antenna; the board raises
+    // it for each conversation (`PicoBoard::chip_begin`). It rises here once to see whether
+    // a chip answers at all. No answer leaves the badge without a chip: seat keys and roots
+    // stay in software, as before the chip.
+    let mut ena = pins.gpio2.into_push_pull_output_in_state(hal::gpio::PinState::High);
     let sda: board::Sda = pins.gpio8.reconfigure();
     let scl: board::Scl = pins.gpio9.reconfigure();
     let i2c = hal::I2C::i2c0(pac.I2C0, sda, scl, 400.kHz(), &mut pac.RESETS, &clocks.system_clock);
-    // The chip wants a moment after its enable pin rises before it answers.
     {
         let mut d = timer;
-        d.delay_ms(10);
+        d.delay_ms(board::CHIP_START_MS);
     }
     let chip = match cahoots_chip::se05x::Se05xChip::new(i2c, timer) {
         Ok(c) => Some(c),
@@ -207,20 +217,25 @@ fn main() -> ! {
             None
         }
     };
-    #[cfg(feature = "bench")]
-    let chip = chip.map(|mut c| {
-        // Give the laptop time to open the port, or the probe's lines are gone before
-        // anyone reads them.
-        for _ in 0..80 {
-            link::usb_pump();
-            let mut d = timer;
-            d.delay_ms(100);
+    {
+        use embedded_hal::digital::OutputPin as _;
+        let _ = ena.set_low();
+        log!("se051: pin low");
+    }
+    // The badge's identity to its chip, from the RP2350's unique id (the device and wafer
+    // ids the boot ROM reports, each little-endian), so a reflash recovers it.
+    let owner_secret = match hal::rom_data::sys_info_api::chip_info() {
+        Ok(Some(info)) => {
+            let mut id = [0u8; 8];
+            id[..4].copy_from_slice(&info.device_id.to_le_bytes());
+            id[4..].copy_from_slice(&info.wafer_id.to_le_bytes());
+            Some(cahoots_chip::owner_secret(&id))
         }
-        for line in c.probe_counter() {
-            log!("probe: {line}");
+        _ => {
+            log!("rp2350: the boot ROM gave no unique id, so the badge cannot own its chip");
+            None
         }
-        c
-    });
+    };
 
     let entropy = Tested::new(
         entropy::Hw::new(pac.TRNG, &mut pac.RESETS),
@@ -235,7 +250,9 @@ fn main() -> ! {
         heap_logged: 0,
         pending: None,
         chip,
-        _chip_enable: ena,
+        chip_enable: ena,
+        chip_up: false,
+        owner_secret,
     });
     badge.boot();
     loop {

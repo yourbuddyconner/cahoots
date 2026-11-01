@@ -171,9 +171,21 @@ fn a_host_board_keeps_the_chip_slot_the_root_and_the_chip_record() {
             has_root: true,
             has_epoch: true,
         }],
+        phone: None,
+        badge_nonce: [7; 16],
+        generation: cahoots_badge::chip::GENERATION,
     };
     board.chip_record_store(&record).unwrap();
-    assert_eq!(board.chip_record_load(), Ok(Some(record)));
+    assert_eq!(board.chip_record_load(), Ok(Some(record.clone())));
+    assert!(std::fs::read(dir.join("chip.cbor")).unwrap().starts_with(b"CAHC2"));
+    // The record of earlier firmware, bare CBOR, reads as none: the badge wipes and starts
+    // over.
+    let mut v1 = vec![0x81, 0x81, 0x85, 0x03, 0x50];
+    v1.extend_from_slice(&circle.circle_id);
+    v1.extend_from_slice(&[0xF5, 0xF5, 0xF5]);
+    std::fs::write(dir.join("chip.cbor"), &v1).unwrap();
+    assert_eq!(board.chip_record_load(), Ok(None));
+
     std::fs::write(dir.join("chip.cbor"), b"not cbor").unwrap();
     assert_eq!(board.chip_record_load(), Err(cahoots_badge::BoardError::Storage));
 }

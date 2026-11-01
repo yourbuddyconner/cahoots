@@ -401,15 +401,34 @@ pub trait Board {
     fn note_screen(&mut self, lines: &[String], secret: bool) {
         let _ = (lines, secret);
     }
-    /// The board's secure element, if it has one. A board without one keeps the seat key and
-    /// the circle root in software, in the circle record.
-    fn chip(&mut self) -> Option<&mut dyn ChipOps> {
+    /// True if the board has a secure element. A board without one keeps the seat key and
+    /// the circle root in software, in the circle record. Asking does not wake the chip.
+    fn has_chip(&self) -> bool {
+        false
+    }
+    /// Start a conversation with the chip and hand it out: the board raises the chip's enable
+    /// pin, waits for it to start, wakes the driver and opens the owner session when the chip
+    /// has an owner object. While the pin is high the chip answers on its wires alone, so a
+    /// phone's tap finds no tag. Calling it again before [`Board::chip_end`] hands out the
+    /// same conversation. `None` without a chip, or when it does not answer.
+    fn chip_begin(&mut self) -> Option<&mut dyn ChipOps> {
+        None
+    }
+    /// End the conversation: close the session and drop the pin, so the chip is at rest and a
+    /// phone's field can start it on its antenna. Nothing happens if none was begun. The
+    /// badge ends every conversation it begins, at the latest at the end of each step.
+    fn chip_end(&mut self) {}
+    /// The secret of the chip's owner object, the badge's identity to its chip. `None` on a
+    /// board without a chip.
+    fn owner_secret(&self) -> Option<[u8; 16]> {
         None
     }
     /// The chip record (see [`crate::chip`]): `Ok(None)` if none is stored, an error if one is
     /// stored but cannot be read or does not decode. The two differ: the badge deletes chip
     /// objects the record does not know, so an unreadable record must not pass for an empty
-    /// one. A board without a chip stores none.
+    /// one. A record of earlier firmware (`CAHC`) reads as none, so the badge wipes the chip
+    /// and makes a new one ([`ChipRecord::from_stored`]); a board writes `CAHC2`
+    /// ([`ChipRecord::to_stored`]). A board without a chip stores none.
     fn chip_record_load(&mut self) -> Result<Option<ChipRecord>, BoardError> {
         Ok(None)
     }

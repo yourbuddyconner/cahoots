@@ -353,34 +353,39 @@ pub fn wipe(p: usize, pad_len: u32) -> Result<(), ()> {
     erase_sectors(at.ledger, at.ledger_cap)
 }
 
-const CHIP_MAGIC: &[u8; 4] = b"CAHC";
+/// The chip record of this firmware, whose chip the badge owns.
+const CHIP_MAGIC: &[u8; 5] = b"CAHC2";
+/// The chip record of earlier firmware, whose chip objects any session could reach.
+const CHIP_MAGIC_V1: &[u8; 4] = b"CAHC";
 
-/// The chip record's bytes: `Ok(None)` if the sector is blank, `Err` if it holds something
-/// that is not a chip record. The bytes are `CAHC`, a little-endian u16 length and the body.
+/// The chip record's bytes: `Ok(None)` if the sector is blank or holds the record of earlier
+/// firmware (`CAHC`, read as no record, so the badge wipes the chip and sets it up anew),
+/// `Err` if it holds something that is not a chip record. The bytes are `CAHC2`, a
+/// little-endian u16 length and the body.
 pub fn load_chip_record() -> Result<Option<Vec<u8>>, ()> {
-    let mut head = [0u8; 6];
+    let mut head = [0u8; 7];
     read_any(CHIP_RECORD_BASE, &mut head);
-    if head == [0xFF; 6] {
+    if head == [0xFF; 7] {
         return Ok(None);
     }
-    if &head[..4] != CHIP_MAGIC {
-        return Err(());
+    if &head[..5] != CHIP_MAGIC {
+        return if &head[..4] == CHIP_MAGIC_V1 { Ok(None) } else { Err(()) };
     }
-    let len = u16::from_le_bytes([head[4], head[5]]) as usize;
-    if len > SECTOR as usize - 6 {
+    let len = u16::from_le_bytes([head[5], head[6]]) as usize;
+    if len > SECTOR as usize - 7 {
         return Err(());
     }
     let mut body = vec![0u8; len];
-    read_any(CHIP_RECORD_BASE + 6, &mut body);
+    read_any(CHIP_RECORD_BASE + 7, &mut body);
     Ok(Some(body))
 }
 
 /// Replace the chip record, rewritten whole in its sector.
 pub fn save_chip_record(body: &[u8]) -> Result<(), ()> {
-    if body.len() > SECTOR as usize - 6 {
+    if body.len() > SECTOR as usize - 7 {
         return Err(());
     }
-    let mut rec = Vec::with_capacity(6 + body.len());
+    let mut rec = Vec::with_capacity(7 + body.len());
     rec.extend_from_slice(CHIP_MAGIC);
     rec.extend_from_slice(&(body.len() as u16).to_le_bytes());
     rec.extend_from_slice(body);

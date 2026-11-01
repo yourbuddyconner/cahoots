@@ -9,6 +9,8 @@ license.workspace = true
 [features]
 default = []
 std = ["cahoots-core/std", "cahoots-hal/std", "cahoots-custodian/std"]
+# `test_support`: a board in memory with a software chip, for this crate's tests and others'.
+test-support = ["std", "cahoots-chip/std"]
 
 [dependencies]
 cahoots-core = { workspace = true }
@@ -25,6 +27,7 @@ embedded-graphics = { version = "0.8", default-features = false }
 profont = { version = "0.7", default-features = false }
 
 [dev-dependencies]
+cahoots-badge = { path = ".", features = ["test-support"] }
 cahoots-core = { workspace = true, features = ["std"] }
 cahoots-chip = { workspace = true, features = ["std"] }
 cahoots-objects = { workspace = true, features = ["std"] }

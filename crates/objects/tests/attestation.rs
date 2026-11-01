@@ -8,7 +8,7 @@ const FRESH: [u8; 16] = [7; 16];
 fn attested() -> cahoots_chip::Attested {
     let mut chip = SoftChip::new();
     let id = KeyId::new(KeyKind::Seat, 1);
-    chip.generate(id, Curve::P256).unwrap();
+    chip.generate(id, Curve::P256, &cahoots_chip::ObjectPolicy::any_session()).unwrap();
     chip.attest(id, &FRESH).unwrap()
 }
 
@@ -91,7 +91,7 @@ fn mismatched_attest_public_fails() {
     let mut att = attested();
     let mut chip2 = SoftChip::new();
     let id = KeyId::new(KeyKind::Seat, 2);
-    chip2.generate(id, Curve::P256).unwrap();
+    chip2.generate(id, Curve::P256, &cahoots_chip::ObjectPolicy::any_session()).unwrap();
     att.attest_public = {
         // any other valid uncompressed point: the seat key decompressed is not needed, reuse a mutated copy
         let mut p = att.attest_public.clone();

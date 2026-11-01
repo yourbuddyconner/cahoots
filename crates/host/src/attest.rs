@@ -238,7 +238,7 @@ mod tests {
 
     fn seat(chip: &mut SoftChip, slot: u8) -> (Vec<u8>, Attested) {
         let id = KeyId::new(KeyKind::Seat, slot);
-        chip.generate(id, Curve::P256).unwrap();
+        chip.generate(id, Curve::P256, &cahoots_chip::ObjectPolicy::any_session()).unwrap();
         let att = chip.attest(id, &FRESH).unwrap();
         (att.public.clone(), att)
     }

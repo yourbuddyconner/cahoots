@@ -4,27 +4,37 @@
 //!
 //! Object ids are the Cahoots ids as they are ([`KeyId`] is already the 32-bit id the applet
 //! uses), so a seat key is object `0x4C41_01ss`, a root `0x4C41_02ss` and an epoch counter
-//! `0x4C41_03ss`. Every command runs in the default session: no user id, no SCP03.
+//! `0x4C41_03ss`.
+//!
+//! The badge owns the chip through a user-id session: [`ChipOps::open_owner`] sends
+//! `CreateSession` for the owner object and `VerifySessionUserId` with the owner secret, and
+//! from then on every command goes through `ProcessSessionCmd` in that session until
+//! [`ChipOps::close_session`]. Before the session opens, commands run in no session.
+//!
+//! A policy names identities by authentication object id: one `Policy` per identity the
+//! [`ObjectPolicy`] names, `ObjectId::INVALID` (all zeros) for no session, the owner object's
+//! id, the phone slot's id. The slot's entry carries `REQUIRE_SM` when the policy asks.
 //!
 //! What is not yet checked against a real chip is marked "bench" below: the Ed25519 byte
 //! order, the counter increment, the attestation object ids and the attested payload.
 
 use crate::ids::KeyId;
-use crate::ops::{Attested, ChipError, ChipOps, Curve, Signature64, Version};
+use crate::ops::{Attested, ChipError, ChipOps, Curve, Identity, ObjectPolicy, Signature64, Version};
 use alloc::vec;
 use alloc::vec::Vec;
 use embedded_hal::delay::DelayNs;
 use embedded_hal::i2c::{ErrorKind, I2c, NoAcknowledgeSource};
 use se05x::se05x::commands::{
-    CheckObjectExists, DeleteSecureObject, EcdsaSign, EddsaSign, GetRandom, GetVersion,
-    MacOneShotGenerate, ReadAttestObject, ReadEcCurveList, ReadIdList, ReadObject, ReadSize,
-    WriteCounter, WriteEcKey, WriteSymmKey,
+    CheckObjectExists, CloseSession, CreateSession, DeleteSecureObject, EcdsaSign, EddsaSign,
+    GetRandom, GetVersion, MacOneShotGenerate, ReadAttestObject, ReadEcCurveList, ReadIdList,
+    ReadObject, ReadSize, VerifySessionUserId, WriteBinary, WriteCounter, WriteEcKey,
+    WriteSymmKey, WriteUserId,
 };
 use se05x::se05x::constants::PRIME256V1_INITIALIZER;
 use se05x::se05x::policies::{ObjectAccessRule, ObjectPolicyFlags, Policy, PolicySet};
 use se05x::se05x::{
     AttestationAlgo, Be, CounterSize, EcCurve, EcDsaSignatureAlgo, Error as SeError, MacAlgo,
-    ObjectId, P1KeyType, Se05X, SecureObjectFilter, SymmKeyType,
+    ObjectId, P1KeyType, Se05X, SecureObjectFilter, SessionId, SymmKeyType,
 };
 use se05x::t1::{Error as T1Error, I2CErrorNack};
 
@@ -46,7 +56,8 @@ const ED25519_REVERSED: bool = true;
 /// The response buffer: the largest response is an attestation (about 250 bytes) or a
 /// chunk of the certificate; the applet's longest APDU payload is 889 bytes.
 const BUF: usize = 1024;
-/// The certificate is read in chunks of this many bytes.
+/// The certificate is read, and a binary object written, in chunks of this many bytes: well
+/// under the applet's 889-byte APDU payload with the session wrapper and the tags around it.
 const CHUNK: u16 = 512;
 
 /// The I2C bus as the driver wants it, with the bus error reduced to its kind so the driver
@@ -106,7 +117,12 @@ fn err(e: SeError) -> ChipError {
     match e {
         SeError::T1(T1Error::AddressNack) => ChipError::NoChip,
         SeError::T1(_) | SeError::Line(_) | SeError::Tlv | SeError::Unknown => ChipError::Transport,
-        SeError::Status(s) => ChipError::Status(s.to_u16()),
+        SeError::Status(s) => match s.to_u16() {
+            // The applet answers a call its policy refuses with 6986 (bench, 2026-10-31).
+            0x6982 | 0x6986 => ChipError::NotAllowed,
+            0x6A89 => ChipError::Exists,
+            w => ChipError::Status(w),
+        },
     }
 }
 
@@ -114,30 +130,53 @@ fn oid(id: KeyId) -> ObjectId {
     ObjectId(id.0.to_be_bytes())
 }
 
-/// The default session, which every command here runs in.
-const ALL_SESSIONS: ObjectId = ObjectId([0, 0, 0, 0]);
+/// The applet's object id for an identity in a policy: all zeros for no session.
+fn identity_oid(i: Identity) -> ObjectId {
+    match i.auth_id() {
+        Some(id) => oid(id),
+        None => ObjectId::INVALID,
+    }
+}
 
-/// A seat key signs, shows its public key, can be attested and deleted; nothing else. The
-/// private key cannot be read in any case.
-const SEAT_POLICY: [Policy; 1] = [Policy {
-    object_id: ALL_SESSIONS,
-    access_rule: ObjectAccessRule::from_flags(
-        ObjectPolicyFlags::ALLOW_SIGN
-            .union(ObjectPolicyFlags::ALLOW_VERIFY)
-            .union(ObjectPolicyFlags::ALLOW_READ)
-            .union(ObjectPolicyFlags::ALLOW_ATTESTATION)
-            .union(ObjectPolicyFlags::ALLOW_DELETE),
-    ),
-}];
+/// The applet's policy set for `p`: one entry per identity it names, with the flags of every
+/// right it names that identity in, and `REQUIRE_SM` on the slot's entry when asked.
+fn policies(p: &ObjectPolicy) -> Vec<Policy> {
+    let rights: [(&[Identity], ObjectPolicyFlags); 5] = [
+        (&p.sign, ObjectPolicyFlags::ALLOW_SIGN),
+        (&p.read, ObjectPolicyFlags::ALLOW_READ),
+        (&p.write, ObjectPolicyFlags::ALLOW_WRITE),
+        (&p.delete, ObjectPolicyFlags::ALLOW_DELETE),
+        (&p.attest, ObjectPolicyFlags::ALLOW_ATTESTATION),
+    ];
+    let mut out = Vec::new();
+    for who in [Identity::None, Identity::Owner, Identity::Slot] {
+        let mut flags = ObjectPolicyFlags::empty();
+        for (ids, flag) in &rights {
+            if ids.contains(&who) {
+                flags |= *flag;
+            }
+        }
+        if flags.is_empty() {
+            continue;
+        }
+        if who == Identity::Slot && p.require_sm {
+            flags |= ObjectPolicyFlags::REQUIRE_SM;
+        }
+        out.push(Policy { object_id: identity_oid(who), access_rule: ObjectAccessRule::from_flags(flags) });
+    }
+    out
+}
 
-/// A root computes HMACs (the applet counts MAC generation as signing) and can be deleted;
-/// it is never read back.
-const ROOT_POLICY: [Policy; 1] = [Policy {
-    object_id: ALL_SESSIONS,
-    access_rule: ObjectAccessRule::from_flags(
-        ObjectPolicyFlags::ALLOW_SIGN.union(ObjectPolicyFlags::ALLOW_DELETE),
-    ),
-}];
+/// Run `cmd` in the open session, or in no session when none is open.
+macro_rules! run {
+    ($chip:expr, $cmd:expr) => {
+        match $chip.session {
+            Some(sid) => $chip.se.run_session_command(sid, &$cmd, &mut $chip.buf),
+            None => $chip.se.run_command(&$cmd, &mut $chip.buf),
+        }
+        .map_err(err)
+    };
+}
 
 /// SEC1 compressed from the uncompressed `04 || X || Y` the applet returns.
 fn compress(point: &[u8]) -> Result<Vec<u8>, ChipError> {
@@ -211,6 +250,8 @@ fn reversed(b: &[u8]) -> Vec<u8> {
 pub struct Se05xChip<I: I2c, D: DelayNs> {
     se: Se05X<Bus<I>, Wait<D>>,
     buf: Vec<u8>,
+    /// The open session, if any.
+    session: Option<SessionId>,
 }
 
 impl<I: I2c, D: DelayNs> Se05xChip<I, D> {
@@ -221,8 +262,9 @@ impl<I: I2c, D: DelayNs> Se05xChip<I, D> {
         let mut chip = Se05xChip {
             se: Se05X::new(Bus(i2c), ADDRESS, Wait(delay)),
             buf: vec![0u8; BUF],
+            session: None,
         };
-        chip.se.enable().map_err(err)?;
+        chip.restart()?;
         let has_p256 = chip
             .se
             .run_command(&ReadEcCurveList {}, &mut chip.buf)
@@ -234,29 +276,33 @@ impl<I: I2c, D: DelayNs> Se05xChip<I, D> {
         Ok(chip)
     }
 
+    /// Wake the chip again after its enable pin rose, in no session: the chip forgets its
+    /// session when it loses power.
+    pub fn restart(&mut self) -> Result<(), ChipError> {
+        self.session = None;
+        self.se.enable().map_err(err)?;
+        Ok(())
+    }
+
+    /// True when a session is open.
+    pub fn in_session(&self) -> bool {
+        self.session.is_some()
+    }
+
     fn read_object(&mut self, id: ObjectId) -> Result<Vec<u8>, ChipError> {
-        let r = self
-            .se
-            .run_command(&ReadObject { object_id: id, offset: None, length: None, rsa_key_component: None }, &mut self.buf)
-            .map_err(err)?;
+        let r = run!(self, ReadObject { object_id: id, offset: None, length: None, rsa_key_component: None })?;
         Ok(r.data.to_vec())
     }
 
     /// A binary object of any size, in chunks.
     fn read_file(&mut self, id: ObjectId) -> Result<Vec<u8>, ChipError> {
-        let size = self.se.run_command(&ReadSize { object_id: id }, &mut self.buf).map_err(err)?.size.0;
+        let size = run!(self, ReadSize { object_id: id })?.size.0;
         let size = u16::try_from(size).map_err(|_| ChipError::Transport)?;
         let mut out = Vec::with_capacity(size as usize);
         let mut at = 0u16;
         while at < size {
             let n = CHUNK.min(size - at);
-            let r = self
-                .se
-                .run_command(
-                    &ReadObject { object_id: id, offset: Some(Be(at)), length: Some(Be(n)), rsa_key_component: None },
-                    &mut self.buf,
-                )
-                .map_err(err)?;
+            let r = run!(self, ReadObject { object_id: id, offset: Some(Be(at)), length: Some(Be(n)), rsa_key_component: None })?;
             if r.data.len() != n as usize {
                 return Err(ChipError::Transport);
             }
@@ -266,41 +312,13 @@ impl<I: I2c, D: DelayNs> Se05xChip<I, D> {
         Ok(out)
     }
 
-    /// Delete the object if it is there, so a write makes it fresh with our policy.
-    fn clear(&mut self, id: KeyId) -> Result<(), ChipError> {
+    /// `Exists` if an object has `id`: a creating call never replaces one, so a policy is
+    /// only ever the one the object was made with.
+    fn fresh(&mut self, id: KeyId) -> Result<(), ChipError> {
         if self.exists(id)? {
-            self.delete(id)?;
+            return Err(ChipError::Exists);
         }
         Ok(())
-    }
-
-    /// Bench: try the counter commands on a scratch object and report each answer, so the
-    /// applet's expectations can be read off a boot log instead of guessed from the data
-    /// sheet. Leaves nothing behind.
-    pub fn probe_counter(&mut self) -> Vec<alloc::string::String> {
-        use alloc::format;
-        let id = KeyId::new(crate::ids::KeyKind::Epoch, 0xFF);
-        let mut out = Vec::new();
-        let _ = self.clear(id);
-        let mut run = |me: &mut Self, what: &str, cmd: WriteCounter| {
-            let r = me.se.run_command(&cmd, &mut me.buf).map_err(err);
-            let read = me.read_object(oid(id));
-            out.push(format!("{what}: {r:?}; read {read:?}"));
-        };
-        run(self, "size 8, value 0", WriteCounter { transient: false, policy: None, object_id: oid(id), data: Some(CounterSize::B8), value: Some(Be(0)) });
-        let _ = self.clear(id);
-        run(self, "size 8, no value", WriteCounter { transient: false, policy: None, object_id: oid(id), data: Some(CounterSize::B8), value: None });
-        run(self, "then increment (no size, no value)", WriteCounter { transient: false, policy: None, object_id: oid(id), data: None, value: None });
-        run(self, "then set value 5 (no size)", WriteCounter { transient: false, policy: None, object_id: oid(id), data: None, value: Some(Be(5)) });
-        let _ = self.clear(id);
-        run(self, "size 8, value 1", WriteCounter { transient: false, policy: None, object_id: oid(id), data: Some(CounterSize::B8), value: Some(Be(1)) });
-        let _ = self.clear(id);
-        run(self, "no size, value 0 on a fresh id", WriteCounter { transient: false, policy: None, object_id: oid(id), data: None, value: Some(Be(0)) });
-        let _ = self.clear(id);
-        run(self, "size 4, no value", WriteCounter { transient: false, policy: None, object_id: oid(id), data: Some(CounterSize::B4), value: None });
-        run(self, "then increment", WriteCounter { transient: false, policy: None, object_id: oid(id), data: None, value: None });
-        let _ = self.clear(id);
-        out
     }
 
     /// The key's public key as the applet returns it: `04 || X || Y` for P-256, 32 bytes for
@@ -332,7 +350,7 @@ impl<I: I2c, D: DelayNs> Se05xChip<I, D> {
 
 impl<I: I2c, D: DelayNs> ChipOps for Se05xChip<I, D> {
     fn version(&mut self) -> Result<Version, ChipError> {
-        let v = self.se.run_command(&GetVersion {}, &mut self.buf).map_err(err)?.version_info;
+        let v = run!(self, GetVersion {})?.version_info;
         Ok(Version { major: v.major, minor: v.minor, patch: v.patch })
     }
 
@@ -340,7 +358,7 @@ impl<I: I2c, D: DelayNs> ChipOps for Se05xChip<I, D> {
         let mut out = Vec::with_capacity(n);
         while out.len() < n {
             let k = (n - out.len()).min(CHUNK as usize) as u16;
-            let r = self.se.run_command(&GetRandom { length: Be(k) }, &mut self.buf).map_err(err)?;
+            let r = run!(self, GetRandom { length: Be(k) })?;
             if r.data.len() != k as usize {
                 return Err(ChipError::Transport);
             }
@@ -349,28 +367,24 @@ impl<I: I2c, D: DelayNs> ChipOps for Se05xChip<I, D> {
         Ok(out)
     }
 
-    fn generate(&mut self, id: KeyId, curve: Curve) -> Result<Vec<u8>, ChipError> {
-        self.clear(id)?;
+    fn generate(&mut self, id: KeyId, curve: Curve, policy: &ObjectPolicy) -> Result<Vec<u8>, ChipError> {
+        self.fresh(id)?;
+        let policy = policies(policy);
         let curve = match curve {
             Curve::P256 => EcCurve::NistP256,
             Curve::Ed25519 => EcCurve::IdEccEd25519,
         };
-        self.se
-            .run_command(
-                &WriteEcKey {
+        run!(self, WriteEcKey {
                     transient: false,
                     is_auth: false,
                     key_type: Some(P1KeyType::KeyPair),
-                    policy: Some(PolicySet(&SEAT_POLICY)),
+                    policy: Some(PolicySet(&policy)),
                     max_attempts: None,
                     object_id: oid(id),
                     curve: Some(curve),
                     private_key: None,
                     public_key: None,
-                },
-                &mut self.buf,
-            )
-            .map_err(err)?;
+                })?;
         self.public(id)
     }
 
@@ -383,12 +397,12 @@ impl<I: I2c, D: DelayNs> ChipOps for Se05xChip<I, D> {
         if !self.exists(id)? {
             return Err(ChipError::NoSuchKey);
         }
-        self.se.run_command(&DeleteSecureObject { object_id: oid(id) }, &mut self.buf).map_err(err)?;
+        run!(self, DeleteSecureObject { object_id: oid(id) })?;
         Ok(())
     }
 
     fn exists(&mut self, id: KeyId) -> Result<bool, ChipError> {
-        let r = self.se.run_command(&CheckObjectExists { object_id: oid(id) }, &mut self.buf).map_err(err)?;
+        let r = run!(self, CheckObjectExists { object_id: oid(id) })?;
         Ok(r.result.is_success())
     }
 
@@ -396,10 +410,7 @@ impl<I: I2c, D: DelayNs> ChipOps for Se05xChip<I, D> {
         let mut out = Vec::new();
         let mut offset = 0u16;
         loop {
-            let r = self
-                .se
-                .run_command(&ReadIdList { offset: Be(offset), filter: SecureObjectFilter::All }, &mut self.buf)
-                .map_err(err)?;
+            let r = run!(self, ReadIdList { offset: Be(offset), filter: SecureObjectFilter::All })?;
             let more = r.more.is_more();
             let chunks = r.ids.chunks_exact(4);
             let n = chunks.len();
@@ -419,21 +430,12 @@ impl<I: I2c, D: DelayNs> ChipOps for Se05xChip<I, D> {
     }
 
     fn sign_p256(&mut self, id: KeyId, digest: &[u8; 32]) -> Result<Signature64, ChipError> {
-        let r = self
-            .se
-            .run_command(
-                &EcdsaSign { key_id: oid(id), algo: EcDsaSignatureAlgo::Sha256, data: digest },
-                &mut self.buf,
-            )
-            .map_err(err)?;
+        let r = run!(self, EcdsaSign { key_id: oid(id), algo: EcDsaSignatureAlgo::Sha256, data: digest })?;
         der_to_raw(r.signature)
     }
 
     fn sign_ed25519(&mut self, id: KeyId, message: &[u8]) -> Result<Signature64, ChipError> {
-        let r = self
-            .se
-            .run_command(&EddsaSign { key_id: oid(id), data: message }, &mut self.buf)
-            .map_err(err)?;
+        let r = run!(self, EddsaSign { key_id: oid(id), data: message })?;
         let sig: Signature64 = r.signature.try_into().map_err(|_| ChipError::Transport)?;
         if !ED25519_REVERSED {
             return Ok(sig);
@@ -453,18 +455,15 @@ impl<I: I2c, D: DelayNs> ChipOps for Se05xChip<I, D> {
     /// `attested_payload` builds for the software chip, and `Attested` has no field for the
     /// attributes. Here `public` is the key as the applet returned it (`04 || X || Y`), `uid`
     /// the 18-byte chip id, `timestamp` the 12-byte timestamp and `signature` the DER
-    /// signature; `attested_payload` must be matched to the real layout on the bench. The
-    /// default session is used; if the attestation key's policy wants a user-id session the
-    /// call fails with a status and that is the first thing to look at.
+    /// signature; `attested_payload` must be matched to the real layout on the bench. It runs
+    /// in the open session, the owner's on the badge; if NXP's attestation key refuses that
+    /// session the call fails with a status and that is the first thing to look at.
     fn attest(&mut self, id: KeyId, freshness: &[u8; 16]) -> Result<Attested, ChipError> {
         if !self.exists(id)? {
             return Err(ChipError::NoSuchKey);
         }
         let attested = {
-            let r = self
-                .se
-                .run_command(
-                    &ReadAttestObject {
+            let r = run!(self, ReadAttestObject {
                         object_id: oid(id),
                         offset: None,
                         length: None,
@@ -472,10 +471,7 @@ impl<I: I2c, D: DelayNs> ChipOps for Se05xChip<I, D> {
                         attestation_object: ObjectId(ATTEST_KEY.to_be_bytes()),
                         attestation_algo: AttestationAlgo::ECdsaSha256,
                         freshness_random: freshness,
-                    },
-                    &mut self.buf,
-                )
-                .map_err(err)?;
+                    })?;
             if r.freshness_random != freshness {
                 return Err(ChipError::Transport);
             }
@@ -494,68 +490,48 @@ impl<I: I2c, D: DelayNs> ChipOps for Se05xChip<I, D> {
         Ok(Attested { attest_public, attest_cert_der: cert, ..attested })
     }
 
-    fn put_hmac_key(&mut self, id: KeyId, key: &[u8; 32]) -> Result<(), ChipError> {
-        self.clear(id)?;
-        self.se
-            .run_command(
-                &WriteSymmKey {
+    fn put_hmac_key(&mut self, id: KeyId, key: &[u8; 32], policy: &ObjectPolicy) -> Result<(), ChipError> {
+        self.fresh(id)?;
+        let policy = policies(policy);
+        run!(self, WriteSymmKey {
                     transient: false,
                     is_auth: false,
                     key_type: SymmKeyType::Hmac,
-                    policy: Some(PolicySet(&ROOT_POLICY)),
+                    policy: Some(PolicySet(&policy)),
                     max_attempts: None,
                     object_id: oid(id),
                     kek_id: None,
                     value: key,
-                },
-                &mut self.buf,
-            )
-            .map_err(err)?;
+                })?;
         Ok(())
     }
 
     fn hmac(&mut self, id: KeyId, data: &[u8]) -> Result<[u8; 32], ChipError> {
-        let r = self
-            .se
-            .run_command(
-                &MacOneShotGenerate { key_id: oid(id), algo: MacAlgo::HmacSha256, data },
-                &mut self.buf,
-            )
-            .map_err(err)?;
+        let r = run!(self, MacOneShotGenerate { key_id: oid(id), algo: MacAlgo::HmacSha256, data })?;
         r.tag.try_into().map_err(|_| ChipError::Transport)
     }
 
-    /// An 8-byte counter, made fresh: the applet's counters only go up, so an old one is
-    /// deleted first. The applet (7.2.0, on the bench 2026-10-29) refuses a `WriteCounter`
+    /// An 8-byte counter at a free id. The applet (7.2.0, on the bench 2026-10-29) refuses a `WriteCounter`
     /// that carries both a size and a value with 0x6A80, so the counter is created with its
     /// size alone, at zero, and a starting value other than zero is a second write.
-    fn put_counter(&mut self, id: KeyId, value: u64) -> Result<(), ChipError> {
-        self.clear(id)?;
-        self.se
-            .run_command(
-                &WriteCounter {
+    fn put_counter(&mut self, id: KeyId, value: u64, policy: &ObjectPolicy) -> Result<(), ChipError> {
+        self.fresh(id)?;
+        let policy = policies(policy);
+        run!(self, WriteCounter {
                     transient: false,
-                    policy: None,
+                    policy: Some(PolicySet(&policy)),
                     object_id: oid(id),
                     data: Some(CounterSize::B8),
                     value: None,
-                },
-                &mut self.buf,
-            )
-            .map_err(err)?;
+                })?;
         if value != 0 {
-            self.se
-                .run_command(
-                    &WriteCounter {
+            run!(self, WriteCounter {
                         transient: false,
                         policy: None,
                         object_id: oid(id),
                         data: None,
                         value: Some(Be(value)),
-                    },
-                    &mut self.buf,
-                )
-                .map_err(err)?;
+                    })?;
         }
         Ok(())
     }
@@ -567,12 +543,7 @@ impl<I: I2c, D: DelayNs> ChipOps for Se05xChip<I, D> {
         if !self.exists(id)? {
             return Err(ChipError::NoSuchKey);
         }
-        self.se
-            .run_command(
-                &WriteCounter { transient: false, policy: None, object_id: oid(id), data: None, value: None },
-                &mut self.buf,
-            )
-            .map_err(err)?;
+        run!(self, WriteCounter { transient: false, policy: None, object_id: oid(id), data: None, value: None })?;
         let raw = self.read_object(oid(id))?;
         if raw.is_empty() || raw.len() > 8 {
             return Err(ChipError::Transport);
@@ -590,7 +561,140 @@ impl<I: I2c, D: DelayNs> ChipOps for Se05xChip<I, D> {
         let be: [u8; 8] = raw.as_slice().try_into().map_err(|_| ChipError::Transport)?;
         Ok(u64::from_be_bytes(be))
     }
+
+    /// `CreateSession` for the owner object, then `VerifySessionUserId` with the secret inside
+    /// it. A session already open is closed first. `NoSuchKey` if the chip has no owner object;
+    /// `BadSession` if the session cannot be opened or the secret is refused.
+    fn open_owner(&mut self, secret: &[u8; 16]) -> Result<(), ChipError> {
+        self.close_session()?;
+        if !self.exists(KeyId::OWNER)? {
+            return Err(ChipError::NoSuchKey);
+        }
+        let sid = self
+            .se
+            .run_command(&CreateSession { object_id: oid(KeyId::OWNER) }, &mut self.buf)
+            .map_err(|_| ChipError::BadSession)?
+            .session_id;
+        let verified = self
+            .se
+            .run_session_command(sid, &VerifySessionUserId { user_id: secret }, &mut self.buf)
+            .map(|_| ());
+        if verified.is_err() {
+            let _ = self.se.run_session_command(sid, &CloseSession {}, &mut self.buf);
+            return Err(ChipError::BadSession);
+        }
+        self.session = Some(sid);
+        Ok(())
+    }
+
+    fn close_session(&mut self) -> Result<(), ChipError> {
+        if let Some(sid) = self.session.take() {
+            self.se.run_session_command(sid, &CloseSession {}, &mut self.buf).map_err(err)?;
+        }
+        Ok(())
+    }
+
+    /// `WriteUserId` without `MaxAttempts`. The applet (7.2.0) refuses the tag as the driver
+    /// encodes it, one byte, with 6A80 for 0 and for 255 (bench, 2026-10-31). Without it, twelve
+    /// wrong secrets in a row did not stop the right one opening the session, on the bench.
+    fn put_user_id(&mut self, id: KeyId, secret: &[u8; 16], policy: &ObjectPolicy) -> Result<(), ChipError> {
+        self.fresh(id)?;
+        let policy = policies(policy);
+        run!(
+            self,
+            WriteUserId {
+                policy: Some(PolicySet(&policy)),
+                max_attempts: None,
+                object_id: oid(id),
+                data: secret,
+            }
+        )?;
+        Ok(())
+    }
+
+    /// `WriteSymmKey` with `is_auth` set: an AES key that opens an SCP03 session.
+    fn put_aes_auth(&mut self, id: KeyId, key: &[u8; 16], policy: &ObjectPolicy) -> Result<(), ChipError> {
+        self.fresh(id)?;
+        let policy = policies(policy);
+        run!(
+            self,
+            WriteSymmKey {
+                transient: false,
+                is_auth: true,
+                key_type: SymmKeyType::Aes,
+                policy: Some(PolicySet(&policy)),
+                max_attempts: None,
+                object_id: oid(id),
+                kek_id: None,
+                value: key,
+            }
+        )?;
+        Ok(())
+    }
+
+    /// `WriteBinary` in chunks: the first makes the object with its length and policy, the
+    /// rest write at their offsets.
+    fn write_binary(&mut self, id: KeyId, data: &[u8], policy: &ObjectPolicy) -> Result<(), ChipError> {
+        let len = u16::try_from(data.len()).map_err(|_| ChipError::Status(0x6A80))?;
+        if len == 0 {
+            return Err(ChipError::Status(0x6A80));
+        }
+        self.fresh(id)?;
+        let policy = policies(policy);
+        let first = &data[..data.len().min(CHUNK as usize)];
+        run!(
+            self,
+            WriteBinary {
+                transient: false,
+                policy: Some(PolicySet(&policy)),
+                object_id: oid(id),
+                offset: Some(Be(0)),
+                file_length: Some(Be(len)),
+                data: Some(first),
+            }
+        )?;
+        self.write_chunks(id, data, first.len())
+    }
+
+    fn rewrite_binary(&mut self, id: KeyId, data: &[u8]) -> Result<(), ChipError> {
+        if !self.exists(id)? {
+            return Err(ChipError::NoSuchKey);
+        }
+        self.write_chunks(id, data, 0)
+    }
+
+    fn read_binary(&mut self, id: KeyId) -> Result<Vec<u8>, ChipError> {
+        if !self.exists(id)? {
+            return Err(ChipError::NoSuchKey);
+        }
+        self.read_file(oid(id))
+    }
 }
+
+impl<I: I2c, D: DelayNs> Se05xChip<I, D> {
+    /// Write `data` from byte `from` on into the existing binary object, a chunk at a time.
+    fn write_chunks(&mut self, id: KeyId, data: &[u8], from: usize) -> Result<(), ChipError> {
+        let mut at = from;
+        while at < data.len() {
+            let end = data.len().min(at + CHUNK as usize);
+            run!(
+                self,
+                WriteBinary {
+                    transient: false,
+                    policy: None,
+                    object_id: oid(id),
+                    offset: Some(Be(at as u16)),
+                    file_length: None,
+                    data: Some(&data[at..end]),
+                }
+            )?;
+            at = end;
+        }
+        Ok(())
+    }
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -610,6 +714,57 @@ mod tests {
         assert_eq!(&raw[33..], &[0x11; 31]);
         assert!(der_to_raw(&der[..der.len() - 1]).is_err());
         assert!(der_to_raw(&[]).is_err());
+    }
+
+    fn rule(f: ObjectPolicyFlags) -> ObjectAccessRule {
+        ObjectAccessRule::from_flags(f)
+    }
+
+    #[test]
+    fn policies_name_each_identity_once() {
+        use ObjectPolicyFlags as F;
+        let owner = oid(KeyId::OWNER);
+        let slot = oid(KeyId::SLOT);
+        assert_eq!(
+            policies(&ObjectPolicy::owner_only()),
+            vec![Policy {
+                object_id: owner,
+                access_rule: rule(F::ALLOW_SIGN | F::ALLOW_READ | F::ALLOW_DELETE | F::ALLOW_ATTESTATION),
+            }]
+        );
+        assert_eq!(
+            policies(&ObjectPolicy::owner_counter()),
+            vec![Policy {
+                object_id: owner,
+                access_rule: rule(F::ALLOW_READ | F::ALLOW_WRITE | F::ALLOW_DELETE),
+            }]
+        );
+        assert_eq!(
+            policies(&ObjectPolicy::owner_and_slot_mac()),
+            vec![
+                Policy { object_id: owner, access_rule: rule(F::ALLOW_SIGN | F::ALLOW_DELETE) },
+                Policy { object_id: slot, access_rule: rule(F::ALLOW_SIGN | F::REQUIRE_SM) },
+            ]
+        );
+        assert_eq!(
+            policies(&ObjectPolicy::inbox()),
+            vec![
+                Policy { object_id: ObjectId::INVALID, access_rule: rule(F::ALLOW_WRITE) },
+                Policy {
+                    object_id: owner,
+                    access_rule: rule(F::ALLOW_READ | F::ALLOW_WRITE | F::ALLOW_DELETE),
+                },
+                Policy { object_id: slot, access_rule: rule(F::ALLOW_WRITE | F::REQUIRE_SM) },
+            ]
+        );
+        assert_eq!(
+            policies(&ObjectPolicy::placeholder_slot()),
+            vec![Policy { object_id: owner, access_rule: rule(F::ALLOW_DELETE) }]
+        );
+        assert_eq!(
+            policies(&ObjectPolicy::owner_object()),
+            vec![Policy { object_id: ObjectId::INVALID, access_rule: rule(F::ALLOW_READ) }]
+        );
     }
 
     #[test]

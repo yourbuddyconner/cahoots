@@ -3,10 +3,10 @@
 
 mod common;
 
-use cahoots_badge::chip::{ChipRecord, SlotEntry};
+use cahoots_badge::chip::SlotEntry;
 use cahoots_badge::screens;
 use cahoots_badge::{Badge, Press};
-use cahoots_chip::{ChipOps, Curve, KeyId, KeyKind, SoftChip};
+use cahoots_chip::{ChipOps, Curve, KeyId, KeyKind, ObjectPolicy};
 use cahoots_core::cose;
 use cahoots_core::frame::{self, Frame};
 use cahoots_core::seat::{SeatKey, SeatPublic};
@@ -144,21 +144,20 @@ fn serving(chip: bool) -> (Badge<FakeBoard>, FakeLink, CircleId, SeatPublic) {
     let (mut board, _, _) = FakeBoard::with_circle();
     let id = board.circle.as_ref().unwrap().circle_id;
     let public = if chip {
-        let mut c = SoftChip::with_seed([9; 32]);
+        board = board.with_soft_chip([9; 32]);
+        let c = board.owner_chip();
         let p = c
-            .generate(KeyId::new(KeyKind::Seat, 0), Curve::P256)
+            .generate(KeyId::new(KeyKind::Seat, 0), Curve::P256, &ObjectPolicy::owner_only())
             .unwrap();
-        c.put_hmac_key(KeyId::new(KeyKind::Root, 0), &ROOT).unwrap();
-        let mut record = ChipRecord::default();
-        record.insert(SlotEntry {
+        c.put_hmac_key(KeyId::new(KeyKind::Root, 0), &ROOT, &ObjectPolicy::owner_and_slot_mac())
+            .unwrap();
+        board.record_slot(SlotEntry {
             slot: 0,
             circle_id: id,
             has_seat: true,
             has_root: true,
             has_epoch: false,
         });
-        board.chip_record = Some(record.encode());
-        board.chip = Some(c);
         let circle = board.circle.as_mut().unwrap();
         circle.chip_slot = Some(0);
         circle.seat_key = [0; 32];
@@ -459,9 +458,7 @@ fn a_circle_without_a_root_has_no_seal_key() {
     let (mut badge2, mut laptop2, id2, _) = serving(true);
     badge2
         .board()
-        .chip
-        .as_mut()
-        .unwrap()
+        .owner_chip()
         .delete(KeyId::new(KeyKind::Root, 0))
         .unwrap();
     let r = ask_now(

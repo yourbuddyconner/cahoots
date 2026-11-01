@@ -18,6 +18,7 @@ use cahoots_badge::grants::GrantsRecord;
 use cahoots_badge::{screens, Board, BoardError, Circle, Press};
 use cahoots_chip::se05x::Se05xChip;
 use cahoots_chip::{ChipOps, KeyId, KeyKind};
+use embedded_hal::digital::OutputPin;
 use cahoots_core::circle_id::CircleId;
 use cahoots_hal::health::Tested;
 use cahoots_hal::{Display, Link};
@@ -51,8 +52,15 @@ pub struct PicoBoard {
     pub pending: Option<(CircleId, usize)>,
     /// The SE051, or `None` when it did not answer at boot.
     pub chip: Option<Chip>,
-    /// The SE051's enable pin, held high for as long as the board runs.
-    pub _chip_enable: Pin<Gpio2, FunctionSioOutput, PullDown>,
+    /// The SE051's enable pin. Low at rest, so a phone's field starts the chip on its
+    /// antenna; high only between `chip_begin` and `chip_end`, when the chip answers on I2C
+    /// alone and a tap finds no tag.
+    pub chip_enable: Pin<Gpio2, FunctionSioOutput, PullDown>,
+    /// True while the pin is high.
+    pub chip_up: bool,
+    /// The secret of the chip's owner object, from the RP2350's unique id, or `None` if the
+    /// ROM did not give the id.
+    pub owner_secret: Option<[u8; 16]>,
 }
 
 impl PicoBoard {
@@ -223,10 +231,34 @@ impl Board for PicoBoard {
         vec![flash, buttons, link::links_selftest(), self.selftest_chip()]
     }
 
-    fn chip(&mut self) -> Option<&mut dyn ChipOps> {
-        self.chip.as_mut().map(|c| c as &mut dyn ChipOps)
+    fn has_chip(&self) -> bool {
+        self.chip.is_some()
     }
 
+    fn chip_begin(&mut self) -> Option<&mut dyn ChipOps> {
+        self.wake().map(|c| c as &mut dyn ChipOps)
+    }
+
+    /// Close the session and drop the pin.
+    fn chip_end(&mut self) {
+        if !self.chip_up {
+            return;
+        }
+        if let Some(chip) = self.chip.as_mut() {
+            if let Err(e) = chip.close_session() {
+                log!("se051: the session did not close ({e:?})");
+            }
+        }
+        let _ = self.chip_enable.set_low();
+        self.chip_up = false;
+        log!("se051: pin low");
+    }
+
+    fn owner_secret(&self) -> Option<[u8; 16]> {
+        self.owner_secret
+    }
+
+    /// `CAHC2` in the sector; the record of earlier firmware (`CAHC`) reads as none.
     fn chip_record_load(&mut self) -> Result<Option<ChipRecord>, BoardError> {
         match store::load_chip_record() {
             Ok(None) => Ok(None),
@@ -272,28 +304,69 @@ impl Board for PicoBoard {
 }
 
 impl PicoBoard {
-    /// `se051: applet x.y.z, N circles`, N the seat keys the chip holds; `se051: not found`
-    /// when it did not answer at boot. A chip that answered at boot but not now is dropped,
-    /// so the badge runs without one.
+    /// Raise the pin, give the chip its start time, wake the driver, and open the owner
+    /// session if the chip has an owner object. The same conversation if one is open.
+    fn wake(&mut self) -> Option<&mut Chip> {
+        if self.chip.is_none() {
+            return None;
+        }
+        if !self.chip_up {
+            let _ = self.chip_enable.set_high();
+            self.chip_up = true;
+            log!("se051: pin high");
+            self.delay.delay_ms(CHIP_START_MS);
+            let chip = self.chip.as_mut()?;
+            if let Err(e) = chip.restart() {
+                log!("se051: no answer after the pin rose ({e:?})");
+                self.chip_end();
+                return None;
+            }
+            match (self.owner_secret, chip.exists(KeyId::OWNER)) {
+                (Some(secret), Ok(true)) => match chip.open_owner(&secret) {
+                    Ok(()) => log!("se051: owner session open"),
+                    Err(e) => log!("se051: the owner session did not open ({e:?})"),
+                },
+                (_, Ok(false)) => log!("se051: no owner object yet, no session"),
+                (None, Ok(true)) => log!("se051: no owner secret, no session"),
+                (_, Err(e)) => log!("se051: could not look for the owner object ({e:?})"),
+            }
+        }
+        self.chip.as_mut()
+    }
+
+    /// `se051: applet x.y.z in the owner session, N circles`, N the seat keys the chip holds;
+    /// `se051: not found` when it did not answer at boot. A chip that answered at boot but not
+    /// now is dropped, so the badge runs without one. The badge ends the conversation.
     fn selftest_chip(&mut self) -> String {
-        let Some(chip) = self.chip.as_mut() else {
+        let Some(chip) = self.wake() else {
+            if self.chip.take().is_some() {
+                log!("se051: answered at boot, not now");
+            }
             return "se051: not found".into();
         };
+        let session = if chip.in_session() { "in the owner session" } else { "in no session" };
         let line = chip.version().and_then(|v| {
             let seats = chip
                 .ids()?
                 .iter()
                 .filter(|id| KeyId::parse(id.0).is_some_and(|(k, _)| k == KeyKind::Seat))
                 .count();
-            Ok(format!("se051: applet {}.{}.{}, {seats} circles", v.major, v.minor, v.patch))
+            Ok(format!(
+                "se051: applet {}.{}.{} {session}, {seats} circles",
+                v.major, v.minor, v.patch
+            ))
         });
         line.unwrap_or_else(|e| {
             log!("se051: answered at boot, not now ({e:?})");
+            self.chip_end();
             self.chip = None;
             "se051: not found".into()
         })
     }
 }
+
+/// The chip wants this long after its enable pin rises before it answers.
+pub const CHIP_START_MS: u32 = 10;
 
 /// Erase, program and read back the last sector of the pad region.
 fn selftest_flash() -> Result<(), String> {

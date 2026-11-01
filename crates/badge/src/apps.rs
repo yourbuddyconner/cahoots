@@ -189,7 +189,7 @@ impl<'a> BadgeApps<'a> {
         clock: &'a mut Clock,
         nonce: Option<[u8; 16]>,
     ) -> Self {
-        let has_chip = board.chip().is_some();
+        let has_chip = board.has_chip();
         BadgeApps {
             circles,
             hw: Hw::Board(board, clock),
@@ -207,7 +207,7 @@ impl<'a> BadgeApps<'a> {
                 Some(c) => Some(&mut **c),
                 None => None,
             },
-            Hw::Board(board, _) => board.chip(),
+            Hw::Board(board, _) => board.chip_begin(),
         }
     }
 

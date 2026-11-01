@@ -3,10 +3,12 @@
 
 mod common;
 
-use cahoots_badge::chip::{ChipRecord, ChipSeat, SlotEntry};
+use cahoots_badge::chip::{ChipRecord, ChipSeat, PhoneSlot, SlotEntry, GENERATION};
 use cahoots_badge::screens::making_key;
 use cahoots_badge::{Badge, Board, Circle, Press, Step};
-use cahoots_chip::{ChipOps, Curve, KeyId, KeyKind, SoftChip};
+use cahoots_chip::{
+    ChipError, ChipOps, Curve, KeyId, KeyKind, ObjectPolicy, SoftChip, TEST_OWNER_SECRET,
+};
 use cahoots_core::manifest::SealedManifest;
 use cahoots_core::root::chat_key;
 use cahoots_core::seat::{SeatPublic, SeatSigner};
@@ -20,10 +22,10 @@ fn pile_of_two(chips: (bool, bool)) -> (Badge<FakeBoard>, Badge<FakeBoard>) {
     b1.links = Some((FakeLink::open(), lower));
     b2.links = Some((upper, FakeLink::open()));
     if chips.0 {
-        b1.chip = Some(SoftChip::with_seed([1; 32]));
+        b1 = b1.with_soft_chip([1; 32]);
     }
     if chips.1 {
-        b2.chip = Some(SoftChip::with_seed([2; 32]));
+        b2 = b2.with_soft_chip([2; 32]);
     }
     (Badge::new(b1), Badge::new(b2))
 }
@@ -83,8 +85,23 @@ fn id(kind: KeyKind, slot: u8) -> KeyId {
     KeyId::new(kind, slot)
 }
 
+/// The board's chip, in the owner session.
 fn chip(b: &mut Badge<FakeBoard>) -> &mut SoftChip {
-    b.board().chip.as_mut().expect("the board has a chip")
+    b.board().owner_chip()
+}
+
+/// The chip's objects that belong to circles: all but the owner object, the phone slot and
+/// the inbox.
+fn circle_objects(b: &mut Badge<FakeBoard>) -> Vec<KeyId> {
+    let ids = chip(b).ids().unwrap();
+    ids.into_iter().filter(|id| !id.is_badge_wide()).collect()
+}
+
+/// A software chip set up as a badge's first boot sets it up, in the owner session.
+fn owned_chip(seed: [u8; 32]) -> SoftChip {
+    let mut c = SoftChip::with_seed(seed);
+    cahoots_badge::chip::first_boot(&mut c, &TEST_OWNER_SECRET, [0; 16]).unwrap();
+    c
 }
 
 #[test]
@@ -94,11 +111,36 @@ fn ceremony_with_soft_chip_makes_seat_in_chip() {
     let c2 = b2.circle().unwrap().clone();
     assert_eq!(c1.circle_id, c2.circle_id);
 
+    // The chip's pin rose for each conversation and is down again after the keep, with the
+    // session closed: high only between `chip_begin` and `chip_end`.
+    let pins = b1.board().pin_log.clone();
+    assert!(pins.len() >= 4, "{pins:?}");
+    assert!(pins.iter().enumerate().all(|(i, &high)| high == (i % 2 == 0)), "{pins:?}");
+    assert!(!b1.board().pin_high());
+    assert_eq!(b1.board().chip.as_ref().unwrap().session(), cahoots_chip::Session::None);
+
     // The seat key, the root and the epoch counter are in the chip at slot 0.
     for kind in [KeyKind::Seat, KeyKind::Root, KeyKind::Epoch] {
         assert!(chip(&mut b1).exists(id(kind, 0)).unwrap(), "{kind:?}");
     }
-    assert_eq!(chip(&mut b1).ids().unwrap().len(), 3);
+    assert_eq!(circle_objects(&mut b1).len(), 3);
+
+    // The seat key signs for the owner alone; the root MACs for the owner and for the phone
+    // slot under secure messaging, and for nothing in no session.
+    let digest = [1u8; 32];
+    let c = chip(&mut b1);
+    assert!(c.sign_p256(id(KeyKind::Seat, 0), &digest).is_ok());
+    assert!(c.hmac(id(KeyKind::Root, 0), b"chat/gen").is_ok());
+    c.open_slot_with_sm_for_test().unwrap();
+    assert_eq!(c.sign_p256(id(KeyKind::Seat, 0), &digest), Err(ChipError::NotAllowed));
+    assert!(c.hmac(id(KeyKind::Root, 0), b"chat/gen").is_ok());
+    c.open_slot_without_sm_for_test().unwrap();
+    assert_eq!(c.hmac(id(KeyKind::Root, 0), b"chat/gen"), Err(ChipError::NotAllowed));
+    c.no_session_for_test();
+    assert_eq!(c.sign_p256(id(KeyKind::Seat, 0), &digest), Err(ChipError::NotAllowed));
+    assert_eq!(c.hmac(id(KeyKind::Root, 0), b"chat/gen"), Err(ChipError::NotAllowed));
+    assert!(b1.board().log.iter().any(|l| l
+        == "chip: slot 0 kept, seat key for the owner alone, root for the owner and the phone slot"));
 
     // The manifest names the chip's key for this seat.
     let manifest = SealedManifest::decode(&c1.manifest).unwrap().verify().unwrap();
@@ -122,8 +164,10 @@ fn ceremony_with_soft_chip_makes_seat_in_chip() {
     // The epoch counter starts at 0.
     assert_eq!(chip(&mut b1).counter_next(id(KeyKind::Epoch, 0)).unwrap(), 1);
 
-    // The chip record knows the slot and what was made in it.
+    // The chip record knows the slot and what was made in it, and is stored as CAHC2.
+    assert!(b1.board().chip_record.as_ref().unwrap().starts_with(b"CAHC2"));
     let record = b1.board().chip_record_load().unwrap().expect("a chip record");
+    assert_eq!(record.generation, GENERATION);
     assert_eq!(
         record.slots,
         vec![SlotEntry {
@@ -172,7 +216,7 @@ fn discarding_deletes_the_key_made_in_the_chip() {
         out.1 |= *s2 == Step::Kept;
         out.0 && out.1
     });
-    assert!(chip(&mut b1).ids().unwrap().is_empty());
+    assert!(circle_objects(&mut b1).is_empty());
     assert!(b1
         .board()
         .chip_record_load()
@@ -183,14 +227,17 @@ fn discarding_deletes_the_key_made_in_the_chip() {
 #[test]
 fn forget_deletes_slot_objects() {
     let (mut b1, _b2) = kept_pair((true, false));
-    assert_eq!(chip(&mut b1).ids().unwrap().len(), 3);
+    assert_eq!(circle_objects(&mut b1).len(), 3);
     let board = b1.board();
     board.a_down = true;
     board.release_at_ms = board.elapsed_ms + 3000;
     b1.boot();
     assert!(b1.circle().is_none());
     assert!(b1.board().load_circle().is_none());
-    assert!(chip(&mut b1).ids().unwrap().is_empty());
+    assert!(circle_objects(&mut b1).is_empty());
+    // The badge's own objects stay: it still owns its chip.
+    let ids = chip(&mut b1).ids().unwrap();
+    assert_eq!(ids, vec![KeyId::SLOT, KeyId::INBOX, KeyId::OWNER]);
     assert!(b1
         .board()
         .chip_record_load()
@@ -200,10 +247,10 @@ fn forget_deletes_slot_objects() {
 
 #[test]
 fn reconcile_deletes_unknown_slot_and_logs() {
-    let mut c = SoftChip::with_seed([3; 32]);
-    c.generate(id(KeyKind::Seat, 0), Curve::P256).unwrap();
-    c.generate(id(KeyKind::Seat, 2), Curve::P256).unwrap();
-    c.put_hmac_key(id(KeyKind::Root, 2), &[9; 32]).unwrap();
+    let mut c = owned_chip([3; 32]);
+    c.generate(id(KeyKind::Seat, 0), Curve::P256, &ObjectPolicy::owner_only()).unwrap();
+    c.generate(id(KeyKind::Seat, 2), Curve::P256, &ObjectPolicy::owner_only()).unwrap();
+    c.put_hmac_key(id(KeyKind::Root, 2), &[9; 32], &ObjectPolicy::owner_and_slot_mac()).unwrap();
     let mut record = ChipRecord {
         slots: vec![SlotEntry {
             slot: 0,
@@ -212,9 +259,18 @@ fn reconcile_deletes_unknown_slot_and_logs() {
             has_root: false,
             has_epoch: false,
         }],
+        ..ChipRecord::default()
     };
+    // An object of a kind this firmware does not know is no circle's, and stays.
+    let unknown = KeyId(0x4C41_0AF0);
+    c.put_user_id(unknown, &[1; 16], &ObjectPolicy::owner_object()).unwrap();
     let lines = record.reconcile(&mut c);
-    assert_eq!(c.ids().unwrap(), vec![id(KeyKind::Seat, 0)]);
+    assert!(c.exists(unknown).unwrap());
+    // The badge-wide objects belong to no circle slot and stay.
+    assert_eq!(
+        c.ids().unwrap(),
+        vec![id(KeyKind::Seat, 0), KeyId::SLOT, KeyId::INBOX, KeyId::OWNER, unknown]
+    );
     assert_eq!(lines.len(), 2, "{lines:?}");
     assert!(lines.iter().all(|l| l.contains("slot 2")), "{lines:?}");
     assert_eq!(record.slots.len(), 1);
@@ -222,14 +278,14 @@ fn reconcile_deletes_unknown_slot_and_logs() {
 
 #[test]
 fn boot_deletes_chip_objects_the_record_does_not_know() {
-    let mut board = FakeBoard::new();
-    let mut c = SoftChip::with_seed([4; 32]);
-    c.generate(id(KeyKind::Seat, 2), Curve::P256).unwrap();
-    c.put_counter(id(KeyKind::Epoch, 2), 0).unwrap();
-    board.chip = Some(c);
+    let mut board = FakeBoard::new().with_soft_chip([4; 32]);
+    let c = board.owner_chip();
+    c.generate(id(KeyKind::Seat, 2), Curve::P256, &ObjectPolicy::owner_only()).unwrap();
+    c.put_counter(id(KeyKind::Epoch, 2), 0, &ObjectPolicy::owner_counter())
+        .unwrap();
     let mut badge = Badge::new(board);
     badge.boot();
-    assert!(chip(&mut badge).ids().unwrap().is_empty());
+    assert!(circle_objects(&mut badge).is_empty());
     let log = &badge.board().log;
     assert_eq!(log.iter().filter(|l| l.contains("slot 2")).count(), 2, "{log:?}");
 }
@@ -248,9 +304,9 @@ fn making_key_screen_lines() {
 
 #[test]
 fn chip_seat_signs_with_the_chip_key() {
-    let mut c = SoftChip::with_seed([6; 32]);
+    let mut c = owned_chip([6; 32]);
     let seat = id(KeyKind::Seat, 1);
-    c.generate(seat, Curve::P256).unwrap();
+    c.generate(seat, Curve::P256, &ObjectPolicy::owner_only()).unwrap();
     let mut s = ChipSeat::new(&mut c, seat);
     let public = s.public();
     let sig = s.sign(b"a message");
@@ -285,9 +341,32 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
                 has_epoch: false,
             },
         ],
+        phone: Some(PhoneSlot {
+            name: "a phone".into(),
+            public: [2; 33],
+        }),
+        badge_nonce: [9; 16],
+        generation: GENERATION,
     };
     let bytes = r.encode();
     assert_eq!(ChipRecord::decode(&bytes), Ok(r.clone()));
+    // Stored, it is CAHC2 and the CBOR.
+    let stored = r.to_stored();
+    assert_eq!(&stored[..5], b"CAHC2");
+    assert_eq!(ChipRecord::from_stored(&stored), Ok(Some(r.clone())));
+    // The record of earlier firmware reads as no record: in a CAHC sector, or bare.
+    // `[[[0, h'0101..01', true, true, true]]]`: one slot entry, as earlier firmware wrote it.
+    let mut old = vec![0x81, 0x81, 0x85, 0x00, 0x50];
+    old.extend_from_slice(&[1; 16]);
+    old.extend_from_slice(&[0xF5, 0xF5, 0xF5]);
+    assert_eq!(ChipRecord::from_stored(&old), Ok(None));
+    let mut sector = b"CAHC".to_vec();
+    sector.extend_from_slice(&old);
+    assert_eq!(ChipRecord::from_stored(&sector), Ok(None));
+    assert!(ChipRecord::from_stored(&[0xFF; 8]).is_err());
+    let mut cut = stored.clone();
+    cut.pop();
+    assert!(ChipRecord::from_stored(&cut).is_err());
     let mut trailing = bytes.clone();
     trailing.push(0);
     assert!(ChipRecord::decode(&trailing).is_err());
@@ -338,11 +417,11 @@ fn a_chip_that_cannot_sign_fails_the_pass_and_leaves_no_key() {
     drive(&mut b1, &mut b2, |b1, b2, _, _| has_seat(b1) && has_seat(b2));
     b2.board().presses.push_back(Press::Both);
     drive(&mut b1, &mut b2, |b1, _, s1, _| {
-        *s1 == Step::InCeremony && b1.board().chip.as_mut().unwrap().ids().unwrap().len() == 1
+        *s1 == Step::InCeremony && circle_objects(b1).len() == 1
     });
     // The key goes before the manifest is signed: the chip's signature is all zeros.
     chip(&mut b1).delete(id(KeyKind::Seat, 0)).unwrap();
-    chip(&mut b1).generate(id(KeyKind::Seat, 7), Curve::P256).unwrap();
+    chip(&mut b1).generate(id(KeyKind::Seat, 7), Curve::P256, &ObjectPolicy::owner_only()).unwrap();
     let mut failed = None;
     for _ in 0..10_000 {
         if let Step::Failed(e) = b1.step() {
@@ -355,7 +434,7 @@ fn a_chip_that_cannot_sign_fails_the_pass_and_leaves_no_key() {
     assert!(failed.contains("BadAttestation"), "{failed}");
     assert!(b1.board().log.iter().any(|l| l.contains("signing failed")));
     // Slot 0 is cleaned up; slot 7 was never this pass's.
-    assert_eq!(chip(&mut b1).ids().unwrap(), vec![id(KeyKind::Seat, 7)]);
+    assert_eq!(circle_objects(&mut b1), vec![id(KeyKind::Seat, 7)]);
 }
 
 #[test]
@@ -363,7 +442,7 @@ fn an_unreadable_chip_record_deletes_nothing_at_boot() {
     let (mut b1, _b2) = kept_pair((true, false));
     b1.board().chip_record = Some(vec![0xFF; 5]);
     b1.boot();
-    assert_eq!(chip(&mut b1).ids().unwrap().len(), 3, "the kept circle's objects stay");
+    assert_eq!(circle_objects(&mut b1).len(), 3, "the kept circle's objects stay");
     assert!(b1.circle().is_some());
     assert!(b1.board().log.iter().any(|l| l.contains("chip record: unreadable")));
     assert_eq!(b1.board().chip_record, Some(vec![0xFF; 5]), "not written over");
@@ -372,9 +451,13 @@ fn an_unreadable_chip_record_deletes_nothing_at_boot() {
 #[test]
 fn boot_keeps_the_slot_the_circle_names_even_if_the_record_forgot_it() {
     let (mut b1, _b2) = kept_pair((true, false));
-    b1.board().chip_record = Some(ChipRecord::default().encode());
+    let empty = ChipRecord {
+        generation: GENERATION,
+        ..ChipRecord::default()
+    };
+    b1.board().chip_record = Some(empty.to_stored());
     b1.boot();
-    assert_eq!(chip(&mut b1).ids().unwrap().len(), 3);
+    assert_eq!(circle_objects(&mut b1).len(), 3);
     assert!(b1.board().log.iter().any(|l| l.contains("a circle names it")));
 }
 
@@ -393,6 +476,6 @@ fn an_unreadable_chip_record_makes_no_key() {
         let _ = b2.step();
     }
     assert!(failed.expect("the pass fails").contains("chip record: unreadable"));
-    assert!(chip(&mut b1).ids().unwrap().is_empty());
+    assert!(circle_objects(&mut b1).is_empty());
     assert_eq!(b1.board().chip_record, Some(vec![0xFF; 5]));
 }

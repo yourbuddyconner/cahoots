@@ -4,10 +4,10 @@
 
 mod common;
 
-use cahoots_badge::chip::{ChipRecord, SlotEntry};
+use cahoots_badge::chip::SlotEntry;
 use cahoots_badge::grants::{GrantRecord, GrantsRecord, ISSUE_SLOT};
 use cahoots_badge::{Badge, Press};
-use cahoots_chip::{ChipOps, Curve, KeyId, KeyKind, SoftChip};
+use cahoots_chip::{ChipOps, Curve, KeyId, KeyKind, ObjectPolicy};
 use cahoots_core::frame::{self, Frame};
 use cahoots_core::seat::{SeatKey, SeatPublic};
 use cahoots_custodian::wire::{
@@ -138,20 +138,18 @@ fn board(chip: bool) -> (FakeBoard, CircleId, SeatPublic) {
     let (mut board, _, _) = FakeBoard::with_circle();
     let id = board.circle.as_ref().unwrap().circle_id;
     let public = if chip {
-        let mut c = SoftChip::with_seed([9; 32]);
+        board = board.with_soft_chip([9; 32]);
+        let c = board.owner_chip();
         let p = c
-            .generate(KeyId::new(KeyKind::Seat, 0), Curve::P256)
+            .generate(KeyId::new(KeyKind::Seat, 0), Curve::P256, &ObjectPolicy::owner_only())
             .unwrap();
-        let mut record = ChipRecord::default();
-        record.insert(SlotEntry {
+        board.record_slot(SlotEntry {
             slot: 0,
             circle_id: id,
             has_seat: true,
             has_root: false,
             has_epoch: false,
         });
-        board.chip_record = Some(record.encode());
-        board.chip = Some(c);
         let circle = board.circle.as_mut().unwrap();
         circle.chip_slot = Some(0);
         circle.seat_key = [0; 32];
@@ -335,9 +333,7 @@ fn remaining_of(r: &Response) -> u32 {
 fn raw_counter(badge: &mut Badge<FakeBoard>, slot: u8) -> Option<u64> {
     badge
         .board()
-        .chip
-        .as_mut()
-        .unwrap()
+        .owner_chip()
         .counter_get(KeyId::new(KeyKind::Grant, slot))
         .ok()
 }
@@ -802,14 +798,17 @@ fn grant_record(slot: u8, id: CircleId) -> GrantRecord {
 #[test]
 fn sweep_deletes_orphans() {
     let (mut board, id, _) = board(true);
-    let chip = board.chip.as_mut().unwrap();
+    let chip = board.owner_chip();
     // Slot 5: a counter with no record. Slot 6: a record with no counter. Slot 1: both,
     // which stays. Slot 2: both, expired by the stored time.
-    chip.put_counter(KeyId::new(KeyKind::Grant, 5), 0).unwrap();
-    chip.put_counter(KeyId::new(KeyKind::Grant, ISSUE_SLOT), 7)
-        .unwrap();
-    chip.put_counter(KeyId::new(KeyKind::Grant, 1), BASE + 3).unwrap();
-    chip.put_counter(KeyId::new(KeyKind::Grant, 2), BASE).unwrap();
+    chip.put_counter(KeyId::new(KeyKind::Grant, 5), 0, &ObjectPolicy::owner_counter())
+.unwrap();
+    chip.put_counter(KeyId::new(KeyKind::Grant, ISSUE_SLOT), 7, &ObjectPolicy::owner_counter())
+.unwrap();
+    chip.put_counter(KeyId::new(KeyKind::Grant, 1), BASE + 3, &ObjectPolicy::owner_counter())
+.unwrap();
+    chip.put_counter(KeyId::new(KeyKind::Grant, 2), BASE, &ObjectPolicy::owner_counter())
+.unwrap();
     let mut expired = grant_record(2, id);
     expired.exp = Some(NOW - 1);
     let stored = GrantsRecord {
@@ -833,9 +832,7 @@ fn sweep_deletes_orphans() {
     // The seat key the chip record knows is left alone.
     assert!(badge
         .board()
-        .chip
-        .as_mut()
-        .unwrap()
+        .owner_chip()
         .exists(KeyId::new(KeyKind::Seat, 0))
         .unwrap());
 }
@@ -1006,9 +1003,8 @@ fn a_proof_is_not_accepted_twice_even_when_signing_fails() {
     badge.board().failing.as_mut().unwrap().fail_sign = false;
     let r = ask_unprompted(&mut badge, &mut laptop, id, op);
     assert_eq!(r, unparseable());
-    let failing = badge.board().failing.as_mut().unwrap();
     assert_eq!(
-        failing.inner.counter_get(KeyId::new(KeyKind::Grant, 0)),
+        badge.board().owner_chip().counter_get(KeyId::new(KeyKind::Grant, 0)),
         Ok(base + 1)
     );
 }
@@ -1149,9 +1145,11 @@ fn a_record_pointing_an_old_grant_at_a_live_grants_slot_and_base_is_refused() {
 #[test]
 fn a_wipe_keeps_the_issue_counter() {
     let (mut board, _, _) = board(true);
-    let chip = board.chip.as_mut().unwrap();
-    chip.put_counter(KeyId::new(KeyKind::Grant, ISSUE_SLOT), 5).unwrap();
-    chip.put_counter(KeyId::new(KeyKind::Grant, 0), 5 * BASE).unwrap();
+    let chip = board.owner_chip();
+    chip.put_counter(KeyId::new(KeyKind::Grant, ISSUE_SLOT), 5, &ObjectPolicy::owner_counter())
+.unwrap();
+    chip.put_counter(KeyId::new(KeyKind::Grant, 0), 5 * BASE, &ObjectPolicy::owner_counter())
+.unwrap();
     board.a_down = true;
     board.release_at_ms = board.elapsed_ms + 3000;
     let mut badge = Badge::new(board);
@@ -1160,8 +1158,12 @@ fn a_wipe_keeps_the_issue_counter() {
     // The grant's counter and the seat key go. The issue counter stays, so no base repeats.
     assert_eq!(raw_counter(&mut badge, 0), None);
     assert_eq!(raw_counter(&mut badge, ISSUE_SLOT), Some(5));
-    let ids = badge.board().chip.as_mut().unwrap().ids().unwrap();
-    assert_eq!(ids, vec![KeyId::new(KeyKind::Grant, ISSUE_SLOT)]);
+    let ids = badge.board().owner_chip().ids().unwrap();
+    // The badge's own objects stay too.
+    assert_eq!(
+        ids,
+        vec![KeyId::new(KeyKind::Grant, ISSUE_SLOT), KeyId::SLOT, KeyId::INBOX, KeyId::OWNER]
+    );
 }
 
 // ---- a use drawn over a question ----
@@ -1229,9 +1231,11 @@ fn the_sweep_drops_a_spent_grant() {
 fn the_sweep_drops_the_grants_of_a_circle_the_badge_no_longer_holds() {
     let (mut board, id, _) = board(true);
     let gone = [0x77; 16];
-    let chip = board.chip.as_mut().unwrap();
-    chip.put_counter(KeyId::new(KeyKind::Grant, 1), BASE).unwrap();
-    chip.put_counter(KeyId::new(KeyKind::Grant, 2), BASE).unwrap();
+    let chip = board.owner_chip();
+    chip.put_counter(KeyId::new(KeyKind::Grant, 1), BASE, &ObjectPolicy::owner_counter())
+.unwrap();
+    chip.put_counter(KeyId::new(KeyKind::Grant, 2), BASE, &ObjectPolicy::owner_counter())
+.unwrap();
     let mut revoked = grant_record(3, gone);
     revoked.revoked = true;
     board.grants = Some(
