@@ -64,6 +64,9 @@ pub struct PicoBoard {
     /// The secret of the chip's owner object, from the RP2350's unique id, or `None` if the
     /// ROM did not give the id.
     pub owner_secret: Option<[u8; 16]>,
+    /// The last conversation found the owner object and its session did not open with
+    /// `owner_secret`.
+    pub owner_refused: bool,
     /// Bench builds: the pin is high for the laptop's APDUs, in no session, since this moment
     /// (the last APDU). `None` when the pass-through holds nothing.
     #[cfg(feature = "bench")]
@@ -330,7 +333,10 @@ impl Board for PicoBoard {
 
 impl PicoBoard {
     /// Raise the pin, give the chip its start time, wake the driver, and open the owner
-    /// session if the chip has an owner object. The same conversation if one is open.
+    /// session if the chip has an owner object. The same conversation if one is open. `None`
+    /// when the owner object is there and its session does not open: no command then runs in
+    /// no session in the badge's name. At boot the badge then runs without its chip, and says
+    /// the chip could not be set up.
     fn wake(&mut self) -> Option<&mut Chip> {
         if self.chip.is_none() {
             return None;
@@ -348,8 +354,16 @@ impl PicoBoard {
             }
             match (self.owner_secret, chip.exists(KeyId::OWNER)) {
                 (Some(secret), Ok(true)) => match chip.open_owner(&secret) {
-                    Ok(()) => log!("se051: owner session open"),
-                    Err(e) => log!("se051: the owner session did not open ({e:?})"),
+                    Ok(()) => {
+                        self.owner_refused = false;
+                        log!("se051: owner session open");
+                    }
+                    Err(e) => {
+                        log!("se051: the owner session did not open ({e:?})");
+                        self.owner_refused = true;
+                        self.chip_end();
+                        return None;
+                    }
                 },
                 (_, Ok(false)) => log!("se051: no owner object yet, no session"),
                 (None, Ok(true)) => log!("se051: no owner secret, no session"),
@@ -364,6 +378,10 @@ impl PicoBoard {
     /// now is dropped, so the badge runs without one. The badge ends the conversation.
     fn selftest_chip(&mut self) -> String {
         let Some(chip) = self.wake() else {
+            // The chip answered but is not this badge's: the boot refuses it and says so.
+            if self.owner_refused {
+                return "se051: the owner session did not open".into();
+            }
             if self.chip.take().is_some() {
                 log!("se051: answered at boot, not now");
             }

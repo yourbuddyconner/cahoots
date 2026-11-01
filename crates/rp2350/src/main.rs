@@ -254,6 +254,7 @@ fn main() -> ! {
         chip_up: false,
         chip_held: false,
         owner_secret,
+        owner_refused: false,
         #[cfg(feature = "bench")]
         bench_raw: None,
     });
