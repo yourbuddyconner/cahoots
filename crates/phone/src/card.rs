@@ -26,6 +26,8 @@ use zeroize::Zeroizing;
 
 /// What the reader shows while it looks for the card.
 const PROMPT: &str = "Hold the phone to the card.";
+/// What the reader says while a card circle's chat waits for keys.
+const KEYS_PROMPT: &str = "Hold the phone to the card to fetch keys.";
 
 /// A generation's id and its key.
 type GenKey = ([u8; 32], Zeroizing<[u8; 32]>);
@@ -161,10 +163,11 @@ impl Phone {
     /// ends with the error's sentence when anything fails.
     fn tap_slot<T>(
         &self,
+        prompt: &str,
         key: &[u8; 16],
         f: impl FnOnce(&mut Session<'_, '_>) -> Result<T, TapError>,
     ) -> Result<T, PhoneError> {
-        let mut tap = Tap::begin(self.nfc.as_ref(), PROMPT)?;
+        let mut tap = Tap::begin(self.nfc.as_ref(), prompt)?;
         let r = tap.open_slot(key).and_then(|mut s| {
             let v = f(&mut s)?;
             s.close()?;
@@ -193,7 +196,7 @@ impl Phone {
         let card = c.record.card.as_ref().ok_or(PhoneError::NotPaired)?;
         let key = self.slot_key(&card.key_label)?;
         let (slot, me) = (card.circle_slot, c.record.seat);
-        let (mine, theirs) = self.tap_slot(&key, |s| {
+        let (mine, theirs) = self.tap_slot(PROMPT, &key, |s| {
             Ok((
                 s.hmac_hello(slot, other, &hello_label(me, number))?,
                 s.hmac_hello(slot, other, &hello_label(other, number))?,
@@ -404,7 +407,7 @@ impl Phone {
             (p.key.clone(), p.badge_name.clone())
         };
         let mine = self.my_public()?;
-        let read = self.tap_slot(&key, |s| {
+        let read = self.tap_slot(PROMPT, &key, |s| {
             let mut out = Vec::new();
             for (slot, o) in s.list_public()? {
                 if o.phone_public != Some(mine) {
@@ -464,7 +467,7 @@ impl Phone {
             let mine = me.my_public()?;
             let circle_id = c.circle_id;
             let slot = card.circle_slot;
-            let keys = me.tap_slot(&key, |s| {
+            let keys = me.tap_slot(KEYS_PROMPT, &key, |s| {
                 let o = s.read_public(slot)?;
                 if o.circle_id != circle_id || o.phone_public != Some(mine) {
                     return Err(TapError::NotPaired);

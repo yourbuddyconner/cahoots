@@ -111,7 +111,7 @@ struct SettingsView: View {
                 }
             }
         } message: {
-            Text("Its circles and their messages are deleted from this phone. The badge keeps them. To use the card again, pair it again.")
+            Text("Its circles and their messages are deleted from this phone, and so is this phone’s key for the card. The badge keeps its phone slot until you unpair it there. To use the card again, pair it again.")
         }
         .confirmationDialog("Remove \(removing?.name ?? "this circle") from this phone? Its messages and keys will be deleted from this phone. You cannot undo this. Other members keep their copies.",
                             isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),

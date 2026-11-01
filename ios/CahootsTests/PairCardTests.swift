@@ -47,10 +47,18 @@ final class PairCardTests: XCTestCase {
         let model = PairCardModel(pairing: fake)
         await model.start()
         await model.finish()
-        XCTAssertEqual(model.error, "This card no longer knows this phone.")
+        XCTAssertEqual(model.error, "Press both buttons on the badge first, then hold the phone again.")
         guard case .check = model.step else { return XCTFail("the words went: \(model.step)") }
         await model.finish()
         XCTAssertEqual(model.step, .done(badge: "Conner's badge", circles: ["park", "lab"]))
+        XCTAssertNil(model.error)
+    }
+
+    func testStartOverForgetsTheWords() async {
+        let model = PairCardModel(pairing: FakePairing())
+        await model.start()
+        model.startOver()
+        XCTAssertEqual(model.step, .name)
         XCTAssertNil(model.error)
     }
 

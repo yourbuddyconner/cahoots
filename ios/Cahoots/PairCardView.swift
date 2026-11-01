@@ -64,9 +64,21 @@ final class PairCardModel: ObservableObject {
         do {
             let kept = try await pairing.finishPairing()
             step = .done(badge: preview.badgeName, circles: kept)
+        } catch PhoneError.NotPaired {
+            // During pairing this means the badge has not taken the phone yet.
+            error = Self.pressFirst
         } catch {
             self.error = plain(error)
         }
+    }
+
+    static let pressFirst = "Press both buttons on the badge first, then hold the phone again."
+
+    /// Back to the name, forgetting the words.
+    func startOver() {
+        guard !working else { return }
+        error = nil
+        step = .name
     }
 }
 
@@ -85,7 +97,7 @@ struct PairCardView: View {
             VStack(alignment: .leading, spacing: Space.xl) {
                 switch model.step {
                 case .name: PairNameStep(name: $model.name)
-                case let .check(preview): PairCheckStep(preview: preview)
+                case let .check(preview): PairCheckStep(preview: preview) { model.startOver() }
                 case let .done(badge, circles): PairDoneStep(badge: badge, circles: circles)
                 }
                 StatusLine(text: model.error)
@@ -100,6 +112,8 @@ struct PairCardView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(model.working)
         .actionBar { action }
+        // Leaving by the back button after the second tap still shows the new circles.
+        .onDisappear { Task { await app.refresh() } }
     }
 
     @ViewBuilder
@@ -134,20 +148,22 @@ private struct PairNameStep: View {
     @Binding var name: String
 
     var body: some View {
-        ScreenHeader(title: "Pair a card",
-                     detail: "This phone can read and post in this badge's circles until you unpair it on the badge.",
-                     style: .title)
-        VStack(alignment: .leading, spacing: Space.s) {
-            Text("Name for this phone")
-                .font(.footnote.weight(.semibold)).foregroundStyle(Color.muted)
-                .accessibilityAddTraits(.isHeader)
-            TextField(UIDevice.current.name, text: $name)
-                .textInputAutocapitalization(.words)
-                .autocorrectionDisabled()
-                .submitLabel(.done)
-                .paperField()
-                .accessibilityLabel("Name for this phone")
-                .accessibilityIdentifier("pair-name")
+        VStack(alignment: .leading, spacing: Space.xl) {
+            ScreenHeader(title: "Pair a card",
+                         detail: "This phone can read and post in this badge's circles until you unpair it on the badge.",
+                         style: .title)
+            VStack(alignment: .leading, spacing: Space.s) {
+                Text("Name for this phone")
+                    .font(.footnote.weight(.semibold)).foregroundStyle(Color.muted)
+                    .accessibilityAddTraits(.isHeader)
+                TextField(UIDevice.current.name, text: $name)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
+                    .submitLabel(.done)
+                    .paperField()
+                    .accessibilityLabel("Name for this phone")
+                    .accessibilityIdentifier("pair-name")
+            }
         }
     }
 }
@@ -155,20 +171,26 @@ private struct PairNameStep: View {
 /// The second step: the four words to check against the badge's screen.
 private struct PairCheckStep: View {
     let preview: PairPreview
+    let startOver: () -> Void
 
     var body: some View {
-        ScreenHeader(title: preview.badgeName,
-                     detail: "Open 'pair a phone' on your badge and check the words match. Press both buttons, then hold the phone to the card again.",
-                     style: .title)
-        VStack(alignment: .leading, spacing: Space.xs) {
-            ForEach(Array(preview.words.enumerated()), id: \.offset) { _, word in
-                Text(word).serifTitle(.largeTitle)
+        VStack(alignment: .leading, spacing: Space.xl) {
+            ScreenHeader(title: preview.badgeName,
+                         detail: "Open 'pair a phone' on your badge and check the words match. Press both buttons, then hold the phone to the card again.",
+                         style: .title)
+            VStack(alignment: .leading, spacing: Space.xs) {
+                ForEach(Array(preview.words.enumerated()), id: \.offset) { _, word in
+                    Text(word).serifTitle(.largeTitle)
+                }
             }
+            .padding(.vertical, Space.s)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("pair-words")
+            CircleNames(title: "Circles on this badge", names: preview.circles)
+            Button("Start over", action: startOver)
+                .buttonStyle(TextButtonStyle(full: false))
+                .accessibilityIdentifier("pair-start-over")
         }
-        .padding(.vertical, Space.s)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("pair-words")
-        CircleNames(title: "Circles on this badge", names: preview.circles)
     }
 }
 
@@ -178,11 +200,13 @@ private struct PairDoneStep: View {
     let circles: [String]
 
     var body: some View {
-        ScreenHeader(title: "Paired with \(badge)", style: .title)
-        if circles.isEmpty {
-            StatusLine(text: "No circles came from this badge.")
-        } else {
-            CircleNames(title: "Circles on this phone", names: circles)
+        VStack(alignment: .leading, spacing: Space.xl) {
+            ScreenHeader(title: "Paired with \(badge)", style: .title)
+            if circles.isEmpty {
+                StatusLine(text: "No circles came from this badge.")
+            } else {
+                CircleNames(title: "Circles on this phone", names: circles)
+            }
         }
     }
 }
