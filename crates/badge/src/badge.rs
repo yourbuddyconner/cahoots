@@ -2,19 +2,22 @@
 
 use crate::apps::{BadgeApps, Served};
 use crate::board::{Board, Circle, Press};
-use crate::chip::{self, ChipSeat, SlotEntry};
+use crate::chip::{self, ChipRecord, ChipSeat, PhoneSlot, SlotEntry};
 use crate::grants::{self, Clock, GrantsRecord};
+use crate::pairing::{self, Inbox};
+use crate::public::PublicObject;
 use crate::screens::{self, Screen};
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use cahoots_chip::{Curve, KeyId, KeyKind, ObjectPolicy};
+use cahoots_chip::{ChipError, Curve, KeyId, KeyKind, ObjectPolicy};
 use cahoots_core::ceremony::CeremonyResult;
 use cahoots_core::frame::{self, Frame, FrameError};
 use cahoots_core::pad::Pad;
 use cahoots_core::params::CircleParams;
+use cahoots_core::root::gen0_id;
 use cahoots_core::seat::SeatPublic;
 use cahoots_custodian::wire::{
     ChipRequest, ErrorCode, Request, Response, KIND_REQUEST, KIND_RESPONSE, MAX_REQUEST_LEN,
@@ -28,6 +31,36 @@ use cahoots_hal::ring::{RingCeremony, Step as RingStep};
 use cahoots_hal::store::StorePad;
 use cahoots_hal::{Display, Entropy, Link};
 use zeroize::Zeroizing;
+
+/// Why pairing or unpairing a phone failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BadgeError {
+    /// The badge has no chip it owns.
+    NoChip,
+    /// A phone is paired already: unpair it first.
+    AlreadyPaired,
+    /// No phone is paired.
+    NotPaired,
+    /// The phone's key in the inbox is not a P-256 key.
+    BadInbox,
+    /// The chip record could not be read or written.
+    Record,
+    /// The random source failed its health tests.
+    Random,
+    /// A chip call failed.
+    Chip(ChipError),
+    /// A circle's public object does not fit its place in the chip.
+    TooLarge,
+}
+
+impl From<chip::PublicError> for BadgeError {
+    fn from(e: chip::PublicError) -> Self {
+        match e {
+            chip::PublicError::Chip(e) => BadgeError::Chip(e),
+            chip::PublicError::TooLarge => BadgeError::TooLarge,
+        }
+    }
+}
 
 /// What one [`Badge::step`] did, or where the pass stands after it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,10 +306,21 @@ enum Idle<B: Board> {
     On(Box<Menu<B>>),
     /// "new circle" was chosen: the pass runs from the idle loop until it ends.
     NewCircle,
+    /// A note covers the list of circles: any gesture goes back to it, entry `index` marked.
+    Note { index: usize },
+    /// "pair with {name}?" and the four words: Both pairs the phone that wrote the inbox,
+    /// Left or Right declines and empties the inbox.
+    PairAsk { inbox: Inbox, index: usize },
+    /// The paired phone's page: Both unpairs it, Left or Right goes back to the list.
+    Phone { index: usize },
 }
 
-/// The chooser's last entry, which starts a pass for one more circle.
+/// The chooser's entry that starts a pass for one more circle.
 const NEW_CIRCLE: &str = "new circle";
+/// The chooser's entry that pairs a phone, on a badge whose chip it owns.
+const PAIR_PHONE: &str = "pair a phone";
+/// The chooser's entry for the paired phone, while one is paired.
+const PHONE: &str = "phone";
 
 /// The answer the holder gave with the buttons, handed to `serve`.
 struct Answer(bool);
@@ -369,6 +413,293 @@ impl<B: Board> Badge<B> {
     /// Every circle the badge holds.
     pub fn circles(&self) -> &[Circle] {
         &self.circles
+    }
+
+    /// The chip record of a chip this badge owns, or why there is none to pair with.
+    fn owned_record(&mut self) -> Result<ChipRecord, BadgeError> {
+        if !self.board.has_chip() {
+            return Err(BadgeError::NoChip);
+        }
+        match self.board.chip_record_load() {
+            Ok(Some(r)) if r.is_current() => Ok(r),
+            Ok(_) => Err(BadgeError::NoChip),
+            Err(_) => Err(BadgeError::Record),
+        }
+    }
+
+    /// The name of the phone paired to this badge, if one is.
+    pub fn paired_phone(&mut self) -> Option<String> {
+        self.owned_record().ok()?.phone.map(|p| p.name)
+    }
+
+    /// The circles whose keys are in the chip, with their slots: the ones a paired phone
+    /// reaches.
+    fn chip_circles(&self) -> Vec<(u8, Circle)> {
+        self.circles
+            .iter()
+            .filter_map(|c| c.chip_slot.map(|s| (s, c.clone())))
+            .collect()
+    }
+
+    /// Circle `c`'s public object as this badge writes it, in slot `slot`: the manifest, the
+    /// last card signed here, and what is given.
+    fn public_object(
+        &self,
+        record: &ChipRecord,
+        c: &Circle,
+        generation: [u8; 32],
+        grant: Option<Vec<u8>>,
+        pending_bump: Option<Vec<u8>>,
+        phone_public: Option<[u8; 33]>,
+    ) -> PublicObject {
+        PublicObject {
+            circle_id: c.circle_id,
+            relay: String::new(),
+            manifest: c.manifest.clone(),
+            card: self
+                .cards
+                .iter()
+                .find(|(id, _)| *id == c.circle_id)
+                .map(|(_, card)| card.clone()),
+            grant,
+            generation,
+            pending_bump,
+            badge_nonce: record.badge_nonce,
+            phone_public,
+        }
+    }
+
+    /// The circle's current chat generation, as the chip record keeps it.
+    fn generation_of(record: &ChipRecord, slot: u8, c: &Circle) -> [u8; 32] {
+        record
+            .entry(slot)
+            .map_or_else(|| gen0_id(&c.circle_id), SlotEntry::current_generation)
+    }
+
+    /// What a phone wrote in the inbox, if anything: read in the owner session, which alone
+    /// may read it. The inbox is left as it is: [`Badge::pair_accept`] and
+    /// [`Badge::pair_decline`] empty it.
+    pub fn pair_read_inbox(&mut self) -> Option<Inbox> {
+        self.owned_record().ok()?;
+        let read = self.board.chip_begin().map(|chip| chip.read_binary(KeyId::INBOX));
+        self.board.chip_end();
+        match read? {
+            Ok(bytes) => Inbox::decode(&bytes),
+            Err(e) => {
+                self.board.log(&format!("pairing: the inbox could not be read: {e:?}"));
+                None
+            }
+        }
+    }
+
+    /// The owner said no: empty the inbox.
+    pub fn pair_decline(&mut self) {
+        if let Some(chip) = self.board.chip_begin() {
+            if let Err(e) = chip::clear_inbox(chip) {
+                self.board.log(&format!("pairing: the inbox was not emptied: {e:?}"));
+            }
+        }
+        self.board.chip_end();
+        self.board.log("pairing: declined");
+    }
+
+    /// Pair the phone that wrote `inbox`, in one owner conversation: sign a device grant for
+    /// its key with each circle's seat key, write each circle's public object with the grant,
+    /// the phone's key and the current chat generation, put the phone's AES key in the phone
+    /// slot, record the phone, and empty the inbox.
+    ///
+    /// The slot is swapped with the record flagged ([`chip::REMAKE_GENERATION`]) before the
+    /// delete and set back ([`chip::GENERATION`]) once the phone's key is in, so a
+    /// conversation cut off between them leaves the next boot to make the slot again as a
+    /// placeholder. A failure before the slot holds the phone's key puts back the public
+    /// objects it wrote. `AlreadyPaired` while a phone is paired: one phone per badge.
+    pub fn pair_accept(&mut self, inbox: Inbox) -> Result<(), BadgeError> {
+        let r = self.pair(&inbox);
+        self.board.chip_end();
+        match r {
+            Ok(n) => self.board.log(&format!(
+                "pairing: paired with {}, {n} circles",
+                screens::phone_name(&inbox.name)
+            )),
+            Err(e) => self.board.log(&format!("pairing: failed: {e:?}")),
+        }
+        r.map(|_| ())
+    }
+
+    fn pair(&mut self, inbox: &Inbox) -> Result<usize, BadgeError> {
+        let mut record = self.owned_record()?;
+        if record.phone.is_some() {
+            return Err(BadgeError::AlreadyPaired);
+        }
+        let grantee = SeatPublic::parse(&inbox.public).map_err(|_| BadgeError::BadInbox)?;
+        let circles = self.chip_circles();
+        let mut nonces = Vec::new();
+        for _ in &circles {
+            nonces.push(self.draw::<16>()?);
+        }
+        // Everything is signed before anything is changed.
+        let mut writes: Vec<(u8, Option<Vec<u8>>, PublicObject)> = Vec::new();
+        for ((slot, c), nonce) in circles.iter().zip(nonces) {
+            let claims =
+                cahoots_objects::grant::issue_device_grant(&c.circle_id, c.seat, grantee, nonce);
+            let chip = self.board.chip_begin().ok_or(BadgeError::NoChip)?;
+            let mut signer = ChipSeat::new(chip, KeyId::new(KeyKind::Seat, *slot));
+            let grant = cahoots_objects::grant::sign_device_grant(&claims, &mut signer, c.seat);
+            if let Some(e) = signer.error {
+                return Err(BadgeError::Chip(e));
+            }
+            let old = chip.read_binary(chip::public_id(*slot)).ok();
+            // A bump signed at an earlier unpair stays for this phone to post.
+            let pending = old
+                .as_deref()
+                .and_then(|b| PublicObject::decode(b).ok())
+                .and_then(|o| o.pending_bump);
+            let generation = Self::generation_of(&record, *slot, c);
+            let object =
+                self.public_object(&record, c, generation, Some(grant), pending, Some(inbox.public));
+            writes.push((*slot, old, object));
+        }
+        // The public objects first: no tap reads them before this conversation ends.
+        for (i, (slot, _, object)) in writes.iter().enumerate() {
+            let chip = self.board.chip_begin().ok_or(BadgeError::NoChip)?;
+            if let Err(e) = chip::write_public(chip, *slot, object) {
+                self.restore_publics(&writes[..=i]);
+                return Err(e.into());
+            }
+        }
+        // The slot, flagged in the record while its id is empty.
+        record.generation = chip::REMAKE_GENERATION;
+        if self.board.chip_record_store(&record).is_err() {
+            self.restore_publics(&writes);
+            return Err(BadgeError::Record);
+        }
+        let chip = self.board.chip_begin().ok_or(BadgeError::NoChip)?;
+        if let Err(e) = chip::replace_slot(chip, Some(&inbox.key)) {
+            // The record stays flagged: the next boot makes the slot again as a placeholder.
+            self.restore_publics(&writes);
+            return Err(BadgeError::Chip(e));
+        }
+        record.generation = chip::GENERATION;
+        record.phone = Some(PhoneSlot {
+            name: inbox.name.clone(),
+            public: inbox.public,
+        });
+        if self.board.chip_record_store(&record).is_err() {
+            // The stored record is still flagged, and the next boot makes the slot again: put
+            // the placeholder back now, so the phone is not half paired until then.
+            self.restore_publics(&writes);
+            if let Some(chip) = self.board.chip_begin() {
+                if let Err(e) = chip::replace_slot(chip, None) {
+                    self.board.log(&format!("pairing: the placeholder was not put back: {e:?}"));
+                }
+            }
+            return Err(BadgeError::Record);
+        }
+        if let Some(chip) = self.board.chip_begin() {
+            if let Err(e) = chip::clear_inbox(chip) {
+                self.board.log(&format!("pairing: the inbox was not emptied: {e:?}"));
+            }
+        }
+        Ok(writes.len())
+    }
+
+    /// Put back public objects as they were before a pairing that failed: the old bytes, or
+    /// no object where there was none.
+    fn restore_publics(&mut self, writes: &[(u8, Option<Vec<u8>>, PublicObject)]) {
+        for (slot, old, _) in writes {
+            let Some(chip) = self.board.chip_begin() else {
+                return;
+            };
+            let id = chip::public_id(*slot);
+            let put = match old {
+                Some(bytes) => chip.rewrite_binary(id, bytes),
+                None => chip.delete(id),
+            };
+            if let Err(e) = put {
+                self.board
+                    .log(&format!("pairing: slot {slot} public object not put back: {e:?}"));
+            }
+        }
+    }
+
+    /// Unpair the phone, in one owner conversation: put a placeholder in the phone slot, which
+    /// ends the phone's taps, then for each circle draw a new chat generation id, sign a bump
+    /// to it with the seat key, and write the public object with the bump pending, no grant
+    /// and no phone key. The chip record keeps each new generation, so the next bump and the
+    /// next pairing start from it. A device posts the bump the next time one taps; until then
+    /// the circle chats in the old generation.
+    ///
+    /// The slot is swapped with the record flagged, as [`Badge::pair_accept`] does. A public
+    /// object that is not written keeps its circle's old generation and is logged: the phone's
+    /// taps end all the same.
+    pub fn unpair(&mut self) -> Result<(), BadgeError> {
+        let r = self.unpair_phone();
+        self.board.chip_end();
+        match &r {
+            Ok(name) => self
+                .board
+                .log(&format!("pairing: unpaired {}", screens::phone_name(name))),
+            Err(e) => self.board.log(&format!("pairing: unpairing failed: {e:?}")),
+        }
+        r.map(|_| ())
+    }
+
+    fn unpair_phone(&mut self) -> Result<String, BadgeError> {
+        let mut record = self.owned_record()?;
+        let phone = record.phone.clone().ok_or(BadgeError::NotPaired)?;
+        let circles = self.chip_circles();
+        let mut ids = Vec::new();
+        for _ in &circles {
+            ids.push(self.draw::<32>()?);
+        }
+        let mut bumps = Vec::new();
+        for ((slot, c), to) in circles.iter().zip(ids) {
+            let from = Self::generation_of(&record, *slot, c);
+            let chip = self.board.chip_begin().ok_or(BadgeError::NoChip)?;
+            let mut signer = ChipSeat::new(chip, KeyId::new(KeyKind::Seat, *slot));
+            let payload = cahoots_chat::sign_bump(&mut signer, c.seat, &c.circle_id, &from, &to)
+                .map_err(|_| BadgeError::Chip(ChipError::Transport))?;
+            if let Some(e) = signer.error {
+                return Err(BadgeError::Chip(e));
+            }
+            bumps.push((*slot, c, to, payload));
+        }
+        // The slot first: the phone's taps end here.
+        record.generation = chip::REMAKE_GENERATION;
+        self.board
+            .chip_record_store(&record)
+            .map_err(|_| BadgeError::Record)?;
+        let chip = self.board.chip_begin().ok_or(BadgeError::NoChip)?;
+        // On failure the record stays flagged: the next boot makes the slot again.
+        chip::replace_slot(chip, None).map_err(BadgeError::Chip)?;
+        record.generation = chip::GENERATION;
+        record.phone = None;
+        let mut failed = self
+            .board
+            .chip_record_store(&record)
+            .err()
+            .map(|_| BadgeError::Record);
+        for (slot, c, to, payload) in bumps {
+            let object = self.public_object(&record, c, to, None, Some(payload), None);
+            let chip = self.board.chip_begin().ok_or(BadgeError::NoChip)?;
+            match chip::write_public(chip, slot, &object) {
+                Ok(()) => {
+                    if let Some(e) = record.entry_mut(slot) {
+                        e.chat_generation = Some(to);
+                    }
+                }
+                Err(e) => {
+                    self.board.log(&format!(
+                        "pairing: slot {slot} public object not written, its chat stays in the old generation: {e:?}"
+                    ));
+                    failed = failed.or(Some(e.into()));
+                }
+            }
+        }
+        if self.board.chip_record_store(&record).is_err() {
+            failed = Some(BadgeError::Record);
+        }
+        failed.map_or(Ok(phone.name), Err)
     }
 
     /// The chip slots the held circles name.
@@ -902,33 +1233,101 @@ impl<B: Board> Badge<B> {
         Ok((slot, public))
     }
 
-    /// At the keep: the root and the epoch counter go into the chip beside the seat key, and
-    /// the chip record learns the slot.
-    fn keep_in_chip(
-        &mut self,
-        slot: u8,
-        circle_id: &CircleId,
-        root: &[u8; 32],
-    ) -> Result<(), String> {
+    /// At the keep: the root and the epoch counter go into the chip beside the seat key, a
+    /// hello object for each other seat from the pair key the ceremony gave for it, and the
+    /// circle's public object; the chip record learns the slot. With a phone paired, the
+    /// public object carries a device grant for it, so the phone finds the new circle at its
+    /// next tap.
+    fn keep_in_chip(&mut self, slot: u8, result: &CeremonyResult, seat: u8) -> Result<(), String> {
+        let root = result.root.as_ref().ok_or("ceremony: no circle root")?;
+        let circle_id = result.circle_id;
+        let mut record = self.load_chip_record()?;
+        let phone = record.phone.clone();
+        let nonce = match phone {
+            Some(_) => Some(self.draw::<16>().map_err(|_| "trng: failed, no grant nonce")?),
+            None => None,
+        };
         let chip = self.board.chip_begin().ok_or("chip: not found")?;
         chip.put_hmac_key(KeyId::new(KeyKind::Root, slot), root, &ObjectPolicy::owner_and_slot_mac())
             .map_err(|e| format!("chip: root not stored: {e:?}"))?;
         chip.put_counter(KeyId::new(KeyKind::Epoch, slot), 0, &ObjectPolicy::owner_counter())
             .map_err(|e| format!("chip: counter not stored: {e:?}"))?;
+        let mut hellos = 0;
+        for (other, key) in result.pair_keys.iter().enumerate() {
+            let Some(key) = key else { continue };
+            // A circle has at most 8 seats, so `other` fits the hello id's three bits.
+            let other = u8::try_from(other).ok().filter(|o| *o < 8).ok_or("ceremony: seat out of range")?;
+            chip.put_hmac_key(
+                chip::hello_id(slot, other),
+                &chip::hello_value(key),
+                &ObjectPolicy::owner_and_slot_mac(),
+            )
+            .map_err(|e| format!("chip: hello object not stored: {e:?}"))?;
+            hellos += 1;
+        }
+        let grant = match (&phone, nonce) {
+            (Some(p), Some(nonce)) => {
+                let grantee = SeatPublic::parse(&p.public).map_err(|_| "chip record: bad phone key")?;
+                let claims = cahoots_objects::grant::issue_device_grant(&circle_id, seat, grantee, nonce);
+                let mut signer = ChipSeat::new(chip, KeyId::new(KeyKind::Seat, slot));
+                let signed = cahoots_objects::grant::sign_device_grant(&claims, &mut signer, seat);
+                if let Some(e) = signer.error {
+                    return Err(format!("chip: device grant not signed: {e:?}"));
+                }
+                Some(signed)
+            }
+            _ => None,
+        };
+        let object = PublicObject {
+            circle_id,
+            relay: String::new(),
+            manifest: result.manifest.encode(),
+            card: None,
+            grant,
+            generation: gen0_id(&circle_id),
+            pending_bump: None,
+            badge_nonce: record.badge_nonce,
+            phone_public: phone.map(|p| p.public),
+        };
+        let chip = self.board.chip_begin().ok_or("chip: not found")?;
+        let written = chip::write_public(chip, slot, &object);
         self.board.log(&format!(
             "chip: slot {slot} kept, seat key for the owner alone, root for the owner and the phone slot"
         ));
-        let mut record = self.load_chip_record()?;
+        self.board.log(&format!(
+            "chip: slot {slot} has {hellos} hello objects for the owner and the phone slot"
+        ));
+        match written {
+            Ok(()) => self.board.log(&format!("chip: slot {slot} public object written")),
+            // The circle is kept without one: a phone does not see it, and nothing else needs it.
+            Err(chip::PublicError::TooLarge) => self.board.log(&format!(
+                "chip: slot {slot} public object too large, a phone will not see this circle"
+            )),
+            Err(chip::PublicError::Chip(e)) => {
+                return Err(format!("chip: public object not written: {e:?}"))
+            }
+        }
         record.insert(SlotEntry {
             slot,
-            circle_id: *circle_id,
+            circle_id,
             has_seat: true,
             has_root: true,
             has_epoch: true,
+            chat_generation: None,
         });
         self.board
             .chip_record_store(&record)
             .map_err(|_| String::from("flash: chip record failed"))
+    }
+
+    /// `N` bytes from the board's random source.
+    fn draw<const N: usize>(&mut self) -> Result<[u8; N], BadgeError> {
+        let mut out = [0u8; N];
+        self.board
+            .entropy()
+            .fill(&mut out)
+            .map_err(|_| BadgeError::Random)?;
+        Ok(out)
     }
 
     /// The stored chip record, empty if there is none. An unreadable one is an error, logged:
@@ -1161,7 +1560,7 @@ impl<B: Board> Badge<B> {
                     // Without a chip the record keeps both.
                     let (seat_key, chip_slot, root) = match self.chip_slot {
                         Some(slot) => {
-                            self.keep_in_chip(slot, &result.circle_id, root)?;
+                            self.keep_in_chip(slot, &result, seat)?;
                             ([0u8; 32], Some(slot), None)
                         }
                         None => (
@@ -1274,6 +1673,18 @@ impl<B: Board> Badge<B> {
             }
             Idle::Choose { index } => self.choose_step(index),
             Idle::NewCircle => self.new_circle_step(),
+            Idle::Note { index } => {
+                if self.board.press() == Press::None {
+                    Idle::Note { index }
+                } else {
+                    // The note may have changed the list: a phone paired or unpaired.
+                    let index = index.min(self.chooser_names().len() - 1);
+                    self.show_chooser(index);
+                    Idle::Choose { index }
+                }
+            }
+            Idle::PairAsk { inbox, index } => self.pair_ask_step(inbox, index),
+            Idle::Phone { index } => self.phone_step(index),
             Idle::On(mut menu) => {
                 match Self::menu_step(
                     &mut self.board,
@@ -1304,8 +1715,9 @@ impl<B: Board> Badge<B> {
     }
 
     /// The chooser's entries: each circle's name, a number after a name two circles share,
-    /// and "new circle" while the board has room for one more.
-    fn chooser_names(&self) -> Vec<String> {
+    /// "new circle" while the board has room for one more, then on a badge that owns its
+    /// chip "pair a phone", and "phone" while one is paired.
+    fn chooser_names(&mut self) -> Vec<String> {
         let mut names: Vec<String> = self
             .circles
             .iter()
@@ -1322,7 +1734,75 @@ impl<B: Board> Badge<B> {
         if self.circles.len() < self.board.max_circles() {
             names.push(String::from(NEW_CIRCLE));
         }
+        if let Ok(record) = self.owned_record() {
+            names.push(String::from(PAIR_PHONE));
+            if record.phone.is_some() {
+                names.push(String::from(PHONE));
+            }
+        }
         names
+    }
+
+    /// A note over the list of circles, until the next gesture.
+    fn note(&mut self, lines: &[&str], index: usize) -> Idle<B> {
+        show(&mut self.board, screens::status(lines));
+        Idle::Note { index }
+    }
+
+    /// "pair a phone" was chosen: read the inbox and ask.
+    fn pair_start(&mut self, index: usize) -> Idle<B> {
+        let record = match self.owned_record() {
+            Ok(r) => r,
+            Err(_) => return self.note(&["the chip cannot pair a phone"], index),
+        };
+        if record.phone.is_some() {
+            return self.note(&["unpair the current phone first"], index);
+        }
+        let Some(inbox) = self.pair_read_inbox() else {
+            return self.note(&["no phone has asked to pair", "hold the phone to the chip first"], index);
+        };
+        let words = pairing::words(&inbox.public, &record.badge_nonce);
+        self.board.log(&format!(
+            "pairing: {} asks, words {}",
+            screens::phone_name(&inbox.name),
+            words.join(" ")
+        ));
+        show(&mut self.board, screens::pair_prompt(&inbox.name, &words));
+        Idle::PairAsk { inbox, index }
+    }
+
+    fn pair_ask_step(&mut self, inbox: Inbox, index: usize) -> Idle<B> {
+        match self.board.press() {
+            Press::None => Idle::PairAsk { inbox, index },
+            Press::Both => {
+                let name = screens::phone_name(&inbox.name);
+                match self.pair_accept(inbox) {
+                    Ok(()) => self.note(&[&format!("paired with {name}"), "tap the phone again"], index),
+                    Err(BadgeError::AlreadyPaired) => {
+                        self.note(&["unpair the current phone first"], index)
+                    }
+                    Err(_) => self.note(&["pairing failed", "nothing changed"], index),
+                }
+            }
+            Press::Left | Press::Right => {
+                self.pair_decline();
+                self.note(&["not paired"], index)
+            }
+        }
+    }
+
+    fn phone_step(&mut self, index: usize) -> Idle<B> {
+        match self.board.press() {
+            Press::None => Idle::Phone { index },
+            Press::Both => match self.unpair() {
+                Ok(()) => self.note(&["phone unpaired", "its taps end now"], index),
+                Err(_) => self.note(&["unpairing failed"], index),
+            },
+            Press::Left | Press::Right => {
+                self.show_chooser(index);
+                Idle::Choose { index }
+            }
+        }
     }
 
     fn show_chooser(&mut self, index: usize) {
@@ -1349,6 +1829,17 @@ impl<B: Board> Badge<B> {
                 self.current = index;
                 self.enter_menu()
             }
+            Press::Both if self.chooser_names()[index] == PAIR_PHONE => self.pair_start(index),
+            Press::Both if self.chooser_names()[index] == PHONE => match self.paired_phone() {
+                Some(name) => {
+                    show(&mut self.board, screens::phone_page(&name));
+                    Idle::Phone { index }
+                }
+                None => {
+                    self.show_chooser(index);
+                    Idle::Choose { index }
+                }
+            },
             Press::Both => {
                 self.board.log("new circle: looking for the pile");
                 self.state = State::Idle;

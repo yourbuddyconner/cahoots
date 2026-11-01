@@ -10,10 +10,12 @@ pub mod badge;
 pub mod board;
 pub mod chip;
 pub mod grants;
+pub mod pairing;
+pub mod public;
 pub mod screens;
 pub mod ssh;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 
-pub use badge::{Badge, Step};
+pub use badge::{Badge, BadgeError, Step};
 pub use board::{word_indices, Board, BoardError, Circle, Press};

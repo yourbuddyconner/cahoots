@@ -285,6 +285,21 @@ impl SoftChip {
         self.open_slot(false)
     }
 
+    /// Open the phone slot's session as a phone holding `key` would, with SCP03 secure
+    /// messaging: the session opens only if `key` is the slot's AES key. `BadSession` for any
+    /// other key, and the chip is left in no session; `NoSuchKey` if there is no slot object.
+    pub fn open_slot_with_key_for_test(&mut self, key: &[u8; 16]) -> Result<(), ChipError> {
+        self.session = Session::None;
+        match self.objects.get(&KeyId::SLOT.0) {
+            Some(Entry { object: Object::Aes(k), .. }) if k == key => {
+                self.session = Session::Slot { scp03: true };
+                Ok(())
+            }
+            Some(Entry { object: Object::Aes(_), .. }) => Err(ChipError::BadSession),
+            _ => Err(ChipError::NoSuchKey),
+        }
+    }
+
     /// The next creating call fails with `6A80`, as a write the applet refuses does.
     pub fn fail_next_create_for_test(&mut self) {
         self.fail_create = Some(0);

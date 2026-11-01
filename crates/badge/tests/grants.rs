@@ -149,6 +149,7 @@ fn board(chip: bool) -> (FakeBoard, CircleId, SeatPublic) {
             has_seat: true,
             has_root: false,
             has_epoch: false,
+            chat_generation: None,
         });
         let circle = board.circle.as_mut().unwrap();
         circle.chip_slot = Some(0);

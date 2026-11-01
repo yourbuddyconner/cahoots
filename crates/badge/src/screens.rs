@@ -319,6 +319,40 @@ pub fn forget_prompt(circle: &str) -> Screen {
     s.done()
 }
 
+/// A phone's name as the badge shows it: printable ASCII kept, anything else shown as `?`. A
+/// tap writes the name, so the badge draws nothing else from it.
+pub fn phone_name(name: &str) -> String {
+    name.chars()
+        .map(|c| if c == ' ' || c.is_ascii_graphic() { c } else { '?' })
+        .collect()
+}
+
+/// The question before a phone is paired: its name and the four words the phone shows too.
+pub fn pair_prompt(name: &str, words: &[&str; 4]) -> Screen {
+    let mut s = Draw::new();
+    s.title("pair a phone");
+    let line = fit("pair with ", &phone_name(name), "?", cols(&FONT_6X13));
+    s.centered(&FONT_6X13, 32, &line);
+    for (i, w) in words.iter().enumerate() {
+        s.centered(&PROFONT_18_POINT, 54 + 23 * i as i32, w);
+    }
+    s.centered(&FONT_8X13, 148, "the phone shows these words");
+    s.footer(Some("no"), Some("A+B  pair"), Some("no"));
+    s.done()
+}
+
+/// The paired phone: its name, what it can do, and unpair.
+pub fn phone_page(name: &str) -> Screen {
+    let mut s = Draw::new();
+    s.title("phone");
+    s.centered(&FONT_9X18_BOLD, 46, &fit("", &phone_name(name), "", cols(&FONT_9X18_BOLD)));
+    s.centered(&FONT_8X13, 80, "reads and posts in");
+    s.centered(&FONT_8X13, 96, "this badge's circles");
+    s.centered(&FONT_8X13, 124, "unpairing ends its taps");
+    s.footer(Some("back"), Some("A+B  unpair"), Some("back"));
+    s.done()
+}
+
 /// Bytes shown as hex under the inverted title "code": eight bytes per row, in groups of two.
 pub fn code(bytes: &[u8]) -> Screen {
     let mut s = Draw::new();

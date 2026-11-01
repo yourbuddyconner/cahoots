@@ -25,6 +25,11 @@
 //! `cahoots:meshtastic`, `cahoots:other`) or `cahoots:purpose-<n>` for a purpose byte without a
 //! name, then the `cahoots:pad` detail last.
 //!
+//! A device grant (`cahoots:device`) has one detail, `{"type": "cahoots:device", "actions":
+//! [...]}`, the actions some of `read`, `post` and `hello` in that order. A seat signs one per
+//! circle for the phone paired to its badge; it carries no channel detail, no log position and
+//! no expiry.
+//!
 //! [`Claims::decode`] refuses anything that is not a grant: an unknown claim or detail type,
 //! a missing claim, an issuer that is not a circle, a `sub` that is not the key id of the `cnf`
 //! key, and any encoding that is not canonical.
@@ -75,6 +80,9 @@ const NUMBERED: &str = "cahoots:purpose-";
 pub const SIGN_TYPE: &str = "cahoots:sign";
 /// The detail type of a channel grant.
 pub const CHANNEL_TYPE: &str = "cahoots:channel";
+/// The detail type of a device grant: a seat lets a device, such as a phone paired to its badge,
+/// act in one circle.
+pub const DEVICE_TYPE: &str = "cahoots:device";
 /// An `aud` naming a seat: `"cahoots:seat:<circle id hex>:<seat>"`.
 pub const AUD_PREFIX: &str = "cahoots:seat:";
 
@@ -82,6 +90,8 @@ pub const AUD_PREFIX: &str = "cahoots:seat:";
 const SIGN_ACTIONS: [&str; 3] = ["git-commit", "ssh-login", "file"];
 /// The actions a channel grant can allow, in the order they are written.
 const CHANNEL_ACTIONS: [&str; 4] = ["read", "post", "admit", "govern"];
+/// The actions a device grant can allow, in the order they are written.
+pub const DEVICE_ACTIONS: [&str; 3] = ["read", "post", "hello"];
 /// The most signatures a sign grant can allow.
 const MAX_SIGN_BUDGET: u32 = 1000;
 /// The most entries in a detail's `actions` or `locations`.
@@ -139,6 +149,12 @@ pub enum Kind {
         channel: [u8; 16],
         actions: Vec<String>,
         budget: u32,
+    },
+    /// What a device may do in circle `circle` as the seat that signed the grant: some of
+    /// [`DEVICE_ACTIONS`], in that order.
+    Device {
+        circle: CircleId,
+        actions: Vec<String>,
     },
 }
 
@@ -431,8 +447,9 @@ impl Claims {
     /// a pad grant. A pad grant has a log claim, the [`PAD_TYPE`] detail last, no `aud`, no
     /// `exp` and no base; a sign grant has one [`SIGN_TYPE`] detail, an `aud` naming the
     /// issuing circle, a base, no log claim and depth 0; a channel grant has one
-    /// [`CHANNEL_TYPE`] detail, a log claim, and no `aud`, `exp` or base. Anything else is
-    /// `Malformed`.
+    /// [`CHANNEL_TYPE`] detail, a log claim, and no `aud`, `exp` or base; a device grant has
+    /// one [`DEVICE_TYPE`] detail holding only its actions, a seat as grantor, depth 0, and no
+    /// `aud`, `exp`, log claim, parent or base. Anything else is `Malformed`.
     pub fn kind(&self) -> Result<(CircleId, Kind), ObjectError> {
         let m = ObjectError::Malformed;
         let circle_id = circle_of(&self.iss).ok_or(m)?;
@@ -445,6 +462,12 @@ impl Claims {
             .any(|d| d.r#type == CHANNEL_TYPE)
         {
             self.channel_kind()?
+        } else if self
+            .authorization_details
+            .iter()
+            .any(|d| d.r#type == DEVICE_TYPE)
+        {
+            self.device_kind(&circle_id)?
         } else if self.log_not_after.is_some() {
             self.pad_kind()?
         } else {
@@ -524,6 +547,48 @@ impl Claims {
             channel,
             actions,
             budget,
+        })
+    }
+
+    fn device_kind(&self, circle_id: &CircleId) -> Result<Kind, ObjectError> {
+        let m = ObjectError::Malformed;
+        if self.aud.is_some()
+            || self.exp.is_some()
+            || self.base.is_some()
+            || self.log_not_after.is_some()
+            || self.parent.is_some()
+            || self.depth != 0
+            || !matches!(self.grantor, Grantor::Seat(_))
+        {
+            return Err(m);
+        }
+        let [d] = self.authorization_details.as_slice() else {
+            return Err(m);
+        };
+        let actions = d.actions.clone().ok_or(m)?;
+        if *d
+            != (Detail {
+                actions: Some(actions.clone()),
+                ..Detail::bare(String::from(DEVICE_TYPE))
+            })
+        {
+            return Err(m);
+        }
+        // Each action once, in the order of DEVICE_ACTIONS.
+        let mut last = None;
+        for a in &actions {
+            let at = DEVICE_ACTIONS.iter().position(|c| *c == a).ok_or(m)?;
+            if last.is_some_and(|l| at <= l) {
+                return Err(m);
+            }
+            last = Some(at);
+        }
+        if actions.is_empty() {
+            return Err(m);
+        }
+        Ok(Kind::Device {
+            circle: *circle_id,
+            actions,
         })
     }
 

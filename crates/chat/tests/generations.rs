@@ -140,6 +140,42 @@ fn a_bump_moves_every_root_holder_and_locks_out_a_device_without_the_key() {
 }
 
 #[test]
+fn a_device_forwards_a_seat_signed_bump_and_then_needs_the_new_key() {
+    // A device holds generation 0's key from a tap. Its badge signed a bump with the seat key
+    // at unpair; the device seals it in generation 0, where the others are.
+    let key0 = chat_gen_key(&ROOT, &CID, &gen0_id(&CID));
+    let mut d = synced(ChatSession::from_generation(gen0_id(&CID), key0, CID, 3, 2));
+    let mut a = member(0);
+    assert_eq!(d.pending_generation(), None);
+    let payload = sign_bump(&seat_key(2), 2, &CID, &g0(), &ID1).unwrap();
+    let wire = d.send_bump(ID1, &payload).unwrap();
+    assert_eq!(epoch_of(&wire), EpochId::generation(generation_tag(&g0()), 1));
+
+    // A root holder reads it, checks the seat's signature and moves.
+    let (h, got) = a.receive(&wire).unwrap();
+    assert_eq!(h.msg_type, MessageType::Bump);
+    assert_eq!(h.sender, 2);
+    assert_eq!(verify_bump(&got, &CID, &manifest()).unwrap(), (g0(), ID1, 2));
+    assert_eq!(a.apply_bump(g0(), ID1), Ok(MOVED));
+    assert_eq!(a.generation_id(), ID1);
+
+    // The device cannot derive the new key: it waits for it, and says so.
+    assert_eq!(d.pending_generation(), Some(ID1));
+    assert_eq!(d.generation_id(), g0());
+    let w = a.send(b"after the bump").unwrap();
+    assert_eq!(d.receive(&w), Err(ChatError::NeedsGeneration(ID1)));
+    // A second bump while it waits would move from a generation the others have left.
+    let again = sign_bump(&seat_key(2), 2, &CID, &g0(), &ID2).unwrap();
+    assert_eq!(d.send_bump(ID2, &again), Err(ChatError::CannotBump));
+
+    // Given the key by a tap, it reads on.
+    d.install_generation(ID1, chat_gen_key(&ROOT, &CID, &ID1));
+    assert_eq!(d.pending_generation(), None);
+    assert_eq!(d.generation_id(), ID1);
+    assert_eq!(d.receive(&w).unwrap().1, b"after the bump");
+}
+
+#[test]
 fn a_bump_from_a_key_that_is_not_a_seat_is_refused() {
     let m = manifest();
     let stranger = SeatKey::from_seed(&[0x99; 32]).unwrap();
@@ -308,16 +344,16 @@ fn a_device_without_the_root_exports_and_imports_its_generation() {
 }
 
 #[test]
-fn only_a_root_holder_sends_a_bump_and_only_to_a_new_generation() {
-    // A device without the root never sends a bump: its key would be one nobody else has.
+fn only_a_bump_from_the_current_generation_to_a_new_one_is_sent() {
+    // A device without the root sends a bump only from the generation it is in: one from a
+    // generation it has left, or to one it already holds, would move nobody.
     let key0 = chat_gen_key(&ROOT, &CID, &gen0_id(&CID));
     let mut d = synced(ChatSession::from_generation(gen0_id(&CID), key0, CID, 3, 2));
-    let payload = sign_bump(&seat_key(2), 2, &CID, &g0(), &ID1).unwrap();
-    assert_eq!(d.send_bump(ID1, &payload), Err(ChatError::CannotBump));
-    // Even with the next key installed, a device does not originate the bump.
     d.install_generation(ID1, chat_gen_key(&ROOT, &CID, &ID1));
-    let payload = sign_bump(&seat_key(2), 2, &CID, &ID1, &ID2).unwrap();
-    assert_eq!(d.send_bump(ID2, &payload), Err(ChatError::CannotBump));
+    let from_old = sign_bump(&seat_key(2), 2, &CID, &g0(), &ID2).unwrap();
+    assert_eq!(d.send_bump(ID2, &from_old), Err(ChatError::CannotBump));
+    let to_held = sign_bump(&seat_key(2), 2, &CID, &ID1, &g0()).unwrap();
+    assert_eq!(d.send_bump(g0(), &to_held), Err(ChatError::CannotBump));
 
     // A root holder refuses a bump to the generation it is already in, and to one it has left.
     let mut a = member(0);

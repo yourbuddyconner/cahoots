@@ -222,8 +222,9 @@ fn two_ceremonies_two_records() {
     assert_ne!(a.circle_id, c.circle_id);
     assert_eq!((a.chip_slot, c.chip_slot), (Some(0), Some(1)));
 
-    // Slots 0 and 1, each with a seat key, a root and a counter; different keys and roots.
-    assert_eq!(circle_objects(&mut b).len(), 6);
+    // Slots 0 and 1, each with a seat key, a root, a counter, a hello object and a public
+    // object; different keys and roots.
+    assert_eq!(circle_objects(&mut b).len(), 10);
     let chip = b.board().owner_chip();
     let k0 = chip.public(id(KeyKind::Seat, 0)).unwrap();
     let k1 = chip.public(id(KeyKind::Seat, 1)).unwrap();
@@ -281,7 +282,7 @@ fn two_ceremonies_two_records() {
     // A reboot opens the first circle's menu, and its list shows both.
     b.boot();
     assert_eq!(b.circles(), &circles[..]);
-    assert_eq!(circle_objects(&mut b).len(), 6);
+    assert_eq!(circle_objects(&mut b).len(), 10);
     b.idle_step();
     assert!(b.board().shows("first  tier 1"), "{:?}", b.board().last());
     to_the_list(&mut b);
@@ -452,7 +453,13 @@ fn forget_one_keeps_the_other() {
     assert_eq!(b.board().more[0].pad, second_pad);
     let mut ids = circle_objects(&mut b);
     ids.sort_by_key(|k| k.0);
-    let mut want = vec![id(KeyKind::Seat, 1), id(KeyKind::Root, 1), id(KeyKind::Epoch, 1)];
+    let mut want = vec![
+        id(KeyKind::Seat, 1),
+        id(KeyKind::Root, 1),
+        id(KeyKind::Epoch, 1),
+        id(KeyKind::Public, 1),
+        cahoots_badge::chip::hello_id(1, 1 - kept.seat),
+    ];
     want.sort_by_key(|k| k.0);
     assert_eq!(ids, want);
     let record = b.board().chip_record_load().unwrap().unwrap();
@@ -464,7 +471,7 @@ fn forget_one_keeps_the_other() {
     assert!(b.board().shows("second  tier 1"));
     b.boot();
     assert_eq!(b.circles(), [kept]);
-    assert_eq!(circle_objects(&mut b).len(), 3);
+    assert_eq!(circle_objects(&mut b).len(), 5);
 }
 
 #[test]
@@ -725,12 +732,12 @@ fn boot_deletes_a_stray_slot_and_the_next_circle_gets_a_clean_one() {
     let chip = b.board().owner_chip();
     let stray = chip.generate(id(KeyKind::Seat, 2), cahoots_chip::Curve::P256, &ObjectPolicy::owner_only()).unwrap();
     chip.put_hmac_key(id(KeyKind::Root, 2), &[7; 32], &ObjectPolicy::owner_and_slot_mac()).unwrap();
-    assert_eq!(circle_objects(&mut b).len(), 8);
+    assert_eq!(circle_objects(&mut b).len(), 12);
     b.boot();
     // Slot 2 is deleted and logged; slots 0 and 1 stay with their circles.
-    let mut slots: Vec<u8> = circle_objects(&mut b).iter().map(|k| k.0 as u8).collect();
+    let mut slots: Vec<u8> = circle_objects(&mut b).iter().filter_map(|k| k.circle_slot()).collect();
     slots.sort();
-    assert_eq!(slots, vec![0, 0, 0, 1, 1, 1]);
+    assert_eq!(slots, vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1]);
     let log = &b.board().log;
     assert_eq!(
         log.iter().filter(|l| l.contains("slot 2 is not in the chip record, deleted")).count(),
@@ -742,6 +749,10 @@ fn boot_deletes_a_stray_slot_and_the_next_circle_gets_a_clean_one() {
     // A third circle takes slot 2, made new: not the stray key, and no stray root.
     b.idle_step();
     to_the_list(&mut b);
+    // Left from the first entry: "pair a phone", the last on a badge with a chip, then
+    // "new circle".
+    press(&mut b, Press::Left);
+    assert!(b.board().shows("> pair a phone"));
     press(&mut b, Press::Left);
     assert!(b.board().shows("> new circle"));
     b.board().name = "third".into();

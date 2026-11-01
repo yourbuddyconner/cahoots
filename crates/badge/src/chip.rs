@@ -11,7 +11,8 @@
 //! phone slot and the inbox) belong to no circle slot and are never deleted that way.
 //!
 //! The record is CBOR: `[slots, phone, badge nonce, generation]`, the slots an array of
-//! `[slot, circle id (bytes), has seat, has root, has epoch]` in slot order, the phone `null`
+//! `[slot, circle id (bytes), has seat, has root, has epoch, chat generation]` in slot order,
+//! the chat generation (bytes 32) left out while it is generation 0, the phone `null`
 //! or `[name, public key (33 bytes)]`. The decoder re-encodes and refuses anything that
 //! differs. A board stores it as `CAHC2` and the CBOR ([`ChipRecord::to_stored`]); the record
 //! of earlier firmware, `CAHC`, reads as no record ([`ChipRecord::from_stored`]), and a badge
@@ -97,9 +98,20 @@ pub struct SlotEntry {
     pub has_root: bool,
     #[n(4)]
     pub has_epoch: bool,
+    /// The circle's current chat generation id, set when the badge unpaired a phone and
+    /// signed a bump to a new one. `None` means generation 0, `cahoots_core::root::gen0_id`.
+    #[cbor(n(5), with = "minicbor::bytes")]
+    pub chat_generation: Option<[u8; 32]>,
 }
 
 impl SlotEntry {
+    /// The circle's current chat generation id: the one the last bump this badge signed
+    /// moved to, or generation 0.
+    pub fn current_generation(&self) -> [u8; 32] {
+        self.chat_generation
+            .unwrap_or_else(|| cahoots_core::root::gen0_id(&self.circle_id))
+    }
+
     fn has(&self, kind: KeyKind) -> bool {
         match kind {
             KeyKind::Seat => self.has_seat,
@@ -263,6 +275,10 @@ impl ChipRecord {
 
     pub fn entry(&self, slot: u8) -> Option<&SlotEntry> {
         self.slots.iter().find(|e| e.slot == slot)
+    }
+
+    pub fn entry_mut(&mut self, slot: u8) -> Option<&mut SlotEntry> {
+        self.slots.iter_mut().find(|e| e.slot == slot)
     }
 
     /// The lowest slot the record does not use, or `None` if all 256 are used.
@@ -506,15 +522,121 @@ pub fn remake_antenna(chip: &mut dyn ChipOps) -> Result<(), ChipError> {
     for id in ANTENNA_IDS {
         delete_quietly(chip, id)?;
     }
+    make_placeholder(chip)?;
+    chip.write_binary(KeyId::INBOX, &[0; INBOX_LEN], &ObjectPolicy::inbox())?;
+    chip.put_counter(issue_id(), floor, &ObjectPolicy::owner_counter())?;
+    Ok(())
+}
+
+/// Make the phone slot as a placeholder: an AES authentication object holding a random key
+/// nobody keeps, which only the owner may delete. The slot's id must be free.
+pub fn make_placeholder(chip: &mut dyn ChipOps) -> Result<(), ChipError> {
     let random = chip.random(16)?;
     let mut key = [0u8; 16];
     key.copy_from_slice(&random);
     let made = chip.put_aes_auth(KeyId::SLOT, &key, &ObjectPolicy::placeholder_slot());
     zeroize::Zeroize::zeroize(&mut key);
-    made?;
-    chip.write_binary(KeyId::INBOX, &[0; INBOX_LEN], &ObjectPolicy::inbox())?;
-    chip.put_counter(issue_id(), floor, &ObjectPolicy::owner_counter())?;
+    made
+}
+
+/// Replace the phone slot with one holding `key` (a paired phone's) or, with `None`, with a
+/// placeholder ([`make_placeholder`]). Either way the slot keeps the placeholder's policy:
+/// delete for the owner and nothing else, so no session but the owner's can remove it. In the
+/// owner session. The caller has flagged the record with [`REMAKE_GENERATION`] first: between
+/// the delete and the make the slot's id is empty.
+pub fn replace_slot(chip: &mut dyn ChipOps, key: Option<&[u8; 16]>) -> Result<(), ChipError> {
+    delete_quietly(chip, KeyId::SLOT)?;
+    match key {
+        Some(k) => chip.put_aes_auth(KeyId::SLOT, k, &ObjectPolicy::placeholder_slot()),
+        None => make_placeholder(chip),
+    }
+}
+
+/// Empty the inbox: zeros over the whole object. In the owner session.
+pub fn clear_inbox(chip: &mut dyn ChipOps) -> Result<(), ChipError> {
+    chip.rewrite_binary(KeyId::INBOX, &[0; INBOX_LEN])
+}
+
+/// The id of the hello object circle slot `slot` keeps for seat `other`.
+pub fn hello_id(slot: u8, other: u8) -> KeyId {
+    KeyId::new(KeyKind::Hello, slot * 8 + other)
+}
+
+/// The id of circle slot `slot`'s public object.
+pub fn public_id(slot: u8) -> KeyId {
+    KeyId::new(KeyKind::Public, slot)
+}
+
+/// A hello object's value for a pair key: `HMAC-SHA256(32 zero bytes, pair_key)`, the extract
+/// step of `cahoots_core::pairwise::words`. A slot session that MACs `"cahoots/words/v1" ||
+/// speaker || counter_le || 0x01` with it gets the expand step, whose first four bytes read
+/// little-endian give the two words.
+pub fn hello_value(pair_key: &[u8; 32]) -> zeroize::Zeroizing<[u8; 32]> {
+    use hmac::{Hmac, Mac};
+    let mut m = <Hmac<Sha256> as Mac>::new_from_slice(&[0u8; 32])
+        .expect("HMAC takes a key of any length");
+    m.update(pair_key);
+    zeroize::Zeroizing::new(m.finalize().into_bytes().into())
+}
+
+/// Why a public object was not written.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PublicError {
+    Chip(ChipError),
+    /// The contents do not fit the object, or [`crate::public::MAX_PUBLIC`] for a new one.
+    TooLarge,
+}
+
+impl From<ChipError> for PublicError {
+    fn from(e: ChipError) -> Self {
+        PublicError::Chip(e)
+    }
+}
+
+/// Write circle slot `slot`'s public object, in the owner session: over the object that is
+/// there, zero-filled to its length, or as a new object with room to grow
+/// ([`crate::public::PublicObject::new_len`]) under [`ObjectPolicy::public_object`]. A card
+/// that does not fit is left out rather than the whole object.
+pub fn write_public(
+    chip: &mut dyn ChipOps,
+    slot: u8,
+    object: &crate::public::PublicObject,
+) -> Result<(), PublicError> {
+    let id = public_id(slot);
+    let without_card = || crate::public::PublicObject {
+        card: None,
+        ..object.clone()
+    };
+    match chip.read_binary(id) {
+        Ok(old) => {
+            let bytes = object
+                .padded(old.len())
+                .or_else(|| without_card().padded(old.len()))
+                .ok_or(PublicError::TooLarge)?;
+            chip.rewrite_binary(id, &bytes)?;
+        }
+        Err(ChipError::NoSuchKey) => {
+            let o = match object.new_len() {
+                Some(_) => object.clone(),
+                None => without_card(),
+            };
+            let len = o.new_len().ok_or(PublicError::TooLarge)?;
+            let bytes = o.padded(len).ok_or(PublicError::TooLarge)?;
+            chip.write_binary(id, &bytes, &ObjectPolicy::public_object())?;
+        }
+        Err(e) => return Err(e.into()),
+    }
     Ok(())
+}
+
+/// Circle slot `slot`'s public object as stored, or why not: a chip error, or `None` for
+/// bytes that are not a public object.
+pub fn read_public(
+    chip: &mut dyn ChipOps,
+    slot: u8,
+) -> Result<Option<crate::public::PublicObject>, ChipError> {
+    let bytes = chip.read_binary(public_id(slot))?;
+    Ok(crate::public::PublicObject::decode(&bytes).ok())
 }
 
 /// The first boot of a chip under this firmware, in one conversation: the owner object (a user

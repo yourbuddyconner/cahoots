@@ -450,6 +450,7 @@ name = "cahoots-badge"
 version = "0.1.0"
 dependencies = [
  "cahoots-badge",
+ "cahoots-chat",
  "cahoots-chip",
  "cahoots-core",
  "cahoots-custodian",
@@ -458,6 +459,7 @@ dependencies = [
  "ed25519-dalek",
  "embedded-graphics",
  "hex",
+ "hmac 0.12.1",
  "minicbor",
  "p256",
  "profont",

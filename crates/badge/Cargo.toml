@@ -18,6 +18,8 @@ cahoots-hal = { workspace = true }
 cahoots-custodian = { workspace = true }
 cahoots-chip = { workspace = true }
 cahoots-objects = { workspace = true }
+cahoots-chat = { workspace = true }
+hmac = { version = "0.12", default-features = false }
 minicbor = { version = "2.3", default-features = false, features = ["alloc", "derive"] }
 sha2 = { workspace = true }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }

@@ -81,6 +81,10 @@ fn kept_pair(chips: (bool, bool)) -> (Badge<FakeBoard>, Badge<FakeBoard>) {
     (b1, b2)
 }
 
+/// The objects a kept circle of two has in the chip: the seat key, the root, the epoch
+/// counter, one hello object and the public object.
+const KEPT_OBJECTS: usize = 5;
+
 fn id(kind: KeyKind, slot: u8) -> KeyId {
     KeyId::new(kind, slot)
 }
@@ -119,11 +123,13 @@ fn ceremony_with_soft_chip_makes_seat_in_chip() {
     assert!(!b1.board().pin_high());
     assert_eq!(b1.board().chip.as_ref().unwrap().session(), cahoots_chip::Session::None);
 
-    // The seat key, the root and the epoch counter are in the chip at slot 0.
-    for kind in [KeyKind::Seat, KeyKind::Root, KeyKind::Epoch] {
+    // The seat key, the root and the epoch counter are in the chip at slot 0, with the hello
+    // object for the other seat and the public object.
+    for kind in [KeyKind::Seat, KeyKind::Root, KeyKind::Epoch, KeyKind::Public] {
         assert!(chip(&mut b1).exists(id(kind, 0)).unwrap(), "{kind:?}");
     }
-    assert_eq!(circle_objects(&mut b1).len(), 3);
+    assert!(chip(&mut b1).exists(id(KeyKind::Hello, 1 - c1.seat)).unwrap());
+    assert_eq!(circle_objects(&mut b1).len(), 5);
 
     // The seat key signs for the owner alone; the root MACs for the owner and for the phone
     // slot under secure messaging, and for nothing in no session.
@@ -176,6 +182,7 @@ fn ceremony_with_soft_chip_makes_seat_in_chip() {
             has_seat: true,
             has_root: true,
             has_epoch: true,
+            chat_generation: None,
         }]
     );
 
@@ -227,7 +234,7 @@ fn discarding_deletes_the_key_made_in_the_chip() {
 #[test]
 fn forget_deletes_slot_objects() {
     let (mut b1, _b2) = kept_pair((true, false));
-    assert_eq!(circle_objects(&mut b1).len(), 3);
+    assert_eq!(circle_objects(&mut b1).len(), KEPT_OBJECTS);
     let board = b1.board();
     board.a_down = true;
     board.release_at_ms = board.elapsed_ms + 3000;
@@ -258,6 +265,7 @@ fn reconcile_deletes_unknown_slot_and_logs() {
             has_seat: true,
             has_root: false,
             has_epoch: false,
+            chat_generation: None,
         }],
         ..ChipRecord::default()
     };
@@ -339,6 +347,7 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
                 has_seat: true,
                 has_root: true,
                 has_epoch: true,
+                chat_generation: None,
             },
             SlotEntry {
                 slot: 3,
@@ -346,6 +355,7 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
                 has_seat: true,
                 has_root: false,
                 has_epoch: false,
+                chat_generation: None,
             },
         ],
         phone: Some(PhoneSlot {
@@ -460,7 +470,7 @@ fn an_unreadable_chip_record_deletes_nothing_at_boot() {
     let (mut b1, _b2) = kept_pair((true, false));
     b1.board().chip_record = Some(vec![0xFF; 5]);
     b1.boot();
-    assert_eq!(circle_objects(&mut b1).len(), 3, "the kept circle's objects stay");
+    assert_eq!(circle_objects(&mut b1).len(), KEPT_OBJECTS, "the kept circle's objects stay");
     assert!(b1.circle().is_some());
     assert!(b1.board().log.iter().any(|l| l.contains("chip record: unreadable")));
     assert_eq!(b1.board().chip_record, Some(vec![0xFF; 5]), "not written over");
@@ -475,7 +485,7 @@ fn boot_keeps_the_slot_the_circle_names_even_if_the_record_forgot_it() {
     };
     b1.board().chip_record = Some(empty.to_stored());
     b1.boot();
-    assert_eq!(circle_objects(&mut b1).len(), 3);
+    assert_eq!(circle_objects(&mut b1).len(), KEPT_OBJECTS);
     assert!(b1.board().log.iter().any(|l| l.contains("a circle names it")));
 }
 
@@ -562,6 +572,7 @@ fn boot_empties_a_slot_a_wipe_marked_stuck_and_leaves_one_merely_unnamed() {
             has_seat: true,
             has_root: false,
             has_epoch: false,
+            chat_generation: None,
         });
     }
     let mut r = board.chip_record_load().unwrap().unwrap();
@@ -588,7 +599,8 @@ fn a_wipe_marks_the_slot_it_could_not_empty_as_stuck() {
         delete: Vec::new(),
         ..ObjectPolicy::any_session()
     };
-    chip(&mut b1).put_hmac_key(id(KeyKind::Hello, 1), &[3; 32], &policy).unwrap();
+    // A hello object for a seat a circle of two does not have.
+    chip(&mut b1).put_hmac_key(id(KeyKind::Hello, 5), &[3; 32], &policy).unwrap();
     let board = b1.board();
     board.a_down = true;
     board.release_at_ms = board.elapsed_ms + 3000;

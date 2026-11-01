@@ -565,11 +565,16 @@ impl ChatSession {
     /// `generation_id`. `payload` is what `crate::bump::sign_bump` returned for a move from the
     /// current generation to this id.
     ///
-    /// Only a session with the root sends a bump: it seals the bump in the generation the
-    /// others are in and derives the new key itself. Without the root this refuses with
-    /// `CannotBump`. It refuses with `CannotBump` too when the payload moves from a generation
-    /// other than the current one, or to a generation this session holds or dropped, because
-    /// the bump would move nobody. `BadSignature` when the payload does not name
+    /// A session with the root seals the bump in the generation the others are in and derives
+    /// the new key itself. A session without the root (`from_generation`) forwards a bump its
+    /// seat signed, such as the one a badge signs when it unpairs a phone: it seals it in the
+    /// current generation, whose key it holds, and then waits for the new key as if it had
+    /// read the bump, `pending_generation` naming it, until `install_generation`.
+    ///
+    /// It refuses with `CannotBump` when the payload moves from a generation other than the
+    /// current one, or to a generation this session holds or dropped, because the bump would
+    /// move nobody, and, without the root, while the session already waits for a generation:
+    /// its current one is not the others' then. `BadSignature` when the payload does not name
     /// `generation_id`. Nothing is sent when it refuses.
     pub fn send_bump(
         &mut self,
@@ -580,15 +585,25 @@ impl ChatSession {
             return Err(ChatError::BadSignature);
         }
         let current = self.current().id;
-        if self.root.is_none()
+        if (self.root.is_none() && self.pending.is_some())
             || payload.get(..32) != Some(&current[..])
             || self.knows(&generation_id)
         {
             return Err(ChatError::CannotBump);
         }
         let wire = self.send_typed(MessageType::Bump, payload)?;
-        self.follow(current, generation_id, true)?;
-        Ok(wire)
+        match self.follow(current, generation_id, true) {
+            // Without the root the session now waits for the new key: the bump was sent.
+            Ok(()) | Err(ChatError::NeedsGeneration(_)) => Ok(wire),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The generation a bump named that this session holds no key for, read or sent by it:
+    /// the key to fetch and `install_generation`. `None` for a session with the root, which
+    /// derives every key, and for a device that is up to date.
+    pub fn pending_generation(&self) -> Option<[u8; 32]> {
+        self.pending
     }
 
     pub fn send(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, ChatError> {

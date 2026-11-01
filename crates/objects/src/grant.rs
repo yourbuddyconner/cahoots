@@ -244,6 +244,69 @@ impl Grant {
     }
 }
 
+/// The device grant a seat gives `grantee`, a device such as the phone paired to its badge:
+/// [`cwt::DEVICE_TYPE`] with every one of [`cwt::DEVICE_ACTIONS`], in circle `circle_id`, as
+/// seat `seat`, with `nonce` as its `cti`. No expiry, no log position, no delegation, no
+/// budget: a device spends no pad.
+pub fn issue_device_grant(
+    circle_id: &CircleId,
+    seat: u8,
+    grantee: SeatPublic,
+    nonce: [u8; 16],
+) -> Claims {
+    Claims {
+        iss: cwt::issuer(circle_id),
+        sub: cwt::subject(&grantee),
+        aud: None,
+        exp: None,
+        cnf: grantee,
+        cti: nonce,
+        authorization_details: alloc::vec![Detail {
+            actions: Some(cwt::DEVICE_ACTIONS.iter().map(|a| String::from(*a)).collect()),
+            ..Detail::bare(String::from(cwt::DEVICE_TYPE))
+        }],
+        log_not_after: None,
+        parent: None,
+        depth: 0,
+        grantor: Grantor::Seat(seat),
+        base: None,
+    }
+}
+
+/// Sign a device grant with the seat's key, kid `[seat]`, under [`DOMAIN`] like every grant.
+pub fn sign_device_grant<S: SeatSigner>(claims: &Claims, key: S, seat: u8) -> Vec<u8> {
+    cose::sign1(key, &[seat], &claims.encode(), DOMAIN, false)
+}
+
+/// Verify a signed device grant against the manifest: signed by a seat of the manifest under
+/// kid `[seat]`, naming that seat as its grantor, a device grant in the manifest's circle.
+/// Returns the seat, the device's key and the actions it allows.
+pub fn verify_device_grant(
+    bytes: &[u8],
+    manifest: &Manifest,
+) -> Result<(u8, SeatPublic, Vec<String>), GrantError> {
+    let kid = cose::kid1(bytes).map_err(GrantError::Cose)?;
+    let [seat] = kid[..] else {
+        return Err(GrantError::WrongKid);
+    };
+    let key = manifest
+        .seat_key(seat)
+        .ok_or(GrantError::NotInRoster(seat))?;
+    let payload = cose::verify1(key, bytes, None, DOMAIN).map_err(GrantError::Cose)?;
+    let claims = Claims::decode(&payload).map_err(GrantError::Decode)?;
+    let (circle_id, Kind::Device { actions, .. }) = claims.kind().map_err(GrantError::Decode)?
+    else {
+        return Err(GrantError::Decode(ObjectError::Malformed));
+    };
+    if claims.grantor != Grantor::Seat(seat) {
+        return Err(GrantError::WrongSigner);
+    }
+    if circle_id != manifest.circle_id {
+        return Err(GrantError::Circle);
+    }
+    Ok((seat, claims.cnf, actions))
+}
+
 /// The kid of a delegated grant: SHA-256 of the signing key's 33 bytes.
 pub fn key_id(key: &SeatPublic) -> [u8; 32] {
     Sha256::digest(key.0).into()
