@@ -25,8 +25,8 @@
 //! [`press`] for `--expect` and `--then`); `forget` forgets a circle through the badge's pages.
 //!
 //! `public` reads the public objects of the circle slots the pairing object names: with
-//! `--key`, in the slot's session, as a paired phone reads them; without, in no session, where
-//! the chip refuses each and the command says so.
+//! `--key`, in the slot's session, as a paired phone reads them. Without it they are tried
+//! in no session, where the chip refuses each, and the command says so.
 //!
 //! What the bench showed an unpaired tap can do: read the pairing object, write the inbox,
 //! and make an object at any id that holds nothing, under the applet's default policy: a

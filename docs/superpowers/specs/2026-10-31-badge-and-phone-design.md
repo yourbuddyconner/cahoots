@@ -61,7 +61,7 @@ Everything a phone gets from a badge arrives through the chip's contactless side
 
 ### 1. Words
 
-A **seat**, a **custodian** and a **device** are defined above. A **slot** is one of the chip's reserved identities for a paired phone. A **tap** is one Core NFC session between the app and the chip. The **inbox** is the chip object any tap may write and only the badge may read. The **public object** is the chip object the badge writes and only the badge and its paired phone may read. A **generation** is a run of the chat's keys under one random id; it changes only when a device is revoked. The **bridge** is defined above; the laptop running `cahoots-host bridge` is **the bridge** in a mixed ceremony.
+A **seat**, a **custodian** and a **device** are defined above. A **slot** is one of the chip's reserved identities for a paired phone. A **tap** is one Core NFC session between the app and the chip. The **inbox** is the chip object any tap may write and only the badge may read. The **public object** is the chip object the badge writes and only the badge and its paired phone may read. A **generation** is a run of the chat's keys under one random id. It changes only when a device is revoked. The **bridge** is defined above. The laptop running `cahoots-host bridge` is **the bridge** in a mixed ceremony.
 
 ### 2. The chip: identities and policies
 

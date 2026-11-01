@@ -1620,7 +1620,7 @@ impl<B: Board> Badge<B> {
     /// At boot, once: every public object made under the first policy, which any session could
     /// read, is made again under [`ObjectPolicy::public_object`], with the same contents. The
     /// badge reads them all first. The record forgets that it wrote them before any is
-    /// deleted, so one left empty by a cut-off boot is never read back as the badge's; such a
+    /// deleted, so one left empty by a cut-off boot is never read back as the badge's. Such a
     /// circle's object is made again from its record at the next pairing or unpairing. The
     /// record then says [`chip::PUBLIC_POLICY`]. A read that fails leaves everything for the
     /// next boot.

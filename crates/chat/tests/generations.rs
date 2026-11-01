@@ -699,7 +699,7 @@ fn a_root_holder_and_a_device_converge_on_the_lower_bump() {
     let mut b = member(1);
     let mut d = device();
     let (wa, wb) = concurrent(&mut a, &mut b, low, high);
-    // a sent the higher bump and follows b's lower one; the device reads a's first.
+    // a sent the higher bump and follows b's lower one. The device reads a's first.
     a.receive(&wb).unwrap();
     a.apply_bump(g0(), low).unwrap();
     d.receive(&wa).unwrap();

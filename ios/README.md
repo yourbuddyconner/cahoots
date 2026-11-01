@@ -256,7 +256,7 @@ in no session, with the chip's pin raised for the exchange, as a phone's tap fin
 
 1. The board kept a new circle with the laptop as the two cards under it.
 2. In no session, the laptop read the pairing object, which named circle slots 0, 1 and 2, and
-   the applet refused it each of their public objects. It refused each of these with `6986`
+   the applet refused to give it any of their public objects. It refused each of these with `6986`
    too: a MAC with the circle's root or a hello object, a signature with the seat key, an AES
    key at the phone slot's id, deleting the slot, the owner object or the root, reading the
    inbox, and reading or writing the public object.

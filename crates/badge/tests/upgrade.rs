@@ -475,7 +475,7 @@ fn an_object_a_tap_planted_at_the_pairing_object_before_the_first_boot_refuses_t
 
 /// A chip whose record is current, with the pairing object missing: the boot flags the record
 /// before it deletes anything. A power cut after the deletes, before the makes, then leaves
-/// every antenna id empty; a tap fills them all; the next boot sees the flag and makes them
+/// every antenna id empty. A tap fills them all. The next boot sees the flag and makes them
 /// again rather than adopt what the tap made.
 #[test]
 fn a_remake_cut_off_after_its_deletes_is_done_again_and_adopts_nothing() {

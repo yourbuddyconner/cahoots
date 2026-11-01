@@ -38,7 +38,7 @@
 //! (u16, bit `s` for each circle slot whose public object the badge wrote)}`, zero-filled to
 //! [`PAIRING_LEN`]. A zero nonce means no pairing is open. The badge makes it at its first
 //! boot and keeps it made, so its id is never empty, and rewrites it whenever the circles
-//! change. Any tap reads it; only the owner and a paired phone read the public objects.
+//! change. Any tap reads it. Only the owner and a paired phone read the public objects.
 
 use alloc::string::String;
 use alloc::vec::Vec;

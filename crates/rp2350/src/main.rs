@@ -225,8 +225,8 @@ fn main() -> ! {
     // The badge's identity to its chip, so a reflash recovers it: the device and wafer ids
     // the boot ROM reports, each little-endian, then the factory's 128-bit random id from OTP
     // (RANDID0 to RANDID7, ECC rows 0x008 to 0x00F, 16 bits each, read little-endian in row
-    // order; the RP2350 datasheet's OTP chapter, list of OTP_DATA rows, and `rp235x-pac`'s
-    // `otp_data::RANDID0` to `RANDID7`). The boot ROM's `get_sys_info` does not report
+    // order. See the RP2350 datasheet's OTP chapter, its list of OTP_DATA rows, and
+    // `rp235x-pac`'s `otp_data::RANDID0` to `RANDID7`). The boot ROM's `get_sys_info` does not report
     // RANDID, so the device and wafer ids alone, which it does, are not the whole secret.
     let randid = (0..8).try_fold([0u8; 16], |mut out, i| {
         let word = hal::otp::read_ecc_word(0x008 + i).ok()?;
