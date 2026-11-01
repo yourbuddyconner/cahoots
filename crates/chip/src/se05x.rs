@@ -17,6 +17,23 @@
 //!
 //! What is not yet checked against a real chip is marked "bench" below: the Ed25519 byte
 //! order, the counter increment, the attestation object ids and the attested payload.
+//!
+//! What a command in no session may make at an id that holds nothing (bench, SE051 applet
+//! 7.2.0, 2026-10-31, `cahoots-host chip raw` from no session, each at an empty id in the
+//! Cahoots range):
+//!
+//! - `WriteBinary`: `9000`, an object with every right for every session (the Task 5 bench).
+//! - `WriteSymmKey` for an HMAC key (`80 01 05 00`): `9000`.
+//! - `WriteSymmKey` for an AES key with `is_auth` (`80 41 03 00`): `9000`. The object it made
+//!   could not then be deleted in no session (`6986`).
+//! - `WriteSymmKey` for a plain AES key (`80 01 03 00`): `9000`.
+//! - `WriteECKey` generating a P-256 key pair (`80 01 61 00`): `9000`.
+//! - `WriteCounter`, 8 bytes (`80 01 08 00`): `9000`.
+//!
+//! So a tap can make any kind of object at an empty id. The badge never trusts one: it flags
+//! its record before it empties an antenna-facing id (`cahoots_badge::chip::ensure_owned`),
+//! deletes whatever stands at an id before it makes its own there, and a phone reads only the
+//! circle slots the badge's pairing object names.
 
 use crate::ids::KeyId;
 use crate::ops::{Attested, ChipError, ChipOps, Curve, Identity, ObjectPolicy, Signature64, Version};

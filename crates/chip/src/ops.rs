@@ -146,8 +146,24 @@ impl ObjectPolicy {
         }
     }
 
-    /// A circle's public object: read by any session, written and deleted by the owner.
+    /// A circle's public object: read by the owner and by the slot under secure messaging,
+    /// written and deleted by the owner. No session may read it, so a stranger's tap learns
+    /// nothing of a circle's manifest, card or paired phone.
     pub fn public_object() -> ObjectPolicy {
+        ObjectPolicy {
+            sign: Vec::new(),
+            read: vec![Identity::Owner, Identity::Slot],
+            write: vec![Identity::Owner],
+            delete: vec![Identity::Owner],
+            attest: Vec::new(),
+            require_sm: true,
+        }
+    }
+
+    /// The pairing object: read by any session, written and deleted by the owner. A phone
+    /// reads it before it holds a key, and learns from it which circle slots the badge vouches
+    /// for.
+    pub fn pairing_object() -> ObjectPolicy {
         ObjectPolicy {
             sign: Vec::new(),
             read: vec![Identity::None, Identity::Owner, Identity::Slot],

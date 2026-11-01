@@ -64,17 +64,37 @@ fn a_root_macs_for_the_owner_and_for_the_slot_under_secure_messaging() {
 }
 
 #[test]
-fn the_public_object_reads_in_no_session_and_refuses_a_write_there() {
+fn the_public_object_reads_only_for_the_owner_and_the_slot() {
     let mut c = badge_chip();
     c.write_binary(PUBLIC, b"circle", &ObjectPolicy::public_object())
         .unwrap();
     c.no_session_for_test();
-    assert_eq!(c.read_binary(PUBLIC).unwrap(), b"circle");
+    assert_eq!(c.read_binary(PUBLIC), Err(ChipError::NotAllowed));
     assert_eq!(c.rewrite_binary(PUBLIC, b"forged"), Err(ChipError::NotAllowed));
     assert_eq!(c.delete(PUBLIC), Err(ChipError::NotAllowed));
+    c.open_slot_without_sm_for_test().unwrap();
+    assert_eq!(c.read_binary(PUBLIC), Err(ChipError::NotAllowed));
+    c.open_slot_with_sm_for_test().unwrap();
+    assert_eq!(c.read_binary(PUBLIC).unwrap(), b"circle");
+    assert_eq!(c.rewrite_binary(PUBLIC, b"forged"), Err(ChipError::NotAllowed));
     c.open_owner(&TEST_OWNER_SECRET).unwrap();
     c.rewrite_binary(PUBLIC, b"CIRCLE").unwrap();
     assert_eq!(c.read_binary(PUBLIC).unwrap(), b"CIRCLE");
+}
+
+#[test]
+fn the_pairing_object_reads_in_no_session_and_refuses_a_write_there() {
+    let mut c = badge_chip();
+    c.write_binary(KeyId::PAIRING, b"nonce", &ObjectPolicy::pairing_object())
+        .unwrap();
+    c.no_session_for_test();
+    assert_eq!(c.read_binary(KeyId::PAIRING).unwrap(), b"nonce");
+    assert_eq!(c.rewrite_binary(KeyId::PAIRING, b"forge"), Err(ChipError::NotAllowed));
+    assert_eq!(c.delete(KeyId::PAIRING), Err(ChipError::NotAllowed));
+    c.open_slot_with_sm_for_test().unwrap();
+    assert_eq!(c.read_binary(KeyId::PAIRING).unwrap(), b"nonce");
+    c.open_owner(&TEST_OWNER_SECRET).unwrap();
+    c.rewrite_binary(KeyId::PAIRING, b"NONCE").unwrap();
 }
 
 #[test]

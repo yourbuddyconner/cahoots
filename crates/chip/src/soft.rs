@@ -97,6 +97,10 @@ pub struct SoftChip {
     fail_status: Option<u16>,
     /// This many creating calls in a row fail, from the next.
     fail_streak: usize,
+    /// The power is cut, as a panic, right after this object is deleted.
+    cut_after_delete: Option<KeyId>,
+    /// The next read of this binary object fails on the bus.
+    fail_read: Option<KeyId>,
     rng: SoftRng,
     clock: u64,
     ca: p256::ecdsa::SigningKey,
@@ -130,6 +134,8 @@ impl SoftChip {
             fail_create: None,
             fail_status: None,
             fail_streak: 0,
+            cut_after_delete: None,
+            fail_read: None,
             rng: SoftRng { seed, counter: 0 },
             clock: 0,
             ca: p256::ecdsa::SigningKey::from_slice(&ca).expect("the test CA key is valid"),
@@ -350,6 +356,17 @@ impl SoftChip {
         self.fail_create = Some(n);
     }
 
+    /// Cut the power right after `id` is next deleted: the call panics, and the test catches
+    /// it and turns the badge on again. What the chip and the board stored by then stays.
+    pub fn cut_after_delete_for_test(&mut self, id: KeyId) {
+        self.cut_after_delete = Some(id);
+    }
+
+    /// The next read of binary object `id` fails on the bus (`Transport`).
+    pub fn fail_next_read_for_test(&mut self, id: KeyId) {
+        self.fail_read = Some(id);
+    }
+
     /// Back to no session, as a tap by anything that holds no key would be.
     pub fn no_session_for_test(&mut self) {
         self.session = Session::None;
@@ -507,6 +524,10 @@ impl ChipOps for SoftChip {
         if own {
             self.session = Session::None;
         }
+        if self.cut_after_delete == Some(id) {
+            self.cut_after_delete = None;
+            panic!("the power was cut after deleting {:08x}", id.0);
+        }
         Ok(())
     }
 
@@ -623,6 +644,10 @@ impl ChipOps for SoftChip {
     }
 
     fn read_binary(&mut self, id: KeyId) -> Result<Vec<u8>, ChipError> {
+        if self.fail_read == Some(id) {
+            self.fail_read = None;
+            return Err(ChipError::Transport);
+        }
         match self.get(id, read_rights)? {
             Object::Binary(b) => Ok(b.clone()),
             _ => Err(ChipError::NoSuchKey),
