@@ -152,6 +152,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let port = req("--serial")?;
     match sub {
         "goto" => return goto(port, req("--entry")?),
+        "window" => return window(port, get("--seconds").and_then(|s| s.parse().ok()).unwrap_or(90)),
+        "pintest" => return pintest(port, 0x02),
+        "starttime" => return pintest(port, 0x03),
         "forget" => return forget(port, req("--circle")?),
         "press" => {
             let code = match args.get(1).map(String::as_str) {
@@ -334,6 +337,46 @@ fn refusals(reader: &SerialNfc, slot: u8) -> Result<(), String> {
 /// The fields of a `screen: ` line.
 fn fields(screen: &str) -> Vec<&str> {
     screen.split(" | ").map(str::trim).collect()
+}
+
+/// Ask the badge to raise the chip's pin and say nothing on the wire for `seconds`, so a
+/// phone's tap meets the chip powered. The badge's log prints meanwhile.
+fn window(port: &str, seconds: u64) -> Result<(), String> {
+    let reader = SerialNfc::open(port)?;
+    reader.begin(String::new()).map_err(|e| e.to_string())?;
+    let answer = reader.transceive(vec![0x01]).map_err(|e| e.to_string())?;
+    if answer != [0x90, 0x00] {
+        return Err("the badge did not open a window (not a bench build?)".into());
+    }
+    println!("window open for {seconds} s: tap the phone now");
+    let deadline = Instant::now() + Duration::from_secs(seconds);
+    while Instant::now() < deadline {
+        if let Ok(mut link) = reader.link.lock() {
+            link.pump();
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    reader.end(String::new(), false).map_err(|e| e.to_string())?;
+    println!("window closed");
+    Ok(())
+}
+
+/// Ask the badge to speak to the chip with the pin low, and print what it logs for 15 s.
+fn pintest(port: &str, request: u8) -> Result<(), String> {
+    let reader = SerialNfc::open(port)?;
+    reader.begin(String::new()).map_err(|e| e.to_string())?;
+    let answer = reader.transceive(vec![request]).map_err(|e| e.to_string())?;
+    if answer != [0x90, 0x00] {
+        return Err("the badge did not run the pin test (not a bench build?)".into());
+    }
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < deadline {
+        if let Ok(mut link) = reader.link.lock() {
+            link.pump();
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    Ok(())
 }
 
 /// Press through the badge's menu and list to the list entry `entry`, open it, and return

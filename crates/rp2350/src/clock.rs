@@ -41,6 +41,10 @@ impl Instant {
 pub struct Duration(u64);
 
 impl Duration {
+    /// Whole milliseconds.
+    pub const fn to_millis(self) -> u64 {
+        self.0 / 1000
+    }
     pub const fn from_micros(us: u64) -> Self {
         Duration(us)
     }

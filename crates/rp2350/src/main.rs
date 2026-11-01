@@ -291,6 +291,12 @@ fn main() -> ! {
         owner_refused: false,
         #[cfg(feature = "bench")]
         bench_raw: None,
+        #[cfg(feature = "bench")]
+        bench_window: false,
+        #[cfg(feature = "bench")]
+        bench_pulse: None,
+        #[cfg(feature = "bench")]
+        bench_boots: 0,
     });
     badge.boot();
     loop {
