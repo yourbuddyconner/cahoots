@@ -38,7 +38,7 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 zeroize = { workspace = true, features = ["alloc"] }
 url = "2.5"
 # SCP03 to the badge's chip over NFC.
-aes = "0.8"
+aes = { version = "0.8", features = ["zeroize"] }
 cmac = "0.7"
 cbc = "0.1"
 # The chip's object ids, and the badge's pairing inbox and public objects (pure encoders).

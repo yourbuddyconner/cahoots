@@ -3,12 +3,12 @@
 //! and secure messaging, and the policies the badge writes.
 
 use cahoots_badge::chip::{first_boot, replace_slot, write_pairing};
-use cahoots_badge::pairing::{words, Inbox};
+use cahoots_badge::pairing::{words, Inbox, PairingKey};
 use cahoots_badge::public::PublicObject;
 use cahoots_chip::{ChipOps, Curve, KeyId, KeyKind, ObjectPolicy, SoftChip, TEST_OWNER_SECRET};
 use cahoots_core::seat::SeatKey;
 use cahoots_phone::apdu;
-use cahoots_phone::nfc::{Nfc, Tap, TapError};
+use cahoots_phone::nfc::{sealed_inbox, Nfc, Tap, TapError};
 use cahoots_phone::PhoneError;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -20,12 +20,19 @@ const HELLO: [u8; 32] = [0x48; 32];
 const NONCE: [u8; 16] = [0x4E; 16];
 const CIRCLE: [u8; 16] = [0xC1; 16];
 
+/// The badge's ephemeral key for the open pairing.
+fn badge_key() -> PairingKey {
+    PairingKey::from_scalar(&[0x21; 32]).unwrap()
+}
+
 #[derive(Default)]
 struct Card {
     /// `None`: no tag in the field.
     chip: Option<SoftChip>,
     /// Flip a bit of the answer to the `n`th command from now.
     garble: Option<usize>,
+    /// Set byte `i` of the answer to the `n`th command from now to `v`: `(n, i, v)`.
+    patch: Option<(usize, usize, u8)>,
     ended: Vec<(String, bool)>,
 }
 
@@ -64,6 +71,14 @@ impl Nfc for FakeNfc {
             Some(n) => Some(n - 1),
             None => None,
         };
+        card.patch = match card.patch {
+            Some((0, i, v)) => {
+                answer[i] = v;
+                None
+            }
+            Some((n, i, v)) => Some((n - 1, i, v)),
+            None => None,
+        };
         Ok(answer)
     }
 
@@ -100,7 +115,7 @@ fn public_object(phone: Option<[u8; 33]>) -> PublicObject {
 fn badge_chip(paired: bool) -> SoftChip {
     let mut chip = SoftChip::with_seed([9; 32]);
     first_boot(&mut chip, &TEST_OWNER_SECRET, [0x0B; 16]).unwrap();
-    write_pairing(&mut chip, &NONCE).unwrap();
+    write_pairing(&mut chip, &NONCE, &badge_key().public()).unwrap();
     chip.generate(KeyId::new(KeyKind::Seat, 3), Curve::P256, &ObjectPolicy::owner_only()).unwrap();
     chip.put_hmac_key(KeyId::new(KeyKind::Root, 3), &ROOT, &ObjectPolicy::owner_and_slot_mac())
         .unwrap();
@@ -123,32 +138,40 @@ fn a_tap_in_no_session_lists_public_objects_and_writes_the_inbox() {
     let mut tap = Tap::begin(&nfc, "Hold the phone to the card").unwrap();
     let pairing = tap.read_pairing().unwrap();
     assert_eq!(pairing.nonce, NONCE);
+    assert_eq!(pairing.badge_key, badge_key().public());
     let list = tap.list_public().unwrap();
     assert_eq!(list, vec![(3, public_object(None))]);
 
     let phone = SeatKey::from_seed(&[5; 32]).unwrap();
-    let inbox = Inbox::signed(&phone, &pairing.nonce, "Conner's phone", PHONE_KEY);
+    let inbox = sealed_inbox(&phone, &pairing, "Conner's phone", &PHONE_KEY).unwrap();
     tap.write_inbox(&inbox).unwrap();
     // A tap in no session may not MAC with a root.
     assert_eq!(tap_mac_without_session(&nfc, KeyId::new(KeyKind::Root, 3)), 0x6986);
     tap.end("Done", false).unwrap();
     assert_eq!(nfc.0.lock().unwrap().ended, vec![("Done".to_string(), false)]);
 
-    // The badge reads what the phone wrote, and both show the same words.
+    // The badge reads what the phone wrote, opens the sealed key, and both show the same
+    // words. The AES key never crossed the air in the clear.
     let read = nfc.chip(|c| {
         c.open_owner(&TEST_OWNER_SECRET).unwrap();
         let b = c.read_binary(KeyId::INBOX).unwrap();
         c.close_session().unwrap();
         b
     });
+    assert!(!read.windows(16).any(|w| w == PHONE_KEY));
     let got = Inbox::decode(&read).unwrap();
-    assert!(got.verify(&NONCE));
-    let p = phone;
-    assert_eq!(got.public, p.public().0);
+    let opened = got.open(&NONCE, &badge_key()).unwrap();
+    assert_eq!(*opened, PHONE_KEY);
+    assert_eq!(got.public, phone.public().0);
+    let badge_pub = badge_key().public();
     assert_eq!(
-        words(&NONCE, &got.public, &got.key),
-        words(&NONCE, &p.public().0, &PHONE_KEY)
+        words(&NONCE, &badge_pub, &got.public, &opened),
+        words(&NONCE, &badge_pub, &phone.public().0, &PHONE_KEY)
     );
+    // A closed pairing seals nothing.
+    let mut closed = pairing.clone();
+    closed.nonce = [0; 16];
+    assert!(matches!(sealed_inbox(&phone, &closed, "x", &PHONE_KEY), Err(TapError::NoPairing)));
 }
 
 /// The status word of a MACOneShot sent outside any session.
@@ -257,4 +280,15 @@ fn a_tap_dropped_without_ending_ends_as_failed() {
         let _tap = Tap::begin(&nfc, "Hold the phone to the card").unwrap();
     }
     assert_eq!(nfc.0.lock().unwrap().ended, vec![(String::new(), true)]);
+}
+
+#[test]
+fn a_card_whose_secure_channel_is_not_scp03_is_refused() {
+    let nfc = FakeNfc::with(badge_chip(true));
+    let mut tap = Tap::begin(&nfc, "Hold the phone to the card").unwrap();
+    // CreateSession, then INITIALIZE UPDATE, whose key information names SCP02.
+    nfc.0.lock().unwrap().patch = Some((1, 11, 0x02));
+    let e = tap.open_slot(&PHONE_KEY).err().unwrap();
+    assert!(matches!(e, TapError::NotScp03));
+    assert!(matches!(PhoneError::from(e), PhoneError::Nfc { .. }));
 }

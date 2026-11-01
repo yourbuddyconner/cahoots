@@ -369,8 +369,9 @@ pub struct Badge<B: Board> {
     /// The badge's best time, for grants: the stored time from boot, raised by what laptops
     /// say, counted on with the uptime.
     clock: Clock,
-    /// The nonce of the open pairing, while `pair a phone` is open. Never stored.
-    pairing_nonce: Option<[u8; 16]>,
+    /// The nonce and the ephemeral key of the open pairing, while `pair a phone` is open.
+    /// Never stored: the key lives in RAM and is zeroized when the pairing closes.
+    pairing: Option<([u8; 16], pairing::PairingKey)>,
     /// Whether the badge can pair a phone, and the paired phone's name: read from the chip
     /// record when first needed, and again after a boot, a keep, a pairing or an unpairing.
     phone_state: Option<(bool, Option<String>)>,
@@ -413,7 +414,7 @@ impl<B: Board> Badge<B> {
             chip_slot: None,
             cards: Vec::new(),
             clock: Clock::default(),
-            pairing_nonce: None,
+            pairing: None,
             phone_state: None,
             chip_held: false,
         }
@@ -552,6 +553,12 @@ impl<B: Board> Badge<B> {
             return Err(BadgeError::AlreadyPaired);
         }
         let nonce = self.draw::<16>()?;
+        let key = loop {
+            let scalar = Zeroizing::new(self.draw::<32>()?);
+            if let Some(k) = pairing::PairingKey::from_scalar(&scalar) {
+                break k;
+            }
+        };
         let chip = self.board.chip_begin().ok_or(BadgeError::NoChip)?;
         if chip::inbox_short(chip).map_err(BadgeError::Chip)? {
             record.generation = chip::REMAKE_GENERATION;
@@ -571,8 +578,8 @@ impl<B: Board> Badge<B> {
         let chip = self.board.chip_begin().ok_or(BadgeError::NoChip)?;
         // A request from before this pairing is not for it.
         chip::clear_inbox(chip).map_err(BadgeError::Chip)?;
-        chip::write_pairing(chip, &nonce).map_err(BadgeError::Chip)?;
-        self.pairing_nonce = Some(nonce);
+        chip::write_pairing(chip, &nonce, &key.public()).map_err(BadgeError::Chip)?;
+        self.pairing = Some((nonce, key));
         Ok(nonce)
     }
 
@@ -584,7 +591,7 @@ impl<B: Board> Badge<B> {
     }
 
     fn close_pairing(&mut self) {
-        if self.pairing_nonce.take().is_none() {
+        if self.pairing.take().is_none() {
             return;
         }
         if let Some(chip) = self.board.chip_begin() {
@@ -596,8 +603,9 @@ impl<B: Board> Badge<B> {
 
     /// What a phone wrote in the inbox for the open pairing: `Ok(None)` while the inbox is
     /// empty, `NotForThisBadge` for a request not signed by the phone's key over this
-    /// pairing's nonce, its AES key and its name, which is emptied. Read in the owner session,
-    /// which alone may read the inbox.
+    /// pairing's nonce and key, its sealed AES key and its name, or whose seal does not open
+    /// with this pairing's key; such a request is emptied. Read in the owner session, which
+    /// alone may read the inbox.
     pub fn pair_read_inbox(&mut self) -> Result<Option<Inbox>, BadgeError> {
         let r = self.read_inbox();
         self.board.chip_end();
@@ -605,16 +613,19 @@ impl<B: Board> Badge<B> {
     }
 
     fn read_inbox(&mut self) -> Result<Option<Inbox>, BadgeError> {
-        let nonce = self.pairing_nonce.ok_or(BadgeError::NotOpen)?;
+        if self.pairing.is_none() {
+            return Err(BadgeError::NotOpen);
+        }
         self.owned_record()?;
         let chip = self.board.chip_begin().ok_or(BadgeError::NoChip)?;
-        let bytes = Zeroizing::new(chip.read_binary(KeyId::INBOX).map_err(BadgeError::Chip)?);
+        let bytes = chip.read_binary(KeyId::INBOX).map_err(BadgeError::Chip)?;
         if bytes.iter().all(|&b| b == 0) {
             return Ok(None);
         }
-        match Inbox::decode(&bytes) {
-            Some(inbox) if inbox.verify(&nonce) => Ok(Some(inbox)),
-            _ => {
+        match Inbox::decode(&bytes).filter(|inbox| self.open_inbox(inbox).is_some()) {
+            Some(inbox) => Ok(Some(inbox)),
+            None => {
+                let chip = self.board.chip_begin().ok_or(BadgeError::NoChip)?;
                 let cleared = chip::clear_inbox(chip);
                 self.board.log("pairing: the inbox holds a request not for this pairing");
                 if let Err(e) = cleared {
@@ -623,6 +634,21 @@ impl<B: Board> Badge<B> {
                 Err(BadgeError::NotForThisBadge)
             }
         }
+    }
+
+    /// The phone's AES key from `inbox`, if it is signed for the open pairing and its seal
+    /// opens with the pairing's key.
+    fn open_inbox(&self, inbox: &Inbox) -> Option<Zeroizing<[u8; 16]>> {
+        let (nonce, key) = self.pairing.as_ref()?;
+        inbox.open(nonce, key)
+    }
+
+    /// The four words for `inbox` in the open pairing, as the phone that wrote it shows them.
+    /// `None` if no pairing is open or the inbox is not for it.
+    pub fn pair_words(&self, inbox: &Inbox) -> Option<[&'static str; 4]> {
+        let (nonce, key) = self.pairing.as_ref()?;
+        let aes = inbox.open(nonce, key)?;
+        Some(pairing::words(nonce, &key.public(), &inbox.public, &aes))
     }
 
     /// The owner said no: empty the inbox and close the pairing.
@@ -651,10 +677,10 @@ impl<B: Board> Badge<B> {
     /// objects it wrote; one that leaves the slot's id empty holds the chip (`ChipHeld`).
     /// `AlreadyPaired` while a phone is paired: one phone per badge.
     pub fn pair_accept(&mut self, inbox: Inbox) -> Result<(), BadgeError> {
-        let r = match self.pairing_nonce {
-            None => Err(BadgeError::NotOpen),
-            Some(nonce) if !inbox.verify(&nonce) => Err(BadgeError::NotForThisBadge),
-            Some(_) => self.pair(&inbox),
+        let r = match (&self.pairing, self.open_inbox(&inbox)) {
+            (None, _) => Err(BadgeError::NotOpen),
+            (Some(_), None) => Err(BadgeError::NotForThisBadge),
+            (Some(_), Some(key)) => self.pair(&inbox, &key),
         };
         if r != Err(BadgeError::ChipHeld) {
             self.close_pairing();
@@ -671,7 +697,7 @@ impl<B: Board> Badge<B> {
         r.map(|_| ())
     }
 
-    fn pair(&mut self, inbox: &Inbox) -> Result<usize, BadgeError> {
+    fn pair(&mut self, inbox: &Inbox, key: &[u8; 16]) -> Result<usize, BadgeError> {
         let mut record = self.owned_record()?;
         if record.phone.is_some() {
             return Err(BadgeError::AlreadyPaired);
@@ -726,7 +752,7 @@ impl<B: Board> Badge<B> {
             return Err(BadgeError::Record);
         }
         let chip = self.board.chip_begin().ok_or(BadgeError::NoChip)?;
-        match chip::replace_slot(chip, Some(&inbox.key)) {
+        match chip::replace_slot(chip, Some(key)) {
             Ok(()) => {}
             Err(chip::SlotFailure::Empty(e)) => {
                 self.restore_publics(&writes);
@@ -1038,7 +1064,7 @@ impl<B: Board> Badge<B> {
         self.reconcile_chip(circles.iter().filter_map(|c| c.chip_slot).collect());
         self.finish_unpair_at_boot(&circles);
         self.phone_state = None;
-        self.pairing_nonce = None;
+        self.pairing = None;
         self.chip_held = false;
         // No pairing is open after a boot: a nonce left from before goes.
         if let Some(chip) = self.board.chip_begin() {
@@ -2089,8 +2115,10 @@ impl<B: Board> Badge<B> {
             }
             Press::Both => match self.pair_read_inbox() {
                 Ok(Some(inbox)) => {
-                    let nonce = self.pairing_nonce.unwrap_or_default();
-                    let words = pairing::words(&nonce, &inbox.public, &inbox.key);
+                    let Some(words) = self.pair_words(&inbox) else {
+                        self.pair_close();
+                        return self.note(&["pairing failed, try again"], index);
+                    };
                     self.board.log(&format!(
                         "pairing: {} asks, words {}",
                         screens::phone_name(&inbox.name),

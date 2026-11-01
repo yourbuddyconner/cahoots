@@ -5,7 +5,7 @@ mod common;
 
 use cahoots_badge::chip::{self, PhoneSlot, GENERATION, INBOX_LEN, REMAKE_GENERATION};
 use cahoots_chip::ObjectPolicy;
-use cahoots_badge::pairing::{self, Inbox, PairingObject};
+use cahoots_badge::pairing::{self, Inbox, PairingKey, PairingObject};
 use cahoots_badge::public::PublicObject;
 use cahoots_badge::{Badge, BadgeError, Board, Press, Step};
 use cahoots_chat::{verify_bump, BumpOutcome, ChatSession};
@@ -109,17 +109,40 @@ fn phone_seat() -> SeatKey {
     SeatKey::from_seed(&[0x77; 32]).unwrap()
 }
 
-/// The nonce of the open pairing, as a phone's tap reads it from the pairing object.
-fn tapped_nonce(b: &mut Badge<FakeBoard>) -> [u8; 16] {
+/// The pairing object, as a phone's tap reads it.
+fn tapped(b: &mut Badge<FakeBoard>) -> PairingObject {
     let bytes = tap(b).read_binary(KeyId::PAIRING).unwrap();
-    PairingObject::decode(&bytes).unwrap().nonce
+    PairingObject::decode(&bytes).unwrap()
 }
 
-/// A phone's first tap: it reads the nonce and writes a signed request in the inbox, in no
-/// session.
+/// The nonce of the open pairing, as a phone's tap reads it from the pairing object.
+fn tapped_nonce(b: &mut Badge<FakeBoard>) -> [u8; 16] {
+    tapped(b).nonce
+}
+
+/// The phone's ephemeral scalar for the seal.
+const PHONE_EPHEMERAL: [u8; 32] = [0x31; 32];
+
+/// An inbox from the honest phone, its AES key sealed to `badge_key`.
+fn sealed(nonce: &[u8; 16], badge_key: &[u8; 33], name: &str, key: [u8; 16]) -> Inbox {
+    Inbox::sealed(&phone_seat(), nonce, badge_key, name, &key, &PHONE_EPHEMERAL).unwrap()
+}
+
+/// What a tap that knows the honest phone's request makes of it with its own AES key: sealed
+/// to the badge's key (anyone can), carrying the honest phone's public key and signature.
+fn swapped_key(honest: &Inbox, nonce: &[u8; 16], badge_key: &[u8; 33], key: [u8; 16]) -> Inbox {
+    let other = SeatKey::from_seed(&[0x99; 32]).unwrap();
+    let mut s = Inbox::sealed(&other, nonce, badge_key, &honest.name, &key, &[0x32; 32]).unwrap();
+    s.public = honest.public;
+    s.sig = honest.sig;
+    s
+}
+
+/// A phone's first tap: it reads the nonce and the badge's key and writes a signed, sealed
+/// request in the inbox, in no session.
 fn phone_taps(b: &mut Badge<FakeBoard>, name: &str, key: [u8; 16]) -> Inbox {
-    let nonce = tapped_nonce(b);
-    let inbox = Inbox::signed(&phone_seat(), &nonce, name, key);
+    let p = tapped(b);
+    let inbox = sealed(&p.nonce, &p.badge_key, name, key);
     write_inbox(b, &inbox);
     inbox
 }
@@ -226,27 +249,31 @@ fn a_hello_object_gives_the_pairwise_words() {
 #[test]
 fn the_inbox_round_trips_checks_its_signature_and_refuses_what_is_not_an_inbox() {
     let nonce = [6; 16];
-    let inbox = Inbox::signed(&phone_seat(), &nonce, "Conner's phone", PHONE_KEY);
-    assert!(inbox.verify(&nonce));
-    assert!(!inbox.verify(&[7; 16]));
-    let mut bytes = inbox.encode().to_vec();
+    let badge = PairingKey::from_scalar(&[0x21; 32]).unwrap();
+    let inbox = sealed(&nonce, &badge.public(), "Conner's phone", PHONE_KEY);
+    assert!(inbox.verify(&nonce, &badge.public()));
+    assert!(!inbox.verify(&[7; 16], &badge.public()));
+    assert_eq!(*inbox.open(&nonce, &badge).unwrap(), PHONE_KEY);
+    // The AES key is not in the inbox in the clear.
+    let mut bytes = inbox.encode();
+    assert!(!bytes.windows(16).any(|w| w == PHONE_KEY));
     assert_eq!(Inbox::decode(&bytes), Some(inbox.clone()));
     // What follows the map is not read: an earlier, longer write.
     bytes.extend_from_slice(&[0xFF; 20]);
     assert_eq!(Inbox::decode(&bytes), Some(inbox.clone()));
-    assert!(!format!("{inbox:?}").contains("171"), "Debug leaves the key out");
     assert_eq!(Inbox::decode(&[0; INBOX_LEN]), None);
-    // The signature covers the AES key and the name.
-    let mut other_key = inbox.clone();
-    other_key.key = [0xEE; 16];
-    assert!(!other_key.verify(&nonce));
+    // The signature covers the sealed key and the name.
+    let mut other_seal = inbox.clone();
+    other_seal.sealed[40] ^= 1;
+    assert!(!other_seal.verify(&nonce, &badge.public()));
+    assert_eq!(other_seal.open(&nonce, &badge), None);
     let mut other_name = inbox.clone();
     other_name.name = "a stranger".into();
-    assert!(!other_name.verify(&nonce));
+    assert!(!other_name.verify(&nonce, &badge.public()));
     let with = |public: [u8; 33], name: &str| Inbox {
         public,
         name: name.into(),
-        key: PHONE_KEY,
+        sealed: inbox.sealed,
         sig: inbox.sig,
     };
     let mut bad_point = [0xFF; 33];
@@ -258,18 +285,37 @@ fn the_inbox_round_trips_checks_its_signature_and_refuses_what_is_not_an_inbox()
     ] {
         assert_eq!(Inbox::decode(&bad.encode()), None);
     }
-    let longest = Inbox::signed(&phone_seat(), &nonce, &"x".repeat(64), PHONE_KEY);
+    let longest = sealed(&nonce, &badge.public(), &"x".repeat(64), PHONE_KEY);
     assert!(longest.encode().len() <= INBOX_LEN);
     assert!(Inbox::decode(&longest.encode()).is_some());
 }
 
 #[test]
-fn the_words_cover_the_nonce_the_phone_key_and_the_aes_key() {
+fn an_inbox_sealed_to_another_badge_key_does_not_open() {
+    let nonce = [6; 16];
+    let badge = PairingKey::from_scalar(&[0x21; 32]).unwrap();
+    let other = PairingKey::from_scalar(&[0x22; 32]).unwrap();
+    let inbox = sealed(&nonce, &other.public(), "Conner's phone", PHONE_KEY);
+    assert!(!inbox.verify(&nonce, &badge.public()));
+    assert_eq!(inbox.open(&nonce, &badge), None);
+    // Signed for this badge's key but sealed to the other: the seal does not open.
+    let mut resigned = sealed(&nonce, &badge.public(), "Conner's phone", PHONE_KEY);
+    resigned.sealed = inbox.sealed;
+    resigned.sig = phone_seat().sign(&pairing::signed_bytes(&nonce, &badge.public(), &resigned.sealed, &resigned.name));
+    assert!(resigned.verify(&nonce, &badge.public()));
+    assert_eq!(resigned.open(&nonce, &badge), None);
+}
+
+#[test]
+fn the_words_cover_the_nonce_the_badge_key_the_phone_key_and_the_aes_key() {
     let public = phone_seat().public().0;
-    let w = pairing::words(&[1; 16], &public, &PHONE_KEY);
-    assert_eq!(w, pairing::words(&[1; 16], &public, &PHONE_KEY));
-    assert_ne!(w, pairing::words(&[2; 16], &public, &PHONE_KEY));
-    assert_ne!(w, pairing::words(&[1; 16], &public, &[0xAC; 16]));
+    let badge = PairingKey::from_scalar(&[0x21; 32]).unwrap().public();
+    let other = PairingKey::from_scalar(&[0x22; 32]).unwrap().public();
+    let w = pairing::words(&[1; 16], &badge, &public, &PHONE_KEY);
+    assert_eq!(w, pairing::words(&[1; 16], &badge, &public, &PHONE_KEY));
+    assert_ne!(w, pairing::words(&[2; 16], &badge, &public, &PHONE_KEY));
+    assert_ne!(w, pairing::words(&[1; 16], &other, &public, &PHONE_KEY));
+    assert_ne!(w, pairing::words(&[1; 16], &badge, &public, &[0xAC; 16]));
     assert!(w.iter().all(|x| cahoots_core::checkwords::WORDLIST.contains(x)));
 }
 
@@ -355,9 +401,9 @@ fn a_request_with_the_honest_key_and_another_aes_key_is_refused() {
     let (mut b1, _b2) = kept_pair((true, false));
     b1.pair_open().unwrap();
     let honest = phone_taps(&mut b1, "Conner's phone", PHONE_KEY);
-    // A second tap keeps the honest public key, name and signature, and puts in its own key.
-    let mut swapped = honest.clone();
-    swapped.key = [0x66; 16];
+    // A second tap keeps the honest public key, name and signature, and seals its own key.
+    let p = tapped(&mut b1);
+    let swapped = swapped_key(&honest, &p.nonce, &p.badge_key, [0x66; 16]);
     write_inbox(&mut b1, &swapped);
     assert_eq!(b1.pair_read_inbox(), Err(BadgeError::NotForThisBadge));
     // The inbox was emptied, and nothing was paired.
@@ -369,6 +415,33 @@ fn a_request_with_the_honest_key_and_another_aes_key_is_refused() {
     assert_eq!(tap(&mut b1).open_slot_with_key_for_test(&[0x66; 16]), Err(ChipError::BadSession));
 }
 
+#[test]
+fn a_request_with_a_wrong_signature_is_refused() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    b1.pair_open().unwrap();
+    let mut forged = phone_taps(&mut b1, "Conner's phone", PHONE_KEY);
+    forged.sig[10] ^= 1;
+    write_inbox(&mut b1, &forged);
+    assert_eq!(b1.pair_read_inbox(), Err(BadgeError::NotForThisBadge));
+    assert_eq!(b1.pair_accept(forged), Err(BadgeError::NotForThisBadge));
+    assert_eq!(b1.paired_phone(), None);
+}
+
+#[test]
+fn a_request_sealed_to_another_pairing_key_is_refused() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    b1.pair_open().unwrap();
+    let nonce = tapped_nonce(&mut b1);
+    let stranger = PairingKey::from_scalar(&[0x23; 32]).unwrap();
+    let inbox = sealed(&nonce, &stranger.public(), "Conner's phone", PHONE_KEY);
+    write_inbox(&mut b1, &inbox);
+    assert_eq!(b1.pair_read_inbox(), Err(BadgeError::NotForThisBadge));
+    assert_eq!(b1.pair_accept(inbox), Err(BadgeError::NotForThisBadge));
+    assert_eq!(b1.paired_phone(), None);
+}
+
+/// A recorded inbox: the same bytes written again after the page reopens, under a new nonce
+/// and a new badge key.
 #[test]
 fn a_request_signed_for_an_earlier_pairing_is_refused() {
     let (mut b1, _b2) = kept_pair((true, false));
@@ -802,9 +875,9 @@ fn pairing_from_the_list_shows_the_name_and_the_four_words() {
     press(&mut b1, Press::Both);
     assert!(b1.board().shows("no phone has tapped yet"), "{:?}", b1.board().last());
     // A request with another AES key is refused and emptied.
-    let honest = Inbox::signed(&phone_seat(), &tapped_nonce(&mut b1), "Conner's phone", PHONE_KEY);
-    let mut swapped = honest.clone();
-    swapped.key = [0x66; 16];
+    let p = tapped(&mut b1);
+    let honest = sealed(&p.nonce, &p.badge_key, "Conner's phone", PHONE_KEY);
+    let swapped = swapped_key(&honest, &p.nonce, &p.badge_key, [0x66; 16]);
     write_inbox(&mut b1, &swapped);
     press(&mut b1, Press::Both);
     assert!(
@@ -815,7 +888,9 @@ fn pairing_from_the_list_shows_the_name_and_the_four_words() {
 
     // The phone taps; Both shows the name and the words the phone shows.
     let inbox = phone_taps(&mut b1, "Conner's phone", PHONE_KEY);
-    let words = pairing::words(&tapped_nonce(&mut b1), &inbox.public, &PHONE_KEY);
+    let p = tapped(&mut b1);
+    let words = pairing::words(&p.nonce, &p.badge_key, &inbox.public, &PHONE_KEY);
+    assert_eq!(b1.pair_words(&inbox), Some(words));
     press(&mut b1, Press::Both);
     assert!(b1.board().shows("pair with Conner's phone?"), "{:?}", b1.board().last());
     for w in words {
@@ -923,7 +998,7 @@ fn a_public_object_refuses_bytes_that_are_not_one() {
 
 #[test]
 fn the_pairing_object_round_trips_and_is_no_circles() {
-    let o = PairingObject { nonce: [9; 16], name: String::new() };
+    let o = PairingObject { nonce: [9; 16], badge_key: [2; 33], name: String::new() };
     let bytes = o.padded().unwrap();
     assert_eq!(bytes.len(), pairing::PAIRING_LEN);
     assert_eq!(PairingObject::decode(&bytes), Some(o));

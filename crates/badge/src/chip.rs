@@ -645,11 +645,13 @@ pub fn remake_inbox(chip: &mut dyn ChipOps) -> Result<(), ChipError> {
     chip.write_binary(KeyId::INBOX, &[0; INBOX_LEN], &ObjectPolicy::inbox())
 }
 
-/// Write the pairing object ([`KeyId::PAIRING`]) with `nonce`, in the owner session: a fresh
-/// object, any object at its id deleted first, so one a tap made is never used.
-pub fn write_pairing(chip: &mut dyn ChipOps, nonce: &[u8; 16]) -> Result<(), ChipError> {
+/// Write the pairing object ([`KeyId::PAIRING`]) with `nonce` and the badge's ephemeral
+/// `badge_key`, in the owner session: a fresh object, any object at its id deleted first, so
+/// one a tap made is never used.
+pub fn write_pairing(chip: &mut dyn ChipOps, nonce: &[u8; 16], badge_key: &[u8; 33]) -> Result<(), ChipError> {
     let bytes = crate::pairing::PairingObject {
         nonce: *nonce,
+        badge_key: *badge_key,
         name: String::new(),
     }
     .padded()
@@ -658,10 +660,11 @@ pub fn write_pairing(chip: &mut dyn ChipOps, nonce: &[u8; 16]) -> Result<(), Chi
     chip.write_binary(KeyId::PAIRING, &bytes, &ObjectPolicy::public_object())
 }
 
-/// Write a zero nonce over the pairing object: no pairing is open.
+/// Write a zero nonce and a zero key over the pairing object: no pairing is open.
 pub fn close_pairing(chip: &mut dyn ChipOps) -> Result<(), ChipError> {
     let bytes = crate::pairing::PairingObject {
         nonce: [0; 16],
+        badge_key: [0; 33],
         name: String::new(),
     }
     .padded()

@@ -14,6 +14,7 @@ use crate::PhoneError;
 use cahoots_badge::pairing::{Inbox, PairingObject};
 use cahoots_badge::public::PublicObject;
 use cahoots_chip::{KeyId, KeyKind};
+use cahoots_core::seat::SeatSigner;
 use rand_core::{OsRng, RngCore};
 
 /// The NFC reader. Swift runs one `NFCTagReaderSession` per tap.
@@ -67,6 +68,10 @@ pub enum TapError {
     BadAnswer,
     /// Data too long for one command in a session.
     TooLong,
+    /// The card's INITIALIZE UPDATE answer does not name SCP03.
+    NotScp03,
+    /// The pairing object says no pairing is open.
+    NoPairing,
     /// Any other status word.
     Status(u16),
     /// The reader said so.
@@ -96,6 +101,8 @@ impl From<TapError> for PhoneError {
             TapError::BadAnswer | TapError::TooLong => {
                 nfc("The card’s answer was garbled. Hold the phone still and try again.")
             }
+            TapError::NotScp03 => nfc("The card does not offer the secure channel this app needs."),
+            TapError::NoPairing => nfc("Open “pair a phone” on your badge, then hold the phone to the card again."),
             TapError::Status(sw) => PhoneError::Nfc {
                 message: format!("The card answered with code {sw:04X}. Try again."),
             },
@@ -161,6 +168,33 @@ fn list_public(ch: &mut dyn Channel) -> Result<Vec<(u8, PublicObject)>, TapError
     Ok(out)
 }
 
+/// The inbox a phone holding `signer` writes for the pairing the badge has open, named
+/// `name`: `key`, the phone slot's AES key, sealed to the badge's ephemeral key under a fresh
+/// ephemeral key of the phone's, and everything signed ([`Inbox::sealed`]). `NoPairing` when
+/// the pairing object's nonce is zero, `Malformed` when its key is not a point.
+pub fn sealed_inbox<S: SeatSigner>(
+    mut signer: S,
+    pairing: &PairingObject,
+    name: &str,
+    key: &[u8; 16],
+) -> Result<Inbox, TapError> {
+    if pairing.nonce == [0; 16] {
+        return Err(TapError::NoPairing);
+    }
+    // A draw that is not a valid scalar (about one in 2^32) is drawn again. Eight failures
+    // mean the badge's key is not a point.
+    for _ in 0..8 {
+        let mut ephemeral = zeroize::Zeroizing::new([0u8; 32]);
+        OsRng.fill_bytes(ephemeral.as_mut());
+        if let Some(inbox) =
+            Inbox::sealed(&mut signer, &pairing.nonce, &pairing.badge_key, name, key, &ephemeral)
+        {
+            return Ok(inbox);
+        }
+    }
+    Err(TapError::Malformed)
+}
+
 /// One tap: a reader session with a card connected and the applet selected. Dropped without
 /// [`Tap::end`], it ends the reader session as failed.
 pub struct Tap<'a> {
@@ -209,7 +243,7 @@ impl<'a> Tap<'a> {
         list_public(self)
     }
 
-    /// Write `inbox` over the start of the badge's inbox.
+    /// Write `inbox` (see [`sealed_inbox`]) over the start of the badge's inbox.
     pub fn write_inbox(&mut self, inbox: &Inbox) -> Result<(), TapError> {
         let bytes = inbox.encode();
         for (i, part) in bytes.chunks(apdu::WRITE_CHUNK).enumerate() {
@@ -244,6 +278,10 @@ impl<'a> Tap<'a> {
         }
         if a.len() < 29 {
             return Err(TapError::BadAnswer);
+        }
+        // Key information: key version, the protocol (03 for SCP03), its parameter.
+        if a[11] != 0x03 {
+            return Err(TapError::NotScp03);
         }
         let card: [u8; 8] = a[13..21].try_into().expect("8 bytes");
         let cryptogram: [u8; 8] = a[21..29].try_into().expect("8 bytes");
