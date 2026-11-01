@@ -67,6 +67,12 @@ pub enum BadgeError {
     NotAllUpdated,
     /// An earlier unpair left public objects unwritten: no phone pairs until they are.
     UnpairUnfinished,
+    /// The chip did not answer a read of a public object the badge wrote: nothing changed.
+    NoAnswer,
+    /// The phone is unpaired, but a circle's public id holds an object the badge did not make
+    /// and cannot delete: that circle's slot is marked stuck and its bump dropped. Forgetting
+    /// the circle clears it.
+    CircleStuck,
 }
 
 impl From<chip::PublicError> for BadgeError {
@@ -343,7 +349,7 @@ enum Idle<B: Board> {
     /// A pairing is open, waiting for the phone's tap: Both reads the inbox, Left or Right
     /// closes the pairing.
     PairWait { index: usize },
-    /// "pair with {name}?" and the four words: Both pairs the phone that wrote the inbox,
+    /// "pair with {name}?" and the six words: Both pairs the phone that wrote the inbox,
     /// Left or Right declines and empties the inbox.
     PairAsk { inbox: Inbox, index: usize },
     /// The paired phone's page: Both unpairs it, Left or Right goes back to the list.
@@ -426,6 +432,8 @@ enum Owned {
 /// owned it, or its setup failed after the owner object, which nobody may delete, was made.
 const REFUSED: &str =
     "the chip was touched or could not be set up. This chip cannot be used. Circles on this badge keep software keys.";
+/// What the badge says when a read of its own public object fails: nothing was changed.
+const NO_ANSWER: &str = "the chip did not answer. Try again.";
 /// What the badge says when it holds its chip until a restart.
 const RESTART: &str = "the chip needs a restart. Turn the badge off and on.";
 /// What the badge says when it cannot use its chip this time.
@@ -548,17 +556,29 @@ impl<B: Board> Badge<B> {
             .map_or_else(|| gen0_id(&c.circle_id), SlotEntry::current_generation)
     }
 
-    /// Circle slot `slot`'s public object as the badge wrote it, with its stored bytes. `None`
-    /// when the record says the badge did not write the one there, or it does not read: the
-    /// badge never reads back an object it did not write.
-    fn own_public(&mut self, record: &ChipRecord, slot: u8) -> Option<(Vec<u8>, PublicObject)> {
+    /// Circle slot `slot`'s public object as the badge wrote it, with its stored bytes.
+    /// `Ok(None)` when the record says the badge did not write the one there, or its bytes do
+    /// not decode: the badge never reads back an object it did not write, and makes such a
+    /// one again. `NoAnswer` when the record says the badge wrote it and the read fails: the
+    /// operation stops rather than make the object again and lose its pending bumps.
+    fn own_public(
+        &mut self,
+        record: &ChipRecord,
+        slot: u8,
+    ) -> Result<Option<(Vec<u8>, PublicObject)>, BadgeError> {
         if !record.entry(slot).is_some_and(SlotEntry::public_written) {
-            return None;
+            return Ok(None);
         }
-        let chip = self.board.chip_begin()?;
-        let bytes = chip.read_binary(chip::public_id(slot)).ok()?;
-        let o = PublicObject::decode(&bytes).ok()?;
-        Some((bytes, o))
+        let chip = self.board.chip_begin().ok_or(BadgeError::NoAnswer)?;
+        let bytes = match chip.read_binary(chip::public_id(slot)) {
+            Ok(b) => b,
+            Err(e) => {
+                self.board
+                    .log(&format!("chip: slot {slot} public object did not read: {e:?}"));
+                return Err(BadgeError::NoAnswer);
+            }
+        };
+        Ok(PublicObject::decode(&bytes).ok().map(|o| (bytes, o)))
     }
 
     /// Write circle slot `slot`'s public object: over the badge's own when `own`, else made
@@ -665,7 +685,13 @@ impl<B: Board> Badge<B> {
         let chip = self.board.chip_begin().ok_or(BadgeError::NoChip)?;
         // A request from before this pairing is not for it.
         chip::clear_inbox(chip).map_err(BadgeError::Chip)?;
-        chip::write_pairing(chip, &nonce, &key.public()).map_err(BadgeError::Chip)?;
+        let object = pairing::PairingObject {
+            nonce,
+            badge_key: key.public(),
+            name: String::new(),
+            circles: record.circle_mask(),
+        };
+        chip::write_pairing(chip, &object).map_err(BadgeError::Chip)?;
         self.pairing = Some((nonce, key));
         Ok(nonce)
     }
@@ -681,10 +707,31 @@ impl<B: Board> Badge<B> {
         if self.pairing.take().is_none() {
             return;
         }
-        if let Some(chip) = self.board.chip_begin() {
-            if let Err(e) = chip::close_pairing(chip) {
-                self.board.log(&format!("pairing: the pairing object was not closed: {e:?}"));
-            }
+        self.sync_pairing();
+    }
+
+    /// Write the pairing object as it stands: the open pairing's nonce and key, or zeros, and
+    /// the circle slots the chip record vouches for ([`ChipRecord::circle_mask`]). After every
+    /// change to which circles the chip holds, and when a pairing closes.
+    fn sync_pairing(&mut self) {
+        let circles = match self.board.chip_record_load() {
+            Ok(Some(r)) if r.is_current() => r.circle_mask(),
+            _ => return,
+        };
+        let object = match &self.pairing {
+            Some((nonce, key)) => pairing::PairingObject {
+                nonce: *nonce,
+                badge_key: key.public(),
+                name: String::new(),
+                circles,
+            },
+            None => pairing::PairingObject::closed(circles),
+        };
+        let Some(chip) = self.board.chip_begin() else {
+            return;
+        };
+        if let Err(e) = chip::write_pairing(chip, &object) {
+            self.board.log(&format!("pairing: the pairing object was not written: {e:?}"));
         }
     }
 
@@ -730,9 +777,9 @@ impl<B: Board> Badge<B> {
         inbox.open(nonce, key)
     }
 
-    /// The four words for `inbox` in the open pairing, as the phone that wrote it shows them.
+    /// The six words for `inbox` in the open pairing, as the phone that wrote it shows them.
     /// `None` if no pairing is open or the inbox is not for it.
-    pub fn pair_words(&self, inbox: &Inbox) -> Option<[&'static str; 4]> {
+    pub fn pair_words(&self, inbox: &Inbox) -> Option<[&'static str; 6]> {
         let (nonce, key) = self.pairing.as_ref()?;
         let aes = inbox.open(nonce, key)?;
         Some(pairing::words(nonce, &key.public(), &inbox.public, &aes))
@@ -802,7 +849,7 @@ impl<B: Board> Badge<B> {
         let circles = self.chip_circles();
         if record.pending_unpair.is_some() {
             let all: Vec<Circle> = circles.iter().map(|(_, c)| c.clone()).collect();
-            if self.finish_unpair(&mut record, &all) > 0 {
+            if self.finish_unpair(&mut record, &all).0 > 0 {
                 return Err(BadgeError::UnpairUnfinished);
             }
         }
@@ -822,7 +869,7 @@ impl<B: Board> Badge<B> {
             if let Some(e) = signer.error {
                 return Err(BadgeError::Chip(e));
             }
-            let own = self.own_public(&record, *slot);
+            let own = self.own_public(&record, *slot)?;
             // Bumps signed at earlier unpairs stay, in order, for this phone to post. An object
             // the badge did not write gives nothing: the circle starts from its record.
             let pending = own.as_ref().map(|(_, o)| o.pending_bumps.clone()).unwrap_or_default();
@@ -946,6 +993,7 @@ impl<B: Board> Badge<B> {
     /// objects were not written: the phone is unpaired and the next boot writes them.
     pub fn unpair(&mut self) -> Result<(), BadgeError> {
         let r = self.unpair_phone();
+        self.sync_pairing();
         self.board.chip_end();
         self.phone_state = None;
         match &r {
@@ -973,7 +1021,7 @@ impl<B: Board> Badge<B> {
         for ((slot, c), to) in circles.iter().zip(ids) {
             let from = Self::generation_of(&record, *slot, c);
             let mut list = self
-                .own_public(&record, *slot)
+                .own_public(&record, *slot)?
                 .map(|(_, o)| o.pending_bumps)
                 .unwrap_or_default();
             match list.last().map(|b| bump_ends(b)) {
@@ -1037,12 +1085,15 @@ impl<B: Board> Badge<B> {
         record.generation = chip::GENERATION;
         record.phone = None;
         let stored = self.board.chip_record_store(&record).is_ok();
-        let left = self.finish_unpair(&mut record, &all);
+        let (left, stuck) = self.finish_unpair(&mut record, &all);
         if !stored {
             return Err(BadgeError::Record);
         }
         if left > 0 {
             return Err(BadgeError::NotAllUpdated);
+        }
+        if stuck > 0 {
+            return Err(BadgeError::CircleStuck);
         }
         Ok(phone.name)
     }
@@ -1051,18 +1102,28 @@ impl<B: Board> Badge<B> {
     /// appended to the object's list unless it is there already, the generation moved to the
     /// bump's, no grant and no phone key. A circle whose object is written takes the new
     /// generation in the record. The bumps not written stay in the record for the next boot;
-    /// the record is stored. Returns how many stayed.
-    fn finish_unpair(&mut self, record: &mut ChipRecord, circles: &[Circle]) -> usize {
+    /// the record is stored. A circle whose public id holds an object the badge did not make
+    /// and cannot delete is marked stuck and its bump dropped: no boot can write it, and
+    /// forgetting the circle clears it. Returns how many bumps stayed and how many circles
+    /// were stuck.
+    fn finish_unpair(&mut self, record: &mut ChipRecord, circles: &[Circle]) -> (usize, usize) {
         let Some(pending) = record.pending_unpair.take() else {
-            return 0;
+            return (0, 0);
         };
         let mut left = Vec::new();
+        let mut stuck = 0;
         for b in pending {
             if !self.board.has_chip() {
                 left.push(b);
                 continue;
             }
-            let old = self.own_public(record, b.slot).map(|(_, o)| o);
+            let old = match self.own_public(record, b.slot) {
+                Ok(o) => o.map(|(_, o)| o),
+                Err(_) => {
+                    left.push(b);
+                    continue;
+                }
+            };
             let own = old.is_some();
             let circle = circles.iter().find(|c| c.chip_slot == Some(b.slot));
             let object = match (old, circle) {
@@ -1094,6 +1155,19 @@ impl<B: Board> Badge<B> {
                     if let Some(e) = record.entry_mut(b.slot) {
                         e.chat_generation = Some(b.to);
                     }
+                    self.board.log(&format!(
+                        "pairing: slot {} public object written, {} pending bumps, {}",
+                        b.slot,
+                        object.pending_bumps.len(),
+                        if object.phone_public.is_some() { "a phone named" } else { "no phone" }
+                    ));
+                }
+                Err(chip::PublicError::Undeletable(_)) => {
+                    self.board.log(&format!(
+                        "pairing: slot {} is stuck, its bump is dropped. Forgetting the circle clears it",
+                        b.slot
+                    ));
+                    stuck += 1;
                 }
                 Err(e) => {
                     self.board.log(&format!(
@@ -1109,7 +1183,7 @@ impl<B: Board> Badge<B> {
         if self.board.chip_record_store(record).is_err() {
             self.board.log("chip record: write failed");
         }
-        n
+        (n, stuck)
     }
 
     /// A bump from `from` to `to` in circle `c`, signed with its seat key in slot `slot`.
@@ -1138,7 +1212,7 @@ impl<B: Board> Badge<B> {
             return;
         }
         self.board.log("pairing: finishing an unpair that was cut off");
-        let left = self.finish_unpair(&mut record, circles);
+        let (left, _) = self.finish_unpair(&mut record, circles);
         if left > 0 {
             self.board
                 .log(&format!("pairing: {left} public objects still not written"));
@@ -1179,13 +1253,10 @@ impl<B: Board> Badge<B> {
         self.phone_state = None;
         self.pairing = None;
         self.chip_held = false;
-        // No pairing is open after a boot: a nonce left from before goes.
-        if let Some(chip) = self.board.chip_begin() {
-            match chip::close_pairing(chip) {
-                Ok(()) | Err(cahoots_chip::ChipError::NoSuchKey) => {}
-                Err(e) => self.board.log(&format!("pairing: the pairing object was not closed: {e:?}")),
-            }
-        }
+        self.upgrade_public_policy();
+        // No pairing is open after a boot: a nonce left from before goes, and the pairing
+        // object names the circles the chip holds now.
+        self.sync_pairing();
         let held: Vec<cahoots_core::circle_id::CircleId> = circles.iter().map(|c| c.circle_id).collect();
         for l in grants::sweep(&mut self.board, &held) {
             self.board.log(&l);
@@ -1268,6 +1339,7 @@ impl<B: Board> Badge<B> {
             }
         }
         let stayed = self.forget_chip();
+        self.sync_pairing();
         // The grants went with the chip's counters and the circles that issued them.
         if self.board.grants_store(&GrantsRecord::default()).is_err() {
             self.board.log("grants record: write failed");
@@ -1329,6 +1401,7 @@ impl<B: Board> Badge<B> {
                             self.board.log("chip record: write failed");
                         }
                     }
+                    self.sync_pairing();
                     return Err(left_line(left.len()));
                 }
             }
@@ -1338,6 +1411,7 @@ impl<B: Board> Badge<B> {
                     self.board
                         .chip_record_store(&record)
                         .map_err(|_| String::from("flash: chip record failed"))?;
+                    self.sync_pairing();
                 }
                 Ok(_) => {}
                 Err(_) => self
@@ -1433,30 +1507,45 @@ impl<B: Board> Badge<B> {
         };
         let opens = has_owner && chip.open_owner(&secret).is_ok();
         if stored.as_ref().is_some_and(|r| r.is_current()) && opens {
-            let remake = stored.as_ref().is_some_and(|r| r.needs_remake());
-            return match chip::ensure_owned(chip, &secret, remake) {
-                Ok(chip::Ensured::Kept) => Owned::Kept,
-                Ok(chip::Ensured::Remade) => {
-                    self.board
-                        .log("chip: the phone slot, the inbox and the grant counter were made again");
-                    if let Some(mut record) = stored {
-                        // A remade slot holds no phone's key.
-                        record.generation = chip::GENERATION;
-                        record.phone = None;
-                        if self.board.chip_record_store(&record).is_err() {
-                            self.board.log("chip record: write failed");
-                        }
-                    }
-                    Owned::Kept
-                }
-                Err(chip::EnsureError::Before(e)) => {
-                    self.refuse_chip(&format!("chip: the owner session did not open: {e:?}"), false)
-                }
-                Err(chip::EnsureError::During(e)) => self.refuse_chip(
-                    &format!("chip: the phone slot, inbox or grant counter not made again: {e:?}"),
-                    true,
-                ),
+            let Some(mut record) = stored else {
+                return Owned::Kept;
             };
+            let remake = record.needs_remake();
+            match chip::ensure_owned(chip, &secret, remake) {
+                Ok(chip::Ensured::Kept) => return Owned::Kept,
+                Ok(chip::Ensured::Remake) => {}
+                Err(chip::EnsureError(e)) => {
+                    return self.refuse_chip(&format!("chip: the owner session did not open: {e:?}"), false);
+                }
+            }
+            // An id found missing is flagged before anything is deleted: a conversation cut off
+            // between the delete and the make leaves the flag, and the next boot makes the ids
+            // again rather than adopt what a tap put there meanwhile.
+            if !remake {
+                record.generation = chip::REMAKE_GENERATION;
+                if self.board.chip_record_store(&record).is_err() {
+                    return self.refuse_chip("chip record: write failed, nothing made again", false);
+                }
+            }
+            let Some(chip) = self.board.chip_begin() else {
+                return self.refuse_chip("chip: no answer", false);
+            };
+            if let Err(e) = chip::remake_antenna(chip, record.circle_mask()) {
+                return self.refuse_chip(
+                    &format!("chip: the phone slot, inbox, grant counter or pairing object not made again: {e:?}"),
+                    true,
+                );
+            }
+            self.board.log(
+                "chip: the phone slot, the inbox, the grant counter and the pairing object were made again",
+            );
+            // A remade slot holds no phone's key.
+            record.generation = chip::GENERATION;
+            record.phone = None;
+            if self.board.chip_record_store(&record).is_err() {
+                self.board.log("chip record: write failed");
+            }
+            return Owned::Kept;
         }
         if has_owner && !opens {
             return self.refuse_chip(
@@ -1506,7 +1595,7 @@ impl<B: Board> Badge<B> {
         let record = match made {
             None => {
                 return self.refuse_chip(
-                    "upgrade: an object a tap made stays at the phone slot, inbox or grant counter id",
+                    "upgrade: an object a tap made stays at the phone slot, inbox, grant counter or pairing object id",
                     true,
                 )
             }
@@ -1519,13 +1608,67 @@ impl<B: Board> Badge<B> {
             return self.refuse_chip("chip record: write failed", false);
         }
         self.board.log(
-            "upgrade: the chip has its owner, its phone slot, its inbox and its grant counter",
+            "upgrade: the chip has its owner, its phone slot, its inbox, its grant counter and its pairing object",
         );
         if !gone.is_empty() || n > 0 || stored.is_some() {
             Owned::Upgraded
         } else {
             Owned::Kept
         }
+    }
+
+    /// At boot, once: every public object made under the first policy, which any session could
+    /// read, is made again under [`ObjectPolicy::public_object`], with the same contents. The
+    /// badge reads them all first. The record forgets that it wrote them before any is
+    /// deleted, so one left empty by a cut-off boot is never read back as the badge's; such a
+    /// circle's object is made again from its record at the next pairing or unpairing. The
+    /// record then says [`chip::PUBLIC_POLICY`]. A read that fails leaves everything for the
+    /// next boot.
+    fn upgrade_public_policy(&mut self) {
+        let Ok(mut record) = self.owned_record() else {
+            return;
+        };
+        if record.public_policy() == chip::PUBLIC_POLICY {
+            return;
+        }
+        let slots: Vec<u8> = record
+            .slots
+            .iter()
+            .filter(|e| e.public_written())
+            .map(|e| e.slot)
+            .collect();
+        let mut objects = Vec::new();
+        for slot in slots {
+            match self.own_public(&record, slot) {
+                Ok(Some((_, o))) => objects.push((slot, o)),
+                Ok(None) => {}
+                Err(_) => {
+                    self.board
+                        .log("chip: public objects not made again under the new policy, tried at the next boot");
+                    return;
+                }
+            }
+        }
+        for e in &mut record.slots {
+            e.set_public_written(false);
+        }
+        if self.board.chip_record_store(&record).is_err() {
+            self.board.log("chip record: write failed");
+            return;
+        }
+        let mut made = 0;
+        for (slot, o) in &objects {
+            if self.put_public(&mut record, *slot, o, false).is_ok() {
+                made += 1;
+            }
+        }
+        record.public_policy = Some(chip::PUBLIC_POLICY);
+        if self.board.chip_record_store(&record).is_err() {
+            self.board.log("chip record: write failed");
+        }
+        self.board.log(&format!(
+            "chip: {made} public objects made again, read now by the badge and its phone only"
+        ));
     }
 
     /// The chip is not this badge's to use: log why, end the conversation and stop the board
@@ -1785,7 +1928,10 @@ impl<B: Board> Badge<B> {
         });
         self.board
             .chip_record_store(&record)
-            .map_err(|_| String::from("flash: chip record failed"))
+            .map_err(|_| String::from("flash: chip record failed"))?;
+        // A paired phone finds the new circle at its next tap.
+        self.sync_pairing();
+        Ok(())
     }
 
     /// `N` bytes from the board's random source.
@@ -2294,6 +2440,7 @@ impl<B: Board> Badge<B> {
                         &["finish the last unpair first, turn the badge off and on"],
                         index,
                     ),
+                    Err(BadgeError::NoAnswer) => self.note(&[NO_ANSWER], index),
                     Err(_) => self.note(&["pairing failed, try again"], index),
                 }
             }
@@ -2312,6 +2459,11 @@ impl<B: Board> Badge<B> {
                 Err(BadgeError::NotAllUpdated) => {
                     self.note(&["phone unpaired, some circles not updated"], index)
                 }
+                Err(BadgeError::CircleStuck) => self.note(
+                    &["phone unpaired", "a circle could not be updated. Forget it to clear this."],
+                    index,
+                ),
+                Err(BadgeError::NoAnswer) => self.note(&[NO_ANSWER], index),
                 Err(BadgeError::ChipHeld) => self.note(&[RESTART], index),
                 Err(_) => self.note(&["unpairing failed, try again"], index),
             },

@@ -1,4 +1,4 @@
-//! Pairing a phone: the pairing object, the sealed inbox a phone writes and the four words both
+//! Pairing a phone: the pairing object, the sealed inbox a phone writes and the six words both
 //! sides show.
 //!
 //! 1. The owner opens `pair a phone` on the badge. The badge draws a fresh 16-byte nonce and
@@ -14,9 +14,9 @@
 //!    session may write the inbox and only the owner session may read it. An antenna that
 //!    listens to the tap learns the sealed key and nothing it can open.
 //! 3. The owner presses both: the badge reads the inbox, checks the signature against the
-//!    open page's nonce and key, opens the sealed key, and shows the name and four words
+//!    open page's nonce and key, opens the sealed key, and shows the name and six words
 //!    ([`words`]) drawn from the nonce, its key, the phone's public key and the AES key. The
-//!    phone shows the same four words from what it wrote. A tap that replaced the sealed key,
+//!    phone shows the same six words from what it wrote. A tap that replaced the sealed key,
 //!    or the whole inbox, gives a signature that does not check or other words; an inbox
 //!    recorded from an earlier pairing is signed over another nonce and key.
 //!
@@ -34,8 +34,11 @@
 //! start of the inbox and need not clear the rest. An inbox of zeros is empty.
 //!
 //! The pairing object holds `{0: nonce (bstr 16), 1: the badge's ephemeral public key (bstr
-//! 33, compressed), 2: the badge's name (text, empty while the badge has none)}`, zero-filled
-//! to [`PAIRING_LEN`]. A zero nonce means no pairing is open.
+//! 33, compressed), 2: the badge's name (text, empty while the badge has none), 3: circles
+//! (u16, bit `s` for each circle slot whose public object the badge wrote)}`, zero-filled to
+//! [`PAIRING_LEN`]. A zero nonce means no pairing is open. The badge makes it at its first
+//! boot and keeps it made, so its id is never empty, and rewrites it whenever the circles
+//! change. Any tap reads it; only the owner and a paired phone read the public objects.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -49,7 +52,7 @@ use p256::elliptic_curve::sec1::ToEncodedPoint;
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
-/// The domain at the head of the bytes the four words are drawn from.
+/// The domain at the head of the bytes the six words are drawn from.
 pub const WORDS_DOMAIN: &[u8] = b"cahoots/pair-phone/v1";
 
 /// The domain at the head of the bytes a phone signs in the inbox.
@@ -67,23 +70,23 @@ pub const SEALED_LEN: usize = 33 + 16 + 16;
 /// The pairing object's length.
 pub const PAIRING_LEN: usize = 128;
 
-/// The four words for a pairing: the first 44 bits of `SHA-256("cahoots/pair-phone/v1" ||
-/// nonce || badge_key || phone_public || key)` as four words of the check-word list, drawn as
-/// [`cahoots_core::checkwords`] draws six.
+/// The six words for a pairing: the first 66 bits of `SHA-256("cahoots/pair-phone/v1" ||
+/// nonce || badge_key || phone_public || key)` as six words of the check-word list, drawn as
+/// [`cahoots_core::checkwords`] draws its six. Six and not four, since an NFC relay could
+/// grind 44 bits in the time the owner takes to compare.
 pub fn words(
     nonce: &[u8; 16],
     badge_key: &[u8; 33],
     phone_public: &[u8; 33],
     key: &[u8; 16],
-) -> [&'static str; 4] {
+) -> [&'static str; 6] {
     let mut h = Sha256::new();
     h.update(WORDS_DOMAIN);
     h.update(nonce);
     h.update(badge_key);
     h.update(phone_public);
     h.update(key);
-    let idx = indices_from_digest(&h.finalize());
-    [0, 1, 2, 3].map(|i| WORDLIST[usize::from(idx[i])])
+    indices_from_digest(&h.finalize()).map(|i| WORDLIST[usize::from(i)])
 }
 
 /// The bytes a phone signs: `"cahoots/pair-inbox/v1" || nonce || badge_key || sealed ||
@@ -277,26 +280,47 @@ impl Inbox {
 }
 
 /// What the pairing object says: the nonce of the open pairing (zeros when none is open), the
-/// badge's ephemeral public key for it, and the badge's name.
+/// badge's ephemeral public key for it, the badge's name, and the circle slots whose public
+/// objects the badge vouches for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PairingObject {
     pub nonce: [u8; 16],
     pub badge_key: [u8; 33],
     pub name: String,
+    /// Bit `s` set for each circle slot `s` (0 to 15) whose public object the badge wrote
+    /// itself. A phone reads only these: an object at any other public id may be a tap's.
+    pub circles: u16,
 }
 
 impl PairingObject {
+    /// No pairing open: a zero nonce and a zero key, with the badge's `circles`.
+    pub fn closed(circles: u16) -> PairingObject {
+        PairingObject {
+            nonce: [0; 16],
+            badge_key: [0; 33],
+            name: String::new(),
+            circles,
+        }
+    }
+
+    /// The circle slots in [`PairingObject::circles`], in order.
+    pub fn circle_slots(&self) -> Vec<u8> {
+        (0..16).filter(|s| self.circles & (1 << s) != 0).collect()
+    }
+
     /// The object as stored: the CBOR, zero-filled to [`PAIRING_LEN`]. `None` if the name is
     /// too long to fit.
     pub fn padded(&self) -> Option<Vec<u8>> {
         let mut e = Encoder::new(Vec::new());
-        e.map(3)
+        e.map(4)
             .and_then(|e| e.u8(0))
             .and_then(|e| e.bytes(&self.nonce))
             .and_then(|e| e.u8(1))
             .and_then(|e| e.bytes(&self.badge_key))
             .and_then(|e| e.u8(2))
             .and_then(|e| e.str(&self.name))
+            .and_then(|e| e.u8(3))
+            .and_then(|e| e.u16(self.circles))
             .expect("writing to a Vec cannot fail");
         let mut out = e.into_writer();
         if out.len() > PAIRING_LEN {
@@ -309,7 +333,7 @@ impl PairingObject {
     /// Strict: the canonical map, then only zeros.
     pub fn decode(bytes: &[u8]) -> Option<PairingObject> {
         let mut d = Decoder::new(bytes);
-        if d.map().ok()? != Some(3) || d.u8().ok()? != 0 {
+        if d.map().ok()? != Some(4) || d.u8().ok()? != 0 {
             return None;
         }
         let nonce: [u8; 16] = d.bytes().ok()?.try_into().ok()?;
@@ -320,10 +344,15 @@ impl PairingObject {
         if d.u8().ok()? != 2 {
             return None;
         }
+        let name = String::from(d.str().ok()?);
+        if d.u8().ok()? != 3 {
+            return None;
+        }
         let o = PairingObject {
             nonce,
             badge_key,
-            name: String::from(d.str().ok()?),
+            name,
+            circles: d.u16().ok()?,
         };
         (o.padded()? == bytes).then_some(o)
     }

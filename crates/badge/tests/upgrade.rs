@@ -101,7 +101,7 @@ fn the_first_boot_wipes_what_was_made_the_old_way_and_says_so_once() {
     let ids = b.board().owner_chip().ids().unwrap();
     assert_eq!(
         ids,
-        vec![KeyId::new(KeyKind::Grant, 255), KeyId::SLOT, KeyId::INBOX, KeyId::OWNER]
+        vec![KeyId::new(KeyKind::Grant, 255), KeyId::SLOT, KeyId::PAIRING, KeyId::INBOX, KeyId::OWNER]
     );
     // The issue counter is new, at 0, for the owner alone.
     assert_eq!(b.board().owner_chip().counter_get(KeyId::new(KeyKind::Grant, 255)), Ok(0));
@@ -152,7 +152,7 @@ fn a_new_badge_is_set_up_without_a_word() {
     let ids = b.board().owner_chip().ids().unwrap();
     assert_eq!(
         ids,
-        vec![KeyId::new(KeyKind::Grant, 255), KeyId::SLOT, KeyId::INBOX, KeyId::OWNER]
+        vec![KeyId::new(KeyKind::Grant, 255), KeyId::SLOT, KeyId::PAIRING, KeyId::INBOX, KeyId::OWNER]
     );
     assert!(b.board().chip_record_load().unwrap().unwrap().is_current());
 }
@@ -393,7 +393,7 @@ fn a_slot_a_tap_filled_while_it_was_empty_is_deleted_and_made_again() {
         .board()
         .log
         .iter()
-        .any(|l| l == "chip: the phone slot, the inbox and the grant counter were made again"));
+        .any(|l| l == "chip: the phone slot, the inbox, the grant counter and the pairing object were made again"));
     // The issue counter was made again too, with the badge's policy.
     assert_eq!(b.board().owner_chip().counter_get(KeyId::new(KeyKind::Grant, 255)), Ok(0));
 }
@@ -422,7 +422,7 @@ fn a_missing_inbox_on_an_owned_chip_brings_all_three_back_new() {
         .board()
         .log
         .iter()
-        .any(|l| l == "chip: the phone slot, the inbox and the grant counter were made again"));
+        .any(|l| l == "chip: the phone slot, the inbox, the grant counter and the pairing object were made again"));
 }
 
 #[test]
@@ -436,4 +436,79 @@ fn a_remade_grant_counter_starts_above_every_grant_on_the_chip() {
     b.boot();
     // The next grant's base is 4 << 32: no base is given twice.
     assert_eq!(b.board().owner_chip().counter_get(KeyId::new(KeyKind::Grant, 255)), Ok(3));
+}
+
+/// The pairing object read in no session, as any tap reads it.
+fn pairing_object(b: &mut Badge<FakeBoard>) -> cahoots_badge::pairing::PairingObject {
+    let c = b.board().chip.as_mut().unwrap();
+    c.no_session_for_test();
+    let bytes = c.read_binary(KeyId::PAIRING).unwrap();
+    cahoots_badge::pairing::PairingObject::decode(&bytes).unwrap()
+}
+
+#[test]
+fn the_first_boot_makes_the_pairing_object_with_no_pairing_open() {
+    let mut board = FakeBoard::new();
+    board.chip = Some(SoftChip::with_seed([2; 32]));
+    let mut b = Badge::new(board);
+    b.boot();
+    let p = pairing_object(&mut b);
+    assert_eq!((p.nonce, p.badge_key, p.circles), ([0; 16], [0; 33], 0));
+    // A tap cannot write it or delete it.
+    let c = b.board().chip.as_mut().unwrap();
+    assert_eq!(c.rewrite_binary(KeyId::PAIRING, &[1; 16]), Err(ChipError::NotAllowed));
+    assert_eq!(c.delete(KeyId::PAIRING), Err(ChipError::NotAllowed));
+}
+
+#[test]
+fn an_object_a_tap_planted_at_the_pairing_object_before_the_first_boot_refuses_the_chip() {
+    let mut board = FakeBoard::new();
+    let mut c = SoftChip::with_seed([2; 32]);
+    c.write_binary(KeyId::PAIRING, &[0; 128], &stuck()).unwrap();
+    board.chip = Some(c);
+    let mut b = Badge::new(board);
+    b.boot();
+    assert_eq!(refused(&mut b), 1);
+    assert!(!b.board().has_chip());
+    assert!(b.board().chip_record_load().unwrap().unwrap().is_refused());
+}
+
+/// A chip whose record is current, with the pairing object missing: the boot flags the record
+/// before it deletes anything. A power cut after the deletes, before the makes, then leaves
+/// every antenna id empty; a tap fills them all; the next boot sees the flag and makes them
+/// again rather than adopt what the tap made.
+#[test]
+fn a_remake_cut_off_after_its_deletes_is_done_again_and_adopts_nothing() {
+    let mut board = FakeBoard::new().with_soft_chip([6; 32]);
+    board.owner_chip().delete(KeyId::PAIRING).unwrap();
+    board.chip.as_mut().unwrap().close_session().unwrap();
+    board.chip.as_mut().unwrap().cut_after_delete_for_test(KeyId::new(KeyKind::Grant, 255));
+    let mut b = Badge::new(board);
+    let cut = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| b.boot()));
+    assert!(cut.is_err(), "the power was cut");
+    let r = b.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.generation, cahoots_badge::chip::REMAKE_GENERATION);
+    // The pin rests low after the cut, and a tap fills every antenna id.
+    b.board().power_cycle();
+    let c = b.board().chip.as_mut().unwrap();
+    for id in cahoots_badge::chip::ANTENNA_IDS {
+        assert!(!c.exists(id).unwrap(), "{id:?} was deleted");
+    }
+    c.put_aes_auth(KeyId::SLOT, &[0x42; 16], &ObjectPolicy::any_session()).unwrap();
+    c.write_binary(KeyId::INBOX, &[0; 256], &ObjectPolicy::any_session()).unwrap();
+    c.put_counter(KeyId::new(KeyKind::Grant, 255), 0, &ObjectPolicy::owner_counter()).unwrap();
+    c.write_binary(KeyId::PAIRING, &[0; 128], &ObjectPolicy::any_session()).unwrap();
+    b.boot();
+    assert_eq!(refused(&mut b), 0);
+    assert!(b.board().has_chip());
+    let c = b.board().chip.as_mut().unwrap();
+    c.no_session_for_test();
+    assert_eq!(c.open_slot_with_key_for_test(&[0x42; 16]), Err(ChipError::BadSession));
+    c.no_session_for_test();
+    assert_eq!(c.delete(KeyId::SLOT), Err(ChipError::NotAllowed));
+    assert_eq!(c.read_binary(KeyId::INBOX), Err(ChipError::NotAllowed));
+    assert_eq!(c.delete(KeyId::PAIRING), Err(ChipError::NotAllowed));
+    assert_eq!(pairing_object(&mut b).nonce, [0; 16]);
+    let r = b.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.generation, cahoots_badge::chip::GENERATION);
 }

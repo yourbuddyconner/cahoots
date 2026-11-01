@@ -333,14 +333,22 @@ pub fn phone_name(name: &str) -> String {
         .collect()
 }
 
-/// The question before a phone is paired: its name and the four words the phone shows too.
-pub fn pair_prompt(name: &str, words: &[&str; 4]) -> Screen {
+/// The question before a phone is paired: its name and the six words the phone shows too, in
+/// two rows of three.
+pub fn pair_prompt(name: &str, words: &[&str; 6]) -> Screen {
     let mut s = Draw::new();
     s.title("pair a phone");
     let line = fit("pair with ", &phone_name(name), "?", cols(&FONT_6X13));
     s.centered(&FONT_6X13, 32, &line);
-    for (i, w) in words.iter().enumerate() {
-        s.centered(&PROFONT_18_POINT, 54 + 23 * i as i32, w);
+    // A word is at most 8 letters, 56 pixels in this face: three fit across in thirds.
+    let third = W / 3;
+    for (row, three) in words.chunks(3).enumerate() {
+        let y = 66 + 34 * row as i32;
+        for (col, w) in three.iter().enumerate() {
+            let at = Point::new(third / 2 + third * col as i32, y);
+            s.text(&FONT_7X13_BOLD, at, Alignment::Center, BinaryColor::On, w);
+        }
+        s.lines.push(three.join(" "));
     }
     s.centered(&FONT_8X13, 148, "the phone shows these words");
     s.footer(Some("no"), Some("A+B  pair"), Some("no"));

@@ -245,7 +245,10 @@ fn forget_deletes_slot_objects() {
     assert!(circle_objects(&mut b1).is_empty());
     // The badge's own objects stay: it still owns its chip.
     let ids = chip(&mut b1).ids().unwrap();
-    assert_eq!(ids, vec![id(KeyKind::Grant, 255), KeyId::SLOT, KeyId::INBOX, KeyId::OWNER]);
+    assert_eq!(
+        ids,
+        vec![id(KeyKind::Grant, 255), KeyId::SLOT, KeyId::PAIRING, KeyId::INBOX, KeyId::OWNER]
+    );
     assert!(b1
         .board()
         .chip_record_load()
@@ -283,6 +286,7 @@ fn reconcile_deletes_unknown_slot_and_logs() {
             id(KeyKind::Seat, 0),
             id(KeyKind::Grant, 255),
             KeyId::SLOT,
+            KeyId::PAIRING,
             KeyId::INBOX,
             KeyId::OWNER,
             unknown
@@ -375,6 +379,7 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
             bumps: vec![vec![1, 2, 3].into()],
         }]),
         paired_since_bump: Some(vec![3]),
+        public_policy: Some(cahoots_badge::chip::PUBLIC_POLICY),
     };
     let bytes = r.encode();
     assert_eq!(ChipRecord::decode(&bytes), Ok(r.clone()));
@@ -398,6 +403,15 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
         r2.stuck = bad;
         assert!(ChipRecord::decode(&r2.encode()).is_err());
     }
+    // A public policy is the current one or none, which means the first.
+    for bad in [Some(1), Some(3)] {
+        let mut r2 = r.clone();
+        r2.public_policy = bad;
+        assert!(ChipRecord::decode(&r2.encode()).is_err());
+    }
+    let mut r2 = r.clone();
+    r2.public_policy = None;
+    assert_eq!(ChipRecord::decode(&r2.encode()).unwrap().public_policy(), 1);
     // A record with no stuck slots encodes as before, four fields.
     let mut r2 = r.clone();
     r2.pending_unpair = Some(vec![]);
@@ -406,6 +420,7 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
     plain.stuck = None;
     plain.pending_unpair = None;
     plain.paired_since_bump = None;
+    plain.public_policy = None;
     assert_eq!(plain.encode()[0], 0x84);
     let mut cut = stored.clone();
     cut.pop();

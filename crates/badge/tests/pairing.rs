@@ -1,10 +1,10 @@
-//! Pairing a phone: the inbox, the four words, the phone slot, the hello objects, the public
+//! Pairing a phone: the inbox, the six words, the phone slot, the hello objects, the public
 //! object with its device grant, and the bump at unpair.
 
 mod common;
 
 use cahoots_badge::chip::{self, PhoneSlot, GENERATION, INBOX_LEN, REMAKE_GENERATION};
-use cahoots_chip::ObjectPolicy;
+use cahoots_chip::{Identity, ObjectPolicy};
 use cahoots_badge::pairing::{self, Inbox, PairingKey, PairingObject};
 use cahoots_badge::public::PublicObject;
 use cahoots_badge::{Badge, BadgeError, Board, Press, Step};
@@ -106,9 +106,21 @@ fn manifest(b: &Badge<FakeBoard>) -> Manifest {
     SealedManifest::decode(&c.manifest).unwrap().verify().unwrap()
 }
 
-/// The public object of circle slot 0, read in no session as a phone's tap reads it.
+/// The public object of circle slot 0, read in the phone slot's session under secure
+/// messaging, as a paired phone's tap reads it. No session may read it.
 fn public(b: &mut Badge<FakeBoard>) -> PublicObject {
-    let bytes = tap(b).read_binary(chip::public_id(0)).unwrap();
+    let c = tap(b);
+    c.open_slot_with_sm_for_test().unwrap();
+    let bytes = c.read_binary(chip::public_id(0));
+    c.no_session_for_test();
+    PublicObject::decode(&bytes.unwrap()).unwrap()
+}
+
+/// The public object of circle slot 0 as the badge reads it, in its owner session: for a
+/// chip whose phone slot is gone.
+fn owner_public(b: &mut Badge<FakeBoard>) -> PublicObject {
+    let bytes = b.board().owner_chip().read_binary(chip::public_id(0)).unwrap();
+    b.board().chip.as_mut().unwrap().no_session_for_test();
     PublicObject::decode(&bytes).unwrap()
 }
 
@@ -191,6 +203,33 @@ fn a_public_object_a_tap_made_before_the_keep_is_not_adopted() {
         tap(&mut b1).rewrite_binary(chip::public_id(0), &[0; 16]),
         Err(ChipError::NotAllowed)
     );
+}
+
+/// A stranger's tap reads the pairing object, which names the circle slots the badge vouches
+/// for, and no public object.
+#[test]
+fn a_tap_in_no_session_reads_which_circles_the_badge_holds_and_no_public_object() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    assert_eq!(
+        tap(&mut b1).read_binary(chip::public_id(0)),
+        Err(ChipError::NotAllowed)
+    );
+    let p = tapped(&mut b1);
+    assert_eq!(p.circles, 1);
+    assert_eq!(p.nonce, [0; 16]);
+    // A pairing open still names them, and so does the pairing object once it closes.
+    b1.pair_open().unwrap();
+    assert_eq!(tapped(&mut b1).circles, 1);
+    b1.pair_close();
+    assert_eq!(tapped(&mut b1).circles, 1);
+    // Forgetting the circle takes it off the pairing object.
+    b1.idle_step();
+    press(&mut b1, Press::Left);
+    assert!(b1.board().shows("forget this circle"), "{:?}", b1.board().last());
+    press(&mut b1, Press::Both);
+    press(&mut b1, Press::Both);
+    assert!(b1.circles().is_empty());
+    assert_eq!(tapped(&mut b1).circles, 0);
 }
 
 #[test]
@@ -344,6 +383,14 @@ fn the_words_cover_the_nonce_the_badge_key_the_phone_key_and_the_aes_key() {
     assert_ne!(w, pairing::words(&[1; 16], &other, &public, &PHONE_KEY));
     assert_ne!(w, pairing::words(&[1; 16], &badge, &public, &[0xAC; 16]));
     assert!(w.iter().all(|x| cahoots_core::checkwords::WORDLIST.contains(x)));
+    // Drawn as the check words draw their six: 66 bits, 11 to a word.
+    let mut h = <sha2::Sha256 as sha2::Digest>::new();
+    sha2::Digest::update(&mut h, pairing::WORDS_DOMAIN);
+    for part in [&[1u8; 16][..], &badge[..], &public[..], &PHONE_KEY[..]] {
+        sha2::Digest::update(&mut h, part);
+    }
+    let idx = cahoots_core::checkwords::indices_from_digest(&sha2::Digest::finalize(h));
+    assert_eq!(w, idx.map(|i| cahoots_core::checkwords::WORDLIST[usize::from(i)]));
 }
 
 #[test]
@@ -813,7 +860,7 @@ fn a_pairing_that_leaves_the_slot_empty_holds_the_chip_until_the_next_boot() {
     let record = b1.board().chip_record_load().unwrap().unwrap();
     assert_eq!(record.generation, REMAKE_GENERATION);
     assert!(!b1.board().owner_chip().exists(KeyId::SLOT).unwrap());
-    assert_eq!(public(&mut b1), before);
+    assert_eq!(owner_public(&mut b1), before);
 
     // Turned off and on, the badge makes the slot again as a placeholder.
     b1.board().power_cycle();
@@ -841,7 +888,7 @@ fn an_unpair_cut_off_before_the_public_objects_is_finished_at_the_next_boot() {
     let record = b1.board().chip_record_load().unwrap().unwrap();
     assert_eq!(record.generation, REMAKE_GENERATION);
     let [pending] = record.pending_unpair.clone().unwrap().try_into().unwrap();
-    assert_eq!(public(&mut b1).phone_public, Some(inbox.public));
+    assert_eq!(owner_public(&mut b1).phone_public, Some(inbox.public));
     assert!(!b1.board().owner_chip().exists(KeyId::SLOT).unwrap());
 
     b1.board().power_cycle();
@@ -887,7 +934,7 @@ fn to_the_list_at(b: &mut Badge<FakeBoard>, index: usize) {
 }
 
 #[test]
-fn pairing_from_the_list_shows_the_name_and_the_four_words() {
+fn pairing_from_the_list_shows_the_name_and_the_six_words() {
     let (mut b1, _b2) = kept_pair((true, false));
 
     // The list: the circle, "new circle", "pair a phone".
@@ -922,8 +969,10 @@ fn pairing_from_the_list_shows_the_name_and_the_four_words() {
     assert_eq!(b1.pair_words(&inbox), Some(words));
     press(&mut b1, Press::Both);
     assert!(b1.board().shows("pair with Conner's phone?"), "{:?}", b1.board().last());
-    for w in words {
-        assert!(b1.board().shows(w), "{w} in {:?}", b1.board().last());
+    // Six words, in two rows of three.
+    for row in words.chunks(3) {
+        let row = row.join(" ");
+        assert!(b1.board().shows(&row), "{row} in {:?}", b1.board().last());
     }
     assert!(!b1.board().pin_high());
     // Left declines, empties the inbox and closes the pairing.
@@ -1027,10 +1076,14 @@ fn a_public_object_refuses_bytes_that_are_not_one() {
 
 #[test]
 fn the_pairing_object_round_trips_and_is_no_circles() {
-    let o = PairingObject { nonce: [9; 16], badge_key: [2; 33], name: String::new() };
+    let o = PairingObject { nonce: [9; 16], badge_key: [2; 33], name: String::new(), circles: 0b1000_0101 };
     let bytes = o.padded().unwrap();
     assert_eq!(bytes.len(), pairing::PAIRING_LEN);
-    assert_eq!(PairingObject::decode(&bytes), Some(o));
+    assert_eq!(PairingObject::decode(&bytes), Some(o.clone()));
+    assert_eq!(o.circle_slots(), vec![0, 2, 7]);
+    // The longest name still fits with every circle slot named.
+    let long = PairingObject { name: "n".repeat(64), circles: u16::MAX, ..o };
+    assert_eq!(PairingObject::decode(&long.padded().unwrap()), Some(long));
     assert_eq!(KeyId::PAIRING.circle_slot(), None);
     assert!(KeyId::PAIRING.is_badge_wide());
 }
@@ -1107,6 +1160,117 @@ fn a_planted_public_object_nobody_can_delete_marks_the_slot_stuck_and_is_not_upd
         .log
         .iter()
         .any(|l| l.contains("pairing: paired with phone, 0 circles, 1 not updated")));
+    // The pairing object no longer vouches for the slot: a phone does not read it.
+    assert_eq!(tapped(&mut b1).circles, 0);
+}
+
+/// An undeletable object planted at a circle's public id before an unpair: the slot is marked
+/// stuck and its bump dropped, so the unpair is finished and a later pairing is not blocked,
+/// and the badge says how to clear it.
+#[test]
+fn an_unpair_that_meets_an_undeletable_public_object_marks_it_stuck_and_finishes() {
+    let (mut b1, _b2) = kept_pair((true, true));
+    pair(&mut b1, "phone", PHONE_KEY);
+    plant_public(&mut b1, &ObjectPolicy::owner_object());
+    // The list: the circle, "new circle", "pair a phone", "phone".
+    to_the_list_at(&mut b1, 3);
+    press(&mut b1, Press::Both);
+    press(&mut b1, Press::Both);
+    assert!(
+        b1.board().shows("a circle could not be updated. Forget it to clear this."),
+        "{:?}",
+        b1.board().last()
+    );
+    assert!(b1.board().shows("phone unpaired"));
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert!(r.is_stuck(0));
+    assert_eq!(r.pending_unpair, None);
+    assert_eq!(r.phone, None);
+    assert!(b1.board().log.iter().any(|l| l.contains("slot 0 is stuck, its bump is dropped")));
+    // A new phone pairs: nothing is left unfinished, and the stuck circle is left out.
+    b1.board().power_cycle();
+    b1.board().presses.push_back(Press::Both);
+    b1.boot();
+    b1.pair_open().unwrap();
+    phone_taps(&mut b1, "another phone", [0x5C; 16]);
+    let read = b1.pair_read_inbox().unwrap().unwrap();
+    assert_eq!(b1.pair_accept(read), Err(BadgeError::NotAllUpdated));
+    assert_eq!(b1.paired_phone().as_deref(), Some("another phone"));
+}
+
+/// A read of a public object the badge wrote that fails changes nothing: the pairing or the
+/// unpairing stops, and the badge says the chip did not answer.
+#[test]
+fn a_failed_read_of_the_badges_own_public_object_stops_the_pairing_and_the_unpairing() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    let before = public(&mut b1);
+    b1.pair_open().unwrap();
+    phone_taps(&mut b1, "phone", PHONE_KEY);
+    let read = b1.pair_read_inbox().unwrap().unwrap();
+    b1.board().chip.as_mut().unwrap().fail_next_read_for_test(chip::public_id(0));
+    assert_eq!(b1.pair_accept(read), Err(BadgeError::NoAnswer));
+    assert_eq!(b1.paired_phone(), None);
+    assert_eq!(public(&mut b1), before);
+    assert_eq!(
+        tap(&mut b1).open_slot_with_key_for_test(&PHONE_KEY),
+        Err(ChipError::BadSession)
+    );
+
+    pair(&mut b1, "phone", PHONE_KEY);
+    let paired = public(&mut b1);
+    b1.board().chip.as_mut().unwrap().fail_next_read_for_test(chip::public_id(0));
+    assert_eq!(b1.unpair(), Err(BadgeError::NoAnswer));
+    assert_eq!(b1.paired_phone().as_deref(), Some("phone"));
+    assert_eq!(public(&mut b1), paired);
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert_eq!((r.generation, r.pending_unpair), (GENERATION, None));
+    assert_eq!(tap(&mut b1).open_slot_with_key_for_test(&PHONE_KEY), Ok(()));
+}
+
+/// A chip whose public objects were made under the first policy, which any session could
+/// read: the next boot makes each again under the current one, with the same contents.
+#[test]
+fn a_boot_makes_public_objects_of_the_first_policy_again_under_the_current_one() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    let inbox = pair(&mut b1, "phone", PHONE_KEY);
+    let before = public(&mut b1);
+    // As the firmware before this one left it.
+    let first = ObjectPolicy {
+        read: vec![Identity::None, Identity::Owner, Identity::Slot],
+        ..ObjectPolicy::public_object()
+    };
+    let c = b1.board().owner_chip();
+    let bytes = c.read_binary(chip::public_id(0)).unwrap();
+    c.delete(chip::public_id(0)).unwrap();
+    c.write_binary(chip::public_id(0), &bytes, &first).unwrap();
+    let mut r = b1.board().chip_record_load().unwrap().unwrap();
+    r.public_policy = None;
+    b1.board().chip_record_store(&r).unwrap();
+    assert!(tap(&mut b1).read_binary(chip::public_id(0)).is_ok());
+
+    b1.board().power_cycle();
+    b1.board().presses.push_back(Press::Both);
+    b1.boot();
+    assert_eq!(tap(&mut b1).read_binary(chip::public_id(0)), Err(ChipError::NotAllowed));
+    assert_eq!(public(&mut b1), before);
+    assert_eq!(public(&mut b1).phone_public, Some(inbox.public));
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.public_policy, Some(chip::PUBLIC_POLICY));
+    assert!(r.entry(0).unwrap().public_written());
+    assert_eq!(tapped(&mut b1).circles, 1);
+    assert!(b1
+        .board()
+        .log
+        .iter()
+        .any(|l| l == "chip: 1 public objects made again, read now by the badge and its phone only"));
+    // Once: the next boot leaves them.
+    b1.board().power_cycle();
+    b1.board().presses.push_back(Press::Both);
+    b1.boot();
+    assert_eq!(
+        b1.board().log.iter().filter(|l| l.contains("public objects made again")).count(),
+        1
+    );
 }
 
 /// A keep whose contents are too large for a new public object writes the least one, with no

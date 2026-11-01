@@ -19,9 +19,9 @@
 //! with no record of [`GENERATION`] wipes the chip and its circles at boot ([`first_boot`]).
 //!
 //! The badge owns its chip: [`first_boot`] makes the owner object, a user id only the badge
-//! knows, then the phone slot as a placeholder whose key nobody holds, and the inbox. Every
-//! policy names identities by those ids, and none of them is ever left empty for a tap to
-//! claim.
+//! knows, then the phone slot as a placeholder whose key nobody holds, the inbox, the grant
+//! issue counter and the pairing object. Every policy names identities by those ids, and none
+//! of them is ever left empty for a tap to claim.
 //!
 //! A tap may make a binary object at any id that holds nothing, under the applet's default
 //! policy (every right for every session), or under a policy that lets nobody delete it (bench,
@@ -165,8 +165,8 @@ impl SlotEntry {
 /// session: the badge wipes them at boot.
 pub const GENERATION: u8 = 2;
 
-/// The generation of a record of a chip this badge owns whose phone slot, inbox and issue
-/// counter must be made again at the next boot: written before a conversation that leaves one
+/// The generation of a record of a chip this badge owns whose antenna objects ([`ANTENNA_IDS`])
+/// must be made again at the next boot: written before a conversation that leaves one
 /// of those ids empty for a moment, so a cut-off conversation never leaves one for a tap to
 /// fill and the badge to adopt.
 pub const REMAKE_GENERATION: u8 = 3;
@@ -230,7 +230,18 @@ pub struct ChipRecord {
     /// phone may have posted it, so the next unpair appends rather than replaces. In order.
     #[n(6)]
     pub paired_since_bump: Option<Vec<u8>>,
+    /// The policy the badge's public objects were made under: `None` for the first one, which
+    /// any session could read, or [`PUBLIC_POLICY`]. Boot makes every public object again
+    /// under the current policy once, and then stores [`PUBLIC_POLICY`]
+    /// ([`crate::Badge::boot`]).
+    #[n(7)]
+    pub public_policy: Option<u8>,
 }
+
+/// The policy the public objects are made under now ([`cahoots_chip::ObjectPolicy::public_object`]):
+/// read by the owner and the phone slot only. A record of earlier firmware has no such field,
+/// which means policy 1, readable by any session.
+pub const PUBLIC_POLICY: u8 = 2;
 
 /// The record of earlier firmware, which only [`ChipRecord::from_stored`] reads, to know it.
 #[derive(Decode)]
@@ -266,6 +277,7 @@ impl ChipRecord {
             || r.slots.windows(2).any(|w| w[0].slot >= w[1].slot)
             || !stuck_ok
             || !unpair_ok
+            || r.public_policy.is_some_and(|p| p != PUBLIC_POLICY)
         {
             return Err(Malformed);
         }
@@ -306,6 +318,21 @@ impl ChipRecord {
         self.generation == REFUSED_GENERATION
     }
 
+    /// The policy the public objects in the chip were made under: 1 for the first, which any
+    /// session could read, or [`PUBLIC_POLICY`].
+    pub fn public_policy(&self) -> u8 {
+        self.public_policy.unwrap_or(1)
+    }
+
+    /// The circle slots whose public objects the badge wrote and vouches for, as the pairing
+    /// object carries them: bit `s` for slot `s`. A stuck slot is not among them.
+    pub fn circle_mask(&self) -> u16 {
+        self.slots
+            .iter()
+            .filter(|e| e.slot < 16 && e.public_written() && !self.is_stuck(e.slot))
+            .fold(0, |m, e| m | 1 << e.slot)
+    }
+
     /// True if a phone was paired since circle slot `slot`'s last bump was made.
     pub fn paired_since_bump(&self, slot: u8) -> bool {
         self.paired_since_bump.as_ref().is_some_and(|v| v.contains(&slot))
@@ -338,8 +365,8 @@ impl ChipRecord {
         self.stuck = (!v.is_empty()).then_some(v);
     }
 
-    /// True if the phone slot, the inbox and the issue counter must be made again at the next
-    /// boot, whatever stands at their ids.
+    /// True if the antenna objects ([`ANTENNA_IDS`]) must be made again at the next boot,
+    /// whatever stands at their ids.
     pub fn needs_remake(&self) -> bool {
         self.generation == REMAKE_GENERATION
     }
@@ -503,11 +530,12 @@ pub fn issue_id() -> KeyId {
 }
 
 /// The ids a tap reaches or the badge relies on and must find its own: the phone slot, the
-/// inbox and the grant issue counter.
-pub const ANTENNA_IDS: [KeyId; 3] = [
+/// inbox, the grant issue counter and the pairing object.
+pub const ANTENNA_IDS: [KeyId; 4] = [
     KeyId::SLOT,
     KeyId::INBOX,
     KeyId::new(KeyKind::Grant, crate::grants::ISSUE_SLOT),
+    KeyId::PAIRING,
 ];
 
 /// The upgrade wipe: delete every object in the Cahoots range but the owner object, of every
@@ -530,47 +558,41 @@ pub fn delete_for_upgrade(chip: &mut dyn ChipOps) -> Result<(usize, Left), ChipE
     Ok((deleted, left))
 }
 
-/// What [`ensure_owned`] did.
+/// What [`ensure_owned`] found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Ensured {
     /// Every object was there and nothing was asked of it.
     Kept,
-    /// The phone slot, the inbox and the issue counter were deleted and made again.
-    Remade,
+    /// The antenna objects must be deleted and made again ([`remake_antenna`]): the record
+    /// asked for it, or one of them is missing. Nothing was changed yet.
+    Remake,
 }
 
-/// Why [`ensure_owned`] failed: before it changed anything, so a later boot may try again, or
-/// while it remade the objects, so the chip may be left with an id a tap could claim.
+/// Why [`ensure_owned`] failed. Nothing was changed, so a later boot may try again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EnsureError {
-    Before(ChipError),
-    During(ChipError),
-}
+pub struct EnsureError(pub ChipError);
 
-/// On a chip this badge owns: open the owner session, and if `remake` is set or any of the
-/// phone slot, the inbox and the issue counter is missing, delete whatever is at all three ids
-/// and make them again, in this one conversation ([`remake_antenna`]).
+/// On a chip this badge owns: open the owner session, and say whether the antenna objects
+/// ([`ANTENNA_IDS`]) must be made again: when `remake` is set, or when any of them is
+/// missing. It deletes and makes nothing itself.
 ///
 /// The badge never adopts an object at those ids it did not make in the conversation that
-/// left them in place: a tap can make one only while the pin rests low, and this delete and
-/// make run with the pin high. An id left empty by a conversation that was cut off is flagged
-/// by the record ([`REMAKE_GENERATION`]) before the conversation starts, so the next boot
-/// remakes it whatever stands there by then.
+/// left them in place: a tap can make one only while the pin rests low. So the caller stores
+/// the record flagged ([`REMAKE_GENERATION`]) before it deletes anything, then runs
+/// [`remake_antenna`] with the pin high, then stores the record back at [`GENERATION`]. A
+/// conversation cut off between the delete and the make leaves the flag, and the next boot
+/// remakes the ids whatever stands there by then.
 pub fn ensure_owned(
     chip: &mut dyn ChipOps,
     owner_secret: &[u8; 16],
     remake: bool,
 ) -> Result<Ensured, EnsureError> {
-    chip.open_owner(owner_secret).map_err(EnsureError::Before)?;
+    chip.open_owner(owner_secret).map_err(EnsureError)?;
     let mut missing = false;
     for id in ANTENNA_IDS {
-        missing |= !chip.exists(id).map_err(EnsureError::Before)?;
+        missing |= !chip.exists(id).map_err(EnsureError)?;
     }
-    if !remake && !missing {
-        return Ok(Ensured::Kept);
-    }
-    remake_antenna(chip).map_err(EnsureError::During)?;
-    Ok(Ensured::Remade)
+    Ok(if remake || missing { Ensured::Remake } else { Ensured::Kept })
 }
 
 /// The highest issue number any grant counter on the chip was based on: a remade issue
@@ -590,10 +612,11 @@ fn issue_floor(chip: &mut dyn ChipOps) -> Result<u64, ChipError> {
     Ok(floor)
 }
 
-/// In the owner session: delete whatever is at the phone slot, inbox and issue counter ids,
-/// then make the slot as a placeholder holding a random key nobody keeps, an empty inbox, and
-/// the issue counter at [`issue_floor`]. An object there that cannot be deleted is an error.
-pub fn remake_antenna(chip: &mut dyn ChipOps) -> Result<(), ChipError> {
+/// In the owner session: delete whatever is at the antenna ids ([`ANTENNA_IDS`]), then make
+/// the slot as a placeholder holding a random key nobody keeps, an empty inbox, the issue
+/// counter at [`issue_floor`], and the pairing object with no pairing open and `circles`. An
+/// object there that cannot be deleted is an error.
+pub fn remake_antenna(chip: &mut dyn ChipOps, circles: u16) -> Result<(), ChipError> {
     let floor = issue_floor(chip)?;
     for id in ANTENNA_IDS {
         delete_quietly(chip, id)?;
@@ -601,6 +624,10 @@ pub fn remake_antenna(chip: &mut dyn ChipOps) -> Result<(), ChipError> {
     make_placeholder(chip)?;
     chip.write_binary(KeyId::INBOX, &[0; INBOX_LEN], &ObjectPolicy::inbox())?;
     chip.put_counter(issue_id(), floor, &ObjectPolicy::owner_counter())?;
+    let pairing = crate::pairing::PairingObject::closed(circles)
+        .padded()
+        .expect("an empty name fits");
+    chip.write_binary(KeyId::PAIRING, &pairing, &ObjectPolicy::pairing_object())?;
     Ok(())
 }
 
@@ -673,30 +700,11 @@ pub fn remake_inbox(chip: &mut dyn ChipOps) -> Result<(), ChipError> {
     chip.write_binary(KeyId::INBOX, &[0; INBOX_LEN], &ObjectPolicy::inbox())
 }
 
-/// Write the pairing object ([`KeyId::PAIRING`]) with `nonce` and the badge's ephemeral
-/// `badge_key`, in the owner session: a fresh object, any object at its id deleted first, so
-/// one a tap made is never used.
-pub fn write_pairing(chip: &mut dyn ChipOps, nonce: &[u8; 16], badge_key: &[u8; 33]) -> Result<(), ChipError> {
-    let bytes = crate::pairing::PairingObject {
-        nonce: *nonce,
-        badge_key: *badge_key,
-        name: String::new(),
-    }
-    .padded()
-    .expect("an empty name fits");
-    delete_quietly(chip, KeyId::PAIRING)?;
-    chip.write_binary(KeyId::PAIRING, &bytes, &ObjectPolicy::public_object())
-}
-
-/// Write a zero nonce and a zero key over the pairing object: no pairing is open.
-pub fn close_pairing(chip: &mut dyn ChipOps) -> Result<(), ChipError> {
-    let bytes = crate::pairing::PairingObject {
-        nonce: [0; 16],
-        badge_key: [0; 33],
-        name: String::new(),
-    }
-    .padded()
-    .expect("an empty name fits");
+/// Write `object` over the pairing object ([`KeyId::PAIRING`]), in the owner session. The
+/// badge made the object itself ([`remake_antenna`]) and keeps it made, so it is written in
+/// place.
+pub fn write_pairing(chip: &mut dyn ChipOps, object: &crate::pairing::PairingObject) -> Result<(), ChipError> {
+    let bytes = object.padded().ok_or(ChipError::Status(0x6A80))?;
     chip.rewrite_binary(KeyId::PAIRING, &bytes)
 }
 
@@ -809,7 +817,7 @@ pub fn read_public(
 
 /// The first boot of a chip under this firmware, in one conversation: the owner object (a user
 /// id holding `owner_secret`) unless it is there, the owner session, then the phone slot, the
-/// inbox and the issue counter ([`remake_antenna`]), and the new record, with no circle
+/// inbox, the issue counter and the pairing object ([`remake_antenna`]), and the new record, with no circle
 /// slots, no phone and `badge_nonce`. The caller has emptied the chip but for the owner object
 /// first ([`delete_for_upgrade`]), so nothing a tap made is adopted.
 ///
@@ -827,7 +835,7 @@ pub fn first_boot(
         chip.put_user_id(KeyId::OWNER, owner_secret, &ObjectPolicy::owner_object())?;
     }
     chip.open_owner(owner_secret)?;
-    remake_antenna(chip)?;
+    remake_antenna(chip, 0)?;
     Ok(ChipRecord {
         slots: Vec::new(),
         phone: None,
@@ -836,5 +844,6 @@ pub fn first_boot(
         stuck: None,
         pending_unpair: None,
         paired_since_bump: None,
+        public_policy: Some(PUBLIC_POLICY),
     })
 }

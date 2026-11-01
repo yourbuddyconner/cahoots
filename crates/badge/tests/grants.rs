@@ -1168,7 +1168,13 @@ fn a_wipe_keeps_the_issue_counter() {
     // The badge's own objects stay too.
     assert_eq!(
         ids,
-        vec![KeyId::new(KeyKind::Grant, ISSUE_SLOT), KeyId::SLOT, KeyId::INBOX, KeyId::OWNER]
+        vec![
+            KeyId::new(KeyKind::Grant, ISSUE_SLOT),
+            KeyId::SLOT,
+            KeyId::PAIRING,
+            KeyId::INBOX,
+            KeyId::OWNER
+        ]
     );
 }
 
