@@ -1263,10 +1263,10 @@ fn seat_face(
     face_seed(key)
 }
 
-/// The circle's manifest, from the sealed copy kept with it.
-/// A name read from a card, as it is shown: without control characters and without the
-/// characters that change the direction of text, so a name cannot hide or reorder what is
-/// drawn around it. The card keeps the name as it was signed.
+/// A name read from a card, as it is shown: without control characters, without the
+/// characters that change the direction of text, and without line and paragraph separators,
+/// zero-width spaces and byte order marks, so a name cannot hide or reorder what is drawn
+/// around it. The card keeps the name as it was signed.
 pub fn display_name(name: &str) -> String {
     name.chars()
         .filter(|&c| {
@@ -1274,10 +1274,14 @@ pub fn display_name(name: &str) -> String {
                 && !matches!(
                     c,
                     '\u{061C}'
+                        | '\u{200B}'
                         | '\u{200E}'
                         | '\u{200F}'
                         | '\u{202A}'..='\u{202E}'
+                        | '\u{2028}'
+                        | '\u{2029}'
                         | '\u{2066}'..='\u{2069}'
+                        | '\u{FEFF}'
                 )
         })
         .collect::<String>()
@@ -1285,6 +1289,7 @@ pub fn display_name(name: &str) -> String {
         .to_string()
 }
 
+/// The circle's manifest, from the sealed copy kept with it.
 fn manifest_of(c: &Circle) -> Result<cahoots_core::manifest::Manifest, PhoneError> {
     let unreadable = || PhoneError::Storage {
         message: "The member list saved for this circle is damaged or cannot be read.".into(),

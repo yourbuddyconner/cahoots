@@ -126,9 +126,10 @@ const loadChat = (id) => tx('chat', 'readonly', (s) => s.index('circle').getAll(
 const loadSettings = async (id) => { const s = (await tx('settings', 'readonly', (s) => s.get(id))) || { id }; if (!s.relay) s.relay = DEFAULT_RELAY; return s; };
 const saveSettings = (row) => tx('settings', 'readwrite', (s) => s.put(row));
 // A member's name: the name on their card, else the name this browser gave them, else the seat.
-// A name read from a card, as it is shown: without control characters and without the characters
-// that change the direction of text. The card keeps the name as it was signed.
-const shownName = (name) => (name || '').replace(/[\p{Cc}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, '').trim();
+// A name read from a card, as it is shown: without control characters, the characters that change
+// the direction of text, line and paragraph separators, zero-width spaces and byte order marks.
+// The card keeps the name as it was signed.
+const shownName = (name) => (name || '').replace(/[\p{Cc}\u061C\u200B\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069\uFEFF]/gu, '').trim();
 const nameOf = (settings, seat, cards) => shownName(cards?.seats?.[seat]?.name) || settings.names?.[seat] || `Seat ${seat + 1}`;
 
 // This browser's name and face, kept beside the circles. The face seed is drawn once and kept.

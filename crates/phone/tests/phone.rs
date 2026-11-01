@@ -1726,7 +1726,7 @@ fn a_name_is_shown_without_control_or_direction_characters() {
     let (a, b) = named(&r, ["Ada", ""]);
     let (id, _, _) = finish(&a, &b);
     b.phone
-        .set_my_name("Bea\u{202E}lin\u{7}\u{2066}da\u{200F}".into())
+        .set_my_name("Bea\u{202E}lin\u{7}\u{2066}da\u{200F}\u{200B}\u{2028}\u{2029}\u{FEFF}".into())
         .unwrap();
     a.phone.poll(id.clone()).unwrap();
     assert_eq!(member(&a, &id, 1).name, "Bealinda");
@@ -1960,4 +1960,64 @@ fn a_phone_that_updates_late_reads_what_it_passed_over_and_follows_the_reset() {
     )
     .unwrap();
     assert!(again.poll(id).unwrap().is_empty());
+}
+
+#[test]
+fn a_reset_that_loses_to_one_made_at_the_same_time_is_not_posted() {
+    use cahoots_chat::{sign_bump, ChatSession};
+    let r = relay();
+    let (a, b) = (device(&r), device(&r));
+    let (id, _, idb) = finish(&a, &b);
+    for d in [&a, &b] {
+        d.phone.set_relay(id.clone(), RELAY.into()).unwrap();
+    }
+    a.phone.send_chat(id.clone(), "before".into()).unwrap();
+    b.phone.poll(id.clone()).unwrap();
+
+    // A resets while the relay refuses its posts: the reset waits.
+    a.http.fail_posts.store(1, Ordering::SeqCst);
+    a.phone.bump_chat_generation(id.clone()).unwrap();
+    assert!(a.phone.chat_reset_waiting(id.clone()));
+
+    // Meanwhile seat 2 resets to the lowest id there is, and the relay takes it first.
+    let circle_id: [u8; 16] = hex::decode(&id).unwrap().try_into().unwrap();
+    let dir = b.path.join("circles").join(&id);
+    let record = CircleRecord::load(&dir).unwrap();
+    let root: [u8; 32] = record.root[..].try_into().unwrap();
+    let mut seat2 = ChatSession::new(&root, circle_id, 2, 1);
+    seat2.mark_synced();
+    let lowest = [0u8; 32];
+    let from = seat2.generation_id();
+    let payload = sign_bump(
+        Soft(&b.signer, format!("cahoots:seat:{idb}")),
+        1,
+        &circle_id,
+        &from,
+        &lowest,
+    )
+    .unwrap();
+    let wire = seat2.send_bump(lowest, &payload).unwrap();
+    r.lock().unwrap().post(&circle_id, &wire).unwrap();
+
+    // A reads it before its own goes: A follows it and drops its own reset.
+    let got = a.phone.poll(id.clone()).unwrap();
+    assert_eq!(texts(&got), ["Keys were reset by seat 2."]);
+    assert!(!a.phone.chat_reset_waiting(id.clone()));
+    let bumps = |r: &Arc<Mutex<MemRelay>>| {
+        r.lock()
+            .unwrap()
+            .poll(&circle_id, None, 0)
+            .unwrap()
+            .iter()
+            .filter(|(_, m)| cahoots_chat::parse(m).unwrap().0.msg_type == cahoots_chat::MessageType::Bump)
+            .count()
+    };
+    assert_eq!(bumps(&r), 1);
+    // A's next message is in the winning generation.
+    a.phone.send_chat(id.clone(), "after".into()).unwrap();
+    let all = r.lock().unwrap().poll(&circle_id, None, 0).unwrap();
+    let (_, text) = seat2.receive(&all.last().unwrap().1).unwrap();
+    assert_eq!(cahoots_chat::bucket_unpad(&text).unwrap(), b"after");
+    a.phone.poll(id).unwrap();
+    assert_eq!(bumps(&r), 1);
 }
