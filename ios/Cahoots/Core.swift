@@ -24,7 +24,8 @@ final class Core: @unchecked Sendable {
         return try await withCheckedThrowingContinuation { c in
             queue.async {
                 c.resume(with: Result {
-                    let phone = try Phone.open(dir: store.directory.path, signer: signer, http: UrlSessionHttp())
+                    let phone = try Phone.open(dir: store.directory.path, signer: signer, http: UrlSessionHttp(),
+                                               nfc: NfcTransport())
                     phone.setEnclave(enclave: signer.usesEnclave)
                     store.relax()
                     return Core(phone: phone, signer: signer, store: store, queue: queue)
@@ -91,8 +92,14 @@ func plain(_ error: Error) -> String {
         return "Use Face ID or your passcode to continue."
     case let PhoneError.Network(m), let PhoneError.Storage(m), let PhoneError.NotFound(m),
          let PhoneError.BadCode(m), let PhoneError.Ceremony(m), let PhoneError.Chat(m),
-         let PhoneError.Signer(m), let PhoneError.Channel(m):
+         let PhoneError.Signer(m), let PhoneError.Channel(m), let PhoneError.Nfc(m):
         return m
+    case PhoneError.NoCard:
+        return "No card found. Hold the phone to the chip."
+    case PhoneError.CardBusy:
+        return "The card is busy with its badge. Try again in a moment."
+    case PhoneError.NotPaired:
+        return "This card no longer knows this phone."
     default:
         return "Cahoots couldn’t complete that action. Please try again."
     }

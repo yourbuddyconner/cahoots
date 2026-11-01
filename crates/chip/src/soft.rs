@@ -7,9 +7,13 @@
 //! It models what the real chip enforces: every object carries the policy it was made with,
 //! the chip is in no session, the owner's user-id session or the phone slot's session, and a
 //! call the policy does not allow the session is `NotAllowed` ([`ObjectPolicy::allows`]). A
-//! slot session either did or did not set up secure messaging ("the host proved the key" is
-//! all of SCP03 modelled here), and a policy with `require_sm` refuses the slot without it.
-//! Creating at an id in use is `Exists`.
+//! slot session either did or did not set up secure messaging, and a policy with `require_sm`
+//! refuses the slot without it. Creating at an id in use is `Exists`.
+//!
+//! Through [`ChipOps`] and the `_for_test` calls, SCP03 is modelled as "the host proved the
+//! key". Through the APDU front end ([`SoftChip::apdu`], in `soft/apdu.rs`) a phone's tap runs
+//! the real thing: the SCP03 handshake against the slot's AES key and every command in the
+//! session under C-MAC, C-ENC, R-MAC and R-ENC.
 
 use crate::ids::KeyId;
 use crate::ops::{
@@ -23,6 +27,11 @@ use p256::ecdsa::signature::hazmat::PrehashSigner;
 use p256::ecdsa::signature::Signer;
 use rand_core::{CryptoRng, RngCore};
 use sha2::{Digest, Sha256};
+
+mod apdu;
+mod scp03;
+
+pub use apdu::APPLET_ID;
 
 /// The chip's unique id: 17 bytes, the same on every soft chip.
 pub const SOFT_UID: &[u8; 17] = b"softchip-00000000";
@@ -86,6 +95,10 @@ pub struct SoftChip {
     rng: SoftRng,
     clock: u64,
     ca: p256::ecdsa::SigningKey,
+    /// The applet was selected over the APDU front end ([`SoftChip::apdu`]).
+    selected: bool,
+    /// The session a phone opened over the APDU front end, if any.
+    nfc: Option<apdu::NfcSession>,
 }
 
 impl SoftChip {
@@ -112,6 +125,8 @@ impl SoftChip {
             rng: SoftRng { seed, counter: 0 },
             clock: 0,
             ca: p256::ecdsa::SigningKey::from_slice(&ca).expect("the test CA key is valid"),
+            selected: false,
+            nfc: None,
         }
     }
 }
@@ -411,6 +426,8 @@ fn attest_rights(p: &ObjectPolicy) -> &[Identity] {
 impl ChipOps for SoftChip {
     fn open_owner(&mut self, secret: &[u8; 16]) -> Result<(), ChipError> {
         self.session = Session::None;
+        // The badge takes the chip over I2C: a phone's session over NFC is gone.
+        self.nfc = None;
         match self.objects.get(&KeyId::OWNER.0) {
             Some(Entry { object: Object::UserId(k), .. }) if k == secret => {
                 self.session = Session::Owner;

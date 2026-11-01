@@ -24,6 +24,13 @@ pub trait Signer: Send + Sync {
     fn batch_begin(&self);
     /// The signatures of the batch are made. The next `sign` asks again.
     fn batch_end(&self);
+    /// Keep `secret` under `label`, replacing what was there, in a keychain item that asks
+    /// for Face ID or the passcode before it is read (the phone slot's key for a badge's
+    /// chip). An empty `secret` deletes the item.
+    fn put_secret(&self, label: String, secret: Vec<u8>) -> Result<(), PhoneError>;
+    /// The secret kept under `label`, or `None` if there is none. Asks for Face ID or the
+    /// passcode: `PhoneError::Locked` when the person says no.
+    fn get_secret(&self, label: String) -> Result<Option<Vec<u8>>, PhoneError>;
 }
 
 /// A batch of signatures, open until this is dropped.
@@ -87,8 +94,9 @@ pub struct SoftSigner {
 #[derive(Default)]
 struct SoftInner {
     keys: HashMap<String, SeatKey>,
+    secrets: HashMap<String, Vec<u8>>,
     signs: Vec<String>,
-    /// `begin`, `sign <label>` and `end`, in order.
+    /// `begin`, `sign <label>`, `secret <label>` and `end`, in order.
     events: Vec<String>,
     locked: bool,
 }
@@ -166,6 +174,26 @@ impl Signer for SoftSigner {
     fn batch_end(&self) {
         self.inner.lock().unwrap().events.push("end".into());
     }
+
+    fn put_secret(&self, label: String, secret: Vec<u8>) -> Result<(), PhoneError> {
+        let mut inner = self.inner.lock().unwrap();
+        if secret.is_empty() {
+            inner.secrets.remove(&label);
+        } else {
+            inner.secrets.insert(label, secret);
+        }
+        Ok(())
+    }
+
+    /// Locked like `sign`: the keychain item asks for Face ID.
+    fn get_secret(&self, label: String) -> Result<Option<Vec<u8>>, PhoneError> {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.locked {
+            return Err(PhoneError::Locked);
+        }
+        inner.events.push(format!("secret {label}"));
+        Ok(inner.secrets.get(&label).cloned())
+    }
 }
 
 #[cfg(test)]
@@ -186,6 +214,12 @@ mod tests {
         }
         fn batch_begin(&self) {}
         fn batch_end(&self) {}
+        fn put_secret(&self, _label: String, _secret: Vec<u8>) -> Result<(), PhoneError> {
+            Err(PhoneError::Locked)
+        }
+        fn get_secret(&self, _label: String) -> Result<Option<Vec<u8>>, PhoneError> {
+            Err(PhoneError::Locked)
+        }
     }
 
     #[test]

@@ -133,6 +133,72 @@ final class EnclaveSigner: Signer {
         }
     }
 
+    // MARK: - Secrets
+
+    /// Where secrets live: apart from the keys' handles, so a key label never meets a secret's.
+    static let secretService = "network.cahoots.secrets"
+
+    private func secretQuery(_ label: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.secretService,
+            kSecAttrAccount as String: label,
+        ]
+    }
+
+    /// Keep a secret (the phone slot's key for a badge's chip) in a keychain item that asks for
+    /// Face ID or the passcode before it is read. On the simulator, which has no enclave, it is
+    /// kept under the ordinary rules. An empty secret deletes the item.
+    func putSecret(label: String, secret: Data) throws {
+        SecItemDelete(secretQuery(label) as CFDictionary)
+        if secret.isEmpty { return }
+        var q = secretQuery(label)
+        q[kSecValueData as String] = secret
+        if usesEnclave {
+            var error: Unmanaged<CFError>?
+            guard let access = SecAccessControlCreateWithFlags(
+                nil, kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly, .userPresence, &error
+            ) else {
+                throw PhoneError.Signer(message: "Cahoots couldn’t protect the card’s key on this phone. Try again.")
+            }
+            q[kSecAttrAccessControl as String] = access
+        } else {
+            q[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        }
+        let status = SecItemAdd(q as CFDictionary, nil)
+        switch status {
+        case errSecSuccess:
+            return
+        case errSecInteractionNotAllowed:
+            throw PhoneError.Locked
+        default:
+            throw PhoneError.Signer(message: "Cahoots couldn’t save the card’s key on this phone (\(status)).")
+        }
+    }
+
+    /// The secret kept under `label`, asking for Face ID or the passcode first, or nil if there
+    /// is none.
+    func getSecret(label: String) throws -> Data? {
+        var q = secretQuery(label)
+        q[kSecReturnData as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        let context = LAContext()
+        context.localizedReason = "Use the key this phone shares with your card"
+        q[kSecUseAuthenticationContext as String] = context
+        var out: CFTypeRef?
+        let status = SecItemCopyMatching(q as CFDictionary, &out)
+        switch status {
+        case errSecSuccess:
+            return out as? Data
+        case errSecItemNotFound:
+            return nil
+        case errSecInteractionNotAllowed, errSecUserCanceled, errSecAuthFailed:
+            throw PhoneError.Locked
+        default:
+            throw PhoneError.Signer(message: "Cahoots couldn’t read the card’s key on this phone (\(status)).")
+        }
+    }
+
     /// Forget the key named `label`. The enclave key is unusable once its handle is gone.
     func deleteKey(label: String) {
         SecItemDelete(query(label) as CFDictionary)

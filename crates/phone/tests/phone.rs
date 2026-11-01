@@ -122,6 +122,7 @@ fn device_on(relay: &Arc<Mutex<MemRelay>>, other: &Arc<Mutex<MemRelay>>) -> Devi
         path.to_string_lossy().into_owned(),
         Box::new(signer.clone()),
         Box::new(http.clone()),
+        Box::new(cahoots_phone::nfc::NoNfc),
     )
     .unwrap();
     Device {
@@ -239,6 +240,7 @@ fn two_phones_make_a_circle_and_chat() {
         a.path.to_string_lossy().into_owned(),
         Box::new(a.signer.clone()),
         Box::new(a.http.clone()),
+        Box::new(cahoots_phone::nfc::NoNfc),
     )
     .unwrap();
     again.send_chat(id.clone(), "after a restart".into()).unwrap();
@@ -657,6 +659,7 @@ fn a_history_line_saved_with_the_state_is_written_once() {
         a.path.to_string_lossy().into_owned(),
         Box::new(a.signer.clone()),
         Box::new(a.http.clone()),
+        Box::new(cahoots_phone::nfc::NoNfc),
     )
     .unwrap();
     assert_eq!(texts(&again.history(id)), ["kept", "saved with the state"]);
@@ -672,6 +675,7 @@ fn a_record_that_cannot_be_read_is_not_written_over() {
         a.path.to_string_lossy().into_owned(),
         Box::new(a.signer.clone()),
         Box::new(a.http.clone()),
+        Box::new(cahoots_phone::nfc::NoNfc),
     );
     assert!(matches!(opened, Err(PhoneError::Storage { .. })));
     assert_eq!(std::fs::read(&path).unwrap(), b"locked");
@@ -1203,6 +1207,7 @@ fn a_reset_by_one_phone_moves_the_other() {
         b.path.to_string_lossy().into_owned(),
         Box::new(b.signer.clone()),
         Box::new(b.http.clone()),
+        Box::new(cahoots_phone::nfc::NoNfc),
     )
     .unwrap();
     assert_eq!(
@@ -1312,6 +1317,7 @@ fn history_saved_before_generations_still_opens() {
         d.path.to_string_lossy().into_owned(),
         Box::new(d.signer.clone()),
         Box::new(d.http.clone()),
+        Box::new(cahoots_phone::nfc::NoNfc),
     )
     .unwrap();
     for w in &wires {
@@ -1390,6 +1396,7 @@ fn after_a_ceremony_both_phones_publish_cards_and_see_each_other() {
         a.path.to_string_lossy().into_owned(),
         Box::new(a.signer.clone()),
         Box::new(a.http.clone()),
+        Box::new(cahoots_phone::nfc::NoNfc),
     )
     .unwrap();
     assert_eq!(again.my_face_seed(), seed);
@@ -1798,6 +1805,7 @@ fn a_phone_restored_from_before_its_reset_follows_it() {
         a.path.to_string_lossy().into_owned(),
         Box::new(a.signer.clone()),
         Box::new(a.http.clone()),
+        Box::new(cahoots_phone::nfc::NoNfc),
     )
     .unwrap();
     restored.poll(id.clone()).unwrap();
@@ -1931,6 +1939,7 @@ fn a_phone_that_updates_late_reads_what_it_passed_over_and_follows_the_reset() {
         d.path.to_string_lossy().into_owned(),
         Box::new(d.signer.clone()),
         Box::new(d.http.clone()),
+        Box::new(cahoots_phone::nfc::NoNfc),
     )
     .unwrap();
     // Read again from the start: the message it had read is a replay, the rest is new.
@@ -1957,6 +1966,7 @@ fn a_phone_that_updates_late_reads_what_it_passed_over_and_follows_the_reset() {
         d.path.to_string_lossy().into_owned(),
         Box::new(d.signer.clone()),
         Box::new(d.http.clone()),
+        Box::new(cahoots_phone::nfc::NoNfc),
     )
     .unwrap();
     assert!(again.poll(id).unwrap().is_empty());

@@ -141,6 +141,7 @@ fn device() -> Device {
         path.clone(),
         Box::new(signer.clone()),
         Box::new(http.clone()),
+        Box::new(cahoots_phone::nfc::NoNfc),
     )
     .unwrap();
     Device {
@@ -159,6 +160,7 @@ impl Device {
             self.path.clone(),
             Box::new(self.signer.clone()),
             Box::new(self.http.clone()),
+            Box::new(cahoots_phone::nfc::NoNfc),
         )
         .unwrap()
     }

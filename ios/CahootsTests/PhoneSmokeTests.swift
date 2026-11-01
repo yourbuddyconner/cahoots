@@ -16,7 +16,7 @@ final class PhoneSmokeTests: XCTestCase {
     }
 
     private func open() throws -> Phone {
-        try Phone.open(dir: dir.path, signer: signer, http: UrlSessionHttp())
+        try Phone.open(dir: dir.path, signer: signer, http: UrlSessionHttp(), nfc: NfcTransport())
     }
 
     func testACeremonyHasCodesToShow() throws {

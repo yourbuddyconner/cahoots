@@ -11,9 +11,12 @@
 
 uniffi::setup_scaffolding!();
 
+pub mod apdu;
 pub mod ceremony;
 pub mod channel;
 pub mod chat;
+pub mod nfc;
+pub mod scp03;
 pub mod signer;
 pub mod store;
 
@@ -71,6 +74,18 @@ pub enum PhoneError {
     /// read, and the like.
     #[error("{message}")]
     Channel { message: String },
+    /// A tap went wrong in a way the other variants do not name.
+    #[error("{message}")]
+    Nfc { message: String },
+    /// No card answered the tap in time, or the person cancelled it.
+    #[error("No card found. Hold the phone to the chip.")]
+    NoCard,
+    /// The card would not open a session for the phone: its badge holds the chip.
+    #[error("The card is busy with its badge. Try again in a moment.")]
+    CardBusy,
+    /// The card's phone slot does not hold this phone's key.
+    #[error("This card no longer knows this phone.")]
+    NotPaired,
 }
 
 impl From<uniffi::UnexpectedUniFFICallbackError> for PhoneError {
@@ -365,8 +380,8 @@ struct State {
     relay: String,
 }
 
-/// The app's state. Every method takes one lock and holds it across the `Http` and `Signer`
-/// callbacks it makes (a request, or a Face ID prompt). So Swift must call `Phone` off the
+/// The app's state. Every method takes one lock and holds it across the `Http`, `Signer` and
+/// `Nfc` callbacks it makes (a request, or a Face ID prompt). So Swift must call `Phone` off the
 /// main thread, and the callbacks must never call back into `Phone` or wait for the main
 /// thread while `Phone` waits for them: either deadlocks.
 #[derive(uniffi::Object)]
@@ -374,6 +389,9 @@ pub struct Phone {
     dir: PathBuf,
     signer: Box<dyn Signer>,
     http: Box<dyn Http>,
+    /// The NFC reader, for taps on a badge's chip.
+    #[expect(dead_code, reason = "the card circle calls (plan 3, task 4) tap through it")]
+    nfc: Box<dyn nfc::Nfc>,
     /// This phone's own record. Taken after `state` when both are held.
     me: Mutex<PhoneRecord>,
     state: Mutex<State>,
@@ -604,6 +622,7 @@ impl Phone {
         dir: String,
         signer: Box<dyn Signer>,
         http: Box<dyn Http>,
+        nfc: Box<dyn nfc::Nfc>,
     ) -> Result<Arc<Phone>, PhoneError> {
         let dir = PathBuf::from(dir);
         std::fs::create_dir_all(store::circles_dir(&dir)).map_err(store::io)?;
@@ -636,6 +655,7 @@ impl Phone {
             dir,
             signer,
             http,
+            nfc,
             me: Mutex::new(me),
             enclave: std::sync::atomic::AtomicBool::new(true),
             card_refused: std::sync::atomic::AtomicBool::new(false),
