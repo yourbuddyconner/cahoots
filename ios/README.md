@@ -148,9 +148,8 @@ phone taps the badge cuts the Click board's power. For that the bench needs two 
 Click board's ENA SEL switch on EN (not ON), so the badge's enable pin reaches the chip, and
 the Click board's +3.3V fed through a PNP transistor (an S8550 works) with its emitter on the
 Pico's 3V3, its collector on the Click board's +3.3V pin and its base through about 1 kΩ to
-GP3, the Pico's pin 5. Turn the Click board's ANTENNA switch on just before a tap and off again
-when the tap is done: with the antenna off nothing can read the chip. Without the transistor
-the chip stays powered and no tap reaches it. Make a new circle on the badge with the bench ceremony or a pile before
+GP3, the Pico's pin 5. The antenna switch is on. Without the transistor the chip stays powered
+and no tap reaches it. Make a new circle on the badge with the bench ceremony or a pile before
 pairing, because a badge with no circles cannot pair.
 
 1. On the badge, open "pair a phone" from the list. It shows "hold the phone to the chip, then

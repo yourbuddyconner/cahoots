@@ -50,9 +50,13 @@ holds it.) The pairing page opens the window by itself. The only pages that hold
 powered are the moments the badge itself needs it: keeping a circle, reading the pairing
 inbox, installing a phone's key, unpairing, forgetting, signing, and badge-only hello words.
 
-On the bench and on any board with a physical antenna switch, that switch is the hard gate:
-the person's steps say to turn it on for a tap and off afterwards, every time, and the badge
-cannot override it. The V1 board has both, the physical switch and the one in software.
+Until a board has an antenna switch of its own, the gate is the chip's power, which gives the
+same result: a chip the badge powers is deaf to a phone. So at rest the badge keeps the chip
+powered, in the chip's deep power-down that costs microamps, and cuts the power only inside
+a tap window. The bench Click board's antenna switch stays on and is not part of anyone's
+steps. (Conner's call, 2026-11-01: the bench is not real life, and the firmware works around
+it rather than asking a person to flip a switch.) The V1 board adds an antenna switch in
+software as a second gate when it comes, with no change to the flows.
 
 **One tap fetches everything the phone will need for a while.** A tap is not "the key for
 this circle". It is "fill the pocket": every card circle's current chat key, the bumps the
@@ -70,20 +74,18 @@ forget, and the badge-only hello words for circles made of badges. Reading is no
 Each flow starts with the badge off and ends with it back in the drawer. Boot is a few
 seconds of e-paper.
 
-**Rotate keys after a reset, or top up hello words.** Badge on, antenna switch on if the board
-has one. One press opens the tap window. Phone: Card, "Tap the card", Face ID, hold. Done.
-Antenna switch off. One badge press, twenty seconds.
+**Rotate keys after a reset, or top up hello words.** Badge on. One press opens the tap
+window. Phone: Card, "Tap the card", Face ID, hold. Done. One badge press, twenty seconds.
 
 **Hello words.** Phone only, from the pocket, exactly as in a software circle. When the
 pocket is down to its last few, the Card screen and the seat's words say "tap the card soon".
 Zero badge visits in the common case.
 
-**Pair a phone.** Antenna switch on. Badge: A+B for the menu, "pair a phone", A+B. The page
-opens the tap window. Phone: Settings, "Pair a card", a name, Face ID, hold. Phone says "Now
+**Pair a phone.** Badge: A+B for the menu, "pair a phone", A+B. The page opens the tap
+window. Phone: Settings, "Pair a card", a name, Face ID, hold. Phone says "Now
 press both on the badge". Badge: A+B, the name and six words appear. Check, A+B. Badge says
 "paired, hold the phone again" and goes back to its home screen with the tap window still
-open. Phone: "Hold the phone again", hold. Done. Antenna switch off. About a minute, four
-badge presses.
+open. Phone: "Hold the phone again", hold. Done. About a minute, four badge presses.
 
 **Unpair.** Badge: A+B, "phone", A+B. Done. The next phone that taps posts the bumps.
 
@@ -97,7 +99,7 @@ hosts. The badge's keep prompt is a consent press.
 
 **Home.** The badge's name and face, the circles it holds as a short list of names, one line
 of status, and the footer "tap  A+B  menu": the left button opens or closes the tap window,
-A+B opens the menu. The status line says one of: "antenna off", "ready for a tap, 1:48
+A+B opens the menu. The status line says one of: "closed to taps", "open for a tap, 1:48
 left", "a phone is paired: NAME", "no chip", or the current problem. Nothing to page through.
 A tap works here while the window is open.
 
@@ -181,9 +183,9 @@ inside a window the owner opened, so the exposure is small, and it is worth stat
   SE051 that costs memory for sixteen slots' worth of small objects and lowers the circles
   that fit. The builder measures it, and if it costs more than one circle, the slot count
   drops to eight.)
-- **In a safe, or just on.** A badge in a drawer is off. A badge that is on has its antenna
-  off until its owner presses, and the physical switch, where there is one, is off between
-  visits. The planting surface is the open window.
+- **In a safe, or just on.** A badge in a drawer is off. A badge that is on keeps its chip
+  powered and so deaf to taps until its owner presses. The planting surface is the open
+  window.
 - **Face ID before every tap.** The phone's proof of presence comes before the sheet, for
   pairing and for every "Tap the card".
 
@@ -192,13 +194,11 @@ inside a window the owner opened, so the exposure is small, and it is worth stat
 - **The chip's supply is switched.** The V1 board gets a load switch or PNP transistor on the
   chip's supply, driven by the MCU, and the chip's enable pin stays wired. The bench Click
   board has the S8550 and three 330 Ω in series as the base resistor, with ENA SEL on EN.
-- **The antenna is switched twice.** Once in software: an MCU pin kills the antenna at rest,
-  simplest as a small signal MOSFET across the coil that shorts it when the pin is high, so
-  no field reaches the chip and nothing is read from the badge while it lies there. (Call:
-  the shorting MOSFET. An RF switch in series works too, and the builder may prefer it if the
-  short detunes the coil badly when open.) And once by hand: the physical antenna switch the
-  Click board has, and the V1 board keeps, which the person turns on for a tap and off after.
-  The person's steps say so every time a tap appears in them.
+- **An antenna switch in software, on V1.** A second gate beside the chip's power: an MCU pin
+  kills the antenna at rest, simplest as a small signal MOSFET across the coil that shorts it
+  when the pin is high. (Call: the shorting MOSFET. An RF switch in series works too, and the
+  builder may prefer it if the short detunes the coil badly when open.) Nothing in the flows
+  depends on it, and no step asks a person to flip a switch.
 - **The V2 card** is RF powered during taps by nature. Its antenna must deliver field power
   for flash writes at the distances a phone is held. The Click board's small loop does, so a
   card-sized antenna will.
@@ -218,8 +218,8 @@ inside a window the owner opened, so the exposure is small, and it is worth stat
   for two minutes and shows the time left. A home screen, a single menu, a one-page circle,
   and notes that return home on their own. The per-circle "circles" page goes.
 - **Firmware.** The rail pin is already there. The rest state at boot is power cut after the
-  self-test. A pin for the antenna switch, off at rest and on during a tap window. The bench
-  window and the pin probes stay as bench tools, and the window opens the antenna too.
+  self-test is powered and deaf, as today. The bench window and the pin probes stay as bench
+  tools.
 - **Phone crate.** A pocket per card circle: hello words by seat and counter, filled by the
   tap in batches, used by `hello_words` and `next_hello` before any tap. One `tap_card`
   operation that fetches keys, posts bumps and tops up words, and reports what it did. A
@@ -234,10 +234,10 @@ inside a window the owner opened, so the exposure is small, and it is worth stat
 
 ## 11. Calls I made
 
-- The chip is off at rest on every idle screen, not only on tap pages, and the antenna is
-  off too until the owner opens a two minute tap window with one press. (Conner's call: the
-  antenna switch in software as well as by hand, and the steps vocal about turning the
-  physical switch off.)
+- Taps reach the chip only inside a two minute tap window the owner opens with one press.
+  Until V1 has its antenna switch in software, the gate is the chip's power: powered and deaf
+  at rest, cut for the window. (Conner's calls: the owner's gate, and the firmware working
+  around the bench rather than steps about a switch.)
 - Hello words are fetched eight at a time per seat and kept on the phone.
 - Placeholders for every circle slot's ids at first boot, with the slot count dropping to
   eight if sixteen cost more than a circle of memory.
