@@ -37,7 +37,7 @@ pub const MAX_PUBLIC: usize = 8192;
 
 /// The room a new public object leaves after its first contents, for the device grant, a
 /// pending bump, the phone's key and a card written later.
-pub const PUBLIC_ROOM: usize = 2048;
+pub const PUBLIC_ROOM: usize = 1024;
 
 /// One circle's public object. See the module docs.
 #[derive(Clone, Debug, PartialEq, Eq)]

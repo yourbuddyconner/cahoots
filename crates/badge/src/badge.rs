@@ -356,6 +356,17 @@ const NEW_CIRCLE: &str = "new circle";
 const PAIR_PHONE: &str = "pair a phone";
 /// Why a circle was not kept: even its least public object is larger than the chip takes.
 const TOO_BIG_FOR_CHIP: &str = "the circle's record is too big for the chip";
+/// Why a circle was not kept: the chip refused an object for want of memory (`6A84`).
+pub const CHIP_FULL: &str = "the chip is full. Forget a circle first.";
+
+/// What the keep says of a chip error: [`CHIP_FULL`] for the chip's memory, else `what` and
+/// the error.
+fn keep_error(what: &str, e: ChipError) -> String {
+    match e {
+        ChipError::Status(0x6A84) => String::from(CHIP_FULL),
+        e => format!("chip: {what}: {e:?}"),
+    }
+}
 /// The chooser's entry for the paired phone, while one is paired.
 const PHONE: &str = "phone";
 
@@ -1667,7 +1678,7 @@ impl<B: Board> Badge<B> {
         let chip = self.board.chip_begin().ok_or("chip: not found")?;
         let public = chip
             .generate(KeyId::new(KeyKind::Seat, slot), Curve::P256, &ObjectPolicy::owner_only())
-            .map_err(|e| format!("chip: key not made: {e:?}"))?;
+            .map_err(|e| keep_error("key not made", e))?;
         // Set before the parse, so a failure below still deletes the key.
         self.chip_slot = Some(slot);
         let public = SeatPublic::parse(&public).map_err(|_| "chip: bad public key")?;
@@ -1681,6 +1692,14 @@ impl<B: Board> Badge<B> {
     /// circle's public object; the chip record learns the slot. With a phone paired, the
     /// public object carries a device grant for it, so the phone finds the new circle at its
     /// next tap.
+    ///
+    /// A chip that refuses an object for want of memory (`6A84`) fails the keep closed: the
+    /// circle is not kept, its seat key is deleted, and the badge says [`CHIP_FULL`]. On the
+    /// bench (SE051, applet 7.2.0, 2026-10-31) a circle took 2.4 to 2.7 KB of the chip's memory
+    /// with a 1 KB room in its public object, and the chip held six circles: four of that size
+    /// beside two older ones with larger public objects, and the seventh keep met `6A84`. That
+    /// is about seven circles on an empty chip of that kind. The Pico has 16 places for
+    /// circles, and the chip slots run to 16, but that does not mean 16 circles on this chip.
     fn keep_in_chip(&mut self, slot: u8, result: &CeremonyResult, seat: u8) -> Result<(), String> {
         let root = result.root.as_ref().ok_or("ceremony: no circle root")?;
         let circle_id = result.circle_id;
@@ -1692,9 +1711,9 @@ impl<B: Board> Badge<B> {
         };
         let chip = self.board.chip_begin().ok_or("chip: not found")?;
         chip.put_hmac_key(KeyId::new(KeyKind::Root, slot), root, &ObjectPolicy::owner_and_slot_mac())
-            .map_err(|e| format!("chip: root not stored: {e:?}"))?;
+            .map_err(|e| keep_error("root not stored", e))?;
         chip.put_counter(KeyId::new(KeyKind::Epoch, slot), 0, &ObjectPolicy::owner_counter())
-            .map_err(|e| format!("chip: counter not stored: {e:?}"))?;
+            .map_err(|e| keep_error("counter not stored", e))?;
         let mut hellos = 0;
         for (other, key) in result.pair_keys.iter().enumerate() {
             let Some(key) = key else { continue };
@@ -1705,7 +1724,7 @@ impl<B: Board> Badge<B> {
                 &chip::hello_value(key),
                 &ObjectPolicy::owner_and_slot_mac(),
             )
-            .map_err(|e| format!("chip: hello object not stored: {e:?}"))?;
+            .map_err(|e| keep_error("hello object not stored", e))?;
             hellos += 1;
         }
         let grant = match (&phone, nonce) {
@@ -1746,7 +1765,7 @@ impl<B: Board> Badge<B> {
             chip::PublicError::Undeletable(e) => {
                 format!("chip: an object at the public object's id was not deleted: {e:?}")
             }
-            chip::PublicError::Chip(e) => format!("chip: public object not written: {e:?}"),
+            chip::PublicError::Chip(e) => keep_error("public object not written", e),
         })?;
         self.board.log(&format!(
             "chip: slot {slot} kept, seat key for the owner alone, root for the owner and the phone slot"
@@ -2009,7 +2028,12 @@ impl<B: Board> Badge<B> {
                     // Without a chip the record keeps both.
                     let (seat_key, chip_slot, root) = match self.chip_slot {
                         Some(slot) => {
-                            self.keep_in_chip(slot, &result, seat)?;
+                            if let Err(e) = self.keep_in_chip(slot, &result, seat) {
+                                if e == CHIP_FULL {
+                                    show_status(&mut self.board, CHIP_FULL);
+                                }
+                                return Err(e);
+                            }
                             ([0u8; 32], Some(slot), None)
                         }
                         None => (
@@ -2352,6 +2376,11 @@ impl<B: Board> Badge<B> {
                 Idle::Choose {
                     index: self.current,
                 }
+            }
+            // A full chip says so until the next gesture: a circle must be forgotten first.
+            Step::Failed(e) if e == CHIP_FULL => {
+                self.board.log(&format!("new circle: {e}"));
+                self.note(&[CHIP_FULL], self.current)
             }
             Step::Failed(e) => {
                 self.board.log(&format!("new circle: {e}"));

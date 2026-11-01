@@ -93,6 +93,8 @@ pub struct SoftChip {
     session: Session,
     /// With `Some(n)`, the creating call after the next `n` fails.
     fail_create: Option<usize>,
+    /// The status word the next failing creating call answers, `6A80` when not set.
+    fail_status: Option<u16>,
     /// This many creating calls in a row fail, from the next.
     fail_streak: usize,
     rng: SoftRng,
@@ -126,6 +128,7 @@ impl SoftChip {
             objects: BTreeMap::new(),
             session: Session::None,
             fail_create: None,
+            fail_status: None,
             fail_streak: 0,
             rng: SoftRng { seed, counter: 0 },
             clock: 0,
@@ -330,6 +333,13 @@ impl SoftChip {
         self.fail_create = Some(0);
     }
 
+    /// The next creating call fails with `sw`: `0x6A84` is the applet's answer when its
+    /// memory is full (bench, SE051 applet 7.2.0).
+    pub fn fail_next_create_with(&mut self, sw: u16) {
+        self.fail_create = Some(0);
+        self.fail_status = Some(sw);
+    }
+
     /// The next `n` creating calls fail with `6A80`.
     pub fn fail_next_creates_for_test(&mut self, n: usize) {
         self.fail_streak = n;
@@ -367,7 +377,7 @@ impl SoftChip {
         match self.fail_create {
             Some(0) => {
                 self.fail_create = None;
-                return Err(ChipError::Status(0x6A80));
+                return Err(ChipError::Status(self.fail_status.take().unwrap_or(0x6A80)));
             }
             Some(n) => self.fail_create = Some(n - 1),
             None => {}

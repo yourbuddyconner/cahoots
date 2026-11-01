@@ -17,5 +17,5 @@ pub mod ssh;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 
-pub use badge::{Badge, BadgeError, Step};
+pub use badge::{Badge, BadgeError, Step, CHIP_FULL};
 pub use board::{word_indices, Board, BoardError, Circle, Press};

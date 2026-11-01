@@ -1132,3 +1132,48 @@ fn a_public_object_too_large_for_the_chip_keeps_the_least_it_can() {
     let huge = PublicObject { manifest: vec![7; 8200], ..base };
     assert_eq!(huge.fitted_for_new(), None);
 }
+
+/// A keep the chip refuses for want of memory (`6A84`, the applet's answer when it is full)
+/// does not keep the circle, says so, and takes back the seat key it made.
+#[test]
+fn a_keep_on_a_full_chip_is_not_kept_and_says_so() {
+    let (mut b1, mut b2) = pile_of_two((true, true));
+    for _ in 0..10_000 {
+        b1.step();
+        b2.step();
+        if has_seat(&mut b1) && has_seat(&mut b2) {
+            break;
+        }
+    }
+    b2.board().presses.push_back(Press::Both);
+    let mut at = (false, false);
+    drive(&mut b1, &mut b2, |s1, s2| {
+        at.0 |= *s1 == Step::Prompt;
+        at.1 |= *s2 == Step::Prompt;
+        at.0 && at.1
+    });
+    b1.board().chip.as_mut().unwrap().fail_next_create_with(0x6A84);
+    b1.board().presses.push_back(Press::Both);
+    let mut failed = None;
+    for _ in 0..10_000 {
+        match b1.step() {
+            Step::Failed(e) => {
+                failed = Some(e);
+                break;
+            }
+            Step::Kept => panic!("kept on a full chip"),
+            _ => {}
+        }
+    }
+    assert_eq!(failed.as_deref(), Some(cahoots_badge::CHIP_FULL));
+    assert_eq!(cahoots_badge::CHIP_FULL, "the chip is full. Forget a circle first.");
+    assert!(b1.circle().is_none());
+    assert!(b1
+        .board()
+        .screens
+        .iter()
+        .any(|l| l.iter().any(|x| x == "the chip is full. Forget a circle first.")));
+    let c = b1.board().owner_chip();
+    assert!(!c.exists(KeyId::new(KeyKind::Seat, 0)).unwrap());
+    assert!(!c.exists(chip::public_id(0)).unwrap());
+}
