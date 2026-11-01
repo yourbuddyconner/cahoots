@@ -61,10 +61,10 @@ fn the_left_button_opens_a_two_minute_tap_window_that_closes_by_itself() {
     press(&mut b1, Press::Left);
     assert!(b1.board().tap_open);
     assert!(b1.board().shows("open for a tap, 2 min"), "{:?}", b1.board().last());
-    b1.board_mut().uptime += 61;
+    b1.board().uptime += 61;
     step(&mut b1);
     assert!(b1.board().shows("open for a tap, 1 min"));
-    b1.board_mut().uptime += 60;
+    b1.board().uptime += 60;
     step(&mut b1);
     assert!(!b1.board().tap_open);
     assert!(b1.board().shows("closed to taps"));
@@ -80,7 +80,7 @@ fn a_conversation_of_the_badges_own_ends_the_window_and_home_says_so() {
     let (mut b1, _b2) = kept_pair((true, false));
     press(&mut b1, Press::Left);
     // The board's chip_begin restores the power, as a laptop's request would.
-    b1.board_mut().tap_open = false;
+    b1.board().tap_open = false;
     step(&mut b1);
     assert!(b1.board().shows("closed to taps"), "{:?}", b1.board().last());
 }
