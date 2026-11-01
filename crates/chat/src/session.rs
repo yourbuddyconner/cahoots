@@ -466,6 +466,17 @@ impl ChatSession {
             return Ok(BumpOutcome::Stale);
         }
         let current = self.current().id;
+        // A device waiting for the key of one bump from `from` reads a second from the same
+        // generation: it keeps the lower of the two, as a root holder would end in the lower.
+        if self.root.is_none() && self.pending_from == Some(from) {
+            if let Some(waiting) = self.pending {
+                if waiting <= to {
+                    return Ok(BumpOutcome::Stale);
+                }
+                self.pending = Some(to);
+                return Err(ChatError::NeedsGeneration(to));
+            }
+        }
         if from == current {
             self.follow(from, to, false)?;
             return Ok(BumpOutcome::Moved { dropped_own: false });

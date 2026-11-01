@@ -658,3 +658,60 @@ fn an_own_bump_that_wins_is_not_dropped() {
     c.receive(&wb).unwrap();
     assert_eq!(c.apply_bump(g0(), low), Ok(MOVED));
 }
+
+/// A device with generation 0's key, synced.
+fn device() -> ChatSession {
+    synced(ChatSession::from_generation(
+        g0(),
+        chat_gen_key(&ROOT, &CID, &g0()),
+        CID,
+        3,
+        2,
+    ))
+}
+
+/// A device that reads two bumps from the same generation before any tap waits for the lower
+/// one, whichever it read first, as a root holder ends in the lower one.
+#[test]
+fn a_device_that_reads_two_bumps_before_a_tap_waits_for_the_lower() {
+    let (low, high) = (ID1, ID2);
+    for order in [[low, high], [high, low]] {
+        let mut a = member(0);
+        let mut b = member(1);
+        let mut d = device();
+        let (wa, wb) = concurrent(&mut a, &mut b, low, high);
+        let wire = |id: [u8; 32]| if id == high { &wa } else { &wb };
+        for id in order {
+            d.receive(wire(id)).unwrap();
+            let _ = d.apply_bump(g0(), id);
+        }
+        assert_eq!(d.pending_generation(), Some(low), "order {:?}", order.map(|i| i[0]));
+        assert_eq!(d.generation_id(), g0());
+    }
+}
+
+/// A root holder and a device that read the same two bumps in opposite orders end in the same
+/// generation once the device is given the key it waits for.
+#[test]
+fn a_root_holder_and_a_device_converge_on_the_lower_bump() {
+    let (low, high) = (ID1, ID2);
+    let mut a = member(0);
+    let mut b = member(1);
+    let mut d = device();
+    let (wa, wb) = concurrent(&mut a, &mut b, low, high);
+    // a sent the higher bump and follows b's lower one; the device reads a's first.
+    a.receive(&wb).unwrap();
+    a.apply_bump(g0(), low).unwrap();
+    d.receive(&wa).unwrap();
+    let _ = d.apply_bump(g0(), high);
+    d.receive(&wb).unwrap();
+    let _ = d.apply_bump(g0(), low);
+    let want = d.pending_generation().unwrap();
+    d.install_generation(want, chat_gen_key(&ROOT, &CID, &want));
+    assert_eq!(a.generation_id(), low);
+    assert_eq!(d.generation_id(), a.generation_id());
+    let w = a.send(b"in the lower").unwrap();
+    assert_eq!(d.receive(&w).unwrap().1, b"in the lower");
+    let back = d.send(b"from the device").unwrap();
+    assert_eq!(a.receive(&back).unwrap().1, b"from the device");
+}
