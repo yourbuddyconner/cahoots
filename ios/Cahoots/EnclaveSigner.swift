@@ -150,8 +150,27 @@ final class EnclaveSigner: Signer {
     /// Face ID or the passcode before it is read. On the simulator, which has no enclave, it is
     /// kept under the ordinary rules. An empty secret deletes the item.
     func putSecret(label: String, secret: Data) throws {
-        SecItemDelete(secretQuery(label) as CFDictionary)
-        if secret.isEmpty { return }
+        if secret.isEmpty {
+            SecItemDelete(secretQuery(label) as CFDictionary)
+            return
+        }
+        // An item already there takes the new secret in place, so a failure never leaves the
+        // label with no key.
+        let context = LAContext()
+        context.localizedReason = "Save the key this phone shares with your card"
+        var find = secretQuery(label)
+        find[kSecUseAuthenticationContext as String] = context
+        let updated = SecItemUpdate(find as CFDictionary, [kSecValueData as String: secret] as CFDictionary)
+        switch updated {
+        case errSecSuccess:
+            return
+        case errSecItemNotFound:
+            break
+        case errSecInteractionNotAllowed, errSecUserCanceled, errSecAuthFailed:
+            throw PhoneError.Locked
+        default:
+            throw PhoneError.Signer(message: "Cahoots couldn’t save the card’s key on this phone (\(updated)).")
+        }
         var q = secretQuery(label)
         q[kSecValueData as String] = secret
         if usesEnclave {

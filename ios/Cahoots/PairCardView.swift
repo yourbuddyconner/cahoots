@@ -3,7 +3,7 @@ import SwiftUI
 /// The two taps of pairing with a badge, as the pairing screen asks for them. `Core` does them
 /// on the phone's queue; the tests stand in for it.
 protocol CardPairing: Sendable {
-    /// The first tap: the badge's name, its circles, and the four words.
+    /// The first tap: the badge's name, how many circles it holds, and the six words.
     func startPairing(name: String) async throws -> PairPreview
     /// The second tap, after both buttons on the badge: the names of the circles kept.
     func finishPairing() async throws -> [String]
@@ -168,16 +168,17 @@ private struct PairNameStep: View {
     }
 }
 
-/// The second step: the four words to check against the badge's screen.
+/// The second step: the six words to check against the badge's screen, and how many circles
+/// the badge holds. Their names come with the second tap.
 private struct PairCheckStep: View {
     let preview: PairPreview
     let startOver: () -> Void
 
+    static let detail = "On the badge, press both to see its words. If they match, press both again, then hold the phone to the card."
+
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xl) {
-            ScreenHeader(title: preview.badgeName,
-                         detail: "Open 'pair a phone' on your badge and check the words match. Press both buttons, then hold the phone to the card again.",
-                         style: .title)
+            ScreenHeader(title: preview.badgeName, detail: Self.detail, style: .title)
             VStack(alignment: .leading, spacing: Space.xs) {
                 ForEach(Array(preview.words.enumerated()), id: \.offset) { _, word in
                     Text(word).serifTitle(.largeTitle)
@@ -186,7 +187,13 @@ private struct PairCheckStep: View {
             .padding(.vertical, Space.s)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("pair-words")
-            CircleNames(title: "Circles on this badge", names: preview.circles)
+            PaperSection(title: "On this badge") {
+                Text(preview.circles)
+                    .serifTitle(.title3)
+                    .padding(.vertical, Space.m)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("pair-circle-count")
+            }
             Button("Start over", action: startOver)
                 .buttonStyle(TextButtonStyle(full: false))
                 .accessibilityIdentifier("pair-start-over")

@@ -11,8 +11,8 @@ final class PairCardTests: XCTestCase {
 
         func startPairing(name: String) async throws -> PairPreview {
             if let startError { throw startError }
-            return PairPreview(badgeName: "Conner's badge", circles: ["park", "lab"],
-                               words: ["amber", "basil", "cedar", "delta"])
+            return PairPreview(badgeName: "Conner's badge", circles: "2 circles",
+                               words: ["amber", "basil", "cedar", "delta", "eagle", "fabric"])
         }
 
         func finishPairing() async throws -> [String] {
@@ -26,7 +26,8 @@ final class PairCardTests: XCTestCase {
         XCTAssertEqual(model.step, .name)
         await model.start()
         guard case let .check(preview) = model.step else { return XCTFail("no words: \(model.step)") }
-        XCTAssertEqual(preview.words.count, 4)
+        XCTAssertEqual(preview.words.count, 6)
+        XCTAssertEqual(preview.circles, "2 circles")
         await model.finish()
         XCTAssertEqual(model.step, .done(badge: "Conner's badge", circles: ["park", "lab"]))
         XCTAssertNil(model.error)
