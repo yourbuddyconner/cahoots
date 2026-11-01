@@ -1288,6 +1288,7 @@ fn history_saved_before_generations_still_opens() {
         seat_public: vec![2; 33].into(),
         pair_keys: vec![Vec::new().into(); 3],
         pair_counters: vec![0; 3],
+        card: None,
     };
     let chat = cahoots_phone::store::ChatRecord {
         state: state.into(),
@@ -1906,6 +1907,7 @@ fn a_phone_that_updates_late_reads_what_it_passed_over_and_follows_the_reset() {
         seat_public: vec![2; 33].into(),
         pair_keys: vec![Vec::new().into(); 3],
         pair_counters: vec![0; 3],
+        card: None,
     };
     let chat = cahoots_phone::store::ChatRecord {
         state: state.into(),

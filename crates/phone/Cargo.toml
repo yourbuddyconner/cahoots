@@ -47,6 +47,8 @@ cahoots-badge = { workspace = true }
 
 [dev-dependencies]
 hmac = "0.12"
+# A badge in memory with a software chip, for the card circle tests.
+cahoots-badge = { workspace = true, features = ["test-support"] }
 cahoots-chip = { workspace = true, features = ["std"] }
 cahoots-relay = { path = "../relay" }
 cahoots-wasm = { path = "../wasm" }

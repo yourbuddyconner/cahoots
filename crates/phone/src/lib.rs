@@ -12,6 +12,7 @@
 uniffi::setup_scaffolding!();
 
 pub mod apdu;
+mod card;
 pub mod ceremony;
 pub mod channel;
 pub mod chat;
@@ -20,6 +21,7 @@ pub mod scp03;
 pub mod signer;
 pub mod store;
 
+use crate::card::card_hello_seat;
 use crate::ceremony::{Pending, Receiver};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -238,6 +240,23 @@ pub struct CircleSummary {
     /// Messages from others read from the relay since the history was last shown.
     pub unread: u32,
     pub relay: String,
+    /// "seat" for a circle this phone holds a seat in, "card" for a circle of a badge this
+    /// phone is paired to (a card circle).
+    pub kind: String,
+    /// A card circle whose chat cannot go on until the card is tapped (`tap_for_keys`): say
+    /// "Tap your card to catch up."
+    pub needs_tap: bool,
+}
+
+/// What the first tap of a pairing read from the badge, for the person to check.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct PairPreview {
+    /// The badge's name, from its pairing object.
+    pub badge_name: String,
+    /// The names of the badge's circles, which become card circles on this phone.
+    pub circles: Vec<String>,
+    /// Four words the badge shows too. They must match before the owner presses both buttons.
+    pub words: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -378,6 +397,15 @@ struct State {
     circles: HashMap<String, Circle>,
     /// The relay new ceremonies and circles use.
     relay: String,
+    /// A pairing with a badge after its first tap, waiting for the second.
+    pairing: Option<PendingPair>,
+}
+
+/// A pairing between its two taps. The slot key lives here only: a pairing that does not
+/// finish leaves it nowhere.
+struct PendingPair {
+    key: zeroize::Zeroizing<[u8; 16]>,
+    badge_name: String,
 }
 
 /// The app's state. Every method takes one lock and holds it across the `Http`, `Signer` and
@@ -390,7 +418,6 @@ pub struct Phone {
     signer: Box<dyn Signer>,
     http: Box<dyn Http>,
     /// The NFC reader, for taps on a badge's chip.
-    #[expect(dead_code, reason = "the card circle calls (plan 3, task 4) tap through it")]
     nfc: Box<dyn nfc::Nfc>,
     /// This phone's own record. Taken after `state` when both are held.
     me: Mutex<PhoneRecord>,
@@ -491,6 +518,10 @@ impl Phone {
     /// the person has given a name. A relay that cannot be reached leaves the card waiting,
     /// and a refused signature leaves the card due, for the next poll to try again.
     fn publish_my_card(&self, c: &mut Circle) -> Result<(), PhoneError> {
+        // A card circle's seat is the badge's, and so is its card.
+        if c.record.is_card() {
+            return Ok(());
+        }
         let Some(name) = self.me().name.clone() else {
             return Ok(());
         };
@@ -664,6 +695,7 @@ impl Phone {
                 join_receiver: Receiver::new(ceremony::JOIN_MAX_LEN),
                 circles: HashMap::new(),
                 relay,
+                pairing: None,
             }),
         }))
     }
@@ -681,6 +713,8 @@ impl Phone {
                         has_root: c.record.root.len() == 32,
                         unread: c.settings.unread,
                         relay: c.settings.relay.clone(),
+                        kind: if c.record.is_card() { "card" } else { "seat" }.into(),
+                        needs_tap: c.needs_tap(),
                     })
                 })
                 .ok()
@@ -943,6 +977,7 @@ impl Phone {
                 .map(|k| k.as_ref().map(|k| k.to_vec()).unwrap_or_default().into())
                 .collect(),
             pair_counters: vec![0; n],
+            card: None,
         };
         let session = cahoots_chat::ChatSession::new(root, r.circle_id, r.params.n, p.seat);
         let chat = ChatRecord {
@@ -1043,6 +1078,9 @@ impl Phone {
     /// not take it now, it is posted again by the next poll or send.
     pub fn bump_chat_generation(&self, circle: String) -> Result<(), PhoneError> {
         self.with_circle(&circle, |c, me| {
+            if c.record.is_card() {
+                return Err(chat::chat_err(cahoots_chat::ChatError::CannotBump));
+            }
             c.bump_generation(me.http.as_ref(), me.signer.as_ref())
         })
     }
@@ -1058,14 +1096,29 @@ impl Phone {
         self.with_circle(&circle, |c, _| c.rotate())
     }
 
-    /// The hello words with `other_seat` at the current hello number.
+    /// The hello words with `other_seat` at the current hello number. In a card circle they
+    /// come from a tap on the card.
     pub fn hello_words(&self, circle: String, other_seat: u8) -> Result<HelloWords, PhoneError> {
-        self.with_circle(&circle, |c, _| hello(c, other_seat))
+        self.with_circle(&circle, |c, me| {
+            if c.record.is_card() {
+                let number = card_hello_seat(c, other_seat)?;
+                return me.card_hello(c, other_seat, number);
+            }
+            hello(c, other_seat)
+        })
     }
 
-    /// Move to the next hello words with `other_seat`. Both people do this.
+    /// Move to the next hello words with `other_seat`. Both people do this. In a card circle
+    /// the words come from a tap, and the number moves once the tap has given them.
     pub fn next_hello(&self, circle: String, other_seat: u8) -> Result<HelloWords, PhoneError> {
-        self.with_circle(&circle, |c, _| {
+        self.with_circle(&circle, |c, me| {
+            if c.record.is_card() {
+                let number = card_hello_seat(c, other_seat)?.wrapping_add(1);
+                let words = me.card_hello(c, other_seat, number)?;
+                c.record.pair_counters[usize::from(other_seat)] = number;
+                c.record.save(&c.dir)?;
+                return Ok(words);
+            }
             hello(c, other_seat)?;
             let i = usize::from(other_seat);
             c.record.pair_counters[i] = c.record.pair_counters[i].wrapping_add(1);
@@ -1277,7 +1330,8 @@ fn seat_face(
     if let Some(face) = card.and_then(|k| k.face) {
         return face.to_vec();
     }
-    if seat == c.record.seat {
+    // A card circle's seat is the badge's: its face is the badge's, not this phone's.
+    if seat == c.record.seat && !c.record.is_card() {
         return phone.my_face_in(c).to_vec();
     }
     face_seed(key)

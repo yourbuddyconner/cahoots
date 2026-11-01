@@ -55,7 +55,13 @@ pub struct Circle {
     pub settings: SettingsRecord,
     /// The cards read from the chat, and this seat's own.
     pub cards: CardsRecord,
+    /// For a card circle: generation keys a tap fetched for generations the chat has not
+    /// reached yet, by id. Kept in memory only, and used when a bump moves the chat there.
+    pub ahead: Vec<([u8; 32], zeroize::Zeroizing<[u8; 32]>)>,
 }
+
+/// What a card circle says when it cannot go on without a tap.
+pub const NEEDS_TAP: &str = "Tap your card to catch up.";
 
 impl Circle {
     pub fn load(dir: &Path) -> Result<Circle, PhoneError> {
@@ -65,14 +71,31 @@ impl Circle {
         };
         let params = CircleParams::decode(&record.params).map_err(|_| unreadable())?;
         let circle_id: [u8; 16] = record.circle_id[..].try_into().map_err(|_| unreadable())?;
-        let root: zeroize::Zeroizing<[u8; 32]> =
-            zeroize::Zeroizing::new(record.root[..].try_into().map_err(|_| unreadable())?);
         let chat = ChatRecord::load(dir)?;
-        let session = if chat.state.is_empty() {
-            ChatSession::new(&root, circle_id, params.n, record.seat)
+        let session = if let Some(card) = &record.card {
+            // A card circle holds no root: one generation's key, from a tap.
+            if chat.state.is_empty() {
+                let key = card.generation_key.ok_or_else(unreadable)?;
+                ChatSession::from_generation(
+                    card.generation,
+                    zeroize::Zeroizing::new(key),
+                    circle_id,
+                    params.n,
+                    record.seat,
+                )
+            } else {
+                ChatSession::import_generation_state(circle_id, params.n, record.seat, &chat.state)
+                    .map_err(chat_err)?
+            }
         } else {
-            ChatSession::import_state(&root, circle_id, params.n, record.seat, &chat.state)
-                .map_err(chat_err)?
+            let root: zeroize::Zeroizing<[u8; 32]> =
+                zeroize::Zeroizing::new(record.root[..].try_into().map_err(|_| unreadable())?);
+            if chat.state.is_empty() {
+                ChatSession::new(&root, circle_id, params.n, record.seat)
+            } else {
+                ChatSession::import_state(&root, circle_id, params.n, record.seat, &chat.state)
+                    .map_err(chat_err)?
+            }
         };
         let mut cursor: CursorRecord =
             store::load_if_present(&dir.join(store::CURSOR))?.unwrap_or_default();
@@ -102,12 +125,134 @@ impl Circle {
             cursor,
             settings,
             cards,
+            ahead: Vec::new(),
         };
         circle.copy_journal()?;
         Ok(circle)
     }
 
-    fn save_chat(&mut self) -> Result<(), PhoneError> {
+    /// A card circle whose chat waits for a generation key only a tap can give: a bump moved
+    /// the circle on, and this phone holds no root to follow it.
+    pub fn needs_tap(&self) -> bool {
+        self.record.is_card() && self.session.pending_generation().is_some()
+    }
+
+    /// The generations a tap should fetch keys for: the one the chat waits for, and the ones
+    /// the bumps still to post move to.
+    pub fn wanted_generations(&self) -> Vec<[u8; 32]> {
+        let mut out: Vec<[u8; 32]> = self.session.pending_generation().into_iter().collect();
+        for b in self.record.card.iter().flat_map(|c| c.forward.iter()) {
+            if let Some(to) = b.get(32..64).and_then(|t| <[u8; 32]>::try_from(t).ok()) {
+                if !out.contains(&to) {
+                    out.push(to);
+                }
+            }
+        }
+        out
+    }
+
+    /// Install the key a tap fetched for generation `id`, if there is one. Returns whether it
+    /// was installed.
+    pub fn install_ahead(&mut self, id: [u8; 32]) -> bool {
+        let Some(i) = self.ahead.iter().position(|(g, _)| *g == id) else {
+            return false;
+        };
+        let (_, key) = self.ahead.remove(i);
+        self.session.install_generation(id, key);
+        true
+    }
+
+    /// Keys a tap fetched: the one the chat waits for is installed now and saved, the rest
+    /// are kept for the bumps that lead to them.
+    pub fn take_keys(
+        &mut self,
+        keys: Vec<([u8; 32], zeroize::Zeroizing<[u8; 32]>)>,
+    ) -> Result<(), PhoneError> {
+        for (id, key) in keys {
+            self.ahead.retain(|(g, _)| *g != id);
+            self.ahead.push((id, key));
+        }
+        if let Some(p) = self.session.pending_generation() {
+            if self.install_ahead(p) {
+                self.save_chat()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Post the bumps a badge signed at an unpair that this phone forwards, in order, once
+    /// the relay has been read to the end. Each is sealed in the generation it moves from,
+    /// and the chat then waits for the key of the one it moves to: from the keys a tap
+    /// fetched, or from the next tap. A bump that moves from a generation the chat is not in
+    /// is stale (another device posted it, or the circle moved on) and is dropped.
+    fn forward_bumps(&mut self) -> Result<(), PhoneError> {
+        let Some(list) = self.record.card.as_ref().map(|c| c.forward.clone()) else {
+            return Ok(());
+        };
+        if list.is_empty() || !self.session.synced() {
+            return Ok(());
+        }
+        let mut done = 0;
+        let mut lines = Vec::new();
+        for payload in &list {
+            let ends = payload
+                .get(..32)
+                .and_then(|f| <[u8; 32]>::try_from(f).ok())
+                .zip(payload.get(32..64).and_then(|t| <[u8; 32]>::try_from(t).ok()));
+            let Some((from, to)) = ends else {
+                done += 1;
+                continue;
+            };
+            match self.session.pending_generation() {
+                // Read from the relay already: someone posted it.
+                Some(p) if p == to => {}
+                // The chat waits for another key: this bump waits for it too.
+                Some(_) => break,
+                None if self.session.generation_id() == from => {
+                    match self.session.send_bump(to, payload) {
+                        Ok(wire) => {
+                            self.chat.outbox.push(OutboxEntry {
+                                id: random_id()?,
+                                wire: wire.into(),
+                            });
+                            let seat = self.record.seat;
+                            lines.push(MessageRecord {
+                                id: random_id()?,
+                                sender: seat,
+                                mine: true,
+                                text: bump_text(seat),
+                                epoch: 0,
+                                seq: None,
+                                kind: Some("bump".into()),
+                            });
+                        }
+                        Err(ChatError::CannotBump | ChatError::BadSignature) => {
+                            done += 1;
+                            continue;
+                        }
+                        Err(e) => return Err(chat_err(e)),
+                    }
+                }
+                None => {
+                    done += 1;
+                    continue;
+                }
+            }
+            done += 1;
+            if !self.install_ahead(to) {
+                break;
+            }
+        }
+        // The chat state and outbox first, then the list: a crash between them leaves a bump
+        // listed that the chat has sent, which the next pass finds stale or waiting.
+        self.save_with(lines)?;
+        if let Some(card) = self.record.card.as_mut() {
+            card.forward.drain(..done.min(card.forward.len()));
+        }
+        self.record.save(&self.dir)
+    }
+
+    pub(crate) fn save_chat(&mut self) -> Result<(), PhoneError> {
         self.chat.state = self.session.export_state().to_vec().into();
         self.chat.save(&self.dir)
     }
@@ -167,6 +312,7 @@ impl Circle {
             }
             let mut lines = Vec::new();
             let mut cards = false;
+            let mut stalled = false;
             for (seq, bytes) in fresh {
                 // Our own post that landed though its answer was lost: it is not sent again.
                 if let Some(i) = self.chat.outbox.iter().position(|e| e.wire[..] == bytes[..]) {
@@ -177,8 +323,20 @@ impl Circle {
                     self.chat.pending_bump = None;
                 }
                 // Our own messages move our sending position; a message that does not open
-                // (damaged, replayed, another kind) is passed over.
-                if let Ok((h, pt)) = self.session.receive(&bytes) {
+                // (damaged, replayed, another kind) is passed over. A card circle that meets
+                // a message in the generation it waits for stops here, without passing it,
+                // until a tap gives the key.
+                let mut opened = self.session.receive(&bytes);
+                if let Err(ChatError::NeedsGeneration(id)) = opened {
+                    if self.record.is_card() {
+                        if !self.install_ahead(id) {
+                            stalled = true;
+                            break;
+                        }
+                        opened = self.session.receive(&bytes);
+                    }
+                }
+                if let Ok((h, pt)) = opened {
                     // A bump counts only with a seat's signature from the manifest; a bad or
                     // stale one is passed over without a word. Our own is followed too, so a
                     // phone restored from older state moves with its own reset. Its line is
@@ -237,8 +395,15 @@ impl Circle {
             if any {
                 self.settings.save(&self.dir)?;
             }
+            if stalled {
+                // What was read is kept and what waits is posted. The rest needs a tap.
+                let _ = self.flush(http);
+                return Ok(new);
+            }
         }
-        // Read to the end: a card waiting for that can be sealed now.
+        // Read to the end: a card circle posts the bumps it forwards, and a card waiting for
+        // that can be sealed now.
+        self.forward_bumps()?;
         let _ = self.queue_card();
         let _ = self.flush(http);
         Ok(new)
@@ -266,6 +431,11 @@ impl Circle {
     pub fn send(&mut self, http: &dyn Http, text: &str) -> Result<(), PhoneError> {
         if !self.session.synced() {
             self.poll(http)?;
+        }
+        if self.needs_tap() {
+            return Err(PhoneError::Chat {
+                message: NEEDS_TAP.into(),
+            });
         }
         let padded = bucket_pad(text.as_bytes()).ok_or_else(|| PhoneError::Chat {
             message: "That message is too long.".into(),
@@ -377,15 +547,22 @@ impl Circle {
         let sealed = cahoots_core::manifest::SealedManifest::decode(&self.record.manifest).ok()?;
         let manifest = cahoots_core::manifest::Manifest::decode(&sealed.body).ok()?;
         let (from, to, seat) = verify_bump(payload, &self.circle_id, &manifest).ok()?;
-        match self.session.apply_bump(from, to).ok()? {
-            BumpOutcome::Moved { dropped_own } => {
+        match self.session.apply_bump(from, to) {
+            Ok(BumpOutcome::Moved { dropped_own }) => {
                 // Our own reset lost to one made at the same time: it is not posted.
                 if dropped_own {
                     self.chat.pending_bump = None;
                 }
                 Some(seat)
             }
-            BumpOutcome::Stale => None,
+            Ok(BumpOutcome::Stale) => None,
+            // A card circle holds no root: it moves once it has the key, from a tap that
+            // fetched it ahead or from the next one.
+            Err(ChatError::NeedsGeneration(id)) => {
+                self.install_ahead(id);
+                Some(seat)
+            }
+            Err(_) => None,
         }
     }
 

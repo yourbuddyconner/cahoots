@@ -3,7 +3,7 @@
 //! ```text
 //! phone.cbor                     this phone's own key, the name and the face seed
 //! circles/<id>/circle.cbor       params, seat, words, manifest, root, pair keys, seat key label
-//! circles/<id>/pad.bin           the pad, raw
+//! circles/<id>/pad.bin           the pad, raw (none for a card circle)
 //! circles/<id>/ledger.bin        spent ranges per slice (none yet: the app sends no pure-pad messages)
 //! circles/<id>/chat.cbor         chat session state and the outbox
 //! circles/<id>/cards.cbor        the signed cards read from the chat, and this seat's own
@@ -161,12 +161,59 @@ pub struct CircleRecord {
     /// Where the hello words with each seat stand.
     #[n(11)]
     pub pair_counters: Vec<u32>,
+    /// Set for a card circle: a circle of a badge this phone is paired to. It has no pad, no
+    /// root, no pair keys and no seat key of its own (`root`, `pair_keys`, `seat_label` and
+    /// `seat_public` are empty): it chats as the badge's seat under a generation key from a
+    /// tap, and asks the tap for hello words.
+    #[n(12)]
+    pub card: Option<CardCircle>,
+}
+
+impl CircleRecord {
+    /// A circle of a badge this phone is paired to.
+    pub fn is_card(&self) -> bool {
+        self.card.is_some()
+    }
+}
+
+/// What a card circle keeps of the badge it belongs to.
+#[derive(Encode, Decode, Clone)]
+pub struct CardCircle {
+    /// The badge's name, from its pairing object.
+    #[n(0)]
+    pub badge_name: String,
+    /// The circle's slot in the badge's chip, 0 to 15.
+    #[n(1)]
+    pub circle_slot: u8,
+    /// The badge's seat key in this circle, SEC1 compressed, as the manifest has it.
+    #[n(2)]
+    pub badge_public: ByteVec,
+    /// The key of the generation the chat starts in, from the tap that paired. The chat is
+    /// built from it while `chat.cbor` holds no state.
+    #[n(3)]
+    #[cbor(with = "minicbor::bytes")]
+    pub generation_key: Option<[u8; 32]>,
+    /// The id of the generation the chat starts in.
+    #[n(4)]
+    #[cbor(with = "minicbor::bytes")]
+    pub generation: [u8; 32],
+    /// The `Signer` label of the keychain item that holds the phone slot's AES key for this
+    /// badge: `cahoots:card:` and the badge nonce in hex.
+    #[n(5)]
+    pub key_label: String,
+    /// Bumps the badge signed at an unpair that this phone has still to post, oldest first:
+    /// `from_id || to_id || COSE_Sign1` each.
+    #[n(6)]
+    pub forward: Vec<ByteVec>,
 }
 
 impl Drop for CircleRecord {
     fn drop(&mut self) {
         self.root.zeroize();
         for k in &mut self.pair_keys {
+            k.zeroize();
+        }
+        if let Some(k) = self.card.as_mut().and_then(|c| c.generation_key.as_mut()) {
             k.zeroize();
         }
     }
@@ -421,6 +468,37 @@ pub fn create_circle(root: &Path, id_hex: &str, c: &NewCircle) -> Result<PathBuf
     c.record.save(&tmp)?;
     c.chat.save(&tmp)?;
     c.settings.save(&tmp)?;
+    CursorRecord::default().save(&tmp)?;
+    fs::rename(&tmp, &dir).map_err(io)?;
+    File::open(&base).and_then(|d| d.sync_all()).map_err(io)?;
+    Ok(dir)
+}
+
+/// The files of a new card circle, written into a hidden directory and renamed into place:
+/// no pad and no ledger, as there is no pad.
+pub fn create_card_circle(
+    root: &Path,
+    id_hex: &str,
+    record: &CircleRecord,
+    chat: &ChatRecord,
+    settings: &SettingsRecord,
+) -> Result<PathBuf, PhoneError> {
+    let base = circles_dir(root);
+    fs::create_dir_all(&base).map_err(io)?;
+    let dir = base.join(id_hex);
+    if dir.exists() {
+        return Err(PhoneError::Ceremony {
+            message: "This phone already holds this circle.".into(),
+        });
+    }
+    let tmp = base.join(format!(".{id_hex}.new"));
+    if tmp.exists() {
+        fs::remove_dir_all(&tmp).map_err(io)?;
+    }
+    fs::create_dir_all(&tmp).map_err(io)?;
+    record.save(&tmp)?;
+    chat.save(&tmp)?;
+    settings.save(&tmp)?;
     CursorRecord::default().save(&tmp)?;
     fs::rename(&tmp, &dir).map_err(io)?;
     File::open(&base).and_then(|d| d.sync_all()).map_err(io)?;
