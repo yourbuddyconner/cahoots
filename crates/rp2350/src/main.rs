@@ -222,14 +222,28 @@ fn main() -> ! {
         let _ = ena.set_low();
         log!("se051: pin low");
     }
-    // The badge's identity to its chip, from the RP2350's unique id (the device and wafer
-    // ids the boot ROM reports, each little-endian), so a reflash recovers it.
-    let owner_secret = match hal::rom_data::sys_info_api::chip_info() {
-        Ok(Some(info)) => {
-            let mut id = [0u8; 8];
+    // The badge's identity to its chip, so a reflash recovers it: the device and wafer ids
+    // the boot ROM reports, each little-endian, then the factory's 128-bit random id from OTP
+    // (RANDID0 to RANDID7, ECC rows 0x008 to 0x00F, 16 bits each, read little-endian in row
+    // order; the RP2350 datasheet's OTP chapter, list of OTP_DATA rows, and `rp235x-pac`'s
+    // `otp_data::RANDID0` to `RANDID7`). The boot ROM's `get_sys_info` does not report
+    // RANDID, so the device and wafer ids alone, which it does, are not the whole secret.
+    let randid = (0..8).try_fold([0u8; 16], |mut out, i| {
+        let word = hal::otp::read_ecc_word(0x008 + i).ok()?;
+        out[2 * i..2 * i + 2].copy_from_slice(&word.to_le_bytes());
+        Some(out)
+    });
+    let owner_secret = match (hal::rom_data::sys_info_api::chip_info(), randid) {
+        (Ok(Some(info)), Some(randid)) => {
+            let mut id = [0u8; 24];
             id[..4].copy_from_slice(&info.device_id.to_le_bytes());
-            id[4..].copy_from_slice(&info.wafer_id.to_le_bytes());
+            id[4..8].copy_from_slice(&info.wafer_id.to_le_bytes());
+            id[8..].copy_from_slice(&randid);
             Some(cahoots_chip::owner_secret(&id))
+        }
+        (_, None) => {
+            log!("rp2350: OTP gave no random id, so the badge cannot own its chip");
+            None
         }
         _ => {
             log!("rp2350: the boot ROM gave no unique id, so the badge cannot own its chip");
