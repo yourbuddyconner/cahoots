@@ -142,29 +142,38 @@ build 202610302331 to App Store Connect (delivery 462fbaa7).
 
 ### Pair a card on a device
 
-Needs the bench badge: the Pico 2 with its SE051 on USB, the antenna switch on, flashed from the
-`chip-pairing` branch. The first boot of that firmware wipes the circles whose keys were in the
-chip. Make a new circle on it with the bench ceremony or a pile before pairing, because a badge
-with no circles cannot pair.
+Needs the bench badge: the Pico 2 with its SE051 Click board on USB, flashed from main. The
+chip takes its antenna only when the phone's field is what starts it, so on the pages where a
+phone taps the badge cuts the Click board's power. For that the bench needs two things: the
+Click board's ENA SEL switch on EN (not ON), so the badge's enable pin reaches the chip, and
+the Click board's +3.3V fed through a PNP transistor (an S8550 works) with its emitter on the
+Pico's 3V3, its collector on the Click board's +3.3V pin and its base through about 1 kΩ to
+GP3, the Pico's pin 5. The antenna switch is on. Without the transistor the chip stays powered
+and no tap reaches it. Make a new circle on the badge with the bench ceremony or a pile before
+pairing, because a badge with no circles cannot pair.
 
 1. On the badge, open "pair a phone" from the list. It shows "hold the phone to the chip, then
-   press both".
-2. In the app, open Settings and choose "Pair a card". Type a name for this phone, choose "Hold
-   the phone to the card", and hold the phone to the badge's antenna. Face ID asks once, because
-   the phone signs its request with its enclave key. The app shows how many circles the badge
-   holds and six words, and says "On the badge, press both to see its words. If they match,
-   press both again, then hold the phone to the card." A badge with no name shows as "your
-   badge".
+   press both". The chip's power is cut while this page is open.
+2. In the app, open Settings and choose "Pair a card". Type a name for this phone and choose
+   "Hold the phone to the card". Face ID asks first, before the NFC sheet, because the phone
+   signs its request with its enclave key during the tap and the camera cannot see a face while
+   the phone lies on the badge. Then hold the phone to the badge's antenna. The app shows how
+   many circles the badge holds and six words, and says "On the badge, press both to see its
+   words. If they match, press both again, then hold the phone to the card." A badge with no
+   name shows as "your badge".
 3. On the badge, press both. It shows "pair with" the phone's name and six words in two rows.
    Check they match the phone's, then press both again. The badge says "paired with" the name
-   and "tap the phone again".
+   and "tap the phone again", and cuts the chip's power again for that tap.
 4. In the app, choose "Hold the phone again" and hold the phone to the antenna. This tap asks
-   nothing. The app shows "Paired with" the badge and the circles it kept. Choose "Done".
+   nothing. The app shows "Paired with" the badge and the circles it kept. Choose "Done". Press
+   a button on the badge to go back to its list, which gives the chip its power back.
 5. On Circles, each of the badge's circles shows the badge's face and "Card circle on" the
    badge. Open one's chat. Post from the browser or another phone and read it here, and post
-   back. When the composer is replaced by "Tap your card to catch up", choose it and hold the
-   phone to the antenna. Face ID asks here, because the tap reads the card's key from the
-   keychain.
+   back. When the composer is replaced by "Tap your card to catch up", first open "phone" from
+   the badge's list: that page says "hold the phone to the chip for its taps" and cuts the
+   chip's power while it is open. Then choose "Tap your card to catch up" and hold the phone to
+   the antenna. Face ID asks here, because the tap reads the card's key from the keychain. The
+   same goes for hello words in People. Leave the page afterwards with a side button.
 6. On the badge, open "phone" from the list and press both. It says "phone unpaired" and "its
    taps end now". In the app, the next tap, for hello words in People or for a key in the chat,
    says "This card no longer knows this phone." The card circle still reads and posts in its
