@@ -271,9 +271,9 @@ in no session, with the chip's pin raised for the exchange, as a phone's tap fin
    card does not open with this key"), and the badge's log said it wrote every public object
    with a pending bump and no phone.
 
-The 2026-11-01 run used the firmware before the owner secret took in the RP2350's random id,
-because the bench chip was owned under the earlier secret. With the later firmware the bench
-chip's owner session does not open, and the badge runs without its chip.
+The bench chip was owned under the owner secret of builds before 2026-11-01. The firmware tries
+that older secret when the current one does not open the chip, and logs "se051: owner session
+open with the older secret".
 
 What the applet does that the client and the software chip had to learn: no Le inside a wrapped
 command (it ends the session with `6982`), `6985` for an id that holds nothing, the two-byte
