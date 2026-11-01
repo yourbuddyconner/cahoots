@@ -8,21 +8,28 @@ import SwiftUI
 /// every error is written to a log the person can share.
 struct NfcDiagnosticsView: View {
     @StateObject private var probe = NfcProbe()
+    @State private var copied = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xl) {
-                Text("Hold the phone to a badge’s chip. The app selects the chip’s applet, asks for its version and asks for random bytes, then writes test bytes of three sizes into the badge’s inbox and reads them back. It touches no key. A write that does not get through shows how much the phone’s field can power.")
+                Text("Hold the phone to a badge’s chip. The app selects the chip’s applet, asks for its version and asks for random bytes, then writes test bytes of three sizes into the badge’s inbox. It touches no key. A write that does not get through shows how much the phone’s field can power.")
                     .font(.subheadline).foregroundStyle(Color.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 if !probe.available {
                     StatusLine(text: "This device cannot read NFC tags.")
                 }
-                Button(probe.running ? "Looking for a chip…" : "Hold the phone to the chip") { probe.start() }
+                Button(probe.running ? "Looking for a chip…" : "Hold the phone to the chip") { copied = false; probe.start() }
                     .buttonStyle(FilledButtonStyle())
                     .disabled(!probe.available || probe.running)
                     .accessibilityIdentifier("nfc-start")
                 if !probe.lines.isEmpty {
+                    Button(copied ? "Copied" : "Copy what happened") {
+                        UIPasteboard.general.string = probe.transcript
+                        copied = true
+                    }
+                    .buttonStyle(TextButtonStyle(full: false))
+                    .accessibilityIdentifier("nfc-copy")
                     PaperSection(title: "What happened") {
                         VStack(alignment: .leading, spacing: Space.s) {
                             ForEach(probe.lines) { line in
@@ -172,10 +179,11 @@ final class NfcProbe: NSObject, ObservableObject {
             add("GetRandom answered \(hex(r)), which is not sixteen bytes in a TLV.", problem: true)
         }
 
-        // Writes into the badge's inbox, which any tap may write, in three sizes. Flash
-        // programming is the chip's hungriest work, so this shows how much the phone's field
-        // can power through this antenna. The badge only reads its inbox when its owner
-        // presses both buttons during a pairing, so these bytes are harmless.
+        // Writes into the badge's inbox, which any tap may write but only the badge may read
+        // (a read here is refused with 69 86 by design), in three sizes. Flash programming
+        // is the chip's hungriest work, so this shows how much the phone's field can power
+        // through this antenna. The badge only reads its inbox when its owner presses both
+        // buttons during a pairing, so these bytes are harmless.
         for size in [16, 64, 160] {
             let bytes = Data((0..<size).map { UInt8(truncatingIfNeeded: $0 &+ size) })
             let started = Date()
@@ -186,16 +194,6 @@ final class NfcProbe: NSObject, ObservableObject {
             guard await send(write, "Write \(size) bytes", tag, session) != nil else { return }
             let ms = Int(Date().timeIntervalSince(started) * 1000)
             add("Write \(size) bytes took \(ms) ms.")
-            let read = NFCISO7816APDU(instructionClass: 0x80, instructionCode: 0x02, p1Parameter: 0x00,
-                                      p2Parameter: 0x00,
-                                      data: tlv(0x41, Self.inboxId) + tlv(0x42, Data([0, 0])) + tlv(0x43, Data([0, UInt8(size)])),
-                                      expectedResponseLength: 256)
-            guard let back = await send(read, "Read \(size) bytes back", tag, session) else { return }
-            if tlv41(back) == bytes {
-                add("The \(size) bytes read back as written.")
-            } else {
-                add("The \(size) bytes read back differently.", problem: true)
-            }
         }
 
         finish(session, "The chip answers over NFC, and writes get through.")
