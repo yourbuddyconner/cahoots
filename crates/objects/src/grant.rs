@@ -244,6 +244,11 @@ impl Grant {
     }
 }
 
+/// A device grant stays valid after its badge unpairs the phone: it has no expiry and no
+/// revocation yet. Any verifier that relies on one must also check that the circle's public
+/// object still names the grantee as its paired phone (field 8): unpairing clears that field
+/// at once.
+///
 /// The device grant a seat gives `grantee`, a device such as the phone paired to its badge:
 /// [`cwt::DEVICE_TYPE`] with every one of [`cwt::DEVICE_ACTIONS`], in circle `circle_id`, as
 /// seat `seat`, with `nonce` as its `cti`. No expiry, no log position, no delegation, no

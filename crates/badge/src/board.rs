@@ -422,6 +422,14 @@ pub trait Board {
     /// own. Afterwards `has_chip` is false and `chip_begin` is `None`. A board with a chip
     /// must do this; the default, for a board without one, does nothing.
     fn chip_unusable(&mut self) {}
+    /// Keep the chip's pin high until the badge is turned off and on, and stop handing the
+    /// chip out: the badge left the phone slot's id empty and could not fill it, and a tap
+    /// must not reach the chip before the next boot makes it again. After this `chip_end`
+    /// leaves the pin as it is, `has_chip` is false and `chip_begin` is `None`. The default,
+    /// for a board without a chip, does what [`Board::chip_unusable`] does.
+    fn chip_hold(&mut self) {
+        self.chip_unusable();
+    }
     /// The secret of the chip's owner object, the badge's identity to its chip. `None` on a
     /// board without a chip.
     fn owner_secret(&self) -> Option<[u8; 16]> {

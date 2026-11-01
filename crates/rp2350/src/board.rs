@@ -58,6 +58,9 @@ pub struct PicoBoard {
     pub chip_enable: Pin<Gpio2, FunctionSioOutput, PullDown>,
     /// True while the pin is high.
     pub chip_up: bool,
+    /// The badge held the chip until a restart: the pin stays high and no conversation ends
+    /// or begins, so no tap reaches the chip before the next boot.
+    pub chip_held: bool,
     /// The secret of the chip's owner object, from the RP2350's unique id, or `None` if the
     /// ROM did not give the id.
     pub owner_secret: Option<[u8; 16]>,
@@ -232,16 +235,19 @@ impl Board for PicoBoard {
     }
 
     fn has_chip(&self) -> bool {
-        self.chip.is_some()
+        self.chip.is_some() && !self.chip_held
     }
 
     fn chip_begin(&mut self) -> Option<&mut dyn ChipOps> {
+        if self.chip_held {
+            return None;
+        }
         self.wake().map(|c| c as &mut dyn ChipOps)
     }
 
     /// Close the session and drop the pin.
     fn chip_end(&mut self) {
-        if !self.chip_up {
+        if !self.chip_up || self.chip_held {
             return;
         }
         if let Some(chip) = self.chip.as_mut() {
@@ -257,6 +263,11 @@ impl Board for PicoBoard {
     fn chip_unusable(&mut self) {
         self.chip_end();
         self.chip = None;
+    }
+
+    fn chip_hold(&mut self) {
+        self.chip_held = true;
+        log!("se051: held, pin high until the badge restarts");
     }
 
     fn owner_secret(&self) -> Option<[u8; 16]> {

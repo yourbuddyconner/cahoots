@@ -12,9 +12,9 @@
 //! | 2 | the sealed manifest, bstr |
 //! | 3 | the signed contact card, bstr, or null |
 //! | 4 | the device grant for the paired phone, bstr, or null |
-//! | 5 | the current chat generation id, bstr 32 |
-//! | 6 | a bump the badge signed and a device has to post, bstr, or null |
-//! | 7 | the badge nonce drawn at first boot, bstr 16 |
+//! | 5 | the chat generation after the pending bumps, bstr 32: the one a newly paired phone fetches |
+//! | 6 | the bumps the badge signed at unpairs, oldest first, that a device has to post, in order: an array of bstr, empty when there are none |
+//! | 7 | the badge nonce drawn at first boot, bstr 16, kept for the record (pairing draws its own) |
 //! | 8 | the paired phone's public key, bstr 33, or null |
 //!
 //! The object is made a little larger than its first contents, so a grant, a bump and a card
@@ -44,8 +44,11 @@ pub struct PublicObject {
     pub manifest: Vec<u8>,
     pub card: Option<Vec<u8>>,
     pub grant: Option<Vec<u8>>,
+    /// The generation after every pending bump.
     pub generation: [u8; 32],
-    pub pending_bump: Option<Vec<u8>>,
+    /// The bumps the badge signed and no device is known to have posted, oldest first. Each
+    /// moves from the one before's generation; members skip the ones they have seen.
+    pub pending_bumps: Vec<Vec<u8>>,
     pub badge_nonce: [u8; 16],
     pub phone_public: Option<[u8; 33]>,
 }
@@ -82,8 +85,10 @@ impl PublicObject {
         e.u8(4)?;
         opt(e, self.grant.as_deref())?;
         e.u8(5)?.bytes(&self.generation)?;
-        e.u8(6)?;
-        opt(e, self.pending_bump.as_deref())?;
+        e.u8(6)?.array(self.pending_bumps.len() as u64)?;
+        for b in &self.pending_bumps {
+            e.bytes(b)?;
+        }
         e.u8(7)?.bytes(&self.badge_nonce)?;
         e.u8(8)?;
         opt(e, self.phone_public.as_ref().map(|p| p.as_slice()))?;
@@ -144,7 +149,14 @@ impl PublicObject {
         key(&mut d, 5)?;
         let generation: [u8; 32] = fixed(&mut d, 32)?.try_into().map_err(|_| Malformed)?;
         key(&mut d, 6)?;
-        let pending_bump = opt(&mut d)?;
+        let n = d.array().map_err(|_| Malformed)?.ok_or(Malformed)?;
+        if n > 64 {
+            return Err(Malformed);
+        }
+        let mut pending_bumps = Vec::new();
+        for _ in 0..n {
+            pending_bumps.push(d.bytes().map_err(|_| Malformed)?.to_vec());
+        }
         key(&mut d, 7)?;
         let badge_nonce: [u8; 16] = fixed(&mut d, 16)?.try_into().map_err(|_| Malformed)?;
         key(&mut d, 8)?;
@@ -160,7 +172,7 @@ impl PublicObject {
             card,
             grant,
             generation,
-            pending_bump,
+            pending_bumps,
             badge_nonce,
             phone_public,
         };

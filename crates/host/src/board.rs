@@ -169,6 +169,8 @@ pub struct HostBoard {
     chip: Option<HostChip>,
     /// True while a chip conversation is open (the real board's enable pin is high).
     chip_up: bool,
+    /// The badge held the chip until a restart: no conversation ends, none begins.
+    chip_held: bool,
     /// The place a pad was written to for a circle not stored yet.
     pending: Option<(CircleId, usize)>,
     /// When the board was made: `uptime_secs` counts from here.
@@ -361,6 +363,7 @@ impl HostBoard {
             seed,
             chip: None,
             chip_up: false,
+            chip_held: false,
             pending: None,
             started: Instant::now(),
         }
@@ -610,12 +613,15 @@ impl Board for HostBoard {
     }
 
     fn has_chip(&self) -> bool {
-        self.chip.is_some()
+        self.chip.is_some() && !self.chip_held
     }
 
     /// The software chip, in the owner session once the chip has an owner object. The
     /// simulated badge's owner secret is the fixed test secret.
     fn chip_begin(&mut self) -> Option<&mut dyn ChipOps> {
+        if self.chip_held {
+            return None;
+        }
         let chip = self.chip.as_mut()?;
         if !self.chip_up {
             self.chip_up = true;
@@ -629,6 +635,9 @@ impl Board for HostBoard {
     }
 
     fn chip_end(&mut self) {
+        if self.chip_held {
+            return;
+        }
         if let (true, Some(chip)) = (self.chip_up, self.chip.as_mut()) {
             let _ = chip.close_session();
         }
@@ -638,6 +647,11 @@ impl Board for HostBoard {
     fn chip_unusable(&mut self) {
         self.chip_end();
         self.chip = None;
+    }
+
+    fn chip_hold(&mut self) {
+        eprintln!("[{}] chip: held until the simulator restarts", self.name);
+        self.chip_held = true;
     }
 
     fn owner_secret(&self) -> Option<[u8; 16]> {

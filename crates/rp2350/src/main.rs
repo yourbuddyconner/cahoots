@@ -252,6 +252,7 @@ fn main() -> ! {
         chip,
         chip_enable: ena,
         chip_up: false,
+        chip_held: false,
         owner_secret,
     });
     badge.boot();

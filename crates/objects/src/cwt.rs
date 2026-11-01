@@ -28,7 +28,8 @@
 //! A device grant (`cahoots:device`) has one detail, `{"type": "cahoots:device", "actions":
 //! [...]}`, the actions some of `read`, `post` and `hello` in that order. A seat signs one per
 //! circle for the phone paired to its badge; it carries no channel detail, no log position and
-//! no expiry.
+//! no expiry. Unpairing does not revoke it: any future verifier must also check that the
+//! circle's public object still names the grantee as its paired phone.
 //!
 //! [`Claims::decode`] refuses anything that is not a grant: an unknown claim or detail type,
 //! a missing claim, an issuer that is not a circle, a `sub` that is not the key id of the `cnf`

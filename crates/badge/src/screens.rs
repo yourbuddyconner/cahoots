@@ -341,6 +341,22 @@ pub fn pair_prompt(name: &str, words: &[&str; 4]) -> Screen {
     s.done()
 }
 
+/// A pairing is open: the phone taps, then the owner presses both. `note` says what the last
+/// press found.
+pub fn pair_wait(note: Option<&str>) -> Screen {
+    let mut s = Draw::new();
+    s.title("pair a phone");
+    s.centered(&FONT_9X18_BOLD, 50, "hold the phone");
+    s.centered(&FONT_9X18_BOLD, 72, "to the chip");
+    s.centered(&FONT_8X13, 100, "then press both");
+    if let Some(n) = note {
+        s.wrapped_centered_cols(&FONT_6X13, 124, n, cols(&FONT_6X13), false);
+        s.lines.push(String::from(n));
+    }
+    s.footer(Some("back"), Some("A+B  ready"), Some("back"));
+    s.done()
+}
+
 /// The paired phone: its name, what it can do, and unpair.
 pub fn phone_page(name: &str) -> Screen {
     let mut s = Draw::new();

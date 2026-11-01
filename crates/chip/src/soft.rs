@@ -81,6 +81,8 @@ pub struct SoftChip {
     session: Session,
     /// With `Some(n)`, the creating call after the next `n` fails.
     fail_create: Option<usize>,
+    /// This many creating calls in a row fail, from the next.
+    fail_streak: usize,
     rng: SoftRng,
     clock: u64,
     ca: p256::ecdsa::SigningKey,
@@ -106,6 +108,7 @@ impl SoftChip {
             objects: BTreeMap::new(),
             session: Session::None,
             fail_create: None,
+            fail_streak: 0,
             rng: SoftRng { seed, counter: 0 },
             clock: 0,
             ca: p256::ecdsa::SigningKey::from_slice(&ca).expect("the test CA key is valid"),
@@ -305,6 +308,11 @@ impl SoftChip {
         self.fail_create = Some(0);
     }
 
+    /// The next `n` creating calls fail with `6A80`.
+    pub fn fail_next_creates_for_test(&mut self, n: usize) {
+        self.fail_streak = n;
+    }
+
     /// The creating call after the next `n` fails with `6A80`.
     pub fn fail_create_after_for_test(&mut self, n: usize) {
         self.fail_create = Some(n);
@@ -329,6 +337,10 @@ impl SoftChip {
     fn create(&mut self, id: KeyId, object: Object, policy: &ObjectPolicy) -> Result<(), ChipError> {
         if self.objects.contains_key(&id.0) {
             return Err(ChipError::Exists);
+        }
+        if self.fail_streak > 0 {
+            self.fail_streak -= 1;
+            return Err(ChipError::Status(0x6A80));
         }
         match self.fail_create {
             Some(0) => {

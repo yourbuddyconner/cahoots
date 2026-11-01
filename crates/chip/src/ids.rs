@@ -47,6 +47,9 @@ impl KeyId {
     pub const SLOT: KeyId = KeyId::new(KeyKind::Slot, 0);
     /// The inbox.
     pub const INBOX: KeyId = KeyId::new(KeyKind::Inbox, 0);
+    /// The pairing object: a binary object any tap reads, holding the nonce of the pairing the
+    /// badge has open. A public object in slot 255, which is no circle's.
+    pub const PAIRING: KeyId = KeyId::new(KeyKind::Public, 255);
 
     /// The id for `kind` in the circle's `slot` (0 to 255).
     pub const fn new(kind: KeyKind, slot: u8) -> KeyId {
@@ -79,15 +82,18 @@ impl KeyId {
         self.0 & 0xFFFF_0000 == Self::BASE
     }
 
-    /// True for the owner object, the phone slot and the inbox.
+    /// True for the owner object, the phone slot, the inbox and the pairing object.
     pub fn is_badge_wide(self) -> bool {
-        KeyId::parse(self.0).is_some_and(|(k, _)| k.is_badge_wide())
+        self == KeyId::PAIRING || KeyId::parse(self.0).is_some_and(|(k, _)| k.is_badge_wide())
     }
 
     /// The circle slot an object belongs to: the slot byte for the per-circle kinds, the
-    /// slot byte divided by 8 for a hello object. `None` for the badge-wide kinds, grant
-    /// counters and ids outside the range.
+    /// slot byte divided by 8 for a hello object. `None` for the badge-wide kinds and the
+    /// pairing object, grant counters and ids outside the range.
     pub fn circle_slot(self) -> Option<u8> {
+        if self == KeyId::PAIRING {
+            return None;
+        }
         match KeyId::parse(self.0)? {
             (KeyKind::Seat | KeyKind::Root | KeyKind::Epoch | KeyKind::Public, s) => Some(s),
             (KeyKind::Hello, s) => Some(s / 8),

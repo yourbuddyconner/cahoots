@@ -210,6 +210,9 @@ pub struct FakeBoard {
     pub pin_log: Vec<bool>,
     /// Set when the badge refused the chip: the board no longer hands it out.
     pub chip_refused: bool,
+    /// Set when the badge held the chip until a restart: the pin stays high and the board no
+    /// longer hands the chip out. [`FakeBoard::power_cycle`] clears it.
+    pub chip_held: bool,
     /// The chip record as stored, as a board keeps it (`CAHC2` and the CBOR).
     pub chip_record: Option<Vec<u8>>,
     /// The grants record as stored, its CBOR encoding.
@@ -339,6 +342,7 @@ impl FakeBoard {
             chip: None,
             pin_log: Vec::new(),
             chip_refused: false,
+            chip_held: false,
             chip_record: None,
             grants: None,
             uptime: 0,
@@ -431,6 +435,18 @@ impl FakeBoard {
         let mut r = self.chip_record_load().unwrap().expect("a chip record");
         r.insert(e);
         self.chip_record = Some(r.to_stored());
+    }
+
+    /// The badge is turned off and on: the pin drops, the chip forgets its session, and a
+    /// held chip is handed out again. A test calls `boot` after.
+    pub fn power_cycle(&mut self) {
+        if self.pin_high() {
+            self.pin_log.push(false);
+        }
+        self.chip_held = false;
+        if let Some(c) = self.chip.as_mut() {
+            c.no_session_for_test();
+        }
     }
 
     /// True while the chip's enable pin is high.
@@ -576,7 +592,10 @@ impl Board for FakeBoard {
         self.screens.push(lines.to_vec());
     }
     fn has_chip(&self) -> bool {
-        (self.chip.is_some() || self.failing.is_some()) && !self.chip_refused
+        (self.chip.is_some() || self.failing.is_some()) && !self.chip_refused && !self.chip_held
+    }
+    fn chip_hold(&mut self) {
+        self.chip_held = true;
     }
     fn chip_unusable(&mut self) {
         self.chip_end();
@@ -602,7 +621,7 @@ impl Board for FakeBoard {
         Some(c)
     }
     fn chip_end(&mut self) {
-        if !self.pin_high() {
+        if !self.pin_high() || self.chip_held {
             return;
         }
         let c: &mut dyn ChipOps = match self.failing.as_mut() {

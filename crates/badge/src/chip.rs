@@ -152,8 +152,21 @@ pub const REFUSED_GENERATION: u8 = 0xFF;
 /// The bytes a stored chip record starts with.
 pub const RECORD_MAGIC: &[u8; 5] = b"CAHC2";
 
-/// The inbox's length: room for a phone's key, its name and the slot key, as CBOR.
-pub const INBOX_LEN: usize = 128;
+/// The inbox's length: room for a phone's key, its name, the slot key and its signature, as
+/// CBOR ([`crate::pairing::Inbox`]).
+pub const INBOX_LEN: usize = 256;
+
+/// One bump signed at an unpair, kept in the chip record until its circle's public object
+/// carries it: the circle slot, the generation it moves to, and the payload.
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+pub struct PendingBump {
+    #[n(0)]
+    pub slot: u8,
+    #[cbor(n(1), with = "minicbor::bytes")]
+    pub to: [u8; 32],
+    #[cbor(n(2), with = "minicbor::bytes")]
+    pub payload: Vec<u8>,
+}
 
 /// The phone paired to this badge.
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
@@ -180,6 +193,11 @@ pub struct ChipRecord {
     /// `None` for none. Boot tries them again ([`crate::Badge::boot`]).
     #[n(4)]
     pub stuck: Option<Vec<u8>>,
+    /// An unpair under way: the bumps it signed, stored before it touches the phone slot or a
+    /// public object. Boot finishes it ([`crate::Badge::boot`]): each bump goes into its
+    /// circle's public object, and the entry goes once every one is written.
+    #[n(5)]
+    pub pending_unpair: Option<Vec<PendingBump>>,
 }
 
 /// The record of earlier firmware, which only [`ChipRecord::from_stored`] reads, to know it.
@@ -206,7 +224,12 @@ impl ChipRecord {
             .stuck
             .as_ref()
             .is_none_or(|v| !v.is_empty() && v.windows(2).all(|w| w[0] < w[1]));
-        if r.encode() != bytes || r.slots.windows(2).any(|w| w[0].slot >= w[1].slot) || !stuck_ok {
+        let unpair_ok = r.pending_unpair.as_ref().is_none_or(|v| !v.is_empty());
+        if r.encode() != bytes
+            || r.slots.windows(2).any(|w| w[0].slot >= w[1].slot)
+            || !stuck_ok
+            || !unpair_ok
+        {
             return Err(Malformed);
         }
         Ok(r)
@@ -539,17 +562,86 @@ pub fn make_placeholder(chip: &mut dyn ChipOps) -> Result<(), ChipError> {
     made
 }
 
+/// Why [`replace_slot`] did not put what it was asked to in the phone slot, and what the slot
+/// holds now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlotFailure {
+    /// The old slot could not be deleted: it is as it was.
+    Unchanged(ChipError),
+    /// The phone's key was not made; a placeholder was, in its place.
+    Placeholder(ChipError),
+    /// Nothing could be made: the slot's id is empty. The conversation must not end, or a
+    /// tap could fill it: the caller holds the chip until the next boot
+    /// ([`crate::Board::chip_hold`]), which makes the slot again.
+    Empty(ChipError),
+}
+
 /// Replace the phone slot with one holding `key` (a paired phone's) or, with `None`, with a
 /// placeholder ([`make_placeholder`]). Either way the slot keeps the placeholder's policy:
 /// delete for the owner and nothing else, so no session but the owner's can remove it. In the
 /// owner session. The caller has flagged the record with [`REMAKE_GENERATION`] first: between
-/// the delete and the make the slot's id is empty.
-pub fn replace_slot(chip: &mut dyn ChipOps, key: Option<&[u8; 16]>) -> Result<(), ChipError> {
-    delete_quietly(chip, KeyId::SLOT)?;
-    match key {
-        Some(k) => chip.put_aes_auth(KeyId::SLOT, k, &ObjectPolicy::placeholder_slot()),
-        None => make_placeholder(chip),
+/// the delete and the make the slot's id is empty. A make that fails is followed by a
+/// placeholder, tried twice, so the id is left empty only if the chip makes nothing.
+pub fn replace_slot(chip: &mut dyn ChipOps, key: Option<&[u8; 16]>) -> Result<(), SlotFailure> {
+    delete_quietly(chip, KeyId::SLOT).map_err(SlotFailure::Unchanged)?;
+    let first = match key {
+        Some(k) => match chip.put_aes_auth(KeyId::SLOT, k, &ObjectPolicy::placeholder_slot()) {
+            Ok(()) => return Ok(()),
+            Err(e) => e,
+        },
+        None => match make_placeholder(chip) {
+            Ok(()) => return Ok(()),
+            Err(e) => e,
+        },
+    };
+    let tries = if key.is_some() { 2 } else { 1 };
+    for _ in 0..tries {
+        if make_placeholder(chip).is_ok() {
+            return match key {
+                Some(_) => Err(SlotFailure::Placeholder(first)),
+                None => Ok(()),
+            };
+        }
     }
+    Err(SlotFailure::Empty(first))
+}
+
+/// True if the inbox in the chip is shorter than [`INBOX_LEN`]: one made by earlier firmware,
+/// too short for a signed request. [`remake_inbox`] makes it again.
+pub fn inbox_short(chip: &mut dyn ChipOps) -> Result<bool, ChipError> {
+    Ok(chip.read_binary(KeyId::INBOX)?.len() < INBOX_LEN)
+}
+
+/// Delete the inbox and make it again, empty, at [`INBOX_LEN`], in the owner session. The
+/// caller has flagged the record with [`REMAKE_GENERATION`] first, as for the slot, and holds
+/// the chip if this fails: an inbox a tap made could be readable by any session.
+pub fn remake_inbox(chip: &mut dyn ChipOps) -> Result<(), ChipError> {
+    delete_quietly(chip, KeyId::INBOX)?;
+    chip.write_binary(KeyId::INBOX, &[0; INBOX_LEN], &ObjectPolicy::inbox())
+}
+
+/// Write the pairing object ([`KeyId::PAIRING`]) with `nonce`, in the owner session: a fresh
+/// object, any object at its id deleted first, so one a tap made is never used.
+pub fn write_pairing(chip: &mut dyn ChipOps, nonce: &[u8; 16]) -> Result<(), ChipError> {
+    let bytes = crate::pairing::PairingObject {
+        nonce: *nonce,
+        name: String::new(),
+    }
+    .padded()
+    .expect("an empty name fits");
+    delete_quietly(chip, KeyId::PAIRING)?;
+    chip.write_binary(KeyId::PAIRING, &bytes, &ObjectPolicy::public_object())
+}
+
+/// Write a zero nonce over the pairing object: no pairing is open.
+pub fn close_pairing(chip: &mut dyn ChipOps) -> Result<(), ChipError> {
+    let bytes = crate::pairing::PairingObject {
+        nonce: [0; 16],
+        name: String::new(),
+    }
+    .padded()
+    .expect("an empty name fits");
+    chip.rewrite_binary(KeyId::PAIRING, &bytes)
 }
 
 /// Empty the inbox: zeros over the whole object. In the owner session.
@@ -666,5 +758,6 @@ pub fn first_boot(
         badge_nonce,
         generation: GENERATION,
         stuck: None,
+        pending_unpair: None,
     })
 }

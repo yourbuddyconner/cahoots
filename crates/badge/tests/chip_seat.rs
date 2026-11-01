@@ -365,6 +365,11 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
         badge_nonce: [9; 16],
         generation: GENERATION,
         stuck: Some(vec![3, 7]),
+        pending_unpair: Some(vec![cahoots_badge::chip::PendingBump {
+            slot: 3,
+            to: [4; 32],
+            payload: vec![1, 2, 3],
+        }]),
     };
     let bytes = r.encode();
     assert_eq!(ChipRecord::decode(&bytes), Ok(r.clone()));
@@ -389,8 +394,12 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
         assert!(ChipRecord::decode(&r2.encode()).is_err());
     }
     // A record with no stuck slots encodes as before, four fields.
+    let mut r2 = r.clone();
+    r2.pending_unpair = Some(vec![]);
+    assert!(ChipRecord::decode(&r2.encode()).is_err(), "an empty unpair is not canonical");
     let mut plain = r.clone();
     plain.stuck = None;
+    plain.pending_unpair = None;
     assert_eq!(plain.encode()[0], 0x84);
     let mut cut = stored.clone();
     cut.pop();
