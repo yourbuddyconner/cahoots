@@ -174,9 +174,9 @@ home by itself after five seconds, or at any press.
    "Hold the phone to the card". Face ID asks first, before the NFC sheet, because the phone
    signs its request with its enclave key during the tap and the camera cannot see a face while
    the phone lies on the badge. Then hold the phone to the badge's antenna. The app shows how
-   many circles the badge holds and six words, and says "On the badge, press both to see its
-   words. If they match, press both again, then hold the phone to the card." A badge with no
-   name shows as "your badge".
+   many circles the badge holds and six words, and says "Set the phone down. On the badge, press
+   both to show its six words. Compare every word in order. If they all match, press both
+   again, then hold the phone to the card." A badge with no name shows as "your badge".
 3. On the badge, press both. It shows "pair with" the phone's name and six words in two rows.
    Check they match the phone's, then press both again. The badge says "paired with" the name
    and "hold the phone again", then goes home with the tap window open for that tap.

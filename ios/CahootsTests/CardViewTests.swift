@@ -54,6 +54,15 @@ final class CardViewTests: XCTestCase {
         XCTAssertEqual(CardView.result(TapReport(keys: 0, bumps: 0, words: 0, kept: 1)), "Kept 1 new circle.")
     }
 
+    /// The badge writes no name of its own, so the crate says "your badge". The name on the
+    /// card the badge published, when there is one, is the one the screen shows.
+    func testTheBadgeIsNamedByItsCard() {
+        let s = CardStatus(paired: true, badge: "your badge", circles: 1, keysWanted: 0,
+                           bumpsToPost: 0, wordsLow: [], lastTap: nil)
+        XCTAssertEqual(CardView.badgeName(s, cardName: "Ada's badge"), "Ada's badge")
+        XCTAssertEqual(CardView.badgeName(s, cardName: nil), "your badge")
+    }
+
     func testTheLastTapIsNeverOrHowLongAgo() {
         XCTAssertEqual(CardView.lastTap(nil), "last tap: never")
         let now = Date(timeIntervalSince1970: 1_000_000)

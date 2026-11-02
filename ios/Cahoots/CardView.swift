@@ -71,12 +71,13 @@ struct CardView: View {
 
     /// The badge's name and face, the last tap, and what a tap would do now.
     private func paired(_ status: CardStatus) -> some View {
-        VStack(alignment: .leading, spacing: Space.xl) {
+        let name = Self.badgeName(status, cardName: badgeCardName)
+        return VStack(alignment: .leading, spacing: Space.xl) {
             HStack(spacing: Space.m) {
                 if let face = badgeFace {
-                    FaceView(pixels: face, size: 64, label: "\(status.badge)'s face")
+                    FaceView(pixels: face, size: 64, label: "\(name)'s face")
                 }
-                ScreenHeader(title: status.badge, detail: Self.lastTap(status.lastTap), style: .title)
+                ScreenHeader(title: name, detail: Self.lastTap(status.lastTap), style: .title)
             }
             PaperSection(title: "What a tap would do") {
                 ForEach(Array(Self.summary(status) { app.seatName(circle: $0, seat: $1) }.enumerated()), id: \.offset) { i, line in
@@ -90,6 +91,20 @@ struct CardView: View {
             }
             .accessibilityIdentifier("card-summary")
         }
+    }
+
+    /// The name on the card the badge published in a card circle, as the Circles list shows
+    /// it. Nil while it has published none.
+    private var badgeCardName: String? {
+        guard let c = app.circles.first(where: AppModel.isCard),
+              app.hasCardName(circle: c.id, seat: c.mySeat) else { return nil }
+        return app.seatName(circle: c.id, seat: c.mySeat)
+    }
+
+    /// The badge's name on this screen: the name on its card, else the crate's, which is
+    /// "your badge" since the badge writes no name of its own.
+    static func badgeName(_ status: CardStatus, cardName: String?) -> String {
+        cardName ?? status.badge
     }
 
     /// The badge's face: a card circle's own seat is the badge's, from the card it published.

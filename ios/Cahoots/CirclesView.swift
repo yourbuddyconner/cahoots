@@ -52,16 +52,11 @@ struct CirclesView: View {
             }
         }
         .refreshable { _ = await model.pollAll() }
+        // The two buttons are stacked, with or without circles: side by side, "Create a
+        // circle" was cut off.
         .actionBar {
-            if model.circles.isEmpty {
-                create
-                join
-            } else {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: Space.s) { join; create }
-                    VStack(spacing: Space.s) { create; join }
-                }
-            }
+            create
+            join
         }
     }
 

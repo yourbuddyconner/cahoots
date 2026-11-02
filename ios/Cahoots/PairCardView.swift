@@ -212,7 +212,7 @@ private struct PairCheckStep: View {
     let preview: PairPreview
     let startOver: () -> Void
 
-    static let detail = "On the badge, press both to see its words. If they match, press both again, then hold the phone to the card."
+    static let detail = "Set the phone down. On the badge, press both to show its six words. Compare every word in order. If they all match, press both again, then hold the phone to the card."
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xl) {
