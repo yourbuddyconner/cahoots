@@ -214,6 +214,12 @@ pub struct CardCircle {
     /// pocket, which is the same as an empty one.
     #[n(7)]
     pub hello_pocket: Option<Vec<PocketWords>>,
+    /// The other seats the card holds no hello object for that the phone slot may use, as a
+    /// circle the badge kept before it made hello objects: those seats get no hello words from
+    /// the card. A later tap that gets a seat's words takes it off. `None` in a record written
+    /// before this, which is the same as none.
+    #[n(8)]
+    pub no_hello: Option<Vec<u8>>,
 }
 
 /// One hello number's words with another seat of a card circle, as the card's MACs: the first

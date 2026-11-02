@@ -78,6 +78,8 @@ pub enum TapError {
     NoPairing,
     /// Two public objects the badge vouches for name the same circle.
     Disagree,
+    /// The card ended the secure session (`6982` inside it).
+    SessionEnded,
     /// Any other status word.
     Status(u16),
     /// The reader said so.
@@ -110,6 +112,7 @@ impl From<TapError> for PhoneError {
             TapError::NotScp03 => nfc("The card does not offer the secure channel this app needs."),
             TapError::NoPairing => nfc("Open “pair a phone” on your badge, then hold the phone to the card again."),
             TapError::Disagree => nfc("This card's records disagree. Unpair and pair again."),
+            TapError::SessionEnded => nfc("The card stopped answering. Tap the card again."),
             TapError::Status(sw) => PhoneError::Nfc {
                 message: format!("The card answered with code {sw:04X}. Try again."),
             },
@@ -425,6 +428,11 @@ impl Channel for Session<'_, '_> {
         // session (bench, SE051 applet 7.2.0, 2026-10-31). The answer comes back anyway.
         let inner = self.scp.wrap(c.cla, c.ins, c.p1, c.p2, &c.data, None);
         let (data, sw) = self.tap.send(&apdu::process_session(&self.id, &inner).encode())?;
+        if sw == 0x6982 {
+            // In a session the applet answers this when it has ended the session, not for an
+            // object's policy, which is `6986`.
+            return Err(TapError::SessionEnded);
+        }
         if sw != 0x9000 {
             return Err(refused(sw));
         }

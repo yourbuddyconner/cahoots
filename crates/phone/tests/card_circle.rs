@@ -726,10 +726,11 @@ fn the_second_tap_fills_a_pocket_of_eight_hellos_per_seat_and_no_tap_follows() {
 }
 
 /// A circle the badge kept before it made hello objects has none: a placeholder, or nothing,
-/// stands at its hello ids. The second tap keeps it with its key, and that seat gets no words
-/// from the card, so a hello with it asks for a tap.
+/// stands at its hello ids. The second tap keeps it with its key, marks that seat, and the
+/// seat gets no words from the card: a hello with it says so plainly and asks for no tap, and
+/// the Card screen does not count it as running low.
 #[test]
-fn a_circle_without_hello_objects_is_kept_with_no_words_from_the_card() {
+fn a_circle_without_hello_objects_is_kept_with_the_seat_marked() {
     for placeholder in [true, false] {
         let relay = Arc::new(Mutex::new(MemRelay::default()));
         let (mut b1, b2) = kept_pair((true, true));
@@ -750,9 +751,43 @@ fn a_circle_without_hello_objects_is_kept_with_no_words_from_the_card() {
         let card = record.card.as_ref().unwrap();
         assert!(card.generation_key.is_some());
         assert!(card.hello_pocket.as_ref().is_some_and(|p| p.is_empty()));
-        let e = d.phone.hello_words(ids[0].clone(), other).err().unwrap();
-        assert!(matches!(e, PhoneError::NeedsTap), "{e:?}");
+        assert_eq!(card.no_hello, Some(vec![other]));
+        assert!(d.phone.card_status().unwrap().words_low.is_empty());
+        for e in [
+            d.phone.hello_words(ids[0].clone(), other).err().unwrap(),
+            d.phone.next_hello(ids[0].clone(), other).err().unwrap(),
+        ] {
+            assert!(matches!(e, PhoneError::NotFound { .. }), "{e:?}");
+            assert_eq!(e.to_string(), "This seat has no hello words from the card.");
+        }
     }
+}
+
+/// A later tap that gets a marked seat's words takes the mark off, and the words come.
+#[test]
+fn a_tap_that_gets_a_marked_seats_words_takes_the_mark_off() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b1, b2) = kept_pair((true, true));
+    let other = b2.circle().unwrap().seat;
+    let mut d = device(&relay);
+    let id = pair(&mut b1, &d).remove(0);
+    let dir = d.path.join("circles").join(&id);
+
+    // As if an earlier tap had found no hello object for the seat.
+    let mut record = CircleRecord::load(&dir).unwrap();
+    let card = record.card.as_mut().unwrap();
+    card.no_hello = Some(vec![other]);
+    card.hello_pocket = Some(Vec::new());
+    record.save(&dir).unwrap();
+    d.restart();
+    assert!(matches!(d.phone.hello_words(id.clone(), other), Err(PhoneError::NotFound { .. })));
+
+    let report = tap(&mut b1, &d, |p| p.tap_card()).unwrap();
+    assert_eq!(report.words, 8);
+    let record = CircleRecord::load(&dir).unwrap();
+    assert_eq!(record.card.as_ref().unwrap().no_hello, Some(Vec::new()));
+    let h = d.phone.hello_words(id.clone(), other).unwrap();
+    assert_eq!((h.number, h.card_left), (0, Some(8)));
 }
 
 #[test]

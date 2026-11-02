@@ -1150,7 +1150,8 @@ impl Phone {
 
     /// The hello words with `other_seat` at the current hello number. In a card circle they
     /// come from the words the last tap on the card fetched ahead, with no tap now: `NeedsTap`
-    /// when it fetched none for this number.
+    /// when it fetched none for this number, and `NotFound` for a seat the card holds no hello
+    /// object for, since a tap would bring none.
     pub fn hello_words(&self, circle: String, other_seat: u8) -> Result<HelloWords, PhoneError> {
         self.with_circle(&circle, |c, _| {
             if c.record.is_card() {
@@ -1162,7 +1163,8 @@ impl Phone {
 
     /// Move to the next hello words with `other_seat`. Both people do this. In a card circle
     /// the words come from the words the last tap fetched ahead, and the number moves only
-    /// when they are there: else `NeedsTap`, and the number stays.
+    /// when they are there: else `NeedsTap`, and the number stays. `NotFound` for a seat the
+    /// card holds no hello object for.
     pub fn next_hello(&self, circle: String, other_seat: u8) -> Result<HelloWords, PhoneError> {
         self.with_circle(&circle, |c, _| {
             if c.record.is_card() {
