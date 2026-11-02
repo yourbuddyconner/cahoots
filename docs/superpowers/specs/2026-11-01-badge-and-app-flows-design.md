@@ -270,9 +270,12 @@ inside a window the owner opened, so the exposure is small, and it is worth stat
   kept three circles in 6.2 seconds: 83 commands, 32 of them hello MACs, 11 root MACs and 31
   reads. Over NFC a command took 37 to 55 ms, so a chip full of circles stays well under a
   tap's 60 seconds, and no limit on the MACs of one tap is needed yet.
-- A seat whose hello object refuses the slot or is not there gets no words from the card, and
-  the tap goes on. A circle the badge kept before it made hello objects (before the evening of
-  2026-10-31) has none: the bench's two oldest circles hold placeholders at their hello ids.
+- A seat whose hello object refuses the slot or is not there (`6985`, `6986` or `6A82` at the
+  seat's first MAC in a tap) gets no words from the card, and the tap goes on. The phone marks
+  the seat: its hello words say "This seat has no hello words from the card." and ask for no
+  tap, and the Card screen does not count it as running low. A later tap that gets its words
+  takes the mark off. A circle the badge kept before it made hello objects (before the evening
+  of 2026-10-31) has none: the bench's two oldest circles hold placeholders at their hello ids.
 
 ## 12. Left to the builder
 

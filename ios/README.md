@@ -152,17 +152,20 @@ Click board's +3.3V fed through a PNP transistor (an S8550 works) with its emitt
 Pico's 3V3, its collector on the Click board's +3.3V pin and its base through about 1 kΩ to
 GP3, the Pico's pin 5. The antenna switch is on. Without the transistor the chip stays powered
 and no tap reaches it. Make a new circle on the badge with the bench ceremony or a pile before
-pairing, because a badge with no circles cannot pair.
+pairing, because a badge with no circles cannot pair. The two circles already on the bench
+badge, owner-bench3 and owner-bench4, were kept before the badge made hello objects, so their
+seats get no hello words from the card: People says "This seat has no hello words from the
+card." for them, and the Card screen does not count them. To try hello words from the card,
+keep a new circle before pairing.
 
 The badge rests on home: "badge" over the names of its circles, a status line, and "tap",
 "A+B menu" and "menu" along the bottom. The left button opens a tap window of two minutes: the
 status line says "open for a tap, 2 min", then "1 min", and the chip's power is cut until the
 window closes. Press the left button again to close it early, and the status line says "closed
 to taps". Opening the menu closes it too. Both buttons, or the right one, open the menu: the
-badge's circles by name, "new
-circle", "pair a phone", "phone" while a phone is paired, and "back". The side buttons move
-along it and both buttons choose. A note after an action goes home by itself after five
-seconds, or at any press.
+badge's circles by name, "new circle", "pair a phone", "phone" while a phone is paired, and
+"back". The side buttons move along it and both buttons choose. A note after an action goes
+home by itself after five seconds, or at any press.
 
 1. On the badge, press both for the menu, move to "pair a phone" and press both. The page says
    "hold the phone to the chip, then press both". The chip's power is cut while it is open.
@@ -195,7 +198,8 @@ seconds, or at any press.
    other circle. When three or fewer are left with that seat, the page says "N hellos left from
    your card. Tap the card soon." When none are left, "Next hello" becomes "Tap the card", which
    taps as in step 6. A circle the badge kept before it made hello objects, before the evening
-   of 2026-10-31, gets no hello words from the card.
+   of 2026-10-31, gets no hello words from the card: its seats say "This seat has no hello
+   words from the card." and offer no tap.
 8. On the badge, press both for the menu, move to "phone" and press both. The page names the
    paired phone. Press both again to unpair. The badge says "phone unpaired" and "its taps end
    now", then goes home. In the app, the next tap says "This card no longer knows this phone."
@@ -320,8 +324,9 @@ open with the older secret".
 
 What the applet does that the client and the software chip had to learn: no Le inside a wrapped
 command (it ends the session with `6982`), `6985` for an id that holds nothing, the two-byte
-TLV length in some answers, and a 2-byte answer to ReadSize. Core NFC on a device first ran on
-2026-11-01, when a phone paired with this board by tap.
+TLV length in some answers, and a 2-byte answer to ReadSize. Core NFC on a device first reached
+this chip on 2026-10-31, an iPhone 11 held to the board's antenna while the board had no power.
+A phone first paired with this board by tap on 2026-11-01.
 
 ## First-use guide
 
