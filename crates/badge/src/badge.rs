@@ -2188,7 +2188,7 @@ impl<B: Board> Badge<B> {
     /// hello object for each other seat from the pair key the ceremony gave for it, and the
     /// circle's public object in place of the placeholder at its id. The chip record learns the
     /// slot. With a phone paired, the public object carries a device grant for it, so the
-    /// phone finds the new circle at its next tap.
+    /// phone's next tap on the card keeps the new circle.
     ///
     /// A chip that refuses an object for want of memory (`6A84`) fails the keep closed: the
     /// circle is not kept, its seat key is deleted, and the badge says [`CHIP_FULL`]. On the
@@ -2292,7 +2292,8 @@ impl<B: Board> Badge<B> {
         self.board
             .chip_record_store(&record)
             .map_err(|_| String::from("flash: chip record failed"))?;
-        // A paired phone finds the new circle at its next tap.
+        // The pairing object names the new slot. A paired phone's next tap lists the slots it
+        // names and keeps the circle it does not hold yet.
         self.sync_pairing();
         Ok(())
     }

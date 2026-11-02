@@ -156,7 +156,8 @@ pairing, because a badge with no circles cannot pair. The two circles already on
 badge, owner-bench3 and owner-bench4, were kept before the badge made hello objects, so their
 seats get no hello words from the card: People says "This seat has no hello words from the
 card." for them, and the Card screen does not count them. To try hello words from the card,
-keep a new circle before pairing.
+keep a new circle, before pairing or after: a circle the badge keeps after pairing comes to the
+phone at its next tap on the Card screen.
 
 The badge rests on home: "badge" over the names of its circles, a status line, and "tap",
 "A+B menu" and "menu" along the bottom. The left button opens a tap window of two minutes: the
@@ -192,8 +193,9 @@ home by itself after five seconds, or at any press.
    for a tap", then choose "Tap the card" and hold the phone to the antenna. No page on the
    badge needs opening. Face ID asks before the NFC sheet, because the tap reads the card's key
    from the keychain. One tap fetches every key a chat waits for, passes on the bumps the badge
-   signed, and tops up the hello words. When a chat's composer is replaced by "Tap the card",
-   that button taps the same way.
+   signed, and tops up the hello words. It also keeps any circle the badge kept since it
+   paired, with its chat key and hello words, and the result says "and kept 1 new circle". When
+   a chat's composer is replaced by "Tap the card", that button taps the same way.
 7. In People, open a seat for hello words. They come from the phone with no tap, as in any
    other circle. When three or fewer are left with that seat, the page says "N hellos left from
    your card. Tap the card soon." When none are left, "Next hello" becomes "Tap the card", which

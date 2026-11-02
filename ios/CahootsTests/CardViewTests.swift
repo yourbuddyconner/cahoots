@@ -34,14 +34,24 @@ final class CardViewTests: XCTestCase {
     }
 
     func testWhatATapDidInOneSentence() {
-        XCTAssertEqual(CardView.result(TapReport(keys: 2, bumps: 1, words: 16)),
+        XCTAssertEqual(CardView.result(TapReport(keys: 2, bumps: 1, words: 16, kept: 0)),
                        "Fetched 2 keys and 16 hello words, and passed on 1 bump.")
-        XCTAssertEqual(CardView.result(TapReport(keys: 0, bumps: 0, words: 0)), "Nothing was waiting.")
-        XCTAssertEqual(CardView.result(TapReport(keys: 1, bumps: 0, words: 0)), "Fetched 1 key.")
-        XCTAssertEqual(CardView.result(TapReport(keys: 0, bumps: 0, words: 1)), "Fetched 1 hello word.")
-        XCTAssertEqual(CardView.result(TapReport(keys: 0, bumps: 2, words: 0)), "Passed on 2 bumps.")
-        XCTAssertEqual(CardView.result(TapReport(keys: 0, bumps: 1, words: 8)),
+        XCTAssertEqual(CardView.result(TapReport(keys: 0, bumps: 0, words: 0, kept: 0)), "Nothing was waiting.")
+        XCTAssertEqual(CardView.result(TapReport(keys: 1, bumps: 0, words: 0, kept: 0)), "Fetched 1 key.")
+        XCTAssertEqual(CardView.result(TapReport(keys: 0, bumps: 0, words: 1, kept: 0)), "Fetched 1 hello word.")
+        XCTAssertEqual(CardView.result(TapReport(keys: 0, bumps: 2, words: 0, kept: 0)), "Passed on 2 bumps.")
+        XCTAssertEqual(CardView.result(TapReport(keys: 0, bumps: 1, words: 8, kept: 0)),
                        "Fetched 8 hello words, and passed on 1 bump.")
+    }
+
+    /// A circle the badge kept after this phone paired comes with the tap, and the sentence
+    /// says so.
+    func testATapThatKeptANewCircleSaysSo() {
+        XCTAssertEqual(CardView.result(TapReport(keys: 1, bumps: 0, words: 8, kept: 1)),
+                       "Fetched 1 key and 8 hello words, and kept 1 new circle.")
+        XCTAssertEqual(CardView.result(TapReport(keys: 3, bumps: 1, words: 16, kept: 2)),
+                       "Fetched 3 keys and 16 hello words, passed on 1 bump, and kept 2 new circles.")
+        XCTAssertEqual(CardView.result(TapReport(keys: 0, bumps: 0, words: 0, kept: 1)), "Kept 1 new circle.")
     }
 
     func testTheLastTapIsNeverOrHowLongAgo() {

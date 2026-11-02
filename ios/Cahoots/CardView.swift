@@ -128,19 +128,20 @@ struct CardView: View {
         return lines.isEmpty ? ["up to date"] : lines
     }
 
-    /// What one tap did, in one sentence: "Fetched 2 keys and 16 hello words, and passed on
-    /// 1 bump." A bump passed on reached the relay, or was there already.
+    /// What one tap did, in one sentence: "Fetched 2 keys and 16 hello words, passed on
+    /// 1 bump, and kept 1 new circle." A bump passed on reached the relay, or was there
+    /// already. A new circle is one the badge kept after this phone paired.
     static func result(_ r: TapReport) -> String {
         var fetched: [String] = []
         if r.keys > 0 { fetched.append(counted(r.keys, "key")) }
         if r.words > 0 { fetched.append(counted(r.words, "hello word")) }
-        let bumps = r.bumps > 0 ? counted(r.bumps, "bump") : nil
-        switch (fetched.isEmpty, bumps) {
-        case (true, nil): return "Nothing was waiting."
-        case let (true, bumps?): return "Passed on \(bumps)."
-        case (false, nil): return "Fetched \(fetched.joined(separator: " and "))."
-        case let (false, bumps?): return "Fetched \(fetched.joined(separator: " and ")), and passed on \(bumps)."
-        }
+        var parts: [String] = []
+        if !fetched.isEmpty { parts.append("fetched \(fetched.joined(separator: " and "))") }
+        if r.bumps > 0 { parts.append("passed on \(counted(r.bumps, "bump"))") }
+        if r.kept > 0 { parts.append("kept \(counted(r.kept, "new circle"))") }
+        guard let last = parts.popLast() else { return "Nothing was waiting." }
+        let sentence = parts.isEmpty ? last : parts.joined(separator: ", ") + ", and " + last
+        return sentence.prefix(1).uppercased() + sentence.dropFirst() + "."
     }
 
     /// "last tap: never", or how long ago, as "last tap: 2 minutes ago".

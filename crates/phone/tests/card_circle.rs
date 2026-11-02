@@ -564,7 +564,7 @@ fn a_phone_pairs_chats_by_tap_follows_a_bump_and_forgets_the_card() {
     assert!(held.card.as_ref().unwrap().generation_key.is_none());
 
     let report = tap(&mut b1, &d, |p| p.tap_card()).unwrap();
-    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 0 });
+    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 0, kept: 0 });
     assert!(!d.phone.circles()[0].needs_tap);
     let got = d.phone.poll(id.clone()).unwrap();
     assert_eq!(got.len(), 1);
@@ -577,7 +577,7 @@ fn a_phone_pairs_chats_by_tap_follows_a_bump_and_forgets_the_card() {
 
     // With nothing waiting a tap fetches nothing, and says so.
     let report = tap(&mut b1, &d, |p| p.tap_card()).unwrap();
-    assert_eq!(report, TapReport { keys: 0, bumps: 0, words: 0 });
+    assert_eq!(report, TapReport { keys: 0, bumps: 0, words: 0, kept: 0 });
 
     // The badge unpairs the phone: the next tap says so, and the card circles can be forgotten.
     b1.unpair().unwrap();
@@ -989,7 +989,7 @@ fn one_tap_fetches_the_waiting_key_posts_the_bumps_and_tops_up_the_pocket() {
     // One tap: the key, and five more pairs, numbers 8 to 12.
     let started = now_secs();
     let report = tap(&mut b1, &d, |p| p.tap_card()).unwrap();
-    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 5 });
+    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 5, kept: 0 });
     assert!(!d.phone.circles()[0].needs_tap);
     let s = d.phone.card_status().unwrap();
     assert_eq!(s.keys_wanted, 0);
@@ -1079,7 +1079,7 @@ fn a_tap_that_loses_the_card_keeps_nothing_half_done() {
     d.nfc.keep_card();
     // The reads, the key, ten hello MACs and the close: the sweep went past the restart.
     assert!(at > 15, "{at}");
-    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 5 });
+    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 5, kept: 0 });
     assert!(!d.phone.circles()[0].needs_tap);
     assert_eq!(d.phone.hello_words(id.clone(), other).unwrap().card_left, Some(8));
 }
@@ -1104,7 +1104,7 @@ fn a_card_circle_from_before_the_pocket_fills_at_the_next_tap() {
     assert_eq!(s.words_low, vec![WordsLeft { circle: id.clone(), seat: other, left: 0 }]);
 
     let report = tap(&mut b1, &d, |p| p.tap_card()).unwrap();
-    assert_eq!(report, TapReport { keys: 0, bumps: 0, words: 8 });
+    assert_eq!(report, TapReport { keys: 0, bumps: 0, words: 8, kept: 0 });
     let h = d.phone.hello_words(id.clone(), other).unwrap();
     assert_eq!((h.number, h.card_left), (0, Some(8)));
     assert!(d.phone.card_status().unwrap().words_low.is_empty());
@@ -1134,7 +1134,7 @@ fn face_id_comes_before_the_reader_opens() {
     d.signer.set_locked(false);
     d.nfc.keep_card();
     let report = tap(&mut b1, &d, |p| p.tap_card()).unwrap();
-    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 0 });
+    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 0, kept: 0 });
     assert!(!d.phone.circles()[0].needs_tap);
 }
 
@@ -1169,7 +1169,7 @@ fn one_tap_serves_every_card_circle() {
 
     // One tap: both keys, and the first circle's pocket topped up.
     let report = tap(&mut b, &d, |p| p.tap_card()).unwrap();
-    assert_eq!(report, TapReport { keys: 2, bumps: 0, words: 5 });
+    assert_eq!(report, TapReport { keys: 2, bumps: 0, words: 5, kept: 0 });
     assert!(d.phone.circles().iter().all(|c| !c.needs_tap));
     let s = d.phone.card_status().unwrap();
     assert_eq!((s.circles, s.keys_wanted), (2, 0));
@@ -1207,7 +1207,7 @@ fn a_circle_the_badge_forgot_does_not_block_the_tap_for_the_other() {
     // The phone still holds both. The tap passes over the one the badge forgot.
     assert_eq!(d.phone.card_status().unwrap().circles, 2);
     let report = tap(&mut b, &d, |p| p.tap_card()).unwrap();
-    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 0 });
+    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 0, kept: 0 });
     let needs = |id: &str| d.phone.circles().into_iter().find(|c| c.id == id).unwrap().needs_tap;
     assert!(!needs(&second));
     assert!(!needs(&first));
@@ -1227,7 +1227,7 @@ fn a_circle_the_badge_forgot_does_not_block_the_tap_for_the_other() {
     badge_chip::write_public(chip, slot, &o).unwrap();
     chip.close_session().unwrap();
     let report = tap(&mut b, &d, |p| p.tap_card()).unwrap();
-    assert_eq!(report, TapReport { keys: 0, bumps: 0, words: 0 });
+    assert_eq!(report, TapReport { keys: 0, bumps: 0, words: 0, kept: 0 });
     assert!(needs(&second));
 }
 
@@ -1295,14 +1295,14 @@ fn a_tap_posts_the_bumps_the_badge_left_and_counts_what_reached_the_relay() {
 
     // A tap with the relay still out of reach fetches the key, and the bump still waits.
     let report = tap(&mut b1, &second, |p| p.tap_card()).unwrap();
-    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 0 });
+    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 0, kept: 0 });
     assert_eq!(second.phone.card_status().unwrap().bumps_to_post, 1);
     assert!(relay.lock().unwrap().poll(&o.circle_id, None, 0).unwrap().is_empty());
 
     // Back online, the next tap posts it.
     second.http.1.store(false, Ordering::SeqCst);
     let report = tap(&mut b1, &second, |p| p.tap_card()).unwrap();
-    assert_eq!(report, TapReport { keys: 1, bumps: 1, words: 0 });
+    assert_eq!(report, TapReport { keys: 1, bumps: 1, words: 0, kept: 0 });
     let s = second.phone.card_status().unwrap();
     assert_eq!((s.keys_wanted, s.bumps_to_post), (0, 0));
     member.read(&relay);
@@ -1311,4 +1311,59 @@ fn a_tap_posts_the_bumps_the_badge_left_and_counts_what_reached_the_relay() {
     second.phone.send_chat(id.clone(), "after the bump".into()).unwrap();
     let seat = b1.circle().unwrap().seat;
     assert_eq!(member.read(&relay), vec![(seat, "after the bump".to_string())]);
+}
+
+#[test]
+fn a_circle_the_badge_keeps_after_pairing_comes_to_the_phone_at_the_next_tap() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let mut board = FakeBoard::seeded(SEEDS.0).with_soft_chip([1; 32]);
+    board.name = "first".into();
+    let mut b = Badge::new(board);
+    let t1 = ceremony(&mut b, SEEDS.1, |b| Some(b.step()));
+    home_after_keep(&mut b, "first");
+    let d = device(&relay);
+    let ids = pair_with(&mut b, &d, "1 circle", |_| {}).unwrap();
+    assert_eq!(ids, vec![id_of(&t1)]);
+
+    // The badge keeps a second circle with the phone paired.
+    press(&mut b, Press::Both);
+    press(&mut b, Press::Right);
+    assert!(b.board().shows("> new circle"), "{:?}", b.board().last());
+    b.board().name = "second".into();
+    b.board().presses.push_back(Press::Both);
+    let t2 = ceremony(&mut b, 0x2545_F491_4F6C_DD1D, |b| {
+        b.idle_step();
+        None
+    });
+    home_after_keep(&mut b, "second");
+    let second = id_of(&t2);
+    assert_eq!(d.phone.circles().len(), 1);
+
+    // The next tap brings it, with its chat key and a pocket of hello words.
+    let mut m2 = Member::of(&t2);
+    let report = tap(&mut b, &d, |p| p.tap_card()).unwrap();
+    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 8, kept: 1 });
+    let held = d.phone.circles();
+    assert_eq!(held.len(), 2);
+    let c = held.iter().find(|c| c.id == second).expect("the new circle");
+    assert_eq!(c.kind, "card");
+    assert_eq!(c.name, "second");
+    assert!(!c.needs_tap);
+    let h = d.phone.hello_words(second.clone(), m2.seat).unwrap();
+    assert_eq!((h.number, h.card_left), (0, Some(8)));
+    assert_eq!(d.phone.card_status().unwrap().circles, 2);
+
+    // Its chat reads and posts.
+    m2.say(&relay, "hello from the second circle");
+    let got = d.phone.poll(second.clone()).unwrap();
+    let texts: Vec<&str> = got.iter().map(|g| g.text.as_str()).collect();
+    assert_eq!(texts, ["hello from the second circle"]);
+    d.phone.send_chat(second.clone(), "the phone is here".into()).unwrap();
+    let mine = b.circles().iter().find(|c| hex::encode(c.circle_id) == second).unwrap().seat;
+    assert_eq!(m2.read(&relay), vec![(mine, "the phone is here".to_string())]);
+
+    // The next tap does not bring it again.
+    let report = tap(&mut b, &d, |p| p.tap_card()).unwrap();
+    assert_eq!(report, TapReport { keys: 0, bumps: 0, words: 0, kept: 0 });
+    assert_eq!(d.phone.circles().len(), 2);
 }

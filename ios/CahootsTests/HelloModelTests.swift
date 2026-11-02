@@ -33,7 +33,7 @@ final class HelloModelTests: XCTestCase {
             }
             taps += 1
             left += 8
-            return TapReport(keys: 0, bumps: 0, words: 8)
+            return TapReport(keys: 0, bumps: 0, words: 8, kept: 0)
         }
     }
 

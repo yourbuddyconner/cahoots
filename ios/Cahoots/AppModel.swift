@@ -368,7 +368,7 @@ final class AppModel: ObservableObject {
     }
 
     /// One tap on the card: the keys the chats wait for, the bumps the badge left to pass on,
-    /// and more hello words. The crate reads the card's key first, so Face ID comes before
+    /// more hello words, and any circle the badge kept since it paired. The crate reads the card's key first, so Face ID comes before
     /// the reader's sheet. The circles and the card's status are read again either way.
     func tapCard() async throws -> TapReport {
         guard let core else { throw PhoneError.Storage(message: "Your circles are still opening. Try again.") }

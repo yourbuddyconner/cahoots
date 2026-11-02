@@ -693,15 +693,21 @@ impl Phone {
     /// One tap on the card for everything the card circles need: the key each chat waits for
     /// and the keys the bumps still to post move to, and the next [`POCKET_WORDS`] hello words
     /// with each other seat, but none for a seat whose hello object refuses the slot or is not
-    /// there. The slot key is read first, which may ask for Face ID, and only then does the
-    /// reader open. Nothing is kept unless the whole tap went through. Then the
-    /// bumps the badge left for a device to post are sent. `NotPaired` when the badge no
-    /// longer knows this phone: offer `forget_card`.
+    /// there. A circle the badge kept after this phone paired, which the pairing object names
+    /// and this phone does not hold, is kept as the second tap of pairing keeps one: checked,
+    /// with its keys and a pocket of hello words, its bumps posted and the badge's card
+    /// published. The slot key is read first, which may ask for Face ID, and only then does
+    /// the reader open. Nothing is kept unless the whole tap went through. Then the bumps the
+    /// badge left for a device to post are sent. `NotPaired` when the badge no longer knows
+    /// this phone: offer `forget_card`.
     pub fn tap_card(&self) -> Result<TapReport, PhoneError> {
         let mut st = self.lock();
         let ids = self.card_circles(&mut st);
-        let label_of = |c: &Circle| c.record.card.as_ref().map(|card| card.key_label.clone());
-        let Some(label) = ids.first().and_then(|id| label_of(&st.circles[id])) else {
+        let card_of = |c: &Circle| {
+            let card = c.record.card.as_ref()?;
+            Some((card.key_label.clone(), card.badge_name.clone()))
+        };
+        let Some((label, badge_name)) = ids.first().and_then(|id| card_of(&st.circles[id])) else {
             return Err(PhoneError::NotFound {
                 message: "Pair a card first.".into(),
             });
@@ -709,29 +715,31 @@ impl Phone {
         // One tap reaches one card: the circles of the badge whose key opens its slot.
         let ids: Vec<String> = ids
             .into_iter()
-            .filter(|id| label_of(&st.circles[id]).as_ref() == Some(&label))
+            .filter(|id| card_of(&st.circles[id]).is_some_and(|(l, _)| l == label))
             .collect();
+        // Every circle on this phone, a card's or not: none is kept a second time.
+        let held = store::circle_ids(&self.dir);
         // Face ID for the key comes before the reader's sheet.
         let key = self.slot_key(&label)?;
         let mine = self.my_public()?;
         let circles = &st.circles;
-        let fetched = self.tap_slot(PROMPT, &key, |s| {
+        let (fetched, new) = self.tap_slot(PROMPT, &key, |s| {
+            // Only the slots the pairing object names: the badge wrote it. The slot key opened
+            // this session, so the badge still knows this phone.
+            let listed = s.list_public()?;
             let mut out = Vec::new();
             for id in &ids {
                 let c = &circles[id];
                 let Some(slot) = c.record.card.as_ref().map(|card| card.circle_slot) else {
                     continue;
                 };
-                // Only a slot the pairing object names: the badge wrote it. A circle the badge
-                // forgot, or whose slot holds another circle now, is passed over. The slot key
-                // opened this session, so the badge still knows this phone.
-                let o = match s.read_public(slot) {
-                    Err(TapError::NotFound) => continue,
-                    r => r?,
-                };
-                if o.circle_id != c.circle_id {
+                // A circle the badge forgot, or whose slot holds another circle now, is
+                // passed over.
+                let Some((_, o)) =
+                    listed.iter().find(|(at, o)| *at == slot && o.circle_id == c.circle_id)
+                else {
                     continue;
-                }
+                };
                 if o.phone_public != Some(mine) {
                     return Err(TapError::NotPaired);
                 }
@@ -742,13 +750,39 @@ impl Phone {
                 }
                 out.push((id.clone(), keys, pocket_fill(c, s)?));
             }
-            Ok(out)
+            // A circle the badge kept since this phone paired: the badge vouches for it, and
+            // this phone holds no circle of that id. It is checked as the second tap of
+            // pairing checks one, and fetched from hello number 0.
+            let mut new = Vec::new();
+            for (slot, o) in listed {
+                if held.contains(&hex::encode(o.circle_id)) {
+                    continue;
+                }
+                if o.phone_public != Some(mine) {
+                    return Err(TapError::NotPaired);
+                }
+                let Some(mut k) = check(o, &mine) else {
+                    continue;
+                };
+                let mut keys = Vec::new();
+                for g in &k.generations {
+                    let mac = s.hmac_root(slot, &generation_label(&k.object.circle_id, g))?;
+                    keys.push((*g, Zeroizing::new(mac)));
+                }
+                let n = k.manifest.params.n;
+                let f = fill(&[], &[], slot, k.seat, n, &vec![0; usize::from(n)], s)?;
+                k.pocket = f.pocket;
+                k.no_hello = f.no_hello;
+                new.push((slot, k, keys, f.added));
+            }
+            Ok((out, new))
         })?;
         // The session closed without error: the circles take what it fetched.
         let mut report = TapReport {
             keys: 0,
             bumps: 0,
             words: 0,
+            kept: 0,
         };
         let mut first = None;
         for (id, keys, filled) in fetched {
@@ -775,6 +809,32 @@ impl Phone {
                 let _ = c.poll(self.http.as_ref());
                 let posted = before.saturating_sub(waiting(c));
                 report.bumps = report.bumps.saturating_add(as_u32(posted));
+            }
+        }
+        // The new circles are kept as the second tap of pairing keeps them, which takes the
+        // lock itself.
+        drop(st);
+        for (slot, k, keys, words) in new {
+            let fetched_keys = as_u32(keys.len());
+            let before = k.object.pending_bumps.len();
+            match self.keep_card_circle(slot, k, keys, &badge_name, &label) {
+                Ok(Some(id)) => {
+                    report.kept = report.kept.saturating_add(1);
+                    report.keys = report.keys.saturating_add(fetched_keys);
+                    report.words = report.words.saturating_add(words);
+                    // Its bumps went with the poll that kept it, as far as the relay took them.
+                    let after = self
+                        .with_circle(&id, |c, _| {
+                            Ok(c.record.card.as_ref().map_or(0, |card| card.forward.len()))
+                        })
+                        .unwrap_or(before);
+                    let posted = before.saturating_sub(after);
+                    report.bumps = report.bumps.saturating_add(as_u32(posted));
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    first.get_or_insert(e);
+                }
             }
         }
         let now = std::time::SystemTime::now()

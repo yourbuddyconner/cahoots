@@ -378,6 +378,9 @@ pub struct TapReport {
     pub bumps: u32,
     /// Hello words added: one for each hello number with a seat.
     pub words: u32,
+    /// Circles the badge kept after this phone paired that this tap brought to the phone. Their
+    /// keys and hello words are counted in `keys` and `words`.
+    pub kept: u32,
 }
 
 /// The hello words a card circle has left with one seat.
