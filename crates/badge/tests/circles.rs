@@ -490,7 +490,12 @@ fn forget_one_keeps_the_other() {
     assert_eq!(record.slots.len(), 1);
     assert_eq!((record.slots[0].slot, record.slots[0].circle_id), (1, kept.circle_id));
 
-    // One circle is left: home lists it, and a reboot keeps it.
+    // A note says so though a circle is left, until a press or five seconds.
+    assert!(b.board().shows("circle forgotten"), "{:?}", b.board().last());
+    b.idle_step();
+    assert!(b.board().shows("circle forgotten"), "{:?}", b.board().last());
+    // Then home lists the one left, and a reboot keeps it.
+    b.board().uptime += 5;
     b.idle_step();
     assert!(b.board().shows("closed to taps"), "{:?}", b.board().last());
     assert!(b.board().shows("second"));
@@ -719,8 +724,9 @@ fn a_failed_forget_never_leaves_a_record_over_a_blank_pad() {
     b.board().fail_ledger_erase = false;
     let (mut laptop, down) = cable();
     b.board().links = Some((down, FakeLink::open()));
-    b.idle_step();
-    assert!(b.board().shows("other") && b.board().shows("closed to taps"));
+    // The forget's note goes home at a press.
+    press(&mut b, Press::Right);
+    assert!(b.board().shows("other") && b.board().shows("closed to taps"), "{:?}", b.board().last());
     connect(&mut b, &mut laptop);
     for req in [
         Request::Psk { circle: gone, context: b"wg".to_vec() },

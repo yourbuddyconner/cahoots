@@ -488,6 +488,9 @@ const REFUSED: &str =
 const NO_ANSWER: &str = "the chip did not answer. Try again.";
 /// What the badge says when it holds its chip until a restart.
 const RESTART: &str = "the chip needs a restart. Turn the badge off and on.";
+/// What the badge says when a circle is forgotten but its chip objects wait for the next boot,
+/// which deletes them: the pairing object that names the circle could not be written.
+const FORGOTTEN_RESTART: &str = "circle forgotten. Turn the badge off and on.";
 /// What the badge says when its chip's owner object opens with none of its secrets.
 const FOREIGN: &str = "this chip belongs to another badge or an older build. It cannot be used.";
 /// What the badge says when it cannot use its chip this time.
@@ -1499,9 +1502,10 @@ impl<B: Board> Badge<B> {
             // and the next boot, with the placeholders to be made again, deletes the slot's
             // objects and names it no more.
             if vouched && !self.pairing_synced() {
-                return Err(String::from(
-                    "pairing object: write failed, the next boot deletes the circle's chip objects",
-                ));
+                self.board.log(
+                    "forget: pairing object: write failed, the next boot deletes the circle's chip objects",
+                );
+                return Err(String::from(FORGOTTEN_RESTART));
             }
             let Some(chip) = self.board.chip_begin() else {
                 return forgot.and(stored);
@@ -2653,7 +2657,7 @@ impl<B: Board> Badge<B> {
     /// circle", and "back" to the list. Both opens the page of an action, and Left or Right
     /// there goes back to the actions. Both on the key page spends 32 bytes and shows them as
     /// a code. Both on the forget page asks, and Both again forgets this circle and nothing
-    /// else. A note goes home at any gesture, or after five seconds.
+    /// else, and a note says so. A note goes home at any gesture, or after five seconds.
     ///
     /// On every page, the badge answers custodian requests from the laptop on the down link
     /// for any circle it holds. The first request after the laptop was plugged in asks
@@ -2714,8 +2718,7 @@ impl<B: Board> Badge<B> {
                     MenuAction::Forget => {
                         let Menu { laptop, .. } = *menu;
                         self.laptop = Some(laptop);
-                        self.forget_current();
-                        Idle::Off
+                        self.forget_current()
                     }
                 }
             }
@@ -2958,27 +2961,29 @@ impl<B: Board> Badge<B> {
         }
     }
 
-    /// Forget the circle whose menu was open, and say so.
-    fn forget_current(&mut self) {
+    /// Forget the circle whose menu was open, and say so in a note, which goes home after five
+    /// seconds or a press. With no circle left the pass for a new one draws over it.
+    fn forget_current(&mut self) -> Idle<B> {
         let Some(c) = self.circles.get(self.current).cloned() else {
-            return;
+            return Idle::Off;
         };
-        match self.forget_circle(&c) {
+        let said = match self.forget_circle(&c) {
             Ok(()) => {
                 self.board
                     .log(&format!("forgotten: {} seat {}", c.params.name, c.seat));
-                show_status(&mut self.board, "circle forgotten");
+                String::from("circle forgotten")
             }
             Err(e) => {
                 self.board.log(&format!("forget: {e}"));
-                show_status(&mut self.board, &e);
+                e
             }
-        }
+        };
         self.circles = self.board.load_circles();
         let held: Vec<CircleId> = self.circles.iter().map(|c| c.circle_id).collect();
         self.cards.retain(|(id, _)| held.contains(id));
         self.current = 0;
         self.open_current = false;
+        self.note(&[&said], false)
     }
 
     /// Open circle `c`'s pad and ledger.

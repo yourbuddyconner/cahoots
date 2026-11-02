@@ -367,6 +367,13 @@ fn a_forget_whose_pairing_object_is_not_written_deletes_nothing_until_the_next_b
     b1.board().owner_chip().delete(KeyId::PAIRING).unwrap();
     press(&mut b1, Press::Both);
     assert!(b1.circles().is_empty());
+    // The badge says what to do in plain words. The detail is in the log only.
+    assert!(
+        b1.board().shows("circle forgotten. Turn the badge off and on."),
+        "{:?}",
+        b1.board().last()
+    );
+    assert!(!b1.board().screens.iter().flatten().any(|l| l.contains("pairing object")));
     assert!(b1.board().log.iter().any(|l| l.starts_with("forget: pairing object: write failed")));
     assert!(b1.board().owner_chip().exists(KeyId::new(KeyKind::Seat, 0)).unwrap());
     let r = b1.board().chip_record_load().unwrap().unwrap();
