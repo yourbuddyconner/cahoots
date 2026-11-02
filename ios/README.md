@@ -51,7 +51,8 @@ to `$CARGO_TARGET_DIR/ios` when the target directory is elsewhere.
 - The screens: `CirclesView`, `NewCircleView`, `JoinView`, `CeremonyView` (with `CeremonyModel`),
   `ChatView`, `PeopleView` and `HelloView`, `SettingsView`, and for channels `ChannelsView`
   (the list section and the start sheet), `ChannelView`, `JoinChannelView`,
-  `ChannelRequestsView` and `ChannelMembersView`, and for a badge `PairCardView`.
+  `ChannelRequestsView` and `ChannelMembersView`, and for a badge `PairCardView` and
+  `CardView`, the Card screen with its one button.
 - `NfcTransport.swift`: one Core NFC session per tap, its delegate on its own queue. It passes
   APDUs to the phone crate's chip client, which runs SCP03 in Rust. It waits 30 seconds for a
   card and 5 seconds for each answer.
@@ -67,7 +68,8 @@ The chat title and Conversation's People and names action both open the roster.
 For hello words, both people open each other's seat and compare the hello number before taking
 turns reading their own pair. Each person checks the reply against their expected pair without
 reading the answer aloud. Next hello advances only the phone on which it was tapped, so both
-people advance after a check. If one number is behind, only that phone advances to catch up.
+people advance after a check. If one number is behind, only that phone advances, until the
+numbers match.
 
 `Info.plist` is written by hand and preprocessed. Debug builds allow plain HTTP to a local relay
 (`NSAllowsLocalNetworking`) so a `cahoots-station` on the Mac works. Release builds do not. The
@@ -143,17 +145,27 @@ build 202610302331 to App Store Connect (delivery 462fbaa7).
 ### Pair a card on a device
 
 Needs the bench badge: the Pico 2 with its SE051 Click board on USB, flashed from main. The
-chip takes its antenna only when the phone's field is what starts it, so on the pages where a
-phone taps the badge cuts the Click board's power. For that the bench needs two things: the
-Click board's ENA SEL switch on EN (not ON), so the badge's enable pin reaches the chip, and
-the Click board's +3.3V fed through a PNP transistor (an S8550 works) with its emitter on the
+chip takes its antenna only when the phone's field is what starts it, so whenever a phone may
+tap, the badge cuts the Click board's power. For that the bench needs two things: the Click
+board's ENA SEL switch on EN (not ON), so the badge's enable pin reaches the chip, and the
+Click board's +3.3V fed through a PNP transistor (an S8550 works) with its emitter on the
 Pico's 3V3, its collector on the Click board's +3.3V pin and its base through about 1 kΩ to
 GP3, the Pico's pin 5. The antenna switch is on. Without the transistor the chip stays powered
 and no tap reaches it. Make a new circle on the badge with the bench ceremony or a pile before
 pairing, because a badge with no circles cannot pair.
 
-1. On the badge, open "pair a phone" from the list. It shows "hold the phone to the chip, then
-   press both". The chip's power is cut while this page is open.
+The badge rests on home: "badge" over the names of its circles, a status line, and "tap",
+"A+B menu" and "menu" along the bottom. The left button opens a tap window of two minutes: the
+status line says "open for a tap, 2 min", then "1 min", and the chip's power is cut until the
+window closes. Press the left button again to close it early, and the status line says "closed
+to taps". Opening the menu closes it too. Both buttons, or the right one, open the menu: the
+badge's circles by name, "new
+circle", "pair a phone", "phone" while a phone is paired, and "back". The side buttons move
+along it and both buttons choose. A note after an action goes home by itself after five
+seconds, or at any press.
+
+1. On the badge, press both for the menu, move to "pair a phone" and press both. The page says
+   "hold the phone to the chip, then press both". The chip's power is cut while it is open.
 2. In the app, open Settings and choose "Pair a card". Type a name for this phone and choose
    "Hold the phone to the card". Face ID asks first, before the NFC sheet, because the phone
    signs its request with its enclave key during the tap and the camera cannot see a face while
@@ -163,29 +175,41 @@ pairing, because a badge with no circles cannot pair.
    name shows as "your badge".
 3. On the badge, press both. It shows "pair with" the phone's name and six words in two rows.
    Check they match the phone's, then press both again. The badge says "paired with" the name
-   and "tap the phone again", and cuts the chip's power again for that tap.
+   and "hold the phone again", then goes home with the tap window open for that tap.
 4. In the app, choose "Hold the phone again" and hold the phone to the antenna. This tap asks
-   nothing. The app shows "Paired with" the badge and the circles it kept. Choose "Done". Press
-   a button on the badge to go back to its list, which gives the chip its power back.
+   nothing. It brings each of the badge's circles onto the phone with its chat key and the
+   next eight hello words with each other seat. The app shows "Paired with" the badge and the
+   circles it kept. Choose "Done". The badge took four presses of both buttons in all.
 5. On Circles, each of the badge's circles shows the badge's face and "Card circle on" the
    badge. Open one's chat. Post from the browser or another phone and read it here, and post
-   back. When the composer is replaced by "Tap your card to catch up", first open "phone" from
-   the badge's list: that page says "hold the phone to the chip for its taps" and cuts the
-   chip's power while it is open. Then choose "Tap your card to catch up" and hold the phone to
-   the antenna. Face ID asks here, because the tap reads the card's key from the keychain. The
-   same goes for hello words in People. Leave the page afterwards with a side button.
-6. On the badge, open "phone" from the list and press both. It says "phone unpaired" and "its
-   taps end now". In the app, the next tap, for hello words in People or for a key in the chat,
-   says "This card no longer knows this phone." The card circle still reads and posts in its
-   chat until a phone posts the bump the badge signed at the unpair. If a phone is lost,
-   unpair it on the badge, then pair another phone, which posts the bump, or ask a member with
-   the circle's root to reset the chat. To pair this phone again, open "pair a phone" on the
-   badge and "Pair a card" in the app. If the app still shows the words from before, choose
-   "Start over" first: those words were for a pairing the badge has closed.
+   back.
+6. In Settings, "Card" opens the Card screen: the badge's name, when it was last tapped, what a
+   tap would do now ("up to date", "1 circle needs a key", "hello words: 2 left for Ada"), and
+   one button, "Tap the card". To tap, press the left button on the badge so home says "open
+   for a tap", then choose "Tap the card" and hold the phone to the antenna. No page on the
+   badge needs opening. Face ID asks before the NFC sheet, because the tap reads the card's key
+   from the keychain. One tap fetches every key a chat waits for, passes on the bumps the badge
+   signed, and tops up the hello words. When a chat's composer is replaced by "Tap the card",
+   that button taps the same way.
+7. In People, open a seat for hello words. They come from the phone with no tap, as in any
+   other circle. When three or fewer are left with that seat, the page says "N hellos left from
+   your card. Tap the card soon." When none are left, "Next hello" becomes "Tap the card", which
+   taps as in step 6. A circle the badge kept before it made hello objects, before the evening
+   of 2026-10-31, gets no hello words from the card.
+8. On the badge, press both for the menu, move to "phone" and press both. The page names the
+   paired phone. Press both again to unpair. The badge says "phone unpaired" and "its taps end
+   now", then goes home. In the app, the next tap says "This card no longer knows this phone."
+   The card circle still reads and posts in its chat until a phone posts the bump the badge
+   signed at the unpair. If a phone is lost, unpair it on the badge, then pair another phone,
+   which posts the bump, or ask a member with the circle's root to reset the chat. To pair this
+   phone again, choose "Forget this card" on the Card screen, then "Pair a card" in Settings and
+   "pair a phone" on the badge. If the app still shows the words from before, choose "Start
+   over" first: those words were for a pairing the badge has closed.
 
 A tap in step 4 before the badge's presses says "Press both buttons on the badge first, then
-hold the phone again." "Forget this card" in Settings deletes the card circles from this phone.
-The badge keeps its slot until it is unpaired there.
+hold the phone again." "Forget this card" on the Card screen deletes the card circles from this
+phone. The badge keeps its slot until it is unpaired there. A phone keeps one badge: to pair
+another, forget this one first.
 
 ### What to try first on a device
 
@@ -257,28 +281,38 @@ address) and on a label the screen rightly stops showing once step one ends. Nei
 
 ## Tried on the bench
 
-On 2026-10-31 and again on 2026-11-01, the phone's own chip client (`crates/phone/src/nfc.rs`, `apdu.rs` and
-`scp03.rs`) ran against the real SE051 on the Pico 2, applet 7.2.0. No phone was in the loop: the
-laptop ran the client, and a bench build of the firmware passed each APDU to the chip over I2C
-in no session, with the chip's pin raised for the exchange, as a phone's tap finds it
-(`cahoots-host chip`, frame kinds 32 and 33). `scripts/pair-bench.sh` runs it end to end:
+On 2026-10-31 and twice on 2026-11-01, the phone's own chip client (`crates/phone/src/nfc.rs`,
+`apdu.rs` and `scp03.rs`) ran against the real SE051 on the Pico 2, applet 7.2.0. No phone was
+in the loop: the laptop ran the client, and a bench build of the firmware passed each APDU to
+the chip over I2C in no session, with the chip's power on for the exchange, as a phone's tap
+finds it (`cahoots-host chip`, frame kinds 32 and 33). Where the badge has cut the chip's power
+for a phone's tap, the bench build gives it back for the laptop's exchange, since the laptop
+reaches the chip by wire. `scripts/pair-bench.sh` runs it end to end, pressing the badge's
+buttons from the laptop. The last run, on 2026-11-01 with the badge resting on home:
 
-1. The board kept a new circle with the laptop as the two cards under it.
+1. From home the laptop pressed both for the menu and chose "new circle", and the board kept a
+   new circle with the laptop as the two cards under it. The badge said "saved" and went home.
 2. In no session, the laptop read the pairing object, which named circle slots 0, 1 and 2, and
    the applet refused to give it any of their public objects. It refused each of these with `6986`
    too: a MAC with the circle's root or a hello object, a signature with the seat key, an AES
    key at the phone slot's id, deleting the slot, the owner object or the root, reading the
    inbox, and reading or writing the public object.
-3. The laptop pressed into "pair a phone", read the pairing object, and wrote a signed, sealed
-   inbox as "bench laptop". Both showed the same six words (the 2026-11-01 run: theory wave
-   elite still setup eyebrow). Both again paired.
-4. The laptop opened the phone slot's SCP03 session with its key, at C-MAC, C-ENC, R-MAC and
-   R-ENC, asked the applet's version in it, and MACed `chat/gen` with the circle's root. In
-   that session every public object the pairing object names carried a device grant and the
-   laptop's key.
-5. The laptop pressed into "phone" and unpaired. The old key no longer opened the slot ("the
+3. The laptop pressed into "pair a phone" and ran the app's own pairing code as "bench laptop",
+   with no network (`cahoots-host chip pair`). The first tap wrote a signed, sealed inbox. Both
+   showed the same six words (empower estate dad enlist inner citizen), and both again paired.
+4. The second tap kept the badge's three circles in 6.2 seconds: 83 APDUs, of which 32 were
+   hello MACs for the new circle's two other seats, 11 were root MACs for the chat keys and the
+   bumps that waited, and 31 were reads. The two older circles were kept before the badge made
+   hello objects, so their seats got no words from the card: one refused MAC each, and the tap
+   went on.
+5. With the key from that tap the laptop opened the phone slot's SCP03 session, at C-MAC,
+   C-ENC, R-MAC and R-ENC, asked the applet's version in it, and MACed `chat/gen` with the new
+   circle's root. In that session every public object the pairing object names carried a
+   device grant and the laptop's key.
+6. The laptop pressed into "phone" and unpaired. The old key no longer opened the slot ("the
    card does not open with this key"), and the badge's log said it wrote every public object
-   with a pending bump and no phone.
+   with a pending bump and no phone. Then it forgot the new circle through the badge's own
+   pages. The run ended "pair bench: ok".
 
 The bench chip was owned under the owner secret of builds before 2026-11-01. The firmware tries
 that older secret when the current one does not open the chip, and logs "se051: owner session
@@ -286,7 +320,8 @@ open with the older secret".
 
 What the applet does that the client and the software chip had to learn: no Le inside a wrapped
 command (it ends the session with `6982`), `6985` for an id that holds nothing, the two-byte
-TLV length in some answers, and a 2-byte answer to ReadSize. Not tried: Core NFC on a device.
+TLV length in some answers, and a 2-byte answer to ReadSize. Core NFC on a device first ran on
+2026-11-01, when a phone paired with this board by tap.
 
 ## First-use guide
 

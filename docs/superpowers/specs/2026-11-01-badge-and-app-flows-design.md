@@ -245,6 +245,35 @@ inside a window the owner opened, so the exposure is small, and it is worth stat
 - Notes return home after five seconds or any press.
 - One verb each: the app says "tap the card", the badge says "hold the phone to the chip".
 
+**As built, 2026-11-01.** Where the build differs from the calls above:
+
+- The gate is the chip's power. No board has an antenna switch in software yet, so the left
+  button on home, the pairing page and the note after a pairing cut the chip's power, and
+  every conversation of the badge's own gives it back. Home's status line says "closed to
+  taps", "open for a tap, 2 min" or "open for a tap, 1 min". Home's title is "badge" over the
+  circles' names. The menu lists the circles first, then "new circle", "pair a phone",
+  "phone" while one is paired, and "back". A circle's page is a list of "hello words", "key as
+  code", "grants", "forget this circle" and "back".
+- Placeholders sit at the public id of every circle slot, and nowhere else. On the bench SE051
+  a placeholder takes 160 bytes. Sixteen slots with all their ids, 144 objects, left room for
+  two circles, and eight slots for three. With the public ids alone, the chip holds five
+  circles of three seats where it held six, so the placeholders cost one circle. The hello ids
+  of a free slot stay empty, a known limit: a tap inside an open window can still plant an
+  object there and so burn that slot.
+- A phone keeps one badge. A second badge's pairing is refused at its second tap with "Forget
+  this card first."
+- The Card screen lists a seat's hello words as low at three or fewer, not fewer than three.
+- A tap's report counts the bumps it passed on, not the bumps it posted: a bump the relay
+  already held, or one dropped as stale, counts too. The app says "passed on".
+- A circle of three seats is 32 hello MACs at a tap, not 48: two other seats, eight numbers,
+  and two speakers each. On the bench, through the laptop's wire, the second tap of a pairing
+  kept three circles in 6.2 seconds: 83 commands, 32 of them hello MACs, 11 root MACs and 31
+  reads. Over NFC a command took 37 to 55 ms, so a chip full of circles stays well under a
+  tap's 60 seconds, and no limit on the MACs of one tap is needed yet.
+- A seat whose hello object refuses the slot or is not there gets no words from the card, and
+  the tap goes on. A circle the badge kept before it made hello objects (before the evening of
+  2026-10-31) has none: the bench's two oldest circles hold placeholders at their hello ids.
+
 ## 12. Left to the builder
 
 The home screen's layout on the 2.13 inch e-paper, how the menu scrolls past eight entries,
