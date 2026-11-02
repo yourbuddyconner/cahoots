@@ -158,9 +158,11 @@ Then hold the phone to the card." The second tap no longer needs a badge page.
   time as a progress line.) The chip's policy for hello objects does not change: the phone
   slot may MAC with them, and nothing else.
 - **What a thief gets.** A stolen phone already holds the chat keys and is a member until a
-  bump. Stored hello words add the next eight hellos per seat, which the owner ends the same
-  way, by unpairing on the badge and letting the next tap post the bump. The pocket lives in
-  the same protected files as the chat keys.
+  bump. Stored hello words add the next eight hellos per seat. Unpairing on the badge and the
+  bump that follows do not end them, since hello words do not depend on the chat generation.
+  The remedy is for the other members to move their hello number with the badge's seat past
+  the next eight, and to treat the thief's words as spent. The pocket lives in the same
+  protected files as the chat keys.
 - **Chat keys and bumps.** Unchanged from the badge and phone design: generation keys come
   from the root by tap, bumps the badge signed wait in the public objects until a phone posts
   them.
@@ -170,22 +172,28 @@ Then hold the phone to the card." The second tap no longer needs a badge page.
 ## 8. Security of a tap-ready badge
 
 Cutting the chip's power at rest was the original design's intent (the pin low at rest). It
-only now works. With the antenna switched off at rest as well, a tap reaches the chip only
-inside a window the owner opened, so the exposure is small, and it is worth stating plainly.
+only now works for a badge that is on: its chip is powered, and so deaf to a phone, outside a
+window the owner opened. A badge that is off is not deaf. The phone's field starts an
+unpowered chip: on 2026-10-31 an iPhone reached the applet with the Pico off. So a tap reaches
+the chip whenever the badge is off or its window is open, and it is worth stating plainly what
+such a tap gets.
 
 - **A stranger's tap** still gets nothing it can use: no MAC, no signature, no read of an
   inbox or a public object. The refusals script proves this on the real applet.
 - **Planting.** Any tap may make an object at an empty id, including one nobody can delete.
-  The badge never adopts such objects, but each one burns the slot whose id it took. A tap
-  window is a couple of minutes with the owner present, so the surface is small. The badge
-  should still leave no id for a stranger to take. (Call: at first boot the badge makes a
+  The badge never adopts such objects, but each one burns the slot whose id it took. The
+  badge should leave no id for a stranger to take. (Call: at first boot the badge makes a
   placeholder, owned by it, at every id of every circle slot it could ever use. On the bench
   SE051 that costs memory for sixteen slots' worth of small objects and lowers the circles
   that fit. The builder measures it, and if it costs more than one circle, the slot count
   drops to eight.)
-- **In a safe, or just on.** A badge in a drawer is off. A badge that is on keeps its chip
-  powered and so deaf to taps until its owner presses. The planting surface is the open
-  window.
+- **In a safe, or just on.** A badge that is on keeps its chip powered and so deaf to taps
+  until its owner presses. A badge in a drawer is off, and a badge that is off can be tapped,
+  since the phone's field starts an unpowered chip. The planting surface is any moment the
+  badge is off or its window is open. A power cut while the badge has an id empty for a
+  moment, between deleting the placeholder there and writing what replaces it, leaves that id
+  open until the next boot puts a placeholder back. On V1 the antenna switch closes the off
+  badge's surface, since its coil is shorted unless the MCU opens it.
 - **Face ID before every tap.** The phone's proof of presence comes before the sheet, for
   pairing and for every "Tap the card".
 
@@ -194,11 +202,14 @@ inside a window the owner opened, so the exposure is small, and it is worth stat
 - **The chip's supply is switched.** The V1 board gets a load switch or PNP transistor on the
   chip's supply, driven by the MCU, and the chip's enable pin stays wired. The bench Click
   board has the S8550 and three 330 Ω in series as the base resistor, with ENA SEL on EN.
-- **An antenna switch in software, on V1.** A second gate beside the chip's power: an MCU pin
-  kills the antenna at rest, simplest as a small signal MOSFET across the coil that shorts it
-  when the pin is high. (Call: the shorting MOSFET. An RF switch in series works too, and the
-  builder may prefer it if the short detunes the coil badly when open.) Nothing in the flows
-  depends on it, and no step asks a person to flip a switch.
+- **An antenna switch in software, on V1.** A second gate beside the chip's power, and the
+  only one for a badge that is off: a switch across the coil that shorts it. The coil must be
+  shorted when the MCU is unpowered, since the phone's field starts an unpowered chip, so the
+  switch is shorted by default and the MCU opens it for a tap window. (Call: a switch across
+  the coil that conducts with no drive, such as a depletion-mode MOSFET. An RF switch in
+  series works too if it is open with no drive, and the builder may prefer it if the short
+  detunes the coil badly when open.) Nothing in the flows depends on it, and no step asks a
+  person to flip a switch.
 - **The V2 card** is RF powered during taps by nature. Its antenna must deliver field power
   for flash writes at the distances a phone is held. The Click board's small loop does, so a
   card-sized antenna will.
@@ -249,7 +260,8 @@ inside a window the owner opened, so the exposure is small, and it is worth stat
 
 - The gate is the chip's power. No board has an antenna switch in software yet, so the left
   button on home, the pairing page and the note after a pairing cut the chip's power, and
-  every conversation of the badge's own gives it back. Home's status line says "closed to
+  every conversation of the badge's own gives it back. A badge that is off has no gate: the
+  phone's field starts the chip, as an iPhone did with the Pico off on 2026-10-31. Home's status line says "closed to
   taps", "open for a tap, 2 min" or "open for a tap, 1 min". Home's title is "badge" over the
   circles' names. The menu lists the circles first, then "new circle", "pair a phone",
   "phone" while one is paired, and "back". A circle's page is a list of "hello words", "key as
@@ -258,8 +270,10 @@ inside a window the owner opened, so the exposure is small, and it is worth stat
   a placeholder takes 160 bytes. Sixteen slots with all their ids, 144 objects, left room for
   two circles, and eight slots for three. With the public ids alone, the chip holds five
   circles of three seats where it held six, so the placeholders cost one circle. The hello ids
-  of a free slot stay empty, a known limit: a tap inside an open window can still plant an
-  object there and so burn that slot.
+  of a free slot stay empty, a known limit: a tap while the badge is off, or inside an open
+  window, can plant an object there and so burn that slot. A power cut while a keep or a
+  forget has a public id empty for a moment leaves that id open the same way, until the next
+  boot puts a placeholder back.
 - A phone keeps one badge. A second badge's pairing is refused at its second tap with "Forget
   this card first."
 - The Card screen lists a seat's hello words as low at three or fewer, not fewer than three.

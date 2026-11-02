@@ -204,10 +204,13 @@ home by itself after five seconds, or at any press.
    words from the card." and offer no tap.
 8. On the badge, press both for the menu, move to "phone" and press both. The page names the
    paired phone. Press both again to unpair. The badge says "phone unpaired" and "its taps end
-   now", then goes home. In the app, the next tap says "This card no longer knows this phone."
-   The card circle still reads and posts in its chat until a phone posts the bump the badge
-   signed at the unpair. If a phone is lost, unpair it on the badge, then pair another phone,
-   which posts the bump, or ask a member with the circle's root to reset the chat. To pair this
+   now", then goes home. In the app, the next tap says "This card no longer knows this phone.
+   Choose Forget this card, then pair again." The card circle still reads and posts in its chat
+   until a phone posts the bump the badge signed at the unpair. If a phone is lost, unpair it
+   on the badge, then pair another phone, which posts the bump, or ask a member with the
+   circle's root to reset the chat. Neither ends the hello words the lost phone holds, since
+   they do not depend on the chat. Ask the other members to move their hello number with the
+   badge's seat past the next eight, and to treat the lost phone's words as spent. To pair this
    phone again, choose "Forget this card" on the Card screen, then "Pair a card" in Settings and
    "pair a phone" on the badge. If the app still shows the words from before, choose "Start
    over" first: those words were for a pairing the badge has closed.
