@@ -91,6 +91,11 @@ pub enum PhoneError {
     /// A card circle has no more hello words with that seat: the next tap fetches more.
     #[error("Tap the card first.")]
     NeedsTap,
+    /// The second tap of pairing reached another badge than the one whose circles this phone
+    /// keeps. A phone keeps one badge: forget its card first. The app matches the variant, so
+    /// the sentence may change.
+    #[error("Forget this card first.")]
+    OtherBadge,
 }
 
 impl From<uniffi::UnexpectedUniFFICallbackError> for PhoneError {

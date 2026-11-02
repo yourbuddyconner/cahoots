@@ -617,7 +617,8 @@ impl Phone {
     /// object refuses the slot or is not there, as in a circle kept before the badge made
     /// hello objects, gets no words from the card, and the circle is kept all the same.
     /// `NotPaired` while the badge has not taken this phone: the owner presses both buttons,
-    /// then this is tried again.
+    /// then this is tried again. `OtherBadge` when this phone keeps the circles of another
+    /// badge, and nothing of this one is kept: a phone keeps one badge.
     pub fn pair_card_finish(&self) -> Result<Vec<String>, PhoneError> {
         let (key, badge_name) = {
             let st = self.lock();
@@ -665,9 +666,7 @@ impl Phone {
                 .is_ok_and(|r| r.card.as_ref().is_some_and(|card| card.key_label != label))
         });
         if other_badge {
-            return Err(PhoneError::Ceremony {
-                message: "Forget this card first.".into(),
-            });
+            return Err(PhoneError::OtherBadge);
         }
         let mut kept = Vec::new();
         let mut first = None;

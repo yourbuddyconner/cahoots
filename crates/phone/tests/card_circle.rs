@@ -1246,6 +1246,7 @@ fn a_phone_keeps_the_circles_of_one_badge() {
 
     // Another badge: the second tap refuses it, and keeps nothing of it.
     let e = pair_with(&mut c1, &d, "1 circle", |_| {}).err().unwrap();
+    assert!(matches!(e, PhoneError::OtherBadge), "{e:?}");
     assert_eq!(e.to_string(), "Forget this card first.");
     assert_eq!(d.phone.circles().into_iter().map(|c| c.id).collect::<Vec<_>>(), ids);
     let nonce = badge_chip::read_public(c1.board().owner_chip(), 0).unwrap().unwrap().badge_nonce;

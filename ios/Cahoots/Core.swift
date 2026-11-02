@@ -102,6 +102,8 @@ func plain(_ error: Error) -> String {
         return "This card no longer knows this phone."
     case PhoneError.NeedsTap:
         return "Tap the card first."
+    case PhoneError.OtherBadge:
+        return "Forget this card first."
     default:
         return "Cahoots couldn’t complete that action. Please try again."
     }

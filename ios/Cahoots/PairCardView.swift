@@ -54,6 +54,9 @@ final class PairCardModel: ObservableObject {
     @Published private(set) var step: Step = .name
     @Published private(set) var working = false
     @Published private(set) var error: String?
+    /// What to do about the problem in `error`, when the screen has more to say than its
+    /// sentence.
+    @Published private(set) var note: String?
 
     init(pairing: CardPairing) {
         self.pairing = pairing
@@ -65,6 +68,7 @@ final class PairCardModel: ObservableObject {
         working = true
         defer { working = false }
         error = nil
+        note = nil
         do {
             try await pairing.authorizeForPairing()
             defer { pairing.endAuthorization() }
@@ -80,6 +84,7 @@ final class PairCardModel: ObservableObject {
         working = true
         defer { working = false }
         error = nil
+        note = nil
         do {
             let kept = try await pairing.finishPairing()
             step = .done(badge: preview.badgeName, circles: kept)
@@ -88,14 +93,15 @@ final class PairCardModel: ObservableObject {
             error = Self.pressFirst
         } catch {
             self.error = plain(error)
+            note = Self.note(after: error)
         }
     }
 
     static let pressFirst = "Press both buttons on the badge first, then hold the phone again."
 
     /// What to do when the crate refuses a second badge: this phone keeps the circles of one.
-    static func note(after error: String?) -> String? {
-        guard error == "Forget this card first." else { return nil }
+    static func note(after error: Error?) -> String? {
+        guard case PhoneError.OtherBadge? = error as? PhoneError else { return nil }
         return "This phone is paired to another badge. In Settings, open Card and forget that card, then pair again. The badge you just tapped already took this phone's key, so unpair it there first."
     }
 
@@ -103,6 +109,7 @@ final class PairCardModel: ObservableObject {
     func startOver() {
         guard !working else { return }
         error = nil
+        note = nil
         step = .name
     }
 }
@@ -126,7 +133,7 @@ struct PairCardView: View {
                 case let .done(badge, circles): PairDoneStep(badge: badge, circles: circles)
                 }
                 StatusLine(text: model.error)
-                if let note = PairCardModel.note(after: model.error) {
+                if let note = model.note {
                     Text(note)
                         .font(.subheadline).foregroundStyle(Color.muted)
                         .fixedSize(horizontal: false, vertical: true)

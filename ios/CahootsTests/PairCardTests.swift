@@ -55,6 +55,22 @@ final class PairCardTests: XCTestCase {
         XCTAssertNil(model.error)
     }
 
+    /// The crate refuses a second badge with its own error, and the screen says what to do
+    /// about it under the sentence, whatever the sentence says.
+    func testASecondBadgeKeepsTheWordsAndSaysWhatToDo() async {
+        let fake = FakePairing()
+        fake.finishErrors = [PhoneError.OtherBadge]
+        let model = PairCardModel(pairing: fake)
+        await model.start()
+        await model.finish()
+        XCTAssertEqual(model.error, "Forget this card first.")
+        XCTAssertEqual(model.note, PairCardModel.note(after: PhoneError.OtherBadge))
+        XCTAssertNotNil(model.note)
+        guard case .check = model.step else { return XCTFail("the words went: \(model.step)") }
+        model.startOver()
+        XCTAssertNil(model.note)
+    }
+
     func testStartOverForgetsTheWords() async {
         let model = PairCardModel(pairing: FakePairing())
         await model.start()
