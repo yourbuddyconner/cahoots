@@ -2803,11 +2803,15 @@ impl<B: Board> Badge<B> {
                     show(&mut self.board, screens::pair_prompt(&inbox.name, &words));
                     Idle::PairAsk { inbox }
                 }
+                // Reading the inbox gave the chip its power back. The page stays, so it cuts the
+                // power again for the phone's tap.
                 Ok(None) => {
+                    self.board.tap_begin();
                     show(&mut self.board, screens::pair_wait(Some("no phone has tapped yet")));
                     Idle::PairWait
                 }
                 Err(BadgeError::NotForThisBadge) => {
+                    self.board.tap_begin();
                     show(
                         &mut self.board,
                         screens::pair_wait(Some("that phone's request is not for this badge. Try again.")),

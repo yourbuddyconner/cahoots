@@ -1110,6 +1110,9 @@ fn pairing_from_the_list_shows_the_name_and_the_six_words() {
     // Both before a tap: nothing there yet.
     press(&mut b1, Press::Both);
     assert!(b1.board().shows("no phone has tapped yet"), "{:?}", b1.board().last());
+    // Reading the inbox gave the chip its power back. The page cuts it again, so the phone's
+    // tap still finds the chip.
+    assert!(b1.board().tap_open);
     // A request with another AES key is refused and emptied.
     let p = tapped(&mut b1);
     let honest = sealed(&p.nonce, &p.badge_key, "Conner's phone", PHONE_KEY);
@@ -1121,6 +1124,7 @@ fn pairing_from_the_list_shows_the_name_and_the_six_words() {
         "{:?}",
         b1.board().last()
     );
+    assert!(b1.board().tap_open);
 
     // The phone taps; Both shows the name and the words the phone shows.
     let inbox = phone_taps(&mut b1, "Conner's phone", PHONE_KEY);
