@@ -89,6 +89,28 @@ Physical pin numbers count from pin 1 at the USB end, down the left column with 
 
 Any Qwiic or STEMMA QT board plugs into V1's socket, and on the breadboard into GP8 and GP9 with 3V3 and GND, so a peripheral tried here works on V1 unchanged.
 
+**The chip on the bench.** The secure element is an NXP SE051 on a MikroE SE051 Plug&Trust Click board, on the same I2C pins. Two more Pico pins go to it. GP2 is the chip's enable, which the firmware holds low at rest and raises only while the badge talks to the chip. GP3 drives a PNP transistor in the Click board's 3.3 V: low passes the power through, high cuts it. The badge cuts it whenever a phone may tap, because the chip picks its interface when it powers up, and a chip the badge powers boots onto the wire and never takes the antenna. A phone's field then powers the chip for the tap on its own, reads and writes included. Without the transistor the chip stays powered and no tap reaches it.
+
+| Click board pin | Pico GPIO | Physical pin | Note |
+|---|---|---|---|
+| SDA | GP8 | 11 | I2C0 data |
+| SCL | GP9 | 12 | I2C0 clock |
+| EN | GP2 | 4 | the chip's enable, low at rest |
+| GND | GND | 13 (or any GND) | |
+| 3.3V | the transistor's collector | | not straight to 3V3 |
+
+| Transistor leg (S8550, PNP) | Goes to |
+|---|---|
+| E, emitter | Pico 3V3 (OUT), pin 36 |
+| C, collector | the Click board's 3.3V pin |
+| B, base | about 1 kΩ (three 330 Ω in series) to GP3, pin 5 |
+
+With the flat face of the S8550 towards you and the legs down, the legs are E, B, C from left to right. Set the Click board's SW2 ENA SEL switch to EN, so the EN pin reaches the chip. On ON the board ties the enable high itself and GP2 does nothing. Leave SW1 ANTENNA on. Put no pull-up resistors on the Pico side of SDA and SCL: the Click board has its own, and a pull-up on the Pico would feed the chip through its data pins while its power is cut.
+
+![Wiring the SE051 Click board to the Pico 2: SDA, SCL, EN and GND straight to pins 11, 12, 4 and 13, the board's 3.3V from the collector of an S8550 whose emitter is on pin 36 and whose base goes through 1 kΩ to pin 5](diagrams/pico2-chip.svg)
+
+A quick check once it is wired: boot the badge and the self-test line says `se051: applet 7.x.y`. Then press the left button on the home screen to open a tap window, and the Click board's power light goes out for two minutes. If it stays on, the transistor is not in the 3.3 V path. If the self-test says `se051: not found` with the light on, check SW2 and the EN wire. The firmware's probes for this are in [`crates/rp2350`](../crates/rp2350/README.md#the-chip).
+
 **A pile on the bench.** Two or more Picos form a pile over UART, which is what V1's connectors carry. On every board UART0 (GP0 TX, pin 1; GP1 RX, pin 2) is its link up, towards the card above it, and UART1 (GP4 TX, pin 6; GP5 RX, pin 7) is its link down. Join each board to the one above it with three wires, crossed: the lower board's GP0 to the upper board's GP5, the lower board's GP1 to the upper board's GP4, and GND to GND. The bottom board's link down is its USB port, where the laptop stands in for the rest of the pile with `cahoots-host pile --serial`, as on the Nano. Every board keeps its own USB for power and flashing, which is fine as long as all the grounds are joined; the UARTs are 3.3 V on every Pico, so nothing else is shared. A Pico 2 W does the job of a Pico 2 here, since the firmware never turns its radio on. On V1 the same signals run through the pogo pair and the JST-SH sockets.
 
 ![Three Pico 2s as a pile: each board's UART0 crossed to the next board's UART1, grounds joined, the laptop on the bottom board's USB](diagrams/pico2-pile.svg)

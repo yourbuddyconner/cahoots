@@ -152,7 +152,7 @@ board's ENA SEL switch on EN (not ON), so the badge's enable pin reaches the chi
 Click board's +3.3V fed through a PNP transistor (an S8550 works) with its emitter on the
 Pico's 3V3, its collector on the Click board's +3.3V pin and its base through about 1 kΩ to
 GP3, the Pico's pin 5. The antenna switch is on. Without the transistor the chip stays powered
-and no tap reaches it. Make a new circle on the badge with the bench ceremony or a pile before
+and no tap reaches it. The diagram and the pin table are on [the DIY page](../docs/diy-badge.md#raspberry-pi-pico-2). Make a new circle on the badge with the bench ceremony or a pile before
 pairing, because a badge with no circles cannot pair. The two circles already on the bench
 badge, owner-bench3 and owner-bench4, were kept before the badge made hello objects, so their
 seats get no hello words from the card: People says "This seat has no hello words from the

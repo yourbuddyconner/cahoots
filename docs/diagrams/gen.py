@@ -491,6 +491,75 @@ def pico2_wiring():
     s.save("pico2-wiring.svg")
 
 
+def pico2_chip():
+    """The SE051 Click board on the same Pico 2: the bus, the enable pin, and the chip's 3.3 V through a
+    PNP transistor the firmware drives, so a phone's tap finds the chip unpowered."""
+    s = Svg(960, 520, "Wiring the SE051 Click board to a Pico 2")
+    s.text(480, 24, "The chip on the bench: the SE051 Plug&Trust Click on the same Pico 2, its power through a transistor", size=13, fill=FG, anchor="middle", weight=600)
+    SIG, PWR, GNDC = AMBER, PAPER, FG2
+    used = {4: SIG, 5: SIG, 11: SIG, 12: SIG, 13: GNDC, 36: PWR}
+    bx0 = 390
+    pads = pico(s, bx0, 48, used)
+    # the Click board on the left, its pins on the rows of the Pico pins they go to
+    cx, cy0, cw, ch = 40, 66, 190, 270
+    s.rect(cx, cy0, cw, ch, fill=BG2, stroke=LINE, r=8)
+    s.text(cx + cw / 2, cy0 + 18, "SE051 Plug&Trust Click", size=11, fill=FG, anchor="middle", weight=600)
+    s.text(cx + cw / 2, cy0 + 32, "MikroE, mikroBUS", size=9, fill=FG3, anchor="middle", mono=True)
+    s.lines(cx + 12, cy0 + 130, ["SW2 ENA SEL: EN", "SW1 ANTENNA: on"], size=10, fill=FG2, lh=16, mono=True)
+    px = cx + cw
+    y33 = 90
+    pins = [("3.3V", y33, PWR), ("EN", pads[4][1], SIG), ("SDA", pads[11][1], SIG), ("SCL", pads[12][1], SIG), ("GND", pads[13][1], GNDC)]
+    for name, py, c in pins:
+        s.circle(px, py, 3.2, fill=c, stroke="none")
+        s.text(px - 12, py + 3.5, name, size=10, fill=c, anchor="end", mono=True, weight=500)
+    for pin in (4, 11, 12, 13):
+        x, y = pads[pin]
+        s.line(x, y, px, y, color=SIG if pin != 13 else GNDC, sw=1.8)
+    # the transistor between the Click board and the Pico: emitter up, collector left, base right
+    tx, ty = 300, y33
+    s.line(tx, 36, tx, ty - 15, color=PWR, sw=1.8)  # emitter lead, from the 3.3 V wire over the top
+    s.line(tx - 15, ty, px, ty, color=PWR, sw=1.8)  # collector to the Click board's 3.3V
+    s.line(tx + 15, ty, 360, ty, color=SIG, sw=1.8)  # base, through the resistor
+    s.circle(tx, ty, 15, fill=BG2, stroke=FG2, sw=1.2)
+    s.text(tx, ty + 3, "PNP", size=8, fill=FG2, anchor="middle", mono=True)
+    s.text(tx - 10, ty - 22, "E", size=9, fill=FG3, anchor="middle", mono=True)
+    s.text(tx - 24, ty - 7, "C", size=9, fill=FG3, anchor="middle", mono=True)
+    s.text(tx + 24, ty - 7, "B", size=9, fill=FG3, anchor="middle", mono=True)
+    s.text(tx, ty + 30, "S8550", size=9, fill=FG2, anchor="middle", mono=True)
+    s.rect(326, ty - 5, 28, 10, fill=BG2, stroke=SIG, r=2, sw=1.4)  # the base resistor
+    s.text(340, ty - 11, "1 k\u03a9", size=9, fill=SIG, anchor="middle", mono=True)
+    # GP3 to the base: down the gap, hopping over the EN wire
+    x5, y5 = pads[5]
+    yen = pads[4][1]
+    s.line(x5, y5, 360, y5, color=SIG, sw=1.8)
+    s.line(360, y5, 360, yen + 6, color=SIG, sw=1.8)
+    s.path(f"M360 {yen + 6} A6 6 0 0 0 360 {yen - 6}", stroke=SIG, sw=1.8)
+    s.line(360, yen - 6, 360, ty, color=SIG, sw=1.8)
+    # 3.3 V from pin 36, over the top of the Pico, to the emitter
+    x36, y36 = pads[36]
+    s.path(f"M{x36} {y36} H604 V36 H{tx}", stroke=PWR, sw=1.8)
+    s.text(612, y36 + 3.5, "3.3 V", size=9, fill=PWR, mono=True)
+    s.lines(cx, 372, ["Signals: amber. 3.3 V: white. Ground: grey.", "Pin numbers and the e-paper wires are on", "the diagram above this one."], size=11, fill=FG2, lh=16)
+    s.lines(610, 236, [
+        "GP2 is the chip's enable. The badge holds it",
+        "low at rest and high only while it talks to",
+        "the chip.",
+        "GP3 drives the transistor. Low passes 3.3 V",
+        "to the Click board. High cuts it, which the",
+        "badge does while a phone may tap: a chip the",
+        "badge powers never takes the antenna.",
+        "",
+        "S8550, flat face towards you, legs down:",
+        "E, B, C from left to right.",
+        "1 k\u03a9 is three 330 \u03a9 in series.",
+        "No pull-ups on the Pico side: the Click",
+        "board has its own.",
+        "SW2 ENA SEL to EN, so GP2 reaches the chip.",
+        "SW1 ANTENNA on.",
+    ], size=11, fill=FG2, lh=16)
+    s.save("pico2-chip.svg")
+
+
 def pico2_pile():
     """Three Pico 2s chained over UART as a pile, with the laptop below the bottom one."""
     s = Svg(960, 420, "Three Pico 2s as a pile")
@@ -540,4 +609,5 @@ if __name__ == "__main__":
     tiers()
     roadmap()
     pico2_wiring()
+    pico2_chip()
     pico2_pile()

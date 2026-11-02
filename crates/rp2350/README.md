@@ -15,8 +15,9 @@ The pin map is V1's, from [hardware/v1/design.py](../../hardware/v1/design.py), 
 | link up: UART0 TX, RX | GP0, GP1 | 1, 2 |
 | link down: UART1 TX, RX | GP4, GP5 | 6, 7 |
 | link to the laptop | USB | |
-| SE051 SDA, SCL (I2C0, 400 kHz) | GP8, GP9 | 11, 12 |
-| SE051 enable, held high | GP2 | 4 |
+| SE051 SDA, SCL (I2C0, 400 kHz, no pull-ups on the Pico side) | GP8, GP9 | 11, 12 |
+| SE051 enable, low at rest, high while the badge talks to the chip | GP2 | 4 |
+| SE051 power, the base of a PNP transistor in the Click board's 3.3 V, low powers it | GP3 | 5 |
 
 The pile links are crossed between boards: this board's GP0 to the board above's GP5, this board's GP1 to the board above's GP4, ground to ground. Each RX pin carries a pull-down, so a connected peer's idle-high TX is the detect line.
 
@@ -98,7 +99,7 @@ The pad is plaintext on flash. The chip holds the seat keys and roots of circles
 
 ## The chip
 
-The NXP SE051 (for now on a MikroE Click board) sits on I2C0, GP8 and GP9, at 400 kHz, with its enable pin GP2 held high. At boot the firmware wakes it, selects its applet and, once in the chip's life, creates the P-256 curve object. The self-test then shows `se051: applet x.y.z, N circles`, where N is the number of seat keys in the chip. If nothing answers, the line is `se051: not found` and the badge runs as it did before the chip: the seat key and the root stay in the circle record.
+The NXP SE051 (for now on a MikroE SE051 Plug&Trust Click board) sits on I2C0, GP8 and GP9, at 400 kHz. Its enable pin is GP2, low at rest and high only while the badge talks to the chip, and its 3.3 V comes through a PNP transistor whose base GP3 drives, low to power the chip and high to cut it. The badge cuts the power whenever a phone may tap, because the chip picks its interface when it powers up: powered by the badge it boots onto the wire, powered by the phone's field it takes the antenna. The wiring, with the transistor and the Click board's switches, is on [the DIY page](../../docs/diy-badge.md#raspberry-pi-pico-2). At boot the firmware wakes it, selects its applet and, once in the chip's life, creates the P-256 curve object. The self-test then shows `se051: applet x.y.z, N circles`, where N is the number of seat keys in the chip. If nothing answers, the line is `se051: not found` and the badge runs as it did before the chip: the seat key and the root stay in the circle record.
 
 A circle made on a badge with a chip keeps its seat key (P-256, made in the chip and never out of it), its root (an HMAC key that can be used but not read) and its chat epoch counter in the chip, at object ids `0x4C41_01ss`, `0x4C41_02ss` and `0x4C41_03ss` for chip slot `ss`. The chip record above says which slots are in use; at boot the badge deletes any Cahoots object in a slot the record does not know.
 
