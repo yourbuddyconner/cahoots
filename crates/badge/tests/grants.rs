@@ -1027,7 +1027,7 @@ fn revoking_from_the_page_ends_the_grant() {
         id,
         grant_request(50, Some(EXP), false, NOW),
     );
-    // On the actions, two to the right of hello words is grants.
+    // On the actions, two to the right of words is grants.
     press(&mut badge, Press::Right);
     press(&mut badge, Press::Right);
     assert!(badge.board().shows("> grants"), "{:?}", badge.board().last());
@@ -1215,7 +1215,7 @@ fn a_grant_use_over_the_revoke_question_takes_it_away() {
 fn a_grant_use_over_the_forget_question_takes_it_away() {
     let (mut badge, mut laptop, id, _) = serving(true);
     let (grant, _) = issue(&mut badge, &mut laptop, id, grant_request(50, Some(EXP), false, NOW));
-    // On the actions, two to the left of hello words is forget this circle.
+    // On the actions, two to the left of words is forget this circle.
     press(&mut badge, Press::Left);
     press(&mut badge, Press::Left);
     assert!(badge.board().shows("> forget this circle"), "{:?}", badge.board().last());

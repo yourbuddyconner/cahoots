@@ -119,12 +119,12 @@ pub fn words(circle: &str, tier: &str, words: &[&str; 6]) -> Screen {
     s.done()
 }
 
-/// A circle's "hello words" page: the header, the title, and the six words one per row,
-/// in order. Either side button goes back.
+/// A circle's "words" page: the header, the title, and the circle's six check words one per
+/// row, in order. Either side button goes back.
 pub fn words_page(circle: &str, tier: &str, words: &[&str; 6]) -> Screen {
     let mut s = Draw::new();
     s.header(circle, tier);
-    s.centered(&FONT_9X18_BOLD, 30, "hello words");
+    s.centered(&FONT_9X18_BOLD, 30, "words");
     for (i, w) in words.iter().enumerate() {
         s.centered(&FONT_10X20, 52 + 20 * i as i32, w);
     }
@@ -143,13 +143,14 @@ pub fn keep_prompt(words: &[&str; 6]) -> Screen {
     s.done()
 }
 
-/// The second question after a single press on the keep prompt.
+/// The second question after a single press on the keep prompt. Discarding loses this new
+/// circle and no other.
 pub fn discard_prompt() -> Screen {
     let mut s = Draw::new();
     s.title("discard this circle?");
-    s.centered(&FONT_9X18_BOLD, 62, "the words and");
-    s.centered(&FONT_9X18_BOLD, 86, "the pad are lost");
-    s.centered(&FONT_8X13, 124, "nothing is saved yet");
+    s.centered(&FONT_9X18_BOLD, 62, "this new circle");
+    s.centered(&FONT_9X18_BOLD, 86, "is not saved");
+    s.centered(&FONT_8X13, 124, "the others stay");
     s.footer(Some("back"), Some("A+B  discard"), Some("back"));
     s.done()
 }

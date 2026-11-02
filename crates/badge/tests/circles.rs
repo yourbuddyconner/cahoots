@@ -374,7 +374,7 @@ fn chooser_navigation() {
     // Both opens that circle's actions, under its name.
     press(&mut b, Press::Both);
     assert!(b.board().shows("other"), "{:?}", b.board().last());
-    assert!(b.board().shows("> hello words"));
+    assert!(b.board().shows("> words"));
     assert_eq!(b.circle().unwrap().params.name, "other");
     // Its "back" goes back to the list, with it marked.
     press(&mut b, Press::Left);
@@ -604,7 +604,7 @@ fn unknown_circle_chip_request() {
     // A spend for a circle the badge does not hold is refused without asking.
     let r = ask(&mut b, &mut laptop, 6, &Request::Psk { circle: stranger, context: b"wg".to_vec() });
     assert_eq!(r, Response::Error { code: ErrorCode::UnknownCircle });
-    assert!(b.board().shows("> hello words"), "nothing asked: {:?}", b.board().last());
+    assert!(b.board().shows("> words"), "nothing asked: {:?}", b.board().last());
 }
 
 /// A board with one record: only `load_circle`, `save_circle` and `forget`, through the

@@ -17,7 +17,7 @@ fn main() {
     .map(|s| s.to_string())
     .collect();
     let actions: Vec<String> = [
-        "hello words",
+        "words",
         "key as code",
         "grants",
         "forget this circle",

@@ -857,9 +857,9 @@ mod tests {
 
     #[test]
     fn a_circles_actions_and_pages_lead_back_to_the_list() {
-        let actions = "owner-bench3 | > hello words |   key as code |   grants |   forget this circle |   back | prev  A+B  open  next";
-        let at_back = "owner-bench3 |   hello words |   key as code |   grants |   forget this circle | > back | prev  A+B  open  next";
-        let words = "owner-bench3  tier 2 | hello words | a | b | c | d | e | f | back  back";
+        let actions = "owner-bench3 | > words |   key as code |   grants |   forget this circle |   back | prev  A+B  open  next";
+        let at_back = "owner-bench3 |   words |   key as code |   grants |   forget this circle | > back | prev  A+B  open  next";
+        let words = "owner-bench3  tier 2 | words | a | b | c | d | e | f | back  back";
         assert_eq!(goto_on("phone", actions, false), Walk::Press(1));
         assert_eq!(goto_on("phone", at_back, false), Walk::Press(2));
         assert_eq!(goto_on("phone", words, false), Walk::Press(0));
@@ -882,7 +882,7 @@ mod tests {
     #[test]
     fn forget_opens_its_own_circle_and_answers_only_its_own_question() {
         let list = "circles |   owner-bench3 | > pair-1712 |   new circle |   back | prev  A+B  open  next";
-        let actions = "pair-1712 |   hello words |   key as code |   grants | > forget this circle |   back | prev  A+B  open  next";
+        let actions = "pair-1712 |   words |   key as code |   grants | > forget this circle |   back | prev  A+B  open  next";
         let page = "pair-1712  tier 2 | forget this circle | Both to forget this circle | the others stay | back  A+B  choose  back";
         let ours = "forget this circle? | pair-1712 | its words, pad and keys | are erased for good | other circles stay | back  A+B  forget  back";
         let other = "forget this circle? | owner-bench3 | its words, pad and keys | are erased for good | other circles stay | back  A+B  forget  back";

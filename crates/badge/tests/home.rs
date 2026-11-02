@@ -344,7 +344,7 @@ fn the_laptops_allowance_lasts_through_the_list_until_it_is_unplugged() {
     // Home, the list, the circle's actions: a request is answered with nothing asked.
     press(&mut b1, Press::Both);
     press(&mut b1, Press::Both);
-    assert!(b1.board().shows("> hello words"), "{:?}", b1.board().last());
+    assert!(b1.board().shows("> words"), "{:?}", b1.board().last());
     send(&mut laptop, 901, &Request::Identify);
     step(&mut b1);
     let got = responses(&mut laptop);
@@ -444,15 +444,15 @@ fn a_circle_is_one_page_of_actions_two_levels_down_and_back_comes_home() {
     press(&mut b1, Press::Both);               // the menu
     press(&mut b1, Press::Both);               // the first circle
     // A list: each action is a row, marked or not.
-    for a in ["hello words", "key as code", "grants", "forget this circle", "back"] {
+    for a in ["words", "key as code", "grants", "forget this circle", "back"] {
         let row = |l: &String| l.trim_start_matches(['>', ' ']) == a;
         assert!(b1.board().last().iter().any(row), "{a} in {:?}", b1.board().last());
     }
-    press(&mut b1, Press::Both);               // hello words
-    assert!(b1.board().shows("hello words"));
+    press(&mut b1, Press::Both);               // words
+    assert!(b1.board().shows("words"));
     assert!(!b1.board().last().iter().any(|l| l.contains("/5")));
     press(&mut b1, Press::Left);               // back to the actions, not another page
-    assert!(b1.board().shows("> hello words"));
+    assert!(b1.board().shows("> words"));
     // "back" on the actions is the list, with the circle marked. "back" there is home.
     to_entry(&mut b1, "back");
     press(&mut b1, Press::Both);

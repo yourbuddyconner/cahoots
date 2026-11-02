@@ -264,7 +264,7 @@ fn after_a_revoke_on_the_badge_one_commit_fails_and_the_next_asks() {
     press(&top, "B");
     wait_line(&top, "> bench");
     press(&top, "B");
-    wait_line(&top, "> hello words");
+    wait_line(&top, "> words");
     press(&top, "R");
     wait_line(&top, "> key as code");
     press(&top, "R");

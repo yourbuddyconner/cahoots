@@ -38,9 +38,9 @@ fn an_action_page_has_no_page_count_or_arrows_and_goes_back_either_side() {
 }
 
 #[test]
-fn the_hello_words_page_lists_the_words_in_order_under_its_title() {
+fn the_words_page_lists_the_words_in_order_under_its_title() {
     let s = words_page("bench", "TRNG T1", &W);
-    assert!(s.lines.iter().any(|l| l == "hello words"));
+    assert!(s.lines.iter().any(|l| l == "words"));
     let tokens: Vec<&str> = s.lines.iter().flat_map(|l| l.split_whitespace()).collect();
     let at = tokens
         .iter()

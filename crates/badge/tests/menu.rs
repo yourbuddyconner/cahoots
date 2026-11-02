@@ -1,4 +1,4 @@
-//! A circle's actions: a list (hello words, key as code, grants, forget this circle, back),
+//! A circle's actions: a list (words, key as code, grants, forget this circle, back),
 //! Left and Right to move, Both to open, and Left or Right on the page an action opened to go
 //! back. The laptop on the down link is answered on every page once it has been allowed with
 //! Both.
@@ -70,7 +70,7 @@ fn serving() -> (Badge<FakeBoard>, FakeLink, CircleId) {
     press(&mut badge, Press::Both);
     let got = responses(&mut laptop);
     assert!(matches!(got.as_slice(), [(900, Response::Identity { .. })]), "{got:?}");
-    assert!(on_actions(&mut badge, "hello words"));
+    assert!(on_actions(&mut badge, "words"));
     (badge, laptop, id)
 }
 
@@ -134,7 +134,7 @@ fn a_circle_opens_on_its_actions_and_hello_words_shows_its_words() {
         badge.board().last(),
         [
             "fakes",
-            "> hello words",
+            "> words",
             "  key as code",
             "  grants",
             "  forget this circle",
@@ -142,7 +142,7 @@ fn a_circle_opens_on_its_actions_and_hello_words_shows_its_words() {
             "prev  A+B  open  next"
         ]
     );
-    open(&mut badge, "hello words");
+    open(&mut badge, "words");
     let kept = badge.circle().unwrap().check_words().map(String::from);
     assert_eq!(badge.board().words().last(), Some(&kept));
     assert!(badge.board().shows("back  back"), "{:?}", badge.board().last());
@@ -151,13 +151,13 @@ fn a_circle_opens_on_its_actions_and_hello_words_shows_its_words() {
 #[test]
 fn left_and_right_move_through_the_actions_and_either_goes_back_from_a_page() {
     let (mut badge, _laptop, _) = in_the_menu();
-    for marked in ["key as code", "grants", "forget this circle", "back", "hello words"] {
+    for marked in ["key as code", "grants", "forget this circle", "back", "words"] {
         press(&mut badge, Press::Right);
         assert!(on_actions(&mut badge, marked), "{marked}: {:?}", badge.board().last());
     }
     press(&mut badge, Press::Left);
     assert!(on_actions(&mut badge, "back"), "Left wraps to the last");
-    for title in ["hello words", "key as code", "grants", "forget this circle"] {
+    for title in ["words", "key as code", "grants", "forget this circle"] {
         for side in [Press::Left, Press::Right] {
             open(&mut badge, title);
             assert!(!badge.board().last().iter().any(|l| l.contains("/5")));
@@ -224,7 +224,7 @@ fn both_on_the_key_page_spends_32_bytes_and_shows_the_code() {
 fn both_on_the_words_page_spends_nothing() {
     let (mut badge, mut laptop, id) = serving();
     let before = remaining(&mut badge, &mut laptop, id);
-    open(&mut badge, "hello words");
+    open(&mut badge, "words");
     press(&mut badge, Press::Both);
     press(&mut badge, Press::Both);
     assert!(badge.board().codes().is_empty());
@@ -234,11 +234,11 @@ fn both_on_the_words_page_spends_nothing() {
 #[test]
 fn both_on_the_words_page_shows_the_six_words_again() {
     let (mut badge, _laptop, _) = in_the_menu();
-    open(&mut badge, "hello words");
+    open(&mut badge, "words");
     let first = badge.board().words().last().unwrap().clone();
     let n = badge.board().words().len();
     press(&mut badge, Press::Both);
-    assert!(on_page(&mut badge, "hello words"));
+    assert!(on_page(&mut badge, "words"));
     assert_eq!(badge.board().words().len(), n + 1);
     assert_eq!(badge.board().words().last().unwrap(), &first);
 }
@@ -246,7 +246,7 @@ fn both_on_the_words_page_shows_the_six_words_again() {
 #[test]
 fn words_are_the_same_after_a_spend() {
     let (mut badge, _laptop, _) = in_the_menu();
-    open(&mut badge, "hello words");
+    open(&mut badge, "words");
     let before = badge.board().words().last().unwrap().clone();
     press(&mut badge, Press::Left);
     open(&mut badge, "key as code");
@@ -256,7 +256,7 @@ fn words_are_the_same_after_a_spend() {
     press(&mut badge, Press::Left);
     assert!(on_actions(&mut badge, "key as code"));
     press(&mut badge, Press::Left);
-    open(&mut badge, "hello words");
+    open(&mut badge, "words");
     assert_eq!(badge.board().words().last().unwrap(), &before);
 }
 
@@ -278,7 +278,7 @@ fn serve_answers_identify_without_a_prompt() {
         }
         other => panic!("not an identity: {other:?}"),
     }
-    assert!(on_actions(&mut badge, "hello words"));
+    assert!(on_actions(&mut badge, "words"));
 }
 
 #[test]
@@ -295,7 +295,7 @@ fn refusing_the_laptop_answers_busy_and_the_next_request_asks_again() {
             vec![(1, Response::Error { code: ErrorCode::Busy })],
             "{single:?}"
         );
-        assert!(on_actions(&mut badge, "hello words"));
+        assert!(on_actions(&mut badge, "words"));
         // Not allowed: the next request asks again, and Both answers it.
         send(&mut laptop, 2, &Request::Identify);
         badge.idle_step();
@@ -323,7 +323,7 @@ fn serve_psk_waits_for_both() {
         matches!(got.as_slice(), [(3, Response::Psk { handle, .. })] if handle.circle_id == id),
         "{got:?}"
     );
-    assert!(on_actions(&mut badge, "hello words"));
+    assert!(on_actions(&mut badge, "words"));
     assert_eq!(remaining(&mut badge, &mut laptop, id), before - 32);
 }
 
@@ -344,7 +344,7 @@ fn a_single_press_refuses_consent_and_both_allows() {
             )],
             "{single:?}"
         );
-        assert!(on_actions(&mut badge, "hello words"), "{single:?}");
+        assert!(on_actions(&mut badge, "words"), "{single:?}");
         assert_eq!(remaining(&mut badge, &mut laptop, id), before);
 
         // Still serving: the next request is asked and Both allows it.
@@ -391,7 +391,7 @@ fn the_first_request_is_held_while_the_badge_asks_about_the_laptop() {
     press(&mut badge, Press::Both);
     let got = responses(&mut laptop);
     assert!(matches!(got.as_slice(), [(1, Response::Identity { .. })]), "{got:?}");
-    assert!(on_actions(&mut badge, "hello words"));
+    assert!(on_actions(&mut badge, "words"));
 }
 
 #[test]

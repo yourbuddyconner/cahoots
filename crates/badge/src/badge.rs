@@ -233,7 +233,7 @@ enum Page {
 
 /// A circle's actions, in the order its page lists them. The last goes back to the list.
 const ACTIONS: [&str; 5] = [
-    "hello words",
+    "words",
     "key as code",
     "grants",
     "forget this circle",
@@ -2654,7 +2654,7 @@ impl<B: Board> Badge<B> {
     /// window of two minutes for a phone's tap, or closes it. Right or Both shows the list,
     /// where Left and Right move, Both opens a circle's actions, "new circle" starts a pass
     /// for one more while the board has room, and the last entry, "back", goes home. A
-    /// circle's actions are a list too: "hello words", "key as code", "grants", "forget this
+    /// circle's actions are a list too: "words", "key as code", "grants", "forget this
     /// circle", and "back" to the list. Both opens the page of an action, and Left or Right
     /// there goes back to the actions. Both on the key page spends 32 bytes and shows them as
     /// a code. Both on the forget page asks, and Both again forgets this circle and nothing

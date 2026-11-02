@@ -133,7 +133,12 @@ fn a_single_press_asks_again_and_another_goes_back() {
     b1.board().presses.push_back(Press::Left);
     assert_eq!(b1.step(), Step::Prompt);
     assert_eq!(b1.board().screens.len(), drawn + 1, "the discard question is drawn");
-    assert!(b1.board().screens.last().unwrap().join(" ").contains("discard this circle?"));
+    let question = b1.board().screens.last().unwrap().join(" ");
+    assert!(question.contains("discard this circle?"), "{question}");
+    // It says what is lost: this new circle, and no other.
+    assert!(question.contains("this new circle is not saved"), "{question}");
+    assert!(question.contains("the others stay"), "{question}");
+    assert!(!question.contains("pad"), "{question}");
     b1.board().presses.push_back(Press::Right);
     assert_eq!(b1.step(), Step::Prompt);
     assert!(b1.board().screens.last().unwrap().join(" ").contains("keep this circle?"));

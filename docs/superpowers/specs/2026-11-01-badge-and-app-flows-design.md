@@ -264,7 +264,7 @@ such a tap gets.
   phone's field starts the chip, as an iPhone did with the Pico off on 2026-10-31. Home's status line says "closed to
   taps", "open for a tap, 2 min" or "open for a tap, 1 min". Home's title is "badge" over the
   circles' names. The menu lists the circles first, then "new circle", "pair a phone",
-  "phone" while one is paired, and "back". A circle's page is a list of "hello words", "key as
+  "phone" while one is paired, and "back". A circle's page is a list of "words", "key as
   code", "grants", "forget this circle" and "back".
 - Placeholders sit at the public id of every circle slot, and nowhere else. On the bench SE051
   a placeholder takes 160 bytes. Sixteen slots with all their ids, 144 objects, left room for
