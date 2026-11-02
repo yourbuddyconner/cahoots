@@ -21,7 +21,7 @@ pub mod scp03;
 pub mod signer;
 pub mod store;
 
-use crate::card::card_hello_seat;
+use crate::card::{card_hello_seat, pocket_hello, pocket_holds};
 use crate::ceremony::{Pending, Receiver};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -88,6 +88,9 @@ pub enum PhoneError {
     /// The card's phone slot does not hold this phone's key.
     #[error("This card no longer knows this phone.")]
     NotPaired,
+    /// A card circle has no more hello words with that seat: the next tap fetches more.
+    #[error("Tap the card first.")]
+    NeedsTap,
 }
 
 impl From<uniffi::UnexpectedUniFFICallbackError> for PhoneError {
@@ -359,6 +362,10 @@ pub struct HelloWords {
     pub theirs: String,
     /// The hello number. Both phones move it with `next_hello`.
     pub number: u32,
+    /// In a card circle, how many hello numbers with this seat the phone holds from this one
+    /// on, this one included: `next_hello` needs a tap once it is 1. `None` in a circle that
+    /// works the words out itself.
+    pub card_left: Option<u32>,
 }
 
 /// One seat of a circle, from its manifest and the seat's card.
@@ -1098,27 +1105,30 @@ impl Phone {
     }
 
     /// The hello words with `other_seat` at the current hello number. In a card circle they
-    /// come from a tap on the card.
+    /// come from the words the last tap on the card fetched ahead, with no tap now: `NeedsTap`
+    /// when it fetched none for this number.
     pub fn hello_words(&self, circle: String, other_seat: u8) -> Result<HelloWords, PhoneError> {
-        self.with_circle(&circle, |c, me| {
+        self.with_circle(&circle, |c, _| {
             if c.record.is_card() {
-                let number = card_hello_seat(c, other_seat)?;
-                return me.card_hello(c, other_seat, number);
+                return pocket_hello(c, other_seat);
             }
             hello(c, other_seat)
         })
     }
 
     /// Move to the next hello words with `other_seat`. Both people do this. In a card circle
-    /// the words come from a tap, and the number moves once the tap has given them.
+    /// the words come from the words the last tap fetched ahead, and the number moves only
+    /// when they are there: else `NeedsTap`, and the number stays.
     pub fn next_hello(&self, circle: String, other_seat: u8) -> Result<HelloWords, PhoneError> {
-        self.with_circle(&circle, |c, me| {
+        self.with_circle(&circle, |c, _| {
             if c.record.is_card() {
-                let number = card_hello_seat(c, other_seat)?.wrapping_add(1);
-                let words = me.card_hello(c, other_seat, number)?;
-                c.record.pair_counters[usize::from(other_seat)] = number;
+                let next = card_hello_seat(c, other_seat)?.wrapping_add(1);
+                if !pocket_holds(c, other_seat, next) {
+                    return Err(PhoneError::NeedsTap);
+                }
+                c.record.pair_counters[usize::from(other_seat)] = next;
                 c.record.save(&c.dir)?;
-                return Ok(words);
+                return pocket_hello(c, other_seat);
             }
             hello(c, other_seat)?;
             let i = usize::from(other_seat);
@@ -1443,5 +1453,6 @@ fn hello(c: &Circle, other: u8) -> Result<HelloWords, PhoneError> {
         mine: pairwise::words(&key, c.record.seat, number).join(" "),
         theirs: pairwise::words(&key, other, number).join(" "),
         number,
+        card_left: None,
     })
 }

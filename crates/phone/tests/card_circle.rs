@@ -467,48 +467,145 @@ fn a_pending_bump_in_the_public_object_is_forwarded_and_a_root_holder_moves() {
     assert_eq!(got.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["me too"]);
 }
 
+/// The words `speaker` says at hello `n` with the badge's seat `badge_seat`, worked out by the
+/// other card from its own hello object for that seat.
+fn other_card_words(b2: &mut Badge<FakeBoard>, badge_seat: u8, speaker: u8, n: u32) -> String {
+    let mut data = cahoots_core::pairwise::WORDS_DOMAIN.to_vec();
+    data.push(speaker);
+    data.extend_from_slice(&n.to_le_bytes());
+    data.push(1);
+    let chip = b2.board().owner_chip();
+    let mac = chip.hmac(badge_chip::hello_id(0, badge_seat), &data).unwrap();
+    chip.close_session().unwrap();
+    let v = u32::from_le_bytes(mac[..4].try_into().unwrap());
+    let w = cahoots_core::checkwords::WORDLIST;
+    format!("{} {}", w[(v & 0x7ff) as usize], w[((v >> 11) & 0x7ff) as usize])
+}
+
 #[test]
-fn hello_words_from_a_tap_equal_the_other_members() {
+fn hello_words_from_the_pocket_equal_the_other_members() {
     let relay = Arc::new(Mutex::new(MemRelay::default()));
     let (mut b1, mut b2) = kept_pair((true, true));
     let d = device(&relay);
-    let ids = pair(&mut b1, &d);
-    let id = ids[0].clone();
+    let id = pair(&mut b1, &d).remove(0);
     let mine = b1.circle().unwrap().seat;
     let other = b2.circle().unwrap().seat;
 
-    // The other card's words, from its own hello object for this badge's seat.
-    let theirs_at = |b2: &mut Badge<FakeBoard>, speaker: u8, n: u32| {
-        let mut data = cahoots_core::pairwise::WORDS_DOMAIN.to_vec();
-        data.push(speaker);
-        data.extend_from_slice(&n.to_le_bytes());
-        data.push(1);
-        let chip = b2.board().owner_chip();
-        let mac = chip.hmac(badge_chip::hello_id(0, mine), &data).unwrap();
-        chip.close_session().unwrap();
-        let v = u32::from_le_bytes(mac[..4].try_into().unwrap());
-        let w = cahoots_core::checkwords::WORDLIST;
-        format!("{} {}", w[(v & 0x7ff) as usize], w[((v >> 11) & 0x7ff) as usize])
-    };
-
-    let h = tap(&mut b1, &d, |p| p.hello_words(id.clone(), other)).unwrap();
+    // No card in the reader: the words come from what the pairing tap kept.
+    let h = d.phone.hello_words(id.clone(), other).unwrap();
     assert_eq!(h.number, 0);
-    assert_eq!(h.mine, theirs_at(&mut b2, mine, 0));
-    assert_eq!(h.theirs, theirs_at(&mut b2, other, 0));
+    assert_eq!(h.mine, other_card_words(&mut b2, mine, mine, 0));
+    assert_eq!(h.theirs, other_card_words(&mut b2, mine, other, 0));
     assert_ne!(h.mine, h.theirs);
 
-    let h = tap(&mut b1, &d, |p| p.next_hello(id.clone(), other)).unwrap();
+    let h = d.phone.next_hello(id.clone(), other).unwrap();
     assert_eq!(h.number, 1);
-    assert_eq!(h.mine, theirs_at(&mut b2, mine, 1));
-    assert_eq!(h.theirs, theirs_at(&mut b2, other, 1));
+    assert_eq!(h.mine, other_card_words(&mut b2, mine, mine, 1));
+    assert_eq!(h.theirs, other_card_words(&mut b2, mine, other, 1));
 
-    // Not with this seat itself, and nothing without the card.
+    // Not with this seat itself.
     assert!(matches!(d.phone.hello_words(id.clone(), mine), Err(PhoneError::NotFound { .. })));
-    assert!(matches!(d.phone.hello_words(id.clone(), other), Err(PhoneError::NoCard)));
-    // A failed tap does not move the number.
-    assert!(d.phone.next_hello(id.clone(), other).is_err());
-    let h = tap(&mut b1, &d, |p| p.hello_words(id.clone(), other)).unwrap();
-    assert_eq!(h.number, 1);
+    assert!(matches!(d.phone.next_hello(id.clone(), mine), Err(PhoneError::NotFound { .. })));
+}
+
+#[test]
+fn the_second_tap_fills_a_pocket_of_eight_hellos_per_seat_and_no_tap_follows() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b1, mut b2) = kept_pair((true, true));
+    let mut d = device(&relay);
+    let id = pair(&mut b1, &d).remove(0);
+    let mine = b1.circle().unwrap().seat;
+    let other = b2.circle().unwrap().seat;
+    let dir = d.path.join("circles").join(&id);
+
+    // The pairing tap kept eight pairs for the other seat, numbers 0 to 7.
+    let record = CircleRecord::load(&dir).unwrap();
+    let pocket = record.card.as_ref().unwrap().hello_pocket.clone().unwrap();
+    assert_eq!(pocket.len(), 8);
+    assert!(pocket.iter().all(|p| p.other == other && p.mine.len() == 32 && p.theirs.len() == 32));
+    let mut numbers: Vec<u32> = pocket.iter().map(|p| p.number).collect();
+    numbers.sort();
+    assert_eq!(numbers, (0..8).collect::<Vec<u32>>());
+
+    // The card is gone from the reader: a tap would fail, and none is needed.
+    assert!(d.nfc.0.lock().unwrap().is_none());
+    let h = d.phone.hello_words(id.clone(), other).unwrap();
+    assert_eq!((h.number, h.card_left), (0, Some(8)));
+    assert_eq!(h.mine, other_card_words(&mut b2, mine, mine, 0));
+    assert_eq!(h.theirs, other_card_words(&mut b2, mine, other, 0));
+    for n in 1..8u32 {
+        let h = d.phone.next_hello(id.clone(), other).unwrap();
+        assert_eq!((h.number, h.card_left), (n, Some(8 - n)));
+        assert_eq!(h.mine, other_card_words(&mut b2, mine, mine, n));
+        assert_eq!(h.theirs, other_card_words(&mut b2, mine, other, n));
+        assert_eq!(d.phone.hello_words(id.clone(), other).unwrap(), h);
+        if n == 4 {
+            // The pocket and the number are on disk.
+            d.restart();
+            assert_eq!(d.phone.hello_words(id.clone(), other).unwrap(), h);
+        }
+    }
+
+    // The ninth asks for a tap, and the number stays at 7.
+    let e = d.phone.next_hello(id.clone(), other).err().unwrap();
+    assert!(matches!(e, PhoneError::NeedsTap), "{e:?}");
+    assert_eq!(e.to_string(), "Tap the card first.");
+    let h = d.phone.hello_words(id.clone(), other).unwrap();
+    assert_eq!((h.number, h.card_left), (7, Some(1)));
+    assert_eq!(CircleRecord::load(&dir).unwrap().pair_counters[usize::from(other)], 7);
+    d.restart();
+    assert_eq!(d.phone.hello_words(id.clone(), other).unwrap().number, 7);
+}
+
+#[test]
+fn a_reset_does_not_empty_the_pocket() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b1, b2) = kept_pair((true, false));
+    let mut member = Member::of(&b2);
+    let d = device(&relay);
+    let id = pair(&mut b1, &d).remove(0);
+    let other = member.seat;
+    let before = d.phone.hello_words(id.clone(), other).unwrap();
+    assert_eq!((before.number, before.card_left), (0, Some(8)));
+
+    // A root holder resets the chat: the card circle waits for the next generation's key.
+    member.bump(&relay, [0x77; 32]);
+    d.phone.poll(id.clone()).unwrap();
+    assert!(d.phone.circles()[0].needs_tap);
+
+    // Hello words do not hang on the chat's keys: they answer without a tap.
+    assert!(d.nfc.0.lock().unwrap().is_none());
+    assert_eq!(d.phone.hello_words(id.clone(), other).unwrap(), before);
+    let h = d.phone.next_hello(id.clone(), other).unwrap();
+    assert_eq!((h.number, h.card_left), (1, Some(7)));
+    assert_ne!(h.mine, before.mine);
+}
+
+#[test]
+fn pairing_again_keeps_the_hello_numbers_and_fills_from_there() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b1, b2) = kept_pair((true, false));
+    let other = b2.circle().unwrap().seat;
+    let d = device(&relay);
+    let id = pair(&mut b1, &d).remove(0);
+    for _ in 0..3 {
+        d.phone.next_hello(id.clone(), other).unwrap();
+    }
+    let at_3 = d.phone.hello_words(id.clone(), other).unwrap();
+    assert_eq!((at_3.number, at_3.card_left), (3, Some(5)));
+
+    // The badge unpairs the phone and pairs it again: the circle it holds keeps its numbers,
+    // and the tap fills eight from there.
+    b1.unpair().unwrap();
+    assert_eq!(pair(&mut b1, &d), vec![id.clone()]);
+    let h = d.phone.hello_words(id.clone(), other).unwrap();
+    assert_eq!((h.number, h.card_left), (3, Some(8)));
+    assert_eq!((h.mine, h.theirs), (at_3.mine, at_3.theirs));
+    let record = CircleRecord::load(&d.path.join("circles").join(&id)).unwrap();
+    let mut numbers: Vec<u32> =
+        record.card.as_ref().unwrap().hello_pocket.as_ref().unwrap().iter().map(|p| p.number).collect();
+    numbers.sort();
+    assert_eq!(numbers, (3..11).collect::<Vec<u32>>());
 }
 
 #[test]

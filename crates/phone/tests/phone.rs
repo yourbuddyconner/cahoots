@@ -329,6 +329,8 @@ fn hello_words_match_across_phones() {
     assert_eq!(wa.mine, wb.theirs);
     assert_eq!(wa.theirs, wb.mine);
     assert_eq!(wa.number, 0);
+    // Not a card circle: no pocket to count.
+    assert_eq!(wa.card_left, None);
     let na = a.phone.next_hello(id.clone(), 1).unwrap();
     let nb = b.phone.next_hello(id.clone(), 0).unwrap();
     assert_eq!(na.number, 1);

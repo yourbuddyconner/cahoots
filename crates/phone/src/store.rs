@@ -164,7 +164,7 @@ pub struct CircleRecord {
     /// Set for a card circle: a circle of a badge this phone is paired to. It has no pad, no
     /// root, no pair keys and no seat key of its own (`root`, `pair_keys`, `seat_label` and
     /// `seat_public` are empty): it chats as the badge's seat under a generation key from a
-    /// tap, and asks the tap for hello words.
+    /// tap, and says the hello words a tap fetched ahead.
     #[n(12)]
     pub card: Option<CardCircle>,
 }
@@ -205,6 +205,29 @@ pub struct CardCircle {
     /// `from_id || to_id || COSE_Sign1` each.
     #[n(6)]
     pub forward: Vec<ByteVec>,
+    /// Hello words a tap fetched ahead: for each other seat, the pairs at its next numbers
+    /// from its counter in `pair_counters`. `None` in a record written before there was a
+    /// pocket, which is the same as an empty one.
+    #[n(7)]
+    pub hello_pocket: Option<Vec<PocketWords>>,
+}
+
+/// One hello number's words with another seat of a card circle, as the card's MACs: the first
+/// four bytes of each give the two words.
+#[derive(Encode, Decode, Clone)]
+pub struct PocketWords {
+    /// The other seat.
+    #[n(0)]
+    pub other: u8,
+    /// The hello number.
+    #[n(1)]
+    pub number: u32,
+    /// The MAC of the words this seat says, 32 bytes.
+    #[n(2)]
+    pub mine: ByteVec,
+    /// The MAC of the words the other seat says back, 32 bytes.
+    #[n(3)]
+    pub theirs: ByteVec,
 }
 
 impl Drop for CircleRecord {
@@ -213,8 +236,14 @@ impl Drop for CircleRecord {
         for k in &mut self.pair_keys {
             k.zeroize();
         }
-        if let Some(k) = self.card.as_mut().and_then(|c| c.generation_key.as_mut()) {
-            k.zeroize();
+        if let Some(card) = self.card.as_mut() {
+            if let Some(k) = card.generation_key.as_mut() {
+                k.zeroize();
+            }
+            for p in card.hello_pocket.iter_mut().flatten() {
+                p.mine.zeroize();
+                p.theirs.zeroize();
+            }
         }
     }
 }
@@ -676,5 +705,58 @@ impl ChannelMessages {
     }
     pub fn save(&self, dir: &Path) -> Result<(), PhoneError> {
         save(&dir.join(CHANNEL_MESSAGES), self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `CardCircle` as it was written before the pocket.
+    #[derive(Encode)]
+    struct CardCircleBefore {
+        #[n(0)]
+        badge_name: String,
+        #[n(1)]
+        circle_slot: u8,
+        #[n(2)]
+        badge_public: ByteVec,
+        #[n(3)]
+        #[cbor(with = "minicbor::bytes")]
+        generation_key: Option<[u8; 32]>,
+        #[n(4)]
+        #[cbor(with = "minicbor::bytes")]
+        generation: [u8; 32],
+        #[n(5)]
+        key_label: String,
+        #[n(6)]
+        forward: Vec<ByteVec>,
+    }
+
+    #[test]
+    fn a_card_record_from_before_the_pocket_reads_with_no_pocket() {
+        let before = CardCircleBefore {
+            badge_name: "your badge".into(),
+            circle_slot: 3,
+            badge_public: vec![2; 33].into(),
+            generation_key: Some([7; 32]),
+            generation: [9; 32],
+            key_label: "cahoots:card:00".into(),
+            forward: vec![vec![1, 2].into()],
+        };
+        let card: CardCircle = minicbor::decode(&minicbor::to_vec(&before).unwrap()).unwrap();
+        assert!(card.hello_pocket.is_none());
+        assert_eq!(
+            (card.circle_slot, card.key_label.as_str()),
+            (3, "cahoots:card:00")
+        );
+        assert_eq!(card.forward.len(), 1);
+        // No pocket is written as nothing at all: such a record is the same bytes as before.
+        let mut none = card.clone();
+        none.hello_pocket = None;
+        assert_eq!(
+            minicbor::to_vec(&none).unwrap(),
+            minicbor::to_vec(&before).unwrap()
+        );
     }
 }

@@ -7,18 +7,20 @@
 //! read them. The owner checks the six words
 //! on both screens and presses both buttons on the badge. The second tap
 //! ([`Phone::pair_card_finish`]) opens the phone slot with that key, which works only once the
-//! badge took it, keeps each circle as a card circle, fetches the keys its chat needs, posts
-//! any bump the badge left for a device to post, and publishes the badge's card in the chat.
+//! badge took it, keeps each circle as a card circle, fetches the keys its chat needs and a
+//! pocket of hello words, posts any bump the badge left for a device to post, and publishes
+//! the badge's card in the chat.
 //!
 //! A card circle holds no pad, no root, no pair keys and no seat key. It chats as the badge's
 //! seat under one generation's key. When a bump moves the circle on, the chat waits
-//! (`needs_tap`) until a tap ([`Phone::tap_for_keys`]) gives the next key. Hello words come
-//! from a tap too. The slot key is kept in the keychain under `cahoots:card:` and the badge's
-//! nonce, behind Face ID.
+//! (`needs_tap`) until a tap ([`Phone::tap_for_keys`]) gives the next key. Hello words need no
+//! tap of their own: a tap fetches the next [`POCKET_WORDS`] with each other seat ahead, and
+//! `next_hello` asks for a tap (`NeedsTap`) only when they run out. The slot key is kept in
+//! the keychain under `cahoots:card:` and the badge's nonce, behind Face ID.
 
 use crate::chat::{self, Circle};
 use crate::nfc::{sealed_inbox, Session, Tap, TapError};
-use crate::store::{self, CardCircle, ChatRecord, CircleRecord, SettingsRecord};
+use crate::store::{self, CardCircle, ChatRecord, CircleRecord, PocketWords, SettingsRecord};
 use crate::{signer, HelloWords, PairPreview, Phone, PhoneError, PHONE_KEY};
 use cahoots_badge::public::PublicObject;
 use cahoots_core::manifest::{Manifest, SealedManifest};
@@ -118,6 +120,127 @@ pub(crate) fn card_hello_seat(c: &Circle, other: u8) -> Result<u32, PhoneError> 
     Ok(c.record.pair_counters[usize::from(other)])
 }
 
+/// How many hello numbers with each other seat a tap fetches ahead, from the seat's counter.
+pub(crate) const POCKET_WORDS: u32 = 8;
+
+/// A pocket entry that holds two MACs.
+fn usable(p: &PocketWords) -> bool {
+    p.mine.len() == 32 && p.theirs.len() == 32
+}
+
+/// The words of the pair `pocket` holds with `other` at `number`: this seat's, then the other
+/// seat's.
+fn pocket_words(pocket: &[PocketWords], other: u8, number: u32) -> Option<(String, String)> {
+    pocket
+        .iter()
+        .filter(|p| p.other == other && p.number == number)
+        .find_map(|p| {
+            let mine: [u8; 32] = p.mine[..].try_into().ok()?;
+            let theirs: [u8; 32] = p.theirs[..].try_into().ok()?;
+            Some((hello_words(&mine), hello_words(&theirs)))
+        })
+}
+
+/// A card circle's pocket. Empty for any other circle, and for a record from before pockets.
+fn pocket_of(c: &Circle) -> &[PocketWords] {
+    c.record
+        .card
+        .as_ref()
+        .and_then(|card| card.hello_pocket.as_deref())
+        .unwrap_or(&[])
+}
+
+/// How many hello numbers with `other` the pocket holds from the seat's counter on, the
+/// counter's own included.
+pub(crate) fn pocket_left(c: &Circle, other: u8) -> u32 {
+    let Some(&counter) = c.record.pair_counters.get(usize::from(other)) else {
+        return 0;
+    };
+    let left = pocket_of(c)
+        .iter()
+        .filter(|p| p.other == other && p.number >= counter && usable(p))
+        .count();
+    u32::try_from(left).unwrap_or(u32::MAX)
+}
+
+/// Whether the pocket holds the hello words with `other` at `number`.
+pub(crate) fn pocket_holds(c: &Circle, other: u8, number: u32) -> bool {
+    pocket_words(pocket_of(c), other, number).is_some()
+}
+
+/// The hello words with `other` at its current number in a card circle, from the pocket, with
+/// no tap. `NeedsTap` when the pocket does not hold them.
+pub(crate) fn pocket_hello(c: &Circle, other: u8) -> Result<HelloWords, PhoneError> {
+    let number = card_hello_seat(c, other)?;
+    let (mine, theirs) = pocket_words(pocket_of(c), other, number).ok_or(PhoneError::NeedsTap)?;
+    Ok(HelloWords {
+        mine,
+        theirs,
+        number,
+        card_left: Some(pocket_left(c, other)),
+    })
+}
+
+/// In the slot session `s`, ask the hello objects of the circle in `slot` for the words seat
+/// `me` and each other seat below `n` say at the [`POCKET_WORDS`] numbers from that seat's
+/// counter in `counters`, for each number `pocket` does not hold yet. Pairs below a seat's
+/// counter leave the pocket. The pocket changes only once every MAC came back. Returns how
+/// many pairs were added.
+fn fill(
+    pocket: &mut Vec<PocketWords>,
+    slot: u8,
+    me: u8,
+    n: u8,
+    counters: &[u32],
+    s: &mut Session<'_, '_>,
+) -> Result<u32, TapError> {
+    let mut added = Vec::new();
+    for other in (0..n).filter(|o| *o != me) {
+        let Some(&from) = counters.get(usize::from(other)) else {
+            continue;
+        };
+        for number in (0..POCKET_WORDS).map(|i| from.wrapping_add(i)) {
+            if pocket
+                .iter()
+                .any(|p| p.other == other && p.number == number && usable(p))
+            {
+                continue;
+            }
+            let mine = s.hmac_hello(slot, other, &hello_label(me, number))?;
+            let theirs = s.hmac_hello(slot, other, &hello_label(other, number))?;
+            added.push(PocketWords {
+                other,
+                number,
+                mine: mine.to_vec().into(),
+                theirs: theirs.to_vec().into(),
+            });
+        }
+    }
+    let count = u32::try_from(added.len()).unwrap_or(u32::MAX);
+    pocket.retain(|p| {
+        usable(p)
+            && counters
+                .get(usize::from(p.other))
+                .is_some_and(|counter| p.number >= *counter)
+    });
+    pocket.extend(added);
+    Ok(count)
+}
+
+/// Top up a card circle's pocket in the slot session `s`, as [`fill`] does. The record changes
+/// in memory only: the caller saves it once the session closed without error, and puts the
+/// old pocket back if it did not. Returns how many pairs were added.
+#[expect(dead_code, reason = "the tap that tops up every card circle calls it")]
+pub(crate) fn pocket_fill(c: &mut Circle, s: &mut Session<'_, '_>) -> Result<u32, TapError> {
+    let (me, n) = (c.record.seat, c.params.n);
+    let Some(card) = c.record.card.as_mut() else {
+        return Ok(0);
+    };
+    let slot = card.circle_slot;
+    let pocket = card.hello_pocket.get_or_insert_with(Vec::new);
+    fill(pocket, slot, me, n, &c.record.pair_counters, s)
+}
+
 /// A circle of the badge, read from its public object at the second tap, checked.
 struct Kept {
     object: PublicObject,
@@ -126,6 +249,8 @@ struct Kept {
     badge_public: SeatPublic,
     /// The generation the chat starts in, then each one a bump moves to.
     generations: Vec<[u8; 32]>,
+    /// The hello words the tap fetched ahead, beside those a card circle held already.
+    pocket: Vec<PocketWords>,
 }
 
 /// The public object of a circle this phone is paired for, checked: its manifest is sealed by
@@ -149,6 +274,7 @@ fn check(object: PublicObject, mine: &[u8; 33]) -> Option<Kept> {
         seat,
         badge_public,
         generations,
+        pocket: Vec::new(),
     })
 }
 
@@ -170,6 +296,25 @@ impl Phone {
         );
         let key: [u8; 16] = secret[..].try_into().map_err(|_| PhoneError::NotPaired)?;
         Ok(Zeroizing::new(key))
+    }
+
+    /// Where the hello words of a circle the second tap keeps start: the counters and the
+    /// pocket of a card circle this phone holds already, else every counter at 0 and an empty
+    /// pocket. `None` for a circle this phone holds with a seat of its own, or cannot read:
+    /// the tap does not keep it.
+    fn pocket_start(&self, k: &Kept) -> Option<(Vec<u32>, Vec<PocketWords>)> {
+        let id_hex = hex::encode(k.object.circle_id);
+        if !store::circle_ids(&self.dir).contains(&id_hex) {
+            return Some((vec![0; usize::from(k.manifest.params.n)], Vec::new()));
+        }
+        self.with_circle(&id_hex, |c, _| {
+            Ok(c.record.card.as_ref().map(|card| {
+                let pocket = card.hello_pocket.clone().unwrap_or_default();
+                (c.record.pair_counters.clone(), pocket)
+            }))
+        })
+        .ok()
+        .flatten()
     }
 
     /// One tap that opens the phone slot with `key` and runs `f` in its session. The reader
@@ -199,32 +344,10 @@ impl Phone {
         }
     }
 
-    /// The hello words with `other` at `number` in a card circle, from a tap.
-    pub(crate) fn card_hello(
-        &self,
-        c: &Circle,
-        other: u8,
-        number: u32,
-    ) -> Result<HelloWords, PhoneError> {
-        let card = c.record.card.as_ref().ok_or(PhoneError::NotPaired)?;
-        let key = self.slot_key(&card.key_label)?;
-        let (slot, me) = (card.circle_slot, c.record.seat);
-        let (mine, theirs) = self.tap_slot(PROMPT, &key, |s| {
-            Ok((
-                s.hmac_hello(slot, other, &hello_label(me, number))?,
-                s.hmac_hello(slot, other, &hello_label(other, number))?,
-            ))
-        })?;
-        Ok(HelloWords {
-            mine: hello_words(&mine),
-            theirs: hello_words(&theirs),
-            number,
-        })
-    }
-
-    /// Keep one circle of the badge as a card circle, or bring a card circle already held up
-    /// to the pairing, then read its relay, post the bumps it forwards, and publish the
-    /// badge's card in its chat. `None` when the phone holds the circle with a seat of its own.
+    /// Keep one circle of the badge as a card circle, with the hello words the tap fetched,
+    /// or bring a card circle already held up to the pairing, then read its relay, post the
+    /// bumps it forwards, and publish the badge's card in its chat. `None` when the phone
+    /// holds the circle with a seat of its own.
     fn keep_card_circle(
         &self,
         slot: u8,
@@ -244,6 +367,7 @@ impl Phone {
             generation: start,
             key_label: label.into(),
             forward: k.object.pending_bumps.iter().map(|b| b.clone().into()).collect(),
+            hello_pocket: Some(k.pocket),
         };
         if store::circle_ids(&self.dir).contains(&id_hex) {
             let held = self.with_circle(&id_hex, |c, _| {
@@ -401,8 +525,9 @@ impl Phone {
 
     /// The second tap of pairing, after the owner pressed both buttons on the badge: open the
     /// phone slot with the key from `pair_card_start`, keep each of the badge's circles as a
-    /// card circle, fetch the keys its chat needs, post any bump the badge left for a device
-    /// to post, and publish the badge's card in the chat. Returns the ids of the card circles.
+    /// card circle, fetch the keys its chat needs and the next [`POCKET_WORDS`] hello words
+    /// with each other seat, post any bump the badge left for a device to post, and publish
+    /// the badge's card in the chat. Returns the ids of the card circles.
     /// `NotPaired` while the badge has not taken this phone: the owner presses both buttons,
     /// then this is tried again.
     pub fn pair_card_finish(&self) -> Result<Vec<String>, PhoneError> {
@@ -425,11 +550,20 @@ impl Phone {
                     let k = s.hmac_root(slot, &generation_label(&o.circle_id, &g))?;
                     keys.push((g, Zeroizing::new(k)));
                 }
-                out.push((slot, o, keys));
+                // After the keys, the hello words ahead, for a circle this tap keeps.
+                let nonce = o.badge_nonce;
+                let mut checked = check(o, &mine);
+                if let Some(k) = checked.as_mut() {
+                    if let Some((counters, mut pocket)) = self.pocket_start(k) {
+                        fill(&mut pocket, slot, k.seat, k.manifest.params.n, &counters, s)?;
+                        k.pocket = pocket;
+                    }
+                }
+                out.push((slot, nonce, checked, keys));
             }
             Ok(out)
         })?;
-        let Some(badge_nonce) = read.first().map(|(_, o, _)| o.badge_nonce) else {
+        let Some(badge_nonce) = read.first().map(|(_, nonce, _, _)| *nonce) else {
             self.lock().pairing = None;
             return Ok(Vec::new());
         };
@@ -437,8 +571,8 @@ impl Phone {
         self.lock().pairing = None;
         let mut kept = Vec::new();
         let mut first = None;
-        for (slot, o, keys) in read {
-            let Some(k) = check(o, &mine) else {
+        for (slot, _, checked, keys) in read {
+            let Some(k) = checked else {
                 continue;
             };
             match self.keep_card_circle(slot, k, keys, &badge_name, &label) {
