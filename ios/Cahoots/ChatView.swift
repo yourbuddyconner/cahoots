@@ -462,7 +462,7 @@ struct ConversationSettings: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.xxl) {
-                    PaperSection(footer: "See who is in this circle and check a member’s hello words.") {
+                    PaperSection(footer: "See who is in this circle and check a member’s hello words. Names help you follow the conversation. They do not prove who typed a message.") {
                         Button { done("people") } label: {
                             HStack(spacing: Space.m) {
                                 Label("People and names", systemImage: "person.2")

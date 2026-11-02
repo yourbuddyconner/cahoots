@@ -98,7 +98,7 @@ struct PeopleView: View {
                                     Text(Self.about(member, card: card)).font(.subheadline).foregroundStyle(Color.muted)
                                 }
                             }
-                            Text("Each device reported how it protects its keys when the circle was created. Cahoots has not checked those claims. Every member has access to the circle’s secret.")
+                            Text("These are the protection levels each device reported when the circle was made. Nothing checked them. Every member holds the circle’s secret.")
                                 .font(.footnote).foregroundStyle(Color.muted)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)

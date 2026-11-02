@@ -83,7 +83,7 @@ private struct EmptyCircles: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xxl) {
-            ScreenHeader(title: "No circles yet",
+            ScreenHeader(title: "Meet in person. Stay in cahoots.",
                          detail: "A circle is a group of people who meet in person. Create one together or join one they have started. You don’t need an account or a phone number.",
                          style: .title)
             VStack(alignment: .leading, spacing: 0) {
