@@ -63,6 +63,21 @@ final class CardViewTests: XCTestCase {
         XCTAssertEqual(CardView.badgeName(s, cardName: nil), "your badge")
     }
 
+    /// Removing a card circle says how it comes back. A software circle's question is as
+    /// before.
+    func testRemovingACardCircleSaysTheNextTapBringsItBack() {
+        func circle(_ kind: String) -> CircleSummary {
+            CircleSummary(id: "c", name: "park", members: 3, mySeat: 1, hasRoot: kind != "card", unread: 0,
+                          relay: "https://relay.cahoots.network", kind: kind, needsTap: false)
+        }
+        XCTAssertEqual(SettingsView.removeQuestion(circle("card"), otherCardCircles: true),
+                       "Remove park from this phone? Its messages and keys will be deleted from this phone. The next tap on the card brings it back, unless the badge forgets it first. Other members keep their copies.")
+        XCTAssertEqual(SettingsView.removeQuestion(circle("card"), otherCardCircles: false),
+                       "Remove park from this phone? Its messages and keys will be deleted from this phone. To get it back, unpair this phone on the badge, then pair the card again. Other members keep their copies.")
+        XCTAssertEqual(SettingsView.removeQuestion(circle("software"), otherCardCircles: true),
+                       "Remove park from this phone? Its messages and keys will be deleted from this phone. You cannot undo this. Other members keep their copies.")
+    }
+
     func testTheLastTapIsNeverOrHowLongAgo() {
         XCTAssertEqual(CardView.lastTap(nil), "last tap: never")
         let now = Date(timeIntervalSince1970: 1_000_000)

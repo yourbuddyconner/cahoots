@@ -64,7 +64,7 @@ struct CardView: View {
                 }
             }
         } message: {
-            Text("This deletes the card’s circles, their messages and the card’s key from this phone. On the badge, open “phone” in the menu and unpair this phone before pairing again.")
+            Text("This deletes the card’s circles, their messages and the card’s key from this phone. If the badge still lists this phone under “phone”, unpair it there as well.")
         }
         .task { await app.refreshCard() }
     }

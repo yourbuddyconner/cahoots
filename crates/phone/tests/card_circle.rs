@@ -1368,3 +1368,23 @@ fn a_circle_the_badge_keeps_after_pairing_comes_to_the_phone_at_the_next_tap() {
     assert_eq!(report, TapReport { keys: 0, bumps: 0, words: 0, kept: 0 });
     assert_eq!(d.phone.circles().len(), 2);
 }
+
+#[test]
+fn a_card_circle_removed_from_the_phone_comes_back_at_the_next_tap() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b, t1, _t2) = badge_with_two_circles();
+    let d = device(&relay);
+    pair_with(&mut b, &d, "2 circles", |_| {}).unwrap();
+    let first = id_of(&t1);
+
+    // The person removes one card circle in Settings. The other keeps the card's key here.
+    d.phone.delete_circle(first.clone()).unwrap();
+    assert_eq!(d.phone.circles().len(), 1);
+
+    // The badge still vouches for it, so the next tap keeps it again.
+    let report = tap(&mut b, &d, |p| p.tap_card()).unwrap();
+    assert_eq!(report.kept, 1);
+    let ids: Vec<String> = d.phone.circles().into_iter().map(|c| c.id).collect();
+    assert!(ids.contains(&first), "{ids:?}");
+    assert_eq!(ids.len(), 2);
+}

@@ -50,7 +50,7 @@ struct PeopleView: View {
                 VStack(alignment: .leading, spacing: Space.m) {
                     FaceRow(faces: members.compactMap { faces[$0.seat] }, size: 32)
                     ScreenHeader(title: app.circle(circle)?.name ?? "Your circle",
-                                 detail: "Each seat is a device in this circle. On a call, open the other person’s words. Take turns saying your two words and checking the reply to know it is really them.", style: .title)
+                                 detail: "Each seat is a device in this circle. On a call, open the other person’s words. Take turns saying your two words and checking the reply.", style: .title)
                 }
                 if !loaded && error == nil {
                     ProgressView("Loading people…").frame(maxWidth: .infinity)

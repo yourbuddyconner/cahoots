@@ -219,9 +219,10 @@ seconds, or at any press.
    over" first: those words were for a pairing the badge has closed.
 
 A tap in step 4 before the badge's presses says "Press both buttons on the badge first, then
-hold the phone again." "Forget this card" on the Card screen deletes the card circles from this
+tap the card again." "Forget this card" on the Card screen deletes the card circles from this
 phone. The badge keeps its slot until it is unpaired there. A phone keeps one badge: to pair
-another, forget this one first.
+another, forget this one first. Removing one card circle in Settings deletes it from this phone
+only: the next tap on the card brings it back, unless the badge forgets it first.
 
 ### What to try first on a device
 

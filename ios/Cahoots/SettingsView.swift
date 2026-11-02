@@ -103,7 +103,9 @@ struct SettingsView: View {
                 }
             }
         }
-        .confirmationDialog("Remove \(removing?.name ?? "this circle") from this phone? Its messages and keys will be deleted from this phone. You cannot undo this. Other members keep their copies.",
+        .confirmationDialog(Self.removeQuestion(removing, otherCardCircles: app.circles.contains {
+                                AppModel.isCard($0) && $0.id != removing?.id
+                            }),
                             isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
                             titleVisibility: .visible) {
             Button("Remove circle", role: .destructive) {
@@ -113,6 +115,20 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    /// The question before removing `circle` from this phone. A card circle comes back at the
+    /// next tap on the card while another card circle keeps the card's key here, unless the
+    /// badge forgets it first. The last one comes back only with a new pairing.
+    static func removeQuestion(_ circle: CircleSummary?, otherCardCircles: Bool) -> String {
+        let start = "Remove \(circle?.name ?? "this circle") from this phone? Its messages and keys will be deleted from this phone."
+        guard let circle, AppModel.isCard(circle) else {
+            return start + " You cannot undo this. Other members keep their copies."
+        }
+        let back = otherCardCircles
+            ? " The next tap on the card brings it back, unless the badge forgets it first."
+            : " To get it back, unpair this phone on the badge, then pair the card again."
+        return start + back + " Other members keep their copies."
     }
 
     /// The phone's own face and name, and where its keys live.

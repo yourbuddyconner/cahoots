@@ -48,7 +48,7 @@ final class PairCardTests: XCTestCase {
         let model = PairCardModel(pairing: fake)
         await model.start()
         await model.finish()
-        XCTAssertEqual(model.error, "Press both buttons on the badge first, then hold the phone again.")
+        XCTAssertEqual(model.error, "Press both buttons on the badge first, then tap the card again.")
         guard case .check = model.step else { return XCTFail("the words went: \(model.step)") }
         await model.finish()
         XCTAssertEqual(model.step, .done(badge: "Conner's badge", circles: ["park", "lab"]))

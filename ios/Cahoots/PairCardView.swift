@@ -97,7 +97,7 @@ final class PairCardModel: ObservableObject {
         }
     }
 
-    static let pressFirst = "Press both buttons on the badge first, then hold the phone again."
+    static let pressFirst = "Press both buttons on the badge first, then tap the card again."
 
     /// What to do when the crate refuses a second badge: this phone keeps the circles of one.
     static func note(after error: Error?) -> String? {
