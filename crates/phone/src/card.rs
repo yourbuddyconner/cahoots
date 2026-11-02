@@ -599,6 +599,16 @@ impl Phone {
         };
         let label = key_label(&badge_nonce);
         self.lock().pairing = None;
+        // One badge per phone: the card circles of another stay until it is forgotten.
+        let other_badge = store::circle_ids(&self.dir).iter().any(|id| {
+            CircleRecord::load(&self.circle_dir(id))
+                .is_ok_and(|r| r.card.as_ref().is_some_and(|card| card.key_label != label))
+        });
+        if other_badge {
+            return Err(PhoneError::Ceremony {
+                message: "Forget this card first.".into(),
+            });
+        }
         let mut kept = Vec::new();
         let mut first = None;
         for (slot, _, checked, keys) in read {
@@ -651,9 +661,17 @@ impl Phone {
                 let Some(slot) = c.record.card.as_ref().map(|card| card.circle_slot) else {
                     continue;
                 };
-                // Only a slot the pairing object names: the badge wrote it.
-                let o = s.read_public(slot)?;
-                if o.circle_id != c.circle_id || o.phone_public != Some(mine) {
+                // Only a slot the pairing object names: the badge wrote it. A circle the badge
+                // forgot, or whose slot holds another circle now, is passed over. The slot key
+                // opened this session, so the badge still knows this phone.
+                let o = match s.read_public(slot) {
+                    Err(TapError::NotFound) => continue,
+                    r => r?,
+                };
+                if o.circle_id != c.circle_id {
+                    continue;
+                }
+                if o.phone_public != Some(mine) {
                     return Err(TapError::NotPaired);
                 }
                 let mut keys = Vec::new();
@@ -686,14 +704,16 @@ impl Phone {
                 first.get_or_insert(e);
                 continue;
             }
-            // The bumps the badge left for a device to post go now that their keys are here.
-            // A chat that has not read the relay since the app opened, or a relay out of
-            // reach, leaves them for the next poll.
-            if let Ok(n) = c.forward_bumps() {
-                report.bumps = report.bumps.saturating_add(n);
-                if n > 0 {
-                    let _ = c.flush(self.http.as_ref());
-                }
+            // The bumps the badge left for a device to post go now that their keys are here:
+            // a poll reads the relay to the end, seals them into the outbox and posts them. A
+            // relay out of reach leaves them for the next poll. A bump leaves the list once
+            // it is sealed, or found on the relay already.
+            let waiting = |c: &Circle| c.record.card.as_ref().map_or(0, |card| card.forward.len());
+            let before = waiting(c);
+            if before > 0 {
+                let _ = c.poll(self.http.as_ref());
+                let posted = before.saturating_sub(waiting(c));
+                report.bumps = report.bumps.saturating_add(as_u32(posted));
             }
         }
         let now = std::time::SystemTime::now()

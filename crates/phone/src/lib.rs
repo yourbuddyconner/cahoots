@@ -373,7 +373,8 @@ pub struct HelloWords {
 pub struct TapReport {
     /// Chat keys fetched, for the circles that waited for one.
     pub keys: u32,
-    /// Bumps the badge left for a device to post, sent to the relay.
+    /// Bumps the badge left for a device to post that this tap sent to the relay. A relay out
+    /// of reach leaves them for the next poll, and `card_status` still counts them.
     pub bumps: u32,
     /// Hello words added: one for each hello number with a seat.
     pub words: u32,

@@ -184,14 +184,13 @@ impl Circle {
     /// the relay has been read to the end. Each is sealed in the generation it moves from,
     /// and the chat then waits for the key of the one it moves to: from the keys a tap
     /// fetched, or from the next tap. A bump that moves from a generation the chat is not in
-    /// is stale (another device posted it, or the circle moved on) and is dropped. Returns
-    /// how many it sealed into the outbox: the caller's flush, or the next, posts them.
-    pub(crate) fn forward_bumps(&mut self) -> Result<u32, PhoneError> {
+    /// is stale (another device posted it, or the circle moved on) and is dropped.
+    fn forward_bumps(&mut self) -> Result<(), PhoneError> {
         let Some(list) = self.record.card.as_ref().map(|c| c.forward.clone()) else {
-            return Ok(0);
+            return Ok(());
         };
         if list.is_empty() || !self.session.synced() {
-            return Ok(0);
+            return Ok(());
         }
         let mut done = 0;
         let mut lines = Vec::new();
@@ -246,13 +245,11 @@ impl Circle {
         }
         // The chat state and outbox first, then the list: a crash between them leaves a bump
         // listed that the chat has sent, which the next pass finds stale or waiting.
-        let sealed = u32::try_from(lines.len()).unwrap_or(u32::MAX);
         self.save_with(lines)?;
         if let Some(card) = self.record.card.as_mut() {
             card.forward.drain(..done.min(card.forward.len()));
         }
-        self.record.save(&self.dir)?;
-        Ok(sealed)
+        self.record.save(&self.dir)
     }
 
     pub(crate) fn save_chat(&mut self) -> Result<(), PhoneError> {

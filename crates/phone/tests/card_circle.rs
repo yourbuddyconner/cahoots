@@ -147,19 +147,27 @@ impl Device {
     }
 }
 
+/// The seeds of the two cards [`kept_pair`] makes.
+const SEEDS: (u64, u64) = (0x9E37_79B9_7F4A_7C15, 0xD1B5_4A32_D192_ED03);
+
 /// Card 1 at the bottom, card 2 on top. `chips` says which cards have a chip.
 fn pile_of_two(chips: (bool, bool)) -> (Badge<FakeBoard>, Badge<FakeBoard>) {
-    let (lower, upper) = cable();
-    let mut b1 = FakeBoard::seeded(0x9E37_79B9_7F4A_7C15);
-    let mut b2 = FakeBoard::seeded(0xD1B5_4A32_D192_ED03);
-    b1.links = Some((FakeLink::open(), lower));
-    b2.links = Some((upper, FakeLink::open()));
+    let mut b1 = FakeBoard::seeded(SEEDS.0);
+    let mut b2 = FakeBoard::seeded(SEEDS.1);
     if chips.0 {
         b1 = b1.with_soft_chip([1; 32]);
     }
     if chips.1 {
         b2 = b2.with_soft_chip([2; 32]);
     }
+    pile(b1, b2)
+}
+
+/// `b1` at the bottom of a pile, `b2` on top.
+fn pile(mut b1: FakeBoard, mut b2: FakeBoard) -> (Badge<FakeBoard>, Badge<FakeBoard>) {
+    let (lower, upper) = cable();
+    b1.links = Some((FakeLink::open(), lower));
+    b2.links = Some((upper, FakeLink::open()));
     (Badge::new(b1), Badge::new(b2))
 }
 
@@ -184,7 +192,24 @@ fn drive(b1: &mut Badge<FakeBoard>, b2: &mut Badge<FakeBoard>, mut done: impl Fn
 
 /// Run a pile of two to the keep and keep the circle on both cards.
 fn kept_pair(chips: (bool, bool)) -> (Badge<FakeBoard>, Badge<FakeBoard>) {
-    let (mut b1, mut b2) = pile_of_two(chips);
+    keep(pile_of_two(chips))
+}
+
+/// A badge that is not [`kept_pair`]'s, with its circle kept beside a chipless card. Every
+/// test chip is set up with the same badge nonce, and the nonce is how a phone tells badges
+/// apart, so this one's chip is set up with another.
+fn kept_pair_of_another_badge() -> (Badge<FakeBoard>, Badge<FakeBoard>) {
+    let mut b1 = FakeBoard::seeded(0x0123_4567_89AB_CDEF);
+    let mut chip = SoftChip::with_seed([3; 32]);
+    let record = badge_chip::first_boot(&mut chip, &cahoots_chip::TEST_OWNER_SECRET, [0x6B; 16]).unwrap();
+    chip.close_session().unwrap();
+    b1.chip = Some(chip);
+    b1.chip_record = Some(record.to_stored());
+    keep(pile(b1, FakeBoard::seeded(0x0F1E_2D3C_4B5A_6978)))
+}
+
+/// Run the pile `(b1, b2)` to the keep and keep the circle on both cards.
+fn keep((mut b1, mut b2): (Badge<FakeBoard>, Badge<FakeBoard>)) -> (Badge<FakeBoard>, Badge<FakeBoard>) {
     for _ in 0..10_000 {
         b1.step();
         b2.step();
@@ -233,6 +258,18 @@ fn pair_then(
     d: &Device,
     accepted: impl FnOnce(&mut Badge<FakeBoard>),
 ) -> Vec<String> {
+    pair_with(b, d, "1 circle", accepted).unwrap()
+}
+
+/// The whole pairing with a badge that holds `circles` ("1 circle", "2 circles"), with
+/// `accepted` run on the badge between the owner's press and the second tap. Returns what
+/// the second tap returns.
+fn pair_with(
+    b: &mut Badge<FakeBoard>,
+    d: &Device,
+    circles: &str,
+    accepted: impl FnOnce(&mut Badge<FakeBoard>),
+) -> Result<Vec<String>, PhoneError> {
     b.pair_open().unwrap();
     let preview = tap(b, d, |p| p.pair_card_start("Conner's phone".into())).unwrap();
     let inbox = b.pair_read_inbox().unwrap().unwrap();
@@ -240,14 +277,124 @@ fn pair_then(
     assert_eq!(preview.words, words);
     assert_eq!(preview.words.len(), 6);
     // Before the press only the count is readable, and the badge gives no name.
-    assert_eq!(preview.circles, "1 circle");
+    assert_eq!(preview.circles, circles);
     assert_eq!(preview.badge_name, "your badge");
     // Before the owner presses both buttons the slot does not know this phone.
     let early = tap(b, d, |p| p.pair_card_finish()).err().unwrap();
     assert!(matches!(early, PhoneError::NotPaired), "{early:?}");
     b.pair_accept(inbox).unwrap();
     accepted(b);
-    tap(b, d, |p| p.pair_card_finish()).unwrap()
+    tap(b, d, |p| p.pair_card_finish())
+}
+
+fn press(b: &mut Badge<FakeBoard>, gesture: Press) {
+    b.board().presses.push_back(gesture);
+    b.idle_step();
+}
+
+/// Right after a keep: the note names the circle `name`, and five seconds later home comes.
+fn home_after_keep(b: &mut Badge<FakeBoard>, name: &str) {
+    assert!(b.board().shows(&format!("saved {name}")), "{:?}", b.board().last());
+    b.board().uptime += 5;
+    b.idle_step();
+    assert!(b.board().shows("closed to taps"), "{:?}", b.board().last());
+}
+
+/// Run a ceremony between `bottom` (stepped by `bottom_step`) and a new chipless top card
+/// seeded `seed`, and keep it on both. Returns the top card. As the badge's own tests do.
+fn ceremony(
+    bottom: &mut Badge<FakeBoard>,
+    seed: u64,
+    mut bottom_step: impl FnMut(&mut Badge<FakeBoard>) -> Option<Step>,
+) -> Badge<FakeBoard> {
+    let (lower, upper) = cable();
+    bottom.board().links = Some((FakeLink::open(), lower));
+    let mut board = FakeBoard::seeded(seed);
+    board.links = Some((upper, FakeLink::open()));
+    let mut top = Badge::new(board);
+    let mut asked = false;
+    let mut kept = (false, false);
+    let mut prompt = (false, false);
+    for _ in 0..20_000 {
+        let s1 = bottom_step(bottom);
+        let s2 = top.step();
+        assert!(!matches!(s1, Some(Step::Failed(_))), "bottom: {s1:?}");
+        assert!(!matches!(s2, Step::Failed(_)), "top: {s2:?}");
+        if !asked && has_seat(bottom) && has_seat(&mut top) {
+            asked = true;
+            top.board().presses.push_back(Press::Both);
+        }
+        if bottom.board().shows("keep this circle?") && !prompt.0 {
+            prompt.0 = true;
+            bottom.board().presses.push_back(Press::Both);
+        }
+        if s2 == Step::Prompt && !prompt.1 {
+            prompt.1 = true;
+            top.board().presses.push_back(Press::Both);
+        }
+        let saved = bottom.board().last().iter().any(|l| l.starts_with("saved "));
+        kept.0 |= s1 == Some(Step::Kept) || (prompt.0 && saved);
+        kept.1 |= s2 == Step::Kept;
+        if kept.0 && kept.1 {
+            return top;
+        }
+    }
+    panic!("the ceremony did not finish: {:?}", bottom.board().last());
+}
+
+/// A badge with a chip that kept two circles, "first" and "second", and the two chipless top
+/// cards it made them with, which hold their roots.
+fn badge_with_two_circles() -> (Badge<FakeBoard>, Badge<FakeBoard>, Badge<FakeBoard>) {
+    let mut board = FakeBoard::seeded(SEEDS.0).with_soft_chip([1; 32]);
+    board.name = "first".into();
+    let mut b = Badge::new(board);
+    let t1 = ceremony(&mut b, SEEDS.1, |b| Some(b.step()));
+    home_after_keep(&mut b, "first");
+    // Home, the list, then "new circle".
+    press(&mut b, Press::Both);
+    press(&mut b, Press::Right);
+    assert!(b.board().shows("> new circle"), "{:?}", b.board().last());
+    b.board().name = "second".into();
+    b.board().presses.push_back(Press::Both);
+    let t2 = ceremony(&mut b, 0x2545_F491_4F6C_DD1D, |b| {
+        b.idle_step();
+        None
+    });
+    home_after_keep(&mut b, "second");
+    assert_eq!(b.circles().len(), 2);
+    (b, t1, t2)
+}
+
+/// Forget the circle `name` on the badge, from home: the list, the circle, "forget this
+/// circle", its question, and both buttons.
+fn forget_on_badge(b: &mut Badge<FakeBoard>, name: &str) {
+    assert!(b.board().shows("closed to taps"), "{:?}", b.board().last());
+    press(b, Press::Both);
+    for _ in 0..4 {
+        if b.board().shows(&format!("> {name}")) {
+            break;
+        }
+        press(b, Press::Left);
+    }
+    assert!(b.board().shows(&format!("> {name}")), "{:?}", b.board().last());
+    press(b, Press::Both);
+    for _ in 0..8 {
+        if b.board().shows("> forget this circle") {
+            break;
+        }
+        press(b, Press::Left);
+    }
+    assert!(b.board().shows("> forget this circle"), "{:?}", b.board().last());
+    press(b, Press::Both);
+    press(b, Press::Both);
+    assert!(b.board().shows("forget this circle?"), "{:?}", b.board().last());
+    press(b, Press::Both);
+    assert!(b.board().log.iter().any(|l| l.starts_with(&format!("forgotten: {name} "))));
+}
+
+/// The circle id of the one circle `b` holds, in hex.
+fn id_of(b: &Badge<FakeBoard>) -> String {
+    hex::encode(b.circle().unwrap().circle_id)
 }
 
 fn manifest(b: &Badge<FakeBoard>) -> Manifest {
@@ -924,4 +1071,179 @@ fn face_id_comes_before_the_reader_opens() {
     let report = tap(&mut b1, &d, |p| p.tap_card()).unwrap();
     assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 0 });
     assert!(!d.phone.circles()[0].needs_tap);
+}
+
+#[test]
+fn one_tap_serves_every_card_circle() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b, t1, t2) = badge_with_two_circles();
+    let (mut m1, mut m2) = (Member::of(&t1), Member::of(&t2));
+    let d = device(&relay);
+    let mut ids = pair_with(&mut b, &d, "2 circles", |_| {}).unwrap();
+    ids.sort();
+    let mut want = vec![id_of(&t1), id_of(&t2)];
+    want.sort();
+    assert_eq!(ids, want);
+    let (first, second) = (id_of(&t1), id_of(&t2));
+
+    // Both circles reset, and five hellos are used in the first.
+    m1.bump(&relay, [0x71; 32]);
+    m2.bump(&relay, [0x72; 32]);
+    m1.say(&relay, "first after the reset");
+    m2.say(&relay, "second after the reset");
+    for id in [&first, &second] {
+        d.phone.poll(id.clone()).unwrap();
+    }
+    assert!(d.phone.circles().iter().all(|c| c.needs_tap));
+    for _ in 0..5 {
+        d.phone.next_hello(first.clone(), m1.seat).unwrap();
+    }
+    let s = d.phone.card_status().unwrap();
+    assert_eq!((s.circles, s.keys_wanted, s.bumps_to_post), (2, 2, 0));
+    assert_eq!(s.words_low, vec![WordsLeft { circle: first.clone(), seat: m1.seat, left: 3 }]);
+
+    // One tap: both keys, and the first circle's pocket topped up.
+    let report = tap(&mut b, &d, |p| p.tap_card()).unwrap();
+    assert_eq!(report, TapReport { keys: 2, bumps: 0, words: 5 });
+    assert!(d.phone.circles().iter().all(|c| !c.needs_tap));
+    let s = d.phone.card_status().unwrap();
+    assert_eq!((s.circles, s.keys_wanted), (2, 0));
+    assert!(s.words_low.is_empty(), "{:?}", s.words_low);
+
+    // Both chats go on.
+    for (id, m, text) in [(&first, &mut m1, "first"), (&second, &mut m2, "second")] {
+        let got = d.phone.poll(id.clone()).unwrap();
+        let after = format!("{text} after the reset");
+        assert_eq!(got.iter().map(|g| g.text.as_str()).collect::<Vec<_>>(), [after.as_str()]);
+        d.phone.send_chat(id.clone(), format!("caught up in {text}")).unwrap();
+        let mine = 1 - m.seat;
+        assert_eq!(m.read(&relay), vec![(mine, format!("caught up in {text}"))]);
+    }
+}
+
+#[test]
+fn a_circle_the_badge_forgot_does_not_block_the_tap_for_the_other() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b, t1, t2) = badge_with_two_circles();
+    let mut m2 = Member::of(&t2);
+    let d = device(&relay);
+    pair_with(&mut b, &d, "2 circles", |_| {}).unwrap();
+    let (first, second) = (id_of(&t1), id_of(&t2));
+
+    // The second circle resets, then the badge forgets the first.
+    m2.bump(&relay, [0x72; 32]);
+    d.phone.poll(second.clone()).unwrap();
+    // The badge is turned off and on, and rests on home.
+    b.boot();
+    b.idle_step();
+    forget_on_badge(&mut b, "first");
+    assert_eq!(b.circles().len(), 1);
+
+    // The phone still holds both. The tap passes over the one the badge forgot.
+    assert_eq!(d.phone.card_status().unwrap().circles, 2);
+    let report = tap(&mut b, &d, |p| p.tap_card()).unwrap();
+    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 0 });
+    let needs = |id: &str| d.phone.circles().into_iter().find(|c| c.id == id).unwrap().needs_tap;
+    assert!(!needs(&second));
+    assert!(!needs(&first));
+    m2.say(&relay, "after the reset");
+    let got = d.phone.poll(second.clone()).unwrap();
+    assert_eq!(got.iter().map(|g| g.text.as_str()).collect::<Vec<_>>(), ["after the reset"]);
+
+    // A slot that holds another circle now is passed over the same way.
+    m2.bump(&relay, [0x73; 32]);
+    d.phone.poll(second.clone()).unwrap();
+    assert!(needs(&second));
+    let dir = d.path.join("circles").join(&second);
+    let slot = CircleRecord::load(&dir).unwrap().card.as_ref().unwrap().circle_slot;
+    let chip = b.board().owner_chip();
+    let mut o = badge_chip::read_public(chip, slot).unwrap().unwrap();
+    o.circle_id = [0xEE; 16];
+    badge_chip::write_public(chip, slot, &o).unwrap();
+    chip.close_session().unwrap();
+    let report = tap(&mut b, &d, |p| p.tap_card()).unwrap();
+    assert_eq!(report, TapReport { keys: 0, bumps: 0, words: 0 });
+    assert!(needs(&second));
+}
+
+#[test]
+fn a_phone_keeps_the_circles_of_one_badge() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b1, _) = kept_pair((true, false));
+    let (mut c1, _) = kept_pair_of_another_badge();
+    let d = device(&relay);
+    let ids = pair(&mut b1, &d);
+    let label = |d: &Device, id: &str| {
+        let r = CircleRecord::load(&d.path.join("circles").join(id)).unwrap();
+        r.card.as_ref().unwrap().key_label.clone()
+    };
+    let first_label = label(&d, &ids[0]);
+
+    // Another badge: the second tap refuses it, and keeps nothing of it.
+    let e = pair_with(&mut c1, &d, "1 circle", |_| {}).err().unwrap();
+    assert_eq!(e.to_string(), "Forget this card first.");
+    assert_eq!(d.phone.circles().into_iter().map(|c| c.id).collect::<Vec<_>>(), ids);
+    let nonce = badge_chip::read_public(c1.board().owner_chip(), 0).unwrap().unwrap().badge_nonce;
+    c1.board().chip.as_mut().unwrap().close_session().unwrap();
+    let other_label = format!("cahoots:card:{}", hex::encode(nonce));
+    assert_ne!(other_label, first_label);
+    assert_eq!(d.signer.get_secret(other_label.clone()).unwrap(), None);
+    assert!(d.signer.get_secret(first_label).unwrap().is_some());
+    // The first badge still taps.
+    tap(&mut b1, &d, |p| p.tap_card()).unwrap();
+
+    // The same badge again is no other badge.
+    b1.unpair().unwrap();
+    assert_eq!(pair(&mut b1, &d), ids);
+
+    // Once the first is forgotten, the other pairs. It took this phone at the refused tap,
+    // so its owner unpairs it there first.
+    d.phone.forget_card().unwrap();
+    assert!(c1.pair_open().is_err());
+    c1.unpair().unwrap();
+    let other = pair(&mut c1, &d);
+    assert_eq!(other, vec![id_of(&c1)]);
+    assert_eq!(label(&d, &other[0]), other_label);
+}
+
+#[test]
+fn a_tap_posts_the_bumps_the_badge_left_and_counts_what_reached_the_relay() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b1, b2) = kept_pair((true, false));
+    let mut member = Member::of(&b2);
+    // A phone paired and unpaired without ever posting: the badge left a bump for a device.
+    let first = device(&relay);
+    pair(&mut b1, &first);
+    b1.unpair().unwrap();
+    let o = badge_chip::read_public(b1.board().owner_chip(), 0).unwrap().unwrap();
+    b1.board().chip.as_mut().unwrap().close_session().unwrap();
+    assert_eq!(o.pending_bumps.len(), 1);
+
+    // A second phone pairs while the relay is out of reach, and the app is closed: the bump
+    // waits, and so does the key it moves to.
+    let mut second = device(&relay);
+    second.http.1.store(true, Ordering::SeqCst);
+    let id = pair(&mut b1, &second).remove(0);
+    second.restart();
+    let s = second.phone.card_status().unwrap();
+    assert_eq!((s.keys_wanted, s.bumps_to_post), (1, 1));
+
+    // A tap with the relay still out of reach fetches the key, and the bump still waits.
+    let report = tap(&mut b1, &second, |p| p.tap_card()).unwrap();
+    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 0 });
+    assert_eq!(second.phone.card_status().unwrap().bumps_to_post, 1);
+    assert!(relay.lock().unwrap().poll(&o.circle_id, None, 0).unwrap().is_empty());
+
+    // Back online, the next tap posts it.
+    second.http.1.store(false, Ordering::SeqCst);
+    let report = tap(&mut b1, &second, |p| p.tap_card()).unwrap();
+    assert_eq!(report, TapReport { keys: 1, bumps: 1, words: 0 });
+    let s = second.phone.card_status().unwrap();
+    assert_eq!((s.keys_wanted, s.bumps_to_post), (0, 0));
+    member.read(&relay);
+    assert_eq!(member.session.generation_id(), o.generation);
+    assert!(!second.phone.circles()[0].needs_tap);
+    second.phone.send_chat(id.clone(), "after the bump".into()).unwrap();
+    let seat = b1.circle().unwrap().seat;
+    assert_eq!(member.read(&relay), vec![(seat, "after the bump".to_string())]);
 }
