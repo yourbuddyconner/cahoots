@@ -188,11 +188,18 @@ fn other_seat(b: &Badge<FakeBoard>) -> u8 {
 }
 
 /// The applet lets any session make an object at an id that holds nothing (bench, SE051 applet
-/// 7.2.0). A public object a tap made at a circle slot before the circle was kept is deleted
-/// at the keep and made again under the badge's policy, so the tap cannot write it later.
+/// 7.2.0). The badge's placeholder stands at a circle slot's public id until the keep, so a
+/// tap cannot make one there. Were the id empty, as on a chip with no room for the
+/// placeholder, a public object a tap made before the circle was kept is deleted at the keep
+/// and made again under the badge's policy, so the tap cannot write it later.
 #[test]
 fn a_public_object_a_tap_made_before_the_keep_is_not_adopted() {
     let (mut b1, _b2) = kept_pair_with((true, true), |b1, _| {
+        assert_eq!(
+            tap(b1).write_binary(chip::public_id(0), &[0; 4096], &ObjectPolicy::any_session()),
+            Err(ChipError::Exists)
+        );
+        b1.board().owner_chip().delete(chip::public_id(0)).unwrap();
         tap(b1)
             .write_binary(chip::public_id(0), &[0; 4096], &ObjectPolicy::any_session())
             .unwrap();
@@ -1400,7 +1407,9 @@ fn a_keep_on_a_full_chip_is_not_kept_and_says_so() {
         .screens
         .iter()
         .any(|l| l.iter().any(|x| x == "the chip is full. Forget a circle first.")));
+    // Nothing of the circle stays: the slot's public id holds its placeholder again.
     let c = b1.board().owner_chip();
     assert!(!c.exists(KeyId::new(KeyKind::Seat, 0)).unwrap());
-    assert!(!c.exists(chip::public_id(0)).unwrap());
+    assert!(common::is_placeholder(c, chip::public_id(0)));
+    assert_eq!(common::empty_public_ids(c), Vec::<KeyId>::new());
 }

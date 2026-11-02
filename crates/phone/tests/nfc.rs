@@ -119,9 +119,9 @@ fn open_pairing(circles: u16) -> PairingObject {
 }
 
 /// A chip as a badge leaves it: owner object, placeholder slot, inbox and an open pairing,
-/// one circle in slot 3 with its seat key, root, a hello object for seat 1 and its public
-/// object, and with `paired`, the phone's key in the slot. The owner session is closed, as
-/// at the end of every I2C conversation.
+/// a placeholder at every circle slot's public id but slot 3's, where one circle has its seat
+/// key, root, a hello object for seat 1 and its public object, and with `paired`, the phone's
+/// key in the slot. The owner session is closed, as at the end of every I2C conversation.
 fn badge_chip(paired: bool) -> SoftChip {
     let mut chip = SoftChip::with_seed([9; 32]);
     first_boot(&mut chip, &TEST_OWNER_SECRET, [0x0B; 16]).unwrap();
@@ -133,6 +133,8 @@ fn badge_chip(paired: bool) -> SoftChip {
         .unwrap();
     let o = public_object(None);
     let bytes = o.padded(o.new_len().unwrap()).unwrap();
+    // In place of the placeholder at its id, as the badge's keep does.
+    chip.delete(KeyId::new(KeyKind::Public, 3)).unwrap();
     chip.write_binary(KeyId::new(KeyKind::Public, 3), &bytes, &ObjectPolicy::public_object())
         .unwrap();
     if paired {
@@ -306,13 +308,16 @@ fn a_card_whose_secure_channel_is_not_scp03_is_refused() {
 }
 
 /// In the session the phone reads only the slots the pairing object names: an object a tap
-/// planted at another public id is not read, and two vouched objects naming one circle are
-/// refused.
+/// planted at another public id, were its placeholder gone, is not read, and two vouched
+/// objects naming one circle are refused.
 #[test]
 fn the_session_reads_only_the_circle_slots_the_badge_vouches_for() {
     let mut chip = badge_chip(true);
     let planted = PublicObject { circle_id: [0xEE; 16], ..public_object(None) };
     let bytes = planted.padded(planted.new_len().unwrap()).unwrap();
+    chip.open_owner(&TEST_OWNER_SECRET).unwrap();
+    chip.delete(KeyId::new(KeyKind::Public, 5)).unwrap();
+    chip.close_session().unwrap();
     chip.write_binary(KeyId::new(KeyKind::Public, 5), &bytes, &ObjectPolicy::any_session())
         .unwrap();
     let nfc = FakeNfc::with(chip);
@@ -328,6 +333,7 @@ fn the_session_reads_only_the_circle_slots_the_badge_vouches_for() {
     let same = public_object(None);
     let bytes = same.padded(same.new_len().unwrap()).unwrap();
     chip.open_owner(&TEST_OWNER_SECRET).unwrap();
+    chip.delete(KeyId::new(KeyKind::Public, 5)).unwrap();
     chip.write_binary(KeyId::new(KeyKind::Public, 5), &bytes, &ObjectPolicy::public_object())
         .unwrap();
     write_pairing(&mut chip, &open_pairing(1 << 3 | 1 << 5)).unwrap();

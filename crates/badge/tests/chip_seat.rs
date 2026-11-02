@@ -3,7 +3,9 @@
 
 mod common;
 
-use cahoots_badge::chip::{ChipRecord, ChipSeat, PhoneSlot, SlotEntry, GENERATION};
+use cahoots_badge::chip::{
+    ChipRecord, ChipSeat, PhoneSlot, SlotEntry, CIRCLE_SLOTS, GENERATION, PLACEHOLDERS,
+};
 use cahoots_badge::screens::making_key;
 use cahoots_badge::{Badge, Board, Circle, Press, Step};
 use cahoots_chip::{
@@ -12,7 +14,7 @@ use cahoots_chip::{
 use cahoots_core::manifest::SealedManifest;
 use cahoots_core::root::chat_key;
 use cahoots_core::seat::{SeatPublic, SeatSigner};
-use common::{cable, FakeBoard, FakeLink};
+use common::{cable, empty_public_ids, every_public_id, is_placeholder, FakeBoard, FakeLink};
 
 /// Card 1 at the bottom, card 2 on top. `chips` says which cards have a chip.
 fn pile_of_two(chips: (bool, bool)) -> (Badge<FakeBoard>, Badge<FakeBoard>) {
@@ -95,10 +97,19 @@ fn chip(b: &mut Badge<FakeBoard>) -> &mut SoftChip {
 }
 
 /// The chip's objects that belong to circles: all but the owner object, the phone slot, the
-/// inbox and the grant issue counter.
+/// inbox, the grant issue counter and the placeholders.
 fn circle_objects(b: &mut Badge<FakeBoard>) -> Vec<KeyId> {
-    let ids = chip(b).ids().unwrap();
-    ids.into_iter().filter(|id| id.circle_slot().is_some()).collect()
+    let c = chip(b);
+    let ids = c.ids().unwrap();
+    ids.into_iter()
+        .filter(|id| id.circle_slot().is_some() && !is_placeholder(c, *id))
+        .collect()
+}
+
+/// No circle slot's public id holds nothing: each holds a circle's public object or the badge's
+/// placeholder.
+fn no_empty_public_id(b: &mut Badge<FakeBoard>) {
+    assert_eq!(empty_public_ids(chip(b)), Vec::<KeyId>::new());
 }
 
 /// A software chip set up as a badge's first boot sets it up, in the owner session.
@@ -225,6 +236,8 @@ fn discarding_deletes_the_key_made_in_the_chip() {
         out.0 && out.1
     });
     assert!(circle_objects(&mut b1).is_empty());
+    // The slot's public id holds its placeholder again.
+    no_empty_public_id(&mut b1);
     assert!(b1
         .board()
         .chip_record_load()
@@ -243,12 +256,15 @@ fn forget_deletes_slot_objects() {
     assert!(b1.circle().is_none());
     assert!(b1.board().load_circle().is_none());
     assert!(circle_objects(&mut b1).is_empty());
-    // The badge's own objects stay: it still owns its chip.
-    let ids = chip(&mut b1).ids().unwrap();
+    // The badge's own objects stay: it still owns its chip. Every circle slot's public id holds
+    // its placeholder again.
+    let c = chip(&mut b1);
+    let ids: Vec<KeyId> = c.ids().unwrap().into_iter().filter(|i| !is_placeholder(c, *i)).collect();
     assert_eq!(
         ids,
         vec![id(KeyKind::Grant, 255), KeyId::SLOT, KeyId::PAIRING, KeyId::INBOX, KeyId::OWNER]
     );
+    no_empty_public_id(&mut b1);
     assert!(b1
         .board()
         .chip_record_load()
@@ -279,9 +295,10 @@ fn reconcile_deletes_unknown_slot_and_logs() {
     c.put_user_id(unknown, &[1; 16], &ObjectPolicy::owner_object()).unwrap();
     let lines = record.reconcile(&mut c);
     assert!(c.exists(unknown).unwrap());
-    // The badge-wide objects belong to no circle slot and stay.
+    // The badge-wide objects belong to no circle slot and stay, and so do the placeholders.
+    assert_eq!(empty_public_ids(&mut c), Vec::<KeyId>::new());
     assert_eq!(
-        c.ids().unwrap(),
+        c.ids().unwrap().into_iter().filter(|i| !is_placeholder(&c, *i)).collect::<Vec<_>>(),
         vec![
             id(KeyKind::Seat, 0),
             id(KeyKind::Grant, 255),
@@ -380,6 +397,7 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
         }]),
         paired_since_bump: Some(vec![3]),
         public_policy: Some(cahoots_badge::chip::PUBLIC_POLICY),
+        placeholders: Some(PLACEHOLDERS),
     };
     let bytes = r.encode();
     assert_eq!(ChipRecord::decode(&bytes), Ok(r.clone()));
@@ -412,6 +430,15 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
     let mut r2 = r.clone();
     r2.public_policy = None;
     assert_eq!(ChipRecord::decode(&r2.encode()).unwrap().public_policy(), 1);
+    // Placeholders are made under this firmware or not known of.
+    for bad in [Some(0), Some(2)] {
+        let mut r2 = r.clone();
+        r2.placeholders = bad;
+        assert!(ChipRecord::decode(&r2.encode()).is_err());
+    }
+    let mut r2 = r.clone();
+    r2.placeholders = None;
+    assert_eq!(ChipRecord::decode(&r2.encode()), Ok(r2.clone()));
     // A record with no stuck slots encodes as before, four fields.
     let mut r2 = r.clone();
     r2.pending_unpair = Some(vec![]);
@@ -421,6 +448,7 @@ fn chip_record_round_trips_and_refuses_other_encodings() {
     plain.pending_unpair = None;
     plain.paired_since_bump = None;
     plain.public_policy = None;
+    plain.placeholders = None;
     assert_eq!(plain.encode()[0], 0x84);
     let mut cut = stored.clone();
     cut.pop();
@@ -556,6 +584,7 @@ fn a_wipe_deletes_every_object_it_can_and_says_what_stayed() {
     assert!(b1.circle().is_none());
     // The seat key, root and counter went; the stuck object stayed, and the badge said so.
     assert_eq!(circle_objects(&mut b1), vec![stuck]);
+    no_empty_public_id(&mut b1);
     let log = b1.board().log.join("\n");
     assert!(log.contains("chip: object 4c410107 could not be deleted: NotAllowed"), "{log}");
     assert!(b1
@@ -584,6 +613,12 @@ fn a_slot_holding_an_object_that_cannot_be_deleted_is_passed_over() {
         *s1 == Step::InCeremony && b1.board().log.iter().any(|l| l.starts_with("seat key made"))
     });
     assert!(b1.board().log.iter().any(|l| l == "seat key made in the chip, slot 1"));
+    // Slot 0's public id, emptied as the badge tried the slot, holds its placeholder again, and
+    // so does slot 1's until the keep.
+    no_empty_public_id(&mut b1);
+    let c = chip(&mut b1);
+    assert!(is_placeholder(c, id(KeyKind::Public, 0)));
+    assert!(is_placeholder(c, id(KeyKind::Public, 1)));
 }
 
 #[test]
@@ -639,4 +674,94 @@ fn a_wipe_marks_the_slot_it_could_not_empty_as_stuck() {
     let r = b1.board().chip_record_load().unwrap().unwrap();
     assert_eq!(r.slots.iter().map(|e| e.slot).collect::<Vec<_>>(), vec![0]);
     assert!(r.is_stuck(0));
+}
+
+#[test]
+fn first_boot_puts_a_placeholder_at_every_circle_slots_public_id() {
+    let mut c = SoftChip::with_seed([3; 32]);
+    let record = cahoots_badge::chip::first_boot(&mut c, &TEST_OWNER_SECRET, [0; 16]).unwrap();
+    assert_eq!(record.placeholders, Some(PLACEHOLDERS));
+    let ids = every_public_id();
+    assert_eq!(ids.len(), CIRCLE_SLOTS as usize);
+    for &at in &ids {
+        assert!(is_placeholder(&c, at), "{at:?}");
+    }
+    // The known limit: the hello ids get none, for want of the chip's memory.
+    assert!(!c.exists(id(KeyKind::Hello, 0)).unwrap());
+    // A stranger's tap, in no session, and the phone slot's session may not write, read, use
+    // or delete any of them, and nobody can make an object of their own at those ids.
+    c.no_session_for_test();
+    for slot_session in [false, true] {
+        if slot_session {
+            c.open_slot_with_sm_for_test().unwrap();
+        }
+        for &at in &ids {
+            assert_eq!(c.delete(at), Err(ChipError::NotAllowed), "{at:?}");
+            assert_eq!(c.rewrite_binary(at, &[1]), Err(ChipError::NotAllowed), "{at:?}");
+            assert_eq!(c.read_binary(at), Err(ChipError::NotAllowed), "{at:?}");
+            assert_eq!(c.hmac(at, b"x"), Err(ChipError::NotAllowed), "{at:?}");
+            assert_eq!(
+                c.write_binary(at, &[1], &ObjectPolicy::any_session()),
+                Err(ChipError::Exists),
+                "{at:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_keep_takes_the_placeholder_at_its_public_id_and_leaves_the_rest() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    let public = id(KeyKind::Public, 0);
+    let c = chip(&mut b1);
+    // The circle's public object stands where slot 0's placeholder was, made by the badge
+    // under its own policy, and reads back.
+    assert_eq!(c.policy_for_test(public), Some(ObjectPolicy::public_object()));
+    let bytes = c.read_binary(public).unwrap();
+    assert!(cahoots_badge::public::PublicObject::decode(&bytes).is_ok());
+    // Every other slot's public id still holds a placeholder.
+    for at in every_public_id() {
+        assert_eq!(is_placeholder(c, at), at != public, "{at:?}");
+    }
+    assert_eq!(circle_objects(&mut b1).len(), KEPT_OBJECTS);
+}
+
+#[test]
+fn a_chip_record_of_earlier_firmware_gets_its_placeholders_once() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    // As firmware before placeholders left the chip: none at any public id, and a record that
+    // does not know of them. A tap made an object at a free slot's public id meanwhile.
+    let c = chip(&mut b1);
+    for at in every_public_id() {
+        if is_placeholder(c, at) {
+            c.delete(at).unwrap();
+        }
+    }
+    c.no_session_for_test();
+    c.write_binary(id(KeyKind::Public, 3), b"planted", &ObjectPolicy::any_session())
+        .unwrap();
+    let mut r = b1.board().chip_record_load().unwrap().unwrap();
+    r.placeholders = None;
+    b1.board().chip_record_store(&r).unwrap();
+
+    let from = b1.board().log.len();
+    b1.boot();
+    // The circle keeps its objects and its slot. Every other public id holds the badge's
+    // placeholder: the tap's object was deleted and one made in its place, not adopted.
+    assert_eq!(b1.circle().unwrap().chip_slot, Some(0));
+    assert_eq!(circle_objects(&mut b1).len(), KEPT_OBJECTS);
+    let c = chip(&mut b1);
+    for at in every_public_id() {
+        assert_eq!(is_placeholder(c, at), at != id(KeyKind::Public, 0), "{at:?}");
+    }
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.placeholders, Some(PLACEHOLDERS));
+    let made = |b: &mut Badge<FakeBoard>| -> Vec<String> {
+        b.board().log[from..].iter().filter(|l| l.contains("made at the circle slots' public ids")).cloned().collect()
+    };
+    assert_eq!(made(&mut b1), ["chip: 15 placeholders made at the circle slots' public ids"]);
+    // Once: the next boot makes none.
+    b1.boot();
+    assert_eq!(made(&mut b1).len(), 1);
+    no_empty_public_id(&mut b1);
 }

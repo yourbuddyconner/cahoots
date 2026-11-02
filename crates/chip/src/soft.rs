@@ -367,6 +367,12 @@ impl SoftChip {
         self.fail_read = Some(id);
     }
 
+    /// The policy the object at `id` was made with, or `None` if `id` holds nothing: for a test
+    /// to tell what stands at an id without the rights to use it.
+    pub fn policy_for_test(&self, id: KeyId) -> Option<ObjectPolicy> {
+        self.objects.get(&id.0).map(|e| e.policy.clone())
+    }
+
     /// Back to no session, as a tap by anything that holds no key would be.
     pub fn no_session_for_test(&mut self) {
         self.session = Session::None;

@@ -186,7 +186,8 @@ impl ObjectPolicy {
         }
     }
 
-    /// The phone slot while no phone is paired: deleted by the owner, nothing else.
+    /// The phone slot, and every placeholder the badge keeps at an id no tap may fill: deleted
+    /// by the owner, nothing else.
     pub fn placeholder_slot() -> ObjectPolicy {
         ObjectPolicy {
             sign: Vec::new(),

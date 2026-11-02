@@ -22,10 +22,18 @@ fn id(kind: KeyKind, slot: u8) -> KeyId {
 }
 
 /// The chip's objects that belong to circles: all but the owner object, the phone slot, the
-/// inbox and the grant issue counter.
+/// inbox, the grant issue counter and the placeholders.
 fn circle_objects(b: &mut Badge<FakeBoard>) -> Vec<KeyId> {
-    let ids = b.board().owner_chip().ids().unwrap();
-    ids.into_iter().filter(|id| id.circle_slot().is_some()).collect()
+    let c = b.board().owner_chip();
+    let ids = c.ids().unwrap();
+    ids.into_iter()
+        .filter(|id| id.circle_slot().is_some() && !common::is_placeholder(c, *id))
+        .collect()
+}
+
+/// Every circle slot's public id holds a circle's public object or a placeholder.
+fn no_empty_public_id(b: &mut Badge<FakeBoard>) {
+    assert_eq!(common::empty_public_ids(b.board().owner_chip()), Vec::<KeyId>::new());
 }
 
 fn has_seat(b: &mut Badge<FakeBoard>) -> bool {
@@ -475,6 +483,8 @@ fn forget_one_keeps_the_other() {
     ];
     want.sort_by_key(|k| k.0);
     assert_eq!(ids, want);
+    // The forgotten circle's slot holds its placeholder again.
+    no_empty_public_id(&mut b);
     let record = b.board().chip_record_load().unwrap().unwrap();
     assert_eq!(record.slots.len(), 1);
     assert_eq!((record.slots[0].slot, record.slots[0].circle_id), (1, kept.circle_id));
@@ -502,6 +512,7 @@ fn a_held_at_boot_forgets_every_circle() {
     assert!(b.board().pad.iter().all(|&x| x == 0));
     assert!(b.board().more[0].pad.iter().all(|&x| x == 0));
     assert!(circle_objects(&mut b).is_empty());
+    no_empty_public_id(&mut b);
     let record = b.board().chip_record_load().unwrap().unwrap();
     assert!(record.slots.is_empty());
     assert!(record.is_current(), "the badge still owns its chip");

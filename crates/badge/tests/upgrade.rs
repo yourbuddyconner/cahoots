@@ -73,6 +73,18 @@ fn old_board() -> FakeBoard {
     board
 }
 
+/// The chip's objects but the placeholders.
+fn own_objects(b: &mut Badge<FakeBoard>) -> Vec<KeyId> {
+    let c = b.board().owner_chip();
+    let ids = c.ids().unwrap();
+    ids.into_iter().filter(|id| !common::is_placeholder(c, *id)).collect()
+}
+
+/// The badge-wide objects a set-up chip holds, in id order.
+fn badge_wide() -> Vec<KeyId> {
+    vec![KeyId::new(KeyKind::Grant, 255), KeyId::SLOT, KeyId::PAIRING, KeyId::INBOX, KeyId::OWNER]
+}
+
 fn shown(b: &mut Badge<FakeBoard>) -> usize {
     b.board().statuses().iter().filter(|s| *s == SCREEN).count()
 }
@@ -98,11 +110,9 @@ fn the_first_boot_wipes_what_was_made_the_old_way_and_says_so_once() {
     assert!(b.circles().is_empty());
     assert!(b.board().load_circles().is_empty());
     assert!(b.board().pad.iter().all(|&x| x == 0));
-    let ids = b.board().owner_chip().ids().unwrap();
-    assert_eq!(
-        ids,
-        vec![KeyId::new(KeyKind::Grant, 255), KeyId::SLOT, KeyId::PAIRING, KeyId::INBOX, KeyId::OWNER]
-    );
+    assert_eq!(own_objects(&mut b), badge_wide());
+    // And a placeholder at every circle slot's public id.
+    assert_eq!(common::empty_public_ids(b.board().owner_chip()), Vec::<KeyId>::new());
     // The issue counter is new, at 0, for the owner alone.
     assert_eq!(b.board().owner_chip().counter_get(KeyId::new(KeyKind::Grant, 255)), Ok(0));
 
@@ -149,11 +159,8 @@ fn a_new_badge_is_set_up_without_a_word() {
     b.boot();
     pin_rests(&mut b);
     assert_eq!(shown(&mut b), 0);
-    let ids = b.board().owner_chip().ids().unwrap();
-    assert_eq!(
-        ids,
-        vec![KeyId::new(KeyKind::Grant, 255), KeyId::SLOT, KeyId::PAIRING, KeyId::INBOX, KeyId::OWNER]
-    );
+    assert_eq!(own_objects(&mut b), badge_wide());
+    assert_eq!(common::empty_public_ids(b.board().owner_chip()), Vec::<KeyId>::new());
     assert!(b.board().chip_record_load().unwrap().unwrap().is_current());
 }
 
@@ -472,6 +479,47 @@ fn an_object_a_tap_planted_at_the_pairing_object_before_the_first_boot_refuses_t
     assert_eq!(refused(&mut b), 1);
     assert!(!b.board().has_chip());
     assert!(b.board().chip_record_load().unwrap().unwrap().is_refused());
+}
+
+#[test]
+fn an_object_a_tap_planted_at_a_circle_slots_public_id_before_the_first_boot_refuses_the_chip() {
+    let last = cahoots_badge::chip::CIRCLE_SLOTS - 1;
+    for planted in [KeyId::new(KeyKind::Public, 0), KeyId::new(KeyKind::Public, last)] {
+        let mut board = FakeBoard::new();
+        let mut c = SoftChip::with_seed([2; 32]);
+        c.write_binary(planted, &[0; 16], &stuck()).unwrap();
+        board.chip = Some(c);
+        let mut b = Badge::new(board);
+        b.boot();
+        assert_eq!(refused(&mut b), 1, "{planted:?}");
+        assert!(!b.board().has_chip());
+        assert!(b.board().chip_record_load().unwrap().unwrap().is_refused());
+        let log = b.board().log.join("\n");
+        assert!(log.contains("a circle slot's public id"), "{log}");
+    }
+}
+
+#[test]
+fn an_object_a_tap_planted_at_a_circle_slots_public_id_that_can_be_deleted_is_not_adopted() {
+    let mut board = old_board();
+    let planted = KeyId::new(KeyKind::Public, 2);
+    board
+        .chip
+        .as_mut()
+        .unwrap()
+        .write_binary(planted, b"planted", &ObjectPolicy::any_session())
+        .unwrap();
+    let mut b = Badge::new(board);
+    b.boot();
+    assert_eq!(refused(&mut b), 0);
+    assert_eq!(shown(&mut b), 1);
+    // The badge's placeholder stands there now: a tap in no session cannot use or delete it.
+    let c = b.board().chip.as_mut().unwrap();
+    assert!(common::is_placeholder(c, planted));
+    c.no_session_for_test();
+    assert_eq!(c.read_binary(planted), Err(ChipError::NotAllowed));
+    assert_eq!(c.delete(planted), Err(ChipError::NotAllowed));
+    assert_eq!(common::empty_public_ids(c), Vec::<KeyId>::new());
 }
 
 /// A chip whose record is current, with the pairing object missing: the boot flags the record

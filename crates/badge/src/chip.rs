@@ -27,11 +27,28 @@
 //! policy (every right for every session), or under a policy that lets nobody delete it (bench,
 //! SE051 applet 7.2.0). The badge never adopts one: a keep deletes whatever stands at the new
 //! circle's public id before it writes ([`remake_public`]), and the badge reads back only a
-//! public object the record says it wrote ([`SlotEntry::public_written`]). What a tap can do is
-//! burn circle slots: one whose ids hold an object nobody may delete is passed over when the
-//! badge picks a slot for a new circle, and a public id it cannot clear marks the slot stuck.
-//! A tap that fills all sixteen leaves the badge no slot for a new circle's keys. That is a
-//! denial of service, not a way to any key, and the remedy is a new chip.
+//! public object the record says it wrote ([`SlotEntry::public_written`]). Such an object
+//! would burn its circle slot: one whose ids hold an object nobody may delete is passed over
+//! when the badge picks a slot for a new circle, and a public id it cannot clear marks the
+//! slot stuck.
+//!
+//! So a tap finds no empty public id: [`first_boot`] makes a placeholder like the phone slot's
+//! at the public id of every circle slot, and the badge keeps one at each public id no circle
+//! uses ([`fill_slots`]). A keep deletes it just before it writes the circle's public object
+//! there ([`remake_public`]), and a slot emptied by a forget or a discarded pass gets its
+//! placeholder again in the same conversation. A chip with no room for a placeholder has no
+//! room for a tap's object either.
+//!
+//! The known limit: the hello ids, and the seat key, root and epoch ids, of a slot no circle
+//! uses stay empty, and a tap that makes an object nobody may delete at one of them still
+//! burns that slot. A placeholder takes 160 bytes of the chip's memory (bench, SE051 applet
+//! 7.2.0, 2026-11-01), and a circle of three about 3.1 KB. One at the public id and the eight
+//! hello ids of all sixteen slots, 144 of them, would take 23 KB, more than the bench chip has
+//! beside its circles: holding two circles, it made 91 and had no room for a third circle. At
+//! eight slots, 72 of them, it held three circles. At the public ids alone, sixteen of them,
+//! it held five and refused a sixth with 3.2 KB free. The eleven placeholders left then took
+//! 1.8 KB, and with that room a sixth would have fit. A kept circle's public object takes its
+//! slot's placeholder's place.
 
 use alloc::format;
 use alloc::string::String;
@@ -236,12 +253,21 @@ pub struct ChipRecord {
     /// ([`crate::Badge::boot`]).
     #[n(7)]
     pub public_policy: Option<u8>,
+    /// [`PLACEHOLDERS`] once the badge made its placeholders at the circle slots' public ids
+    /// ([`fill_slots`]), after it deleted whatever stood at them. `None` in a record of earlier
+    /// firmware, which made none: the next boot deletes what stands at the ids of the slots no
+    /// circle uses and makes them ([`crate::Badge::boot`]).
+    #[n(8)]
+    pub placeholders: Option<u8>,
 }
 
 /// The policy the public objects are made under now ([`cahoots_chip::ObjectPolicy::public_object`]):
 /// read by the owner and the phone slot only. A record of earlier firmware has no such field,
 /// which means policy 1, readable by any session.
 pub const PUBLIC_POLICY: u8 = 2;
+
+/// The value of [`ChipRecord::placeholders`] once the badge made its placeholders.
+pub const PLACEHOLDERS: u8 = 1;
 
 /// The record of earlier firmware, which only [`ChipRecord::from_stored`] reads, to know it.
 #[derive(Decode)]
@@ -278,6 +304,7 @@ impl ChipRecord {
             || !stuck_ok
             || !unpair_ok
             || r.public_policy.is_some_and(|p| p != PUBLIC_POLICY)
+            || r.placeholders.is_some_and(|p| p != PLACEHOLDERS)
         {
             return Err(Malformed);
         }
@@ -402,7 +429,9 @@ impl ChipRecord {
 
     /// Delete every Cahoots object in a slot this record does not know, and clear the flag of
     /// any object the record says was made but the chip does not hold. Returns a log line for
-    /// each change. Grant counters are left alone: [`crate::grants::sweep`] owns them.
+    /// each change. Grant counters are left alone: [`crate::grants::sweep`] owns them. So are
+    /// the public ids of the circle slots, where the badge keeps its placeholders
+    /// ([`fill_slots`]).
     pub fn reconcile(&mut self, chip: &mut dyn ChipOps) -> Vec<String> {
         self.reconcile_keeping(chip, &[])
     }
@@ -426,6 +455,11 @@ impl ChipRecord {
                 continue;
             };
             if self.entry(slot).is_some() {
+                continue;
+            }
+            // The public id of a slot no circle uses holds the badge's placeholder, which stays
+            // ([`fill_slots`]).
+            if is_placeholder_id(*id) {
                 continue;
             }
             if keep.contains(&slot) {
@@ -480,9 +514,16 @@ pub type Left = Vec<(KeyId, ChipError)>;
 
 /// The circle slots the badge makes objects in: 0 to 15, one for each place a board keeps a
 /// circle in. A hello object's slot byte is `circle_slot * 8 + other_seat`, so a circle slot
-/// above 31 would not fit it.
+/// above 31 would not fit it. Each slot's public id holds a placeholder while no circle uses
+/// it ([`fill_slots`]).
 pub const CIRCLE_SLOTS: u8 = 16;
 const _: () = assert!((CIRCLE_SLOTS as usize) * 8 <= 256);
+
+/// True for an id the badge keeps a placeholder at while no circle uses it: the public id of a
+/// circle slot below [`CIRCLE_SLOTS`]. The pairing object's id, public id 255, is not one.
+pub fn is_placeholder_id(id: KeyId) -> bool {
+    matches!(KeyId::parse(id.0), Some((KeyKind::Public, slot)) if slot < CIRCLE_SLOTS)
+}
 
 fn delete_into(chip: &mut dyn ChipOps, id: KeyId, left: &mut Left) {
     if let Err(e) = delete_quietly(chip, id) {
@@ -493,8 +534,9 @@ fn delete_into(chip: &mut dyn ChipOps, id: KeyId, left: &mut Left) {
 }
 
 /// Delete every object of circle slot `slot`: the seat key, the root, the epoch counter, the
-/// public object and the hello objects. An object that is not there is not an error. Every
-/// object is tried; the ones that stay are returned.
+/// public object or the placeholder at its id, and the hello objects. An object that is not
+/// there is not an error. Every object is tried, and the ones that stay are returned. The
+/// caller makes the slot's placeholder again ([`fill_slots`]) before the conversation ends.
 pub fn delete_slot(chip: &mut dyn ChipOps, slot: u8) -> Result<Left, ChipError> {
     let mut left = Left::new();
     for kind in SLOT_KINDS {
@@ -508,10 +550,11 @@ pub fn delete_slot(chip: &mut dyn ChipOps, slot: u8) -> Result<Left, ChipError> 
     Ok(left)
 }
 
-/// Delete every circle object and grant counter in the Cahoots range: the wipe at boot. The
-/// grant issue counter stays, so a grant base is never given twice on one chip, and so do the
-/// badge-wide objects and objects of kinds this firmware does not know. Every object is
-/// tried; the ones that stay are returned.
+/// Delete every circle object and grant counter in the Cahoots range, and the placeholders at
+/// the circle slots' public ids: the wipe at boot, after which the caller makes the
+/// placeholders again ([`fill_slots`]). The grant issue counter stays, so a grant base is
+/// never given twice on one chip, and so do the badge-wide objects and objects of kinds this
+/// firmware does not know. Every object is tried, and the ones that stay are returned.
 pub fn delete_all(chip: &mut dyn ChipOps) -> Result<Left, ChipError> {
     let issue = issue_id();
     let mut left = Left::new();
@@ -631,15 +674,82 @@ pub fn remake_antenna(chip: &mut dyn ChipOps, circles: u16) -> Result<(), ChipEr
     Ok(())
 }
 
-/// Make the phone slot as a placeholder: an AES authentication object holding a random key
-/// nobody keeps, which only the owner may delete. The slot's id must be free.
+/// Make the phone slot as a placeholder ([`make_placeholder_at`]). The slot's id must be free.
 pub fn make_placeholder(chip: &mut dyn ChipOps) -> Result<(), ChipError> {
+    make_placeholder_at(chip, KeyId::SLOT)
+}
+
+/// Make a placeholder at `id`: an AES authentication object holding a random key nobody
+/// keeps, under [`ObjectPolicy::placeholder_slot`], so only the owner may delete it and no
+/// session may do anything else with it. No policy names it, so a session opened against it,
+/// were its key known, would get no more than no session does. The id must be free.
+pub fn make_placeholder_at(chip: &mut dyn ChipOps, id: KeyId) -> Result<(), ChipError> {
     let random = chip.random(16)?;
     let mut key = [0u8; 16];
     key.copy_from_slice(&random);
-    let made = chip.put_aes_auth(KeyId::SLOT, &key, &ObjectPolicy::placeholder_slot());
+    let made = chip.put_aes_auth(id, &key, &ObjectPolicy::placeholder_slot());
     zeroize::Zeroize::zeroize(&mut key);
     made
+}
+
+/// What [`fill_slots`] did: how many placeholders it made, and the chip error that stopped it,
+/// if one did.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Filled {
+    pub made: usize,
+    pub error: Option<ChipError>,
+}
+
+impl Filled {
+    /// True when the chip refused a placeholder for want of memory (`6A84`).
+    pub fn out_of_memory(&self) -> bool {
+        self.error == Some(ChipError::Status(0x6A84))
+    }
+}
+
+/// In the owner session: a placeholder ([`make_placeholder_at`]) at the public id of each
+/// circle slot in `slots` that holds nothing. A public object the record vouches for
+/// ([`ChipRecord::circle_mask`]) is the circle's, and its id is left: if the object is gone,
+/// the badge writes it again there. Nothing is deleted, so what stands at an id stays. Stops
+/// at the first error: a chip short of memory (`6A84`) for a placeholder has no room for a
+/// tap's object either.
+pub fn fill_slots(chip: &mut dyn ChipOps, record: &ChipRecord, slots: &[u8]) -> Filled {
+    let mut filled = Filled::default();
+    let present = match chip.ids() {
+        Ok(ids) => ids,
+        Err(e) => {
+            filled.error = Some(e);
+            return filled;
+        }
+    };
+    let vouched = record.circle_mask();
+    for &slot in slots {
+        let id = public_id(slot);
+        if slot >= CIRCLE_SLOTS || vouched & 1 << slot != 0 || present.contains(&id) {
+            continue;
+        }
+        if let Err(e) = make_placeholder_at(chip, id) {
+            filled.error = Some(e);
+            return filled;
+        }
+        filled.made += 1;
+    }
+    filled
+}
+
+/// In the owner session: delete whatever stands at the public id of each circle slot in
+/// `slots`, each one tried, and return what stays. For a chip whose record does not know of
+/// placeholders: an object there is not one the badge made as a placeholder, so it is not
+/// kept as one.
+pub fn clear_placeholder_ids(chip: &mut dyn ChipOps, slots: &[u8]) -> Result<Left, ChipError> {
+    let present = chip.ids()?;
+    let mut left = Left::new();
+    for id in slots.iter().map(|&s| public_id(s)) {
+        if present.contains(&id) {
+            delete_into(chip, id, &mut left);
+        }
+    }
+    Ok(left)
 }
 
 /// Why [`replace_slot`] did not put what it was asked to in the phone slot, and what the slot
@@ -817,9 +927,12 @@ pub fn read_public(
 
 /// The first boot of a chip under this firmware, in one conversation: the owner object (a user
 /// id holding `owner_secret`) unless it is there, the owner session, then the phone slot, the
-/// inbox, the issue counter and the pairing object ([`remake_antenna`]), and the new record, with no circle
-/// slots, no phone and `badge_nonce`. The caller has emptied the chip but for the owner object
-/// first ([`delete_for_upgrade`]), so nothing a tap made is adopted.
+/// inbox, the issue counter and the pairing object ([`remake_antenna`]), a placeholder at
+/// every circle slot's public id ([`fill_slots`]), and the new record, with no circle slots, no
+/// phone and `badge_nonce`. The caller has emptied the chip but for the owner object first
+/// ([`delete_for_upgrade`]), so nothing a tap made is adopted. A placeholder the chip will
+/// not make leaves the record without [`PLACEHOLDERS`], and the next boot tries again: the
+/// chip is owned either way.
 ///
 /// No factory reset undoes this, on the bench chip (SE051, applet 7.2.0, 2026-10-31): it has
 /// no factory-reset authentication object (`7FFF0205` does not exist), and `DeleteAll` is
@@ -836,7 +949,7 @@ pub fn first_boot(
     }
     chip.open_owner(owner_secret)?;
     remake_antenna(chip, 0)?;
-    Ok(ChipRecord {
+    let mut record = ChipRecord {
         slots: Vec::new(),
         phone: None,
         badge_nonce,
@@ -845,5 +958,12 @@ pub fn first_boot(
         pending_unpair: None,
         paired_since_bump: None,
         public_policy: Some(PUBLIC_POLICY),
-    })
+        placeholders: None,
+    };
+    let all: Vec<u8> = (0..CIRCLE_SLOTS).collect();
+    let filled = fill_slots(chip, &record, &all);
+    if filled.error.is_none() || filled.out_of_memory() {
+        record.placeholders = Some(PLACEHOLDERS);
+    }
+    Ok(record)
 }

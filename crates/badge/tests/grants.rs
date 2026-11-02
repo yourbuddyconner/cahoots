@@ -1171,8 +1171,9 @@ fn a_wipe_keeps_the_issue_counter() {
     // The grant's counter and the seat key go. The issue counter stays, so no base repeats.
     assert_eq!(raw_counter(&mut badge, 0), None);
     assert_eq!(raw_counter(&mut badge, ISSUE_SLOT), Some(5));
-    let ids = badge.board().owner_chip().ids().unwrap();
-    // The badge's own objects stay too.
+    let c = badge.board().owner_chip();
+    let ids: Vec<KeyId> = c.ids().unwrap().into_iter().filter(|i| !common::is_placeholder(c, *i)).collect();
+    // The badge's own objects stay too, and the placeholders.
     assert_eq!(
         ids,
         vec![

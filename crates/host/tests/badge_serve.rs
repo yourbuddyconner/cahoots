@@ -180,6 +180,7 @@ fn a_host_board_keeps_the_chip_slot_the_root_and_the_chip_record() {
         pending_unpair: None,
         paired_since_bump: None,
         public_policy: Some(cahoots_badge::chip::PUBLIC_POLICY),
+        placeholders: Some(cahoots_badge::chip::PLACEHOLDERS),
     };
     board.chip_record_store(&record).unwrap();
     assert_eq!(board.chip_record_load(), Ok(Some(record.clone())));
