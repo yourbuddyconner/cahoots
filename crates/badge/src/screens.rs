@@ -211,9 +211,9 @@ pub fn chooser_titled(title: &str, names: &[String], chosen: usize) -> Screen {
 const HOME_ROWS: usize = 6;
 
 /// The home page, where the badge rests: the circles it holds by name, then `status`, which
-/// says whether a phone can tap now. A opens or closes the window for a tap, both or B open
-/// the menu.
-pub fn home(circles: &[String], status: &str) -> Screen {
+/// says whether a phone can tap now. A opens the window for a tap, or closes it while it is
+/// `open`, and its label says which. Both or B open the menu.
+pub fn home(circles: &[String], status: &str, open: bool) -> Screen {
     let mut s = Draw::new();
     s.title("badge");
     let w = cols(&FONT_8X13);
@@ -227,7 +227,7 @@ pub fn home(circles: &[String], status: &str) -> Screen {
         s.centered(&FONT_8X13, y, &format!("+{} more", circles.len() - shown));
     }
     s.centered(&FONT_8X13, 150, status);
-    s.footer(Some("tap"), Some("A+B  menu"), Some("menu"));
+    s.footer(Some(if open { "close" } else { "tap" }), Some("A+B  menu"), Some("menu"));
     s.done()
 }
 

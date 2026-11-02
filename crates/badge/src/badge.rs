@@ -3575,7 +3575,7 @@ fn show_page<B: Board>(board: &mut B, circles: &[Circle], current: usize, m: &Me
         Page::Home => {
             let names: Vec<String> = circles.iter().map(|c| c.params.name.clone()).collect();
             let status = tap_status(board, m);
-            show(board, screens::home(&names, status));
+            show(board, screens::home(&names, status, m.tap_until.is_some()));
             return;
         }
         Page::Actions => {

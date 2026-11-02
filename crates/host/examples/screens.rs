@@ -44,7 +44,7 @@ fn main() {
         screens::keep_prompt(&words),
         screens::discard_prompt(),
         screens::words("bench", "TRNG T1", &words),
-        screens::home(&["bench".to_string()], "closed to taps"),
+        screens::home(&["bench".to_string()], "closed to taps", false),
         screens::chooser_titled("bench", &actions, 0),
         screens::words_page("bench", "TRNG T1", &words),
         screens::action_page(

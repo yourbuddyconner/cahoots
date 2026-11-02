@@ -173,7 +173,8 @@ fn the_badge_rests_on_a_home_page_that_lists_its_circles() {
     // Boot ends on home, whatever the circle count.
     assert!(b1.board().shows("closed to taps"), "{:?}", b1.board().last());
     assert!(b1.board().shows(&name));
-    assert!(b1.board().last().iter().any(|l| l.contains("tap") && l.contains("A+B  menu")));
+    // Closed, the left button's label says it opens the window for a tap.
+    assert!(b1.board().shows("tap  A+B  menu  menu"), "{:?}", b1.board().last());
 }
 
 #[test]
@@ -182,6 +183,8 @@ fn the_left_button_opens_a_two_minute_tap_window_that_closes_by_itself() {
     press(&mut b1, Press::Left);
     assert!(b1.board().tap_open);
     assert!(b1.board().shows("open for a tap, 2 min"), "{:?}", b1.board().last());
+    // Open, the left button's label says it closes the window.
+    assert!(b1.board().shows("close  A+B  menu  menu"), "{:?}", b1.board().last());
     b1.board().uptime += 61;
     step(&mut b1);
     assert!(b1.board().shows("open for a tap, 1 min"));
@@ -189,6 +192,7 @@ fn the_left_button_opens_a_two_minute_tap_window_that_closes_by_itself() {
     step(&mut b1);
     assert!(!b1.board().tap_open);
     assert!(b1.board().shows("closed to taps"));
+    assert!(b1.board().shows("tap  A+B  menu  menu"), "{:?}", b1.board().last());
     // A second press while open closes it at once.
     press(&mut b1, Press::Left);
     assert!(b1.board().tap_open);

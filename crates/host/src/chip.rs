@@ -380,7 +380,8 @@ enum Walk {
     Refused,
 }
 
-/// Home: the badge's circles by name over the footer "tap  A+B  menu  menu".
+/// Home: the badge's circles by name over the footer "tap  A+B  menu  menu", which starts
+/// with "close" while the window for a tap is open.
 fn is_home(f: &[&str]) -> bool {
     f.first() == Some(&HOME) && f.last().is_some_and(|x| x.contains("A+B  menu"))
 }
@@ -816,7 +817,7 @@ mod tests {
     }
 
     const HOME_SCREEN: &str = "badge | owner-bench3 | pair-1712 | closed to taps | tap  A+B  menu  menu";
-    const OPEN_HOME: &str = "badge | owner-bench3 | open for a tap, 2 min | tap  A+B  menu  menu";
+    const OPEN_HOME: &str = "badge | owner-bench3 | open for a tap, 2 min | close  A+B  menu  menu";
 
     #[test]
     fn home_opens_the_list_with_both_never_left() {
