@@ -205,7 +205,7 @@ fn fill(
     s: &mut Session<'_, '_>,
 ) -> Result<u32, TapError> {
     let mut added = Vec::new();
-    for other in (0..n).filter(|o| *o != me) {
+    'seats: for other in (0..n).filter(|o| *o != me) {
         let Some(&from) = counters.get(usize::from(other)) else {
             continue;
         };
@@ -216,7 +216,14 @@ fn fill(
             {
                 continue;
             }
-            let mine = s.hmac_hello(slot, other, &hello_label(me, number))?;
+            // A circle the badge kept before it made hello objects has none, and what stands
+            // at the id refuses the slot or is not there: that seat gets no words from the
+            // card, and the tap goes on.
+            let mine = match s.hmac_hello(slot, other, &hello_label(me, number)) {
+                Ok(m) => m,
+                Err(TapError::NotAllowed | TapError::NotFound) => continue 'seats,
+                Err(e) => return Err(e),
+            };
             let theirs = s.hmac_hello(slot, other, &hello_label(other, number))?;
             added.push(PocketWords {
                 other,
@@ -557,7 +564,9 @@ impl Phone {
     /// phone slot with the key from `pair_card_start`, keep each of the badge's circles as a
     /// card circle, fetch the keys its chat needs and the next [`POCKET_WORDS`] hello words
     /// with each other seat, post any bump the badge left for a device to post, and publish
-    /// the badge's card in the chat. Returns the ids of the card circles.
+    /// the badge's card in the chat. Returns the ids of the card circles. A seat whose hello
+    /// object refuses the slot or is not there, as in a circle kept before the badge made
+    /// hello objects, gets no words from the card, and the circle is kept all the same.
     /// `NotPaired` while the badge has not taken this phone: the owner presses both buttons,
     /// then this is tried again.
     pub fn pair_card_finish(&self) -> Result<Vec<String>, PhoneError> {
@@ -632,8 +641,9 @@ impl Phone {
 
     /// One tap on the card for everything the card circles need: the key each chat waits for
     /// and the keys the bumps still to post move to, and the next [`POCKET_WORDS`] hello words
-    /// with each other seat. The slot key is read first, which may ask for Face ID, and only
-    /// then does the reader open. Nothing is kept unless the whole tap went through. Then the
+    /// with each other seat, but none for a seat whose hello object refuses the slot or is not
+    /// there. The slot key is read first, which may ask for Face ID, and only then does the
+    /// reader open. Nothing is kept unless the whole tap went through. Then the
     /// bumps the badge left for a device to post are sent. `NotPaired` when the badge no
     /// longer knows this phone: offer `forget_card`.
     pub fn tap_card(&self) -> Result<TapReport, PhoneError> {

@@ -725,6 +725,36 @@ fn the_second_tap_fills_a_pocket_of_eight_hellos_per_seat_and_no_tap_follows() {
     assert_eq!(d.phone.hello_words(id.clone(), other).unwrap().number, 7);
 }
 
+/// A circle the badge kept before it made hello objects has none: a placeholder, or nothing,
+/// stands at its hello ids. The second tap keeps it with its key, and that seat gets no words
+/// from the card, so a hello with it asks for a tap.
+#[test]
+fn a_circle_without_hello_objects_is_kept_with_no_words_from_the_card() {
+    for placeholder in [true, false] {
+        let relay = Arc::new(Mutex::new(MemRelay::default()));
+        let (mut b1, b2) = kept_pair((true, true));
+        let other = b2.circle().unwrap().seat;
+        let slot = b1.circle().unwrap().chip_slot.unwrap();
+        let hello = badge_chip::hello_id(slot, other);
+        let chip = b1.board().owner_chip();
+        chip.delete(hello).unwrap();
+        if placeholder {
+            badge_chip::make_placeholder_at(chip, hello).unwrap();
+        }
+        chip.close_session().unwrap();
+        let d = device(&relay);
+        let ids = pair(&mut b1, &d);
+        assert_eq!(ids.len(), 1, "placeholder {placeholder}");
+        let dir = d.path.join("circles").join(&ids[0]);
+        let record = CircleRecord::load(&dir).unwrap();
+        let card = record.card.as_ref().unwrap();
+        assert!(card.generation_key.is_some());
+        assert!(card.hello_pocket.as_ref().is_some_and(|p| p.is_empty()));
+        let e = d.phone.hello_words(ids[0].clone(), other).err().unwrap();
+        assert!(matches!(e, PhoneError::NeedsTap), "{e:?}");
+    }
+}
+
 #[test]
 fn a_reset_does_not_empty_the_pocket() {
     let relay = Arc::new(Mutex::new(MemRelay::default()));
