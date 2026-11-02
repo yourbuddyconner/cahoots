@@ -739,15 +739,18 @@ impl Nfc for SharedNfc {
 }
 
 /// Pair the laptop with the badge as the app pairs a phone, with the phone crate's own
-/// `Phone`, kept in `dir` (made fresh) and given no network. The badge must be on its pairing
+/// `Phone`, made in `dir`, which must be empty or new, and given no network. The badge must be on its pairing
 /// page. `pair_card_start` is the first tap: it writes the inbox under `name` and shows the
 /// words. Both on the badge shows its words, and only if they are the laptop's, Both again
 /// pairs. `pair_card_finish` is the second tap: it keeps every circle of the badge as a card
 /// circle, with its chat key and the hello words ahead. It is timed. Prints the words, the
 /// phone's key, the second tap's time and the phone slot's key.
 fn pair(port: &str, name: &str, dir: &Path) -> Result<(), String> {
-    if dir.exists() {
-        std::fs::remove_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    if std::fs::read_dir(dir).is_ok_and(|mut d| d.next().is_some()) {
+        return Err(format!(
+            "{} is not empty. Give an empty or new directory for the laptop's phone.",
+            dir.display()
+        ));
     }
     let reader = Arc::new(SerialNfc::open(port)?);
     let apdus = Arc::new(AtomicU32::new(0));
@@ -862,6 +865,17 @@ mod tests {
         assert_eq!(forget_on("pair-1712", actions), Walk::Press(1));
         assert_eq!(forget_on("pair-1712", at_back), Walk::Press(2));
         assert_eq!(forget_on("pair-1712", words), Walk::Press(0));
+    }
+
+    #[test]
+    fn pair_refuses_a_state_directory_that_holds_anything() {
+        let dir = std::env::temp_dir().join(format!("cahoots-pair-state-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("keep.txt"), b"not the phone's").unwrap();
+        let e = pair("/dev/null", "bench laptop", &dir).err().unwrap();
+        assert!(e.contains("is not empty"), "{e}");
+        assert!(dir.join("keep.txt").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

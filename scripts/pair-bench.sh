@@ -149,6 +149,7 @@ grep -q "^pairing: open" "$STATE/pairing.txt" || fail "the pairing object says n
 # laptop's, Both again, once the question is drawn, pairs. Any other words are answered no.
 # Then the second tap keeps every circle of the badge on the laptop's phone.
 say "pairing as the app does, the laptop as the phone"
+rm -rf "$STATE/phone"
 chip pair --name "bench laptop" --state "$STATE/phone" > "$STATE/pair.txt" \
   || fail "the badge did not pair, see $LOG"
 WORDS=$(sed -n 's/^words: //p' "$STATE/pair.txt")
