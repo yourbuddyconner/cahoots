@@ -12,6 +12,8 @@ enum Route: Hashable {
     case settings
     /// Pair this phone with a badge, and bring its circles.
     case pairCard
+    /// The badge this phone is paired with: what a tap would do, and the one button that taps.
+    case card
     /// A channel on this phone, by id.
     case channel(String)
     /// A channel link opened from outside, the whole URL.
@@ -39,6 +41,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var seatNames: [String: [String: String]] = [:]
     /// The name on each seat's card, by circle id and seat. A seat without a card has none.
     @Published private(set) var cardNames: [String: [UInt8: String]] = [:]
+    /// What a tap on the card would do now, as last read. Nil until the first read.
+    @Published private(set) var cardStatus: CardStatus?
     @Published var path: [Route] = [] {
         didSet {
             // A link held while a ceremony was open goes once the ceremony leaves the screen.
@@ -104,6 +108,7 @@ final class AppModel: ObservableObject {
         guard let list = try? await core.run({ $0.circles() }) else { return false }
         circles = list
         if let chs = try? await core.run({ $0.channels() }) { channels = chs }
+        await refreshCard()
         seatNames = Dictionary(uniqueKeysWithValues: list.map {
             ($0.id, (try? core.store.seatNames(circle: $0.id)) ?? [:])
         })
@@ -118,6 +123,12 @@ final class AppModel: ObservableObject {
             for (id, m) in members { noteMembers(m, circle: id) }
         }
         return true
+    }
+
+    /// Read again what a tap on the card would do. It neither taps nor asks for Face ID.
+    func refreshCard() async {
+        guard let core, UIApplication.shared.isProtectedDataAvailable else { return }
+        if let status = try? await core.run({ try $0.cardStatus() }) { cardStatus = status }
     }
 
     /// Keep the names on the cards of a circle's members, as just read.
@@ -354,6 +365,21 @@ final class AppModel: ObservableObject {
         path = []
         await refresh()
         await updateBadge()
+    }
+
+    /// One tap on the card: the keys the chats wait for, the bumps the badge left to pass on,
+    /// and more hello words. The crate reads the card's key first, so Face ID comes before
+    /// the reader's sheet. The circles and the card's status are read again either way.
+    func tapCard() async throws -> TapReport {
+        guard let core else { throw PhoneError.Storage(message: "Your circles are still opening. Try again.") }
+        do {
+            let report = try await core.run { try $0.tapCard() }
+            await refresh()
+            return report
+        } catch {
+            await refresh()
+            throw error
+        }
     }
 
     /// Remove every card circle from this phone, and the key kept for its badge.

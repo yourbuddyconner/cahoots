@@ -22,7 +22,7 @@ final class ChatModel: ObservableObject {
     @Published private(set) var card = false
     /// A card circle whose chat waits for keys only a tap on the card can bring.
     @Published private(set) var needsTap = false
-    /// A tap for the keys is under way.
+    /// A tap on the card is under way.
     @Published private(set) var tapping = false
 
     init(core: Core, circle: String) {
@@ -90,13 +90,13 @@ final class ChatModel: ObservableObject {
         needsTap = summary.needsTap
     }
 
-    /// Tap the card for the keys the chat waits for, then read the relay with them.
-    func tapForKeys() async {
+    /// Tap the card, which brings the key the chat waits for, then read the relay with it.
+    func tapCard(_ app: AppModel) async {
         guard !tapping else { return }
         tapping = true
         defer { tapping = false }
         do {
-            try await core.run { [circle] in try $0.tapForKeys(circle: circle) }
+            _ = try await app.tapCard()
             status = nil
             await poll()
             await load()
@@ -243,13 +243,17 @@ struct ChatView: View {
             if let notice { StatusLine(text: notice, problem: false) }
             StatusLine(text: model.status)
             if model.needsTap {
-                Button { Task { await model.tapForKeys(); await app.refresh() } } label: {
-                    Working(busy: model.tapping, title: "Tap your card to catch up")
+                Button { Task { await model.tapCard(app); await app.refresh() } } label: {
+                    Working(busy: model.tapping, title: "Tap the card")
                 }
                 .buttonStyle(.filled)
                 .disabled(model.tapping)
-                .accessibilityLabel("Tap your card to catch up")
-                .accessibilityIdentifier("tap-for-keys")
+                .accessibilityLabel("Tap the card")
+                .accessibilityIdentifier("tap-card")
+                NavigationLink(value: Route.card) { Text("Card details") }
+                    .buttonStyle(TextButtonStyle(full: false))
+                    .disabled(model.tapping)
+                    .accessibilityIdentifier("chat-card")
             } else if summary?.hasRoot == false && !model.card {
                 Text("This circle uses an older format that doesn’t support chat. Create a new circle together to start chatting.")
                     .font(.subheadline).foregroundStyle(Color.muted)

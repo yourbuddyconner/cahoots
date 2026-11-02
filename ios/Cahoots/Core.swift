@@ -100,6 +100,8 @@ func plain(_ error: Error) -> String {
         return "The card is busy with its badge. Try again in a moment."
     case PhoneError.NotPaired:
         return "This card no longer knows this phone."
+    case PhoneError.NeedsTap:
+        return "Tap the card first."
     default:
         return "Cahoots couldn’t complete that action. Please try again."
     }

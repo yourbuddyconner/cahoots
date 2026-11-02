@@ -121,7 +121,7 @@ struct CircleRow: View {
         s += others.map { "With \($0)." } ?? "\(spelled(Int(circle.members))) people."
         if !AppModel.isCard(circle) { s += " You are seat \(circle.mySeat + 1)." }
         if !circle.hasRoot && !AppModel.isCard(circle) { s += " Needs a new ceremony to chat." }
-        if circle.needsTap { s += " Tap your card to catch up." }
+        if circle.needsTap { s += " Tap the card." }
         return s
     }
 

@@ -233,8 +233,17 @@ struct HelloView: View {
     @State private var notice: String?
     @State private var advancing = false
     @State private var confirmNext = false
+    /// A card circle has no hello words left with this seat: a tap on the card brings more.
+    @State private var needsTap = false
+    @State private var tapping = false
 
     private var who: String { app.seatName(circle: circle, seat: seat) }
+
+    /// In a card circle, the line that says the hello words from the card run low: 3 or fewer.
+    static func pocketNote(_ left: UInt32?) -> String? {
+        guard let left, left <= 3 else { return nil }
+        return "\(left) \(left == 1 ? "hello" : "hellos") left from your card. Tap the card soon."
+    }
 
     var body: some View {
         ScrollView {
@@ -256,6 +265,16 @@ struct HelloView: View {
                     .padding(Space.l)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.brand.opacity(0.06), in: RoundedRectangle(cornerRadius: Radius.control))
+                    if !needsTap, let low = Self.pocketNote(words.cardLeft) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            StatusLine(text: low, problem: false)
+                            Button("Tap the card") { Task { await tapCard() } }
+                                .buttonStyle(TextButtonStyle(full: false))
+                                .disabled(tapping || advancing)
+                                .accessibilityIdentifier("hello-tap-card-soon")
+                        }
+                        .accessibilityIdentifier("hello-pocket-low")
+                    }
                     VStack(alignment: .leading, spacing: 0) {
                         Hairline()
                         said("1", "You say aloud", words.mine, detail: "They should match the reply shown on the other person’s screen.")
@@ -286,10 +305,18 @@ struct HelloView: View {
         .navigationTitle("Hello words")
         .navigationBarTitleDisplayMode(.large)
         .actionBar {
-            Button { confirmNext = true } label: { Working(busy: advancing, title: "Next hello") }
-                .buttonStyle(.filled)
-                .accessibilityLabel("Next hello")
-                .disabled(words == nil || advancing)
+            if needsTap {
+                Button { Task { await tapCard() } } label: { Working(busy: tapping, title: "Tap the card") }
+                    .buttonStyle(.filled)
+                    .accessibilityLabel("Tap the card")
+                    .accessibilityIdentifier("hello-tap-card")
+                    .disabled(tapping)
+            } else {
+                Button { confirmNext = true } label: { Working(busy: advancing, title: "Next hello") }
+                    .buttonStyle(.filled)
+                    .accessibilityLabel("Next hello")
+                    .disabled(words == nil || advancing || tapping)
+            }
         }
         .confirmationDialog("Move to the next hello?", isPresented: $confirmNext, titleVisibility: .visible) {
             Button("Move to next hello") { Task { await next() } }
@@ -297,11 +324,34 @@ struct HelloView: View {
             Text("This changes only your phone. Ask \(who) to advance too, unless you’re catching up to their number. You can’t go back to earlier words.")
         }
         .task {
-            do {
-                face = try? await core.run { [circle, seat] in $0.seatFace(circle: circle, seat: seat) }
-                words = try await core.run { [circle, seat] in try $0.helloWords(circle: circle, otherSeat: seat) }
-            } catch { self.error = plain(error) }
+            face = try? await core.run { [circle, seat] in $0.seatFace(circle: circle, seat: seat) }
+            await load()
         }
+    }
+
+    /// The words for the current hello number. A card circle with none left asks for a tap.
+    private func load() async {
+        do {
+            words = try await core.run { [circle, seat] in try $0.helloWords(circle: circle, otherSeat: seat) }
+            needsTap = false
+            error = nil
+        } catch PhoneError.NeedsTap {
+            needsTap = true
+            self.error = plain(PhoneError.NeedsTap)
+        } catch { self.error = plain(error) }
+    }
+
+    /// Tap the card for more hello words, then read the words again.
+    private func tapCard() async {
+        guard !tapping else { return }
+        tapping = true
+        defer { tapping = false }
+        error = nil
+        notice = nil
+        do {
+            _ = try await app.tapCard()
+            await load()
+        } catch { self.error = plain(error) }
     }
 
     private func said(_ number: String, _ label: String, _ word: String, detail: String) -> some View {
@@ -326,6 +376,11 @@ struct HelloView: View {
             let updated = try await core.run { [circle, seat] in try $0.nextHello(circle: circle, otherSeat: seat) }
             words = updated
             notice = "Ready for hello \(UInt64(updated.number) + 1). Check that both screens show this number."
+        } catch PhoneError.NeedsTap {
+            // The number stays: the next words come with a tap.
+            needsTap = true
+            notice = nil
+            self.error = plain(PhoneError.NeedsTap)
         } catch { self.error = plain(error) }
     }
 }

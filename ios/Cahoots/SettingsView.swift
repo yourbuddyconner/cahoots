@@ -20,8 +20,6 @@ struct SettingsView: View {
     @State private var removing: CircleSummary?
     @State private var error: String?
     @State private var showingGuide = false
-    @State private var confirmForget = false
-    @State private var cardError: String?
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -87,6 +85,7 @@ struct SettingsView: View {
             // A card left unsigned by a cancelled Face ID waits for a tap on Share again. Opening
             // Settings never asks for Face ID by itself.
             await checkCard()
+            await app.refreshCard()
         }
         .sheet(item: $export) { e in
             NavigationStack {
@@ -103,15 +102,6 @@ struct SettingsView: View {
                     ToolbarItem(placement: .primaryAction) { ShareLink(item: e.text) }
                 }
             }
-        }
-        .confirmationDialog("Forget this card?", isPresented: $confirmForget, titleVisibility: .visible) {
-            Button("Forget this card", role: .destructive) {
-                Task {
-                    do { try await app.forgetCard() } catch { cardError = plain(error) }
-                }
-            }
-        } message: {
-            Text("Its circles and their messages are deleted from this phone, and so is this phone’s key for the card. The badge keeps its phone slot until you unpair it there. To use the card again, pair it again.")
         }
         .confirmationDialog("Remove \(removing?.name ?? "this circle") from this phone? Its messages and keys will be deleted from this phone. You cannot undo this. Other members keep their copies.",
                             isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
@@ -290,29 +280,56 @@ struct SettingsView: View {
         }
     }
 
-    /// Pairing with a badge, and forgetting it.
+    /// The badge this phone is paired with: one row to its screen, with what a tap would do,
+    /// and pairing while there is none.
     private var cardSection: some View {
         PaperSection(title: "Card", footer: "Pair this phone with a badge to read and post in the badge’s circles.") {
-            NavigationLink(value: Route.pairCard) {
+            NavigationLink(value: Route.card) {
                 HStack {
-                    Label("Pair a card", systemImage: "wave.3.right")
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Card")
+                            if let line = cardLine {
+                                Text(line)
+                                    .font(.subheadline).foregroundStyle(Color.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .accessibilityIdentifier("settings-card-line")
+                            }
+                        }
+                    } icon: {
+                        Image(systemName: "wave.3.right")
+                    }
                     Spacer()
                     Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
                 }
                 .foregroundStyle(Color.brand)
+                .padding(.vertical, Space.s)
                 .frame(minHeight: 44)
             }
             .buttonStyle(RowButtonStyle())
-            .accessibilityIdentifier("settings-pair-card")
-            if app.hasCardCircle {
+            .accessibilityIdentifier("settings-card")
+            if app.cardStatus?.paired == false {
                 Hairline()
-                Button("Forget this card") { confirmForget = true }
-                    .buttonStyle(TextButtonStyle(full: false, color: .ink))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityIdentifier("forget-card")
+                NavigationLink(value: Route.pairCard) {
+                    HStack {
+                        Label("Pair a card", systemImage: "plus")
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                    }
+                    .foregroundStyle(Color.brand)
+                    .frame(minHeight: 44)
+                }
+                .buttonStyle(RowButtonStyle())
+                .accessibilityIdentifier("settings-pair-card")
             }
-            StatusLine(text: cardError)
         }
+    }
+
+    /// The first line of what a tap would do, or "not paired". Nil until the card is read.
+    private var cardLine: String? {
+        guard let status = app.cardStatus else { return nil }
+        guard status.paired else { return "not paired" }
+        return CardView.summary(status) { app.seatName(circle: $0, seat: $1) }.first
     }
 
     private var circles: some View {

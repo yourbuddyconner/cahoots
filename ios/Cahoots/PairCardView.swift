@@ -93,6 +93,12 @@ final class PairCardModel: ObservableObject {
 
     static let pressFirst = "Press both buttons on the badge first, then hold the phone again."
 
+    /// What to do when the crate refuses a second badge: this phone keeps the circles of one.
+    static func note(after error: String?) -> String? {
+        guard error == "Forget this card first." else { return nil }
+        return "This phone is paired to another badge. Forget that card in Settings, then pair again. The badge you just tapped already took this phone's key, so unpair it there first."
+    }
+
     /// Back to the name, forgetting the words.
     func startOver() {
         guard !working else { return }
@@ -120,6 +126,12 @@ struct PairCardView: View {
                 case let .done(badge, circles): PairDoneStep(badge: badge, circles: circles)
                 }
                 StatusLine(text: model.error)
+                if let note = PairCardModel.note(after: model.error) {
+                    Text(note)
+                        .font(.subheadline).foregroundStyle(Color.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("pair-other-badge")
+                }
             }
             .padding(.horizontal, Space.l)
             .padding(.top, Space.s)

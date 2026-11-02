@@ -83,7 +83,7 @@ final class PairCardTests: XCTestCase {
         XCTAssertEqual(CircleRow.meta(summary(kind: "card"), others: "Grace", badge: "Conner's badge"),
                        "Card circle on Conner's badge. With Grace.")
         XCTAssertEqual(CircleRow.meta(summary(kind: "card", needsTap: true), others: nil, badge: "Conner's badge"),
-                       "Card circle on Conner's badge. Three people. Tap your card to catch up.")
+                       "Card circle on Conner's badge. Three people. Tap the card.")
         XCTAssertEqual(CircleRow.meta(summary(kind: "seat"), others: "Grace", badge: nil),
                        "With Grace. You are seat 2.")
     }

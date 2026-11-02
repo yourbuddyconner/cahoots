@@ -100,6 +100,10 @@ final class NfcTransport: NSObject, Nfc, @unchecked Sendable {
         return f()
     }
 
+    /// The chip went quiet in the middle of a tap: the phone moved, or the badge's tap window
+    /// closed under it.
+    static let movedAway = "The card moved away. Hold the phone to it until it says done."
+
     /// A tap error in the crate's words: the person cancelling or no chip in time is `NoCard`.
     private static func mapped(_ error: Error) -> PhoneError {
         guard let e = error as? NFCReaderError else {
@@ -112,7 +116,7 @@ final class NfcTransport: NSObject, Nfc, @unchecked Sendable {
         case .readerSessionInvalidationErrorSystemIsBusy:
             return .Nfc(message: "The NFC reader is busy. Try again in a moment.")
         case .readerTransceiveErrorTagConnectionLost, .readerTransceiveErrorTagNotConnected:
-            return .Nfc(message: "The card moved away. Hold the phone to it until it says done.")
+            return .Nfc(message: movedAway)
         default:
             return .Nfc(message: "The tap did not work: \(e.localizedDescription)")
         }

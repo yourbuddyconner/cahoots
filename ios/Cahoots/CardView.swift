@@ -1,0 +1,166 @@
+import SwiftUI
+
+/// The badge this phone is paired with: its name and face, when it was last tapped, what a tap
+/// would do now, and one button that taps. Forgetting the card is here too. With no card
+/// paired it offers to pair one.
+struct CardView: View {
+    @EnvironmentObject private var app: AppModel
+    @State private var tapping = false
+    /// What the last tap did, in one sentence.
+    @State private var result: String?
+    @State private var error: String?
+    @State private var confirmForget = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.xl) {
+                if let status = app.cardStatus {
+                    if status.paired {
+                        paired(status)
+                    } else {
+                        ScreenHeader(title: "No card on this phone",
+                                     detail: "Pair this phone with a badge to read and post in the badge’s circles.",
+                                     style: .title)
+                    }
+                } else {
+                    ProgressView().frame(maxWidth: .infinity)
+                }
+                StatusLine(text: result, problem: false)
+                StatusLine(text: error)
+                if app.cardStatus?.paired == true {
+                    Button("Forget this card") { confirmForget = true }
+                        .buttonStyle(TextButtonStyle(full: false, color: .ink))
+                        .disabled(tapping)
+                        .accessibilityIdentifier("forget-card")
+                }
+            }
+            .padding(.horizontal, Space.l)
+            .padding(.top, Space.s)
+            .padding(.bottom, Space.xl)
+        }
+        .paperBackground()
+        .navigationTitle("Card")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(tapping)
+        .actionBar(shown: app.cardStatus != nil) {
+            if app.cardStatus?.paired == true {
+                Button { Task { await tap() } } label: {
+                    Working(busy: tapping, title: "Tap the card")
+                }
+                .buttonStyle(.filled)
+                .disabled(tapping)
+                .accessibilityLabel("Tap the card")
+                .accessibilityIdentifier("tap-card")
+            } else {
+                NavigationLink(value: Route.pairCard) { Text("Pair a card") }
+                    .buttonStyle(.filled)
+                    .accessibilityIdentifier("card-pair-card")
+            }
+        }
+        .confirmationDialog("Forget this card?", isPresented: $confirmForget, titleVisibility: .visible) {
+            Button("Forget this card", role: .destructive) {
+                Task {
+                    do { try await app.forgetCard() } catch { self.error = plain(error) }
+                }
+            }
+        } message: {
+            Text("Its circles and their messages are deleted from this phone, and so is this phone’s key for the card. The badge keeps its phone slot until you unpair it there. To use the card again, pair it again.")
+        }
+        .task { await app.refreshCard() }
+    }
+
+    /// The badge's name and face, the last tap, and what a tap would do now.
+    private func paired(_ status: CardStatus) -> some View {
+        VStack(alignment: .leading, spacing: Space.xl) {
+            HStack(spacing: Space.m) {
+                if let face = badgeFace {
+                    FaceView(pixels: face, size: 64, label: "\(status.badge)'s face")
+                }
+                ScreenHeader(title: status.badge, detail: Self.lastTap(status.lastTap), style: .title)
+            }
+            PaperSection(title: "What a tap would do") {
+                ForEach(Array(Self.summary(status) { app.seatName(circle: $0, seat: $1) }.enumerated()), id: \.offset) { i, line in
+                    if i > 0 { Hairline() }
+                    Text(line)
+                        .font(.body).foregroundStyle(Color.ink)
+                        .padding(.vertical, Space.m)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .accessibilityIdentifier("card-summary")
+        }
+    }
+
+    /// The badge's face: a card circle's own seat is the badge's, from the card it published.
+    private var badgeFace: Data? {
+        guard let c = app.circles.first(where: AppModel.isCard),
+              let faces = app.faces[c.id], Int(c.mySeat) < faces.count else { return nil }
+        return faces[Int(c.mySeat)]
+    }
+
+    private func tap() async {
+        guard !tapping else { return }
+        tapping = true
+        defer { tapping = false }
+        result = nil
+        error = nil
+        do {
+            result = Self.result(try await app.tapCard())
+        } catch {
+            self.error = Self.problem(plain(error))
+        }
+    }
+
+    /// What a tap would do now, a line each: "up to date" when nothing waits. `name` gives a
+    /// seat's name in a circle.
+    static func summary(_ s: CardStatus, name: (String, UInt8) -> String) -> [String] {
+        var lines: [String] = []
+        if s.keysWanted > 0 {
+            lines.append(s.keysWanted == 1 ? "1 circle needs a key" : "\(s.keysWanted) circles need a key")
+        }
+        if s.bumpsToPost > 0 {
+            lines.append(counted(s.bumpsToPost, "bump") + " to post")
+        }
+        for low in s.wordsLow {
+            lines.append("hello words: \(low.left) left for \(name(low.circle, low.seat))")
+        }
+        return lines.isEmpty ? ["up to date"] : lines
+    }
+
+    /// What one tap did, in one sentence: "Fetched 2 keys and 16 hello words, and passed on
+    /// 1 bump." A bump passed on reached the relay, or was there already.
+    static func result(_ r: TapReport) -> String {
+        var fetched: [String] = []
+        if r.keys > 0 { fetched.append(counted(r.keys, "key")) }
+        if r.words > 0 { fetched.append(counted(r.words, "hello word")) }
+        let bumps = r.bumps > 0 ? counted(r.bumps, "bump") : nil
+        switch (fetched.isEmpty, bumps) {
+        case (true, nil): return "Nothing was waiting."
+        case let (true, bumps?): return "Passed on \(bumps)."
+        case (false, nil): return "Fetched \(fetched.joined(separator: " and "))."
+        case let (false, bumps?): return "Fetched \(fetched.joined(separator: " and ")), and passed on \(bumps)."
+        }
+    }
+
+    /// "last tap: never", or how long ago, as "last tap: 2 minutes ago".
+    static func lastTap(_ seconds: UInt64?, now: Date = Date()) -> String {
+        guard let seconds else { return "last tap: never" }
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .full
+        f.dateTimeStyle = .named
+        let when = min(Date(timeIntervalSince1970: TimeInterval(seconds)), now)
+        return "last tap: " + f.localizedString(for: when, relativeTo: now)
+    }
+
+    /// A tap's problem as this screen says it. The chip goes quiet when the badge's tap window
+    /// closes in the middle of a tap, so that sentence says how to open it again.
+    static func problem(_ text: String) -> String {
+        text == NfcTransport.movedAway ? text + " Press tap on the badge and try again." : text
+    }
+
+    /// "1 bump", "2 bumps".
+    private static func counted(_ n: UInt32, _ thing: String) -> String {
+        "\(n) \(thing)\(n == 1 ? "" : "s")"
+    }
+}
