@@ -75,7 +75,7 @@ final class CardViewTests: XCTestCase {
     /// A second badge is refused by the crate, and the pairing screen says what to do about it.
     func testASecondBadgeSaysWhatToDo() {
         XCTAssertEqual(PairCardModel.note(after: "Forget this card first."),
-                       "This phone is paired to another badge. Forget that card in Settings, then pair again. The badge you just tapped already took this phone's key, so unpair it there first.")
+                       "This phone is paired to another badge. In Settings, open Card and forget that card, then pair again. The badge you just tapped already took this phone's key, so unpair it there first.")
         XCTAssertNil(PairCardModel.note(after: "No card found. Hold the phone to the chip."))
         XCTAssertNil(PairCardModel.note(after: nil))
     }

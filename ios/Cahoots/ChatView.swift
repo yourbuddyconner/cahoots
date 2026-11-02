@@ -243,13 +243,13 @@ struct ChatView: View {
             if let notice { StatusLine(text: notice, problem: false) }
             StatusLine(text: model.status)
             if model.needsTap {
-                Button { Task { await model.tapCard(app); await app.refresh() } } label: {
+                Button { Task { await model.tapCard(app) } } label: {
                     Working(busy: model.tapping, title: "Tap the card")
                 }
                 .buttonStyle(.filled)
                 .disabled(model.tapping)
                 .accessibilityLabel("Tap the card")
-                .accessibilityIdentifier("tap-card")
+                .accessibilityIdentifier("tap-card-chat")
                 NavigationLink(value: Route.card) { Text("Card details") }
                     .buttonStyle(TextButtonStyle(full: false))
                     .disabled(model.tapping)

@@ -373,7 +373,7 @@ final class AppModel: ObservableObject {
     func tapCard() async throws -> TapReport {
         guard let core else { throw PhoneError.Storage(message: "Your circles are still opening. Try again.") }
         do {
-            let report = try await core.run { try $0.tapCard() }
+            let report = try await core.tapCard()
             await refresh()
             return report
         } catch {

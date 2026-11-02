@@ -221,21 +221,126 @@ struct SeatNameSheet: View {
     }
 }
 
+/// The hello words of one seat, as `HelloModel` asks for them. `Core` answers on the phone's
+/// queue; the tests stand in for it.
+protocol HelloSource: Sendable {
+    func helloWords(circle: String, seat: UInt8) async throws -> HelloWords
+    func nextHello(circle: String, seat: UInt8) async throws -> HelloWords
+    /// One tap on the card: Face ID first, then the reader's sheet.
+    func tapCard() async throws -> TapReport
+}
+
+extension Core: HelloSource {
+    func helloWords(circle: String, seat: UInt8) async throws -> HelloWords {
+        try await run { try $0.helloWords(circle: circle, otherSeat: seat) }
+    }
+
+    func nextHello(circle: String, seat: UInt8) async throws -> HelloWords {
+        try await run { try $0.nextHello(circle: circle, otherSeat: seat) }
+    }
+
+    func tapCard() async throws -> TapReport {
+        try await run { try $0.tapCard() }
+    }
+}
+
+/// The words of the current hello with one seat, the move to the next, and in a card circle
+/// the tap that brings more words when the phone has none left.
+@MainActor
+final class HelloModel: ObservableObject {
+    let source: HelloSource
+    let circle: String
+    let seat: UInt8
+    @Published private(set) var words: HelloWords?
+    @Published private(set) var error: String?
+    @Published private(set) var notice: String?
+    @Published private(set) var advancing = false
+    @Published private(set) var tapping = false
+    /// A card circle has no hello words left with this seat: a tap on the card brings more.
+    @Published private(set) var needsTap = false
+    /// Next hello asked for the tap. The person confirmed it already, so it goes on once the
+    /// tap is through.
+    private var nextAfterTap = false
+
+    init(source: HelloSource, circle: String, seat: UInt8) {
+        self.source = source
+        self.circle = circle
+        self.seat = seat
+    }
+
+    /// The words for the current hello number. A card circle with none left asks for a tap.
+    func load() async {
+        do {
+            words = try await source.helloWords(circle: circle, seat: seat)
+            needsTap = false
+            error = nil
+        } catch PhoneError.NeedsTap {
+            needsTap = true
+            self.error = plain(PhoneError.NeedsTap)
+        } catch {
+            self.error = plain(error)
+        }
+    }
+
+    /// Move to the next hello. Past the last words from the card the number stays, and the
+    /// screen asks for a tap.
+    func next() async {
+        guard !advancing else { return }
+        advancing = true
+        defer { advancing = false }
+        error = nil
+        do {
+            let updated = try await source.nextHello(circle: circle, seat: seat)
+            words = updated
+            notice = "Ready for hello \(UInt64(updated.number) + 1). Check that both screens show this number."
+        } catch PhoneError.NeedsTap {
+            needsTap = true
+            nextAfterTap = true
+            notice = nil
+            self.error = plain(PhoneError.NeedsTap)
+        } catch {
+            self.error = plain(error)
+        }
+    }
+
+    /// Tap the card for more hello words and read the words again, then move to the next
+    /// hello if that is what asked for the tap.
+    func tapCard() async {
+        guard !tapping else { return }
+        tapping = true
+        defer { tapping = false }
+        error = nil
+        notice = nil
+        do {
+            _ = try await source.tapCard()
+        } catch {
+            self.error = plain(error)
+            return
+        }
+        await load()
+        if nextAfterTap, !needsTap, error == nil {
+            nextAfterTap = false
+            await next()
+        }
+    }
+}
+
 /// A call check with one other seat. Both phones advance their own counter.
 struct HelloView: View {
     let core: Core
     let circle: String
     let seat: UInt8
     @EnvironmentObject private var app: AppModel
-    @State private var words: HelloWords?
+    @StateObject private var model: HelloModel
     @State private var face: Data?
-    @State private var error: String?
-    @State private var notice: String?
-    @State private var advancing = false
     @State private var confirmNext = false
-    /// A card circle has no hello words left with this seat: a tap on the card brings more.
-    @State private var needsTap = false
-    @State private var tapping = false
+
+    init(core: Core, circle: String, seat: UInt8) {
+        self.core = core
+        self.circle = circle
+        self.seat = seat
+        _model = StateObject(wrappedValue: HelloModel(source: core, circle: circle, seat: seat))
+    }
 
     private var who: String { app.seatName(circle: circle, seat: seat) }
 
@@ -253,7 +358,7 @@ struct HelloView: View {
                     ScreenHeader(title: "Check with \(who)",
                                  detail: "On their phone, ask them to open this circle, tap People, then choose your seat (seat \((app.circle(circle)?.mySeat ?? 0) + 1)).", style: .title2)
                 }
-                if let words {
+                if let words = model.words {
                     VStack(alignment: .leading, spacing: Space.s) {
                         Text("Hello \(UInt64(words.number) + 1)")
                             .font(.title3.weight(.semibold).monospacedDigit()).foregroundStyle(Color.brand)
@@ -265,12 +370,13 @@ struct HelloView: View {
                     .padding(Space.l)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.brand.opacity(0.06), in: RoundedRectangle(cornerRadius: Radius.control))
-                    if !needsTap, let low = Self.pocketNote(words.cardLeft) {
+                    StatusLine(text: model.notice, problem: false)
+                    if !model.needsTap, let low = Self.pocketNote(words.cardLeft) {
                         VStack(alignment: .leading, spacing: 0) {
                             StatusLine(text: low, problem: false)
-                            Button("Tap the card") { Task { await tapCard() } }
+                            Button("Tap the card") { Task { await tap() } }
                                 .buttonStyle(TextButtonStyle(full: false))
-                                .disabled(tapping || advancing)
+                                .disabled(model.tapping || model.advancing)
                                 .accessibilityIdentifier("hello-tap-card-soon")
                         }
                         .accessibilityIdentifier("hello-pocket-low")
@@ -291,11 +397,9 @@ struct HelloView: View {
                             .padding(.top, Space.s)
                     }
                     .foregroundStyle(Color.ink)
-                } else if error == nil {
+                } else if model.error == nil {
                     ProgressView("Loading hello words…").frame(maxWidth: .infinity)
                 }
-                StatusLine(text: notice, problem: false)
-                StatusLine(text: error)
             }
             .padding(.horizontal, Space.l)
             .padding(.top, Space.s)
@@ -305,53 +409,36 @@ struct HelloView: View {
         .navigationTitle("Hello words")
         .navigationBarTitleDisplayMode(.large)
         .actionBar {
-            if needsTap {
-                Button { Task { await tapCard() } } label: { Working(busy: tapping, title: "Tap the card") }
+            // A problem shows above the button, where it is seen, as in the chat.
+            StatusLine(text: model.error)
+            if model.needsTap {
+                Button { Task { await tap() } } label: { Working(busy: model.tapping, title: "Tap the card") }
                     .buttonStyle(.filled)
                     .accessibilityLabel("Tap the card")
                     .accessibilityIdentifier("hello-tap-card")
-                    .disabled(tapping)
+                    .disabled(model.tapping)
             } else {
-                Button { confirmNext = true } label: { Working(busy: advancing, title: "Next hello") }
+                Button { confirmNext = true } label: { Working(busy: model.advancing, title: "Next hello") }
                     .buttonStyle(.filled)
                     .accessibilityLabel("Next hello")
-                    .disabled(words == nil || advancing || tapping)
+                    .disabled(model.words == nil || model.advancing || model.tapping)
             }
         }
         .confirmationDialog("Move to the next hello?", isPresented: $confirmNext, titleVisibility: .visible) {
-            Button("Move to next hello") { Task { await next() } }
+            Button("Move to next hello") { Task { await model.next() } }
         } message: {
             Text("This changes only your phone. Ask \(who) to advance too, unless you’re catching up to their number. You can’t go back to earlier words.")
         }
         .task {
             face = try? await core.run { [circle, seat] in $0.seatFace(circle: circle, seat: seat) }
-            await load()
+            await model.load()
         }
     }
 
-    /// The words for the current hello number. A card circle with none left asks for a tap.
-    private func load() async {
-        do {
-            words = try await core.run { [circle, seat] in try $0.helloWords(circle: circle, otherSeat: seat) }
-            needsTap = false
-            error = nil
-        } catch PhoneError.NeedsTap {
-            needsTap = true
-            self.error = plain(PhoneError.NeedsTap)
-        } catch { self.error = plain(error) }
-    }
-
-    /// Tap the card for more hello words, then read the words again.
-    private func tapCard() async {
-        guard !tapping else { return }
-        tapping = true
-        defer { tapping = false }
-        error = nil
-        notice = nil
-        do {
-            _ = try await app.tapCard()
-            await load()
-        } catch { self.error = plain(error) }
+    /// Tap the card, then read the circles and the card's status again for the other screens.
+    private func tap() async {
+        await model.tapCard()
+        await app.refresh()
     }
 
     private func said(_ number: String, _ label: String, _ word: String, detail: String) -> some View {
@@ -365,22 +452,5 @@ struct HelloView: View {
         }
         .padding(.vertical, Space.l)
         .accessibilityElement(children: .combine)
-    }
-
-    private func next() async {
-        guard !advancing else { return }
-        advancing = true
-        error = nil
-        defer { advancing = false }
-        do {
-            let updated = try await core.run { [circle, seat] in try $0.nextHello(circle: circle, otherSeat: seat) }
-            words = updated
-            notice = "Ready for hello \(UInt64(updated.number) + 1). Check that both screens show this number."
-        } catch PhoneError.NeedsTap {
-            // The number stays: the next words come with a tap.
-            needsTap = true
-            notice = nil
-            self.error = plain(PhoneError.NeedsTap)
-        } catch { self.error = plain(error) }
     }
 }

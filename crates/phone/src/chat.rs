@@ -61,7 +61,7 @@ pub struct Circle {
 }
 
 /// What a card circle says when it cannot go on without a tap.
-pub const NEEDS_TAP: &str = "Tap your card to catch up.";
+pub const NEEDS_TAP: &str = "Tap the card.";
 
 impl Circle {
     pub fn load(dir: &Path) -> Result<Circle, PhoneError> {

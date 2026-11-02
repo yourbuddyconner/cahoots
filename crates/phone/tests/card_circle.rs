@@ -549,7 +549,7 @@ fn a_phone_pairs_chats_by_tap_follows_a_bump_and_forgets_the_card() {
     assert_eq!(got[0].kind, "bump");
     assert!(d.phone.circles()[0].needs_tap);
     let e = d.phone.send_chat(id.clone(), "too soon".into()).err().unwrap();
-    assert_eq!(e.to_string(), "Tap your card to catch up.");
+    assert_eq!(e.to_string(), "Tap the card.");
     // Without the card nothing changes.
     assert!(matches!(d.phone.tap_card(), Err(PhoneError::NoCard)));
     assert!(d.phone.circles()[0].needs_tap);
@@ -558,7 +558,7 @@ fn a_phone_pairs_chats_by_tap_follows_a_bump_and_forgets_the_card() {
     assert!(d.phone.circles()[0].needs_tap);
     assert!(d.phone.poll(id.clone()).unwrap().is_empty());
     let e = d.phone.send_chat(id.clone(), "too soon".into()).err().unwrap();
-    assert_eq!(e.to_string(), "Tap your card to catch up.");
+    assert_eq!(e.to_string(), "Tap the card.");
     // The first key left the record once the chat state held it.
     let held = CircleRecord::load(&dir).unwrap();
     assert!(held.card.as_ref().unwrap().generation_key.is_none());

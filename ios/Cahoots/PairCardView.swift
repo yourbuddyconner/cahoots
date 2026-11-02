@@ -96,7 +96,7 @@ final class PairCardModel: ObservableObject {
     /// What to do when the crate refuses a second badge: this phone keeps the circles of one.
     static func note(after error: String?) -> String? {
         guard error == "Forget this card first." else { return nil }
-        return "This phone is paired to another badge. Forget that card in Settings, then pair again. The badge you just tapped already took this phone's key, so unpair it there first."
+        return "This phone is paired to another badge. In Settings, open Card and forget that card, then pair again. The badge you just tapped already took this phone's key, so unpair it there first."
     }
 
     /// Back to the name, forgetting the words.

@@ -247,7 +247,7 @@ pub struct CircleSummary {
     /// phone is paired to (a card circle).
     pub kind: String,
     /// A card circle whose chat cannot go on until the card is tapped (`tap_card`): say
-    /// "Tap your card to catch up."
+    /// "Tap the card."
     pub needs_tap: bool,
 }
 
