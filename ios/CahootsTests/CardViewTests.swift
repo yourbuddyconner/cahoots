@@ -53,12 +53,22 @@ final class CardViewTests: XCTestCase {
         XCTAssertNotEqual(ago, "last tap: never")
     }
 
-    /// The tap window closed under the phone: the Card screen says how to open it again.
-    func testACardThatMovedAwaySaysToPressTapOnTheBadge() {
-        XCTAssertEqual(CardView.problem(NfcTransport.movedAway),
-                       "The card moved away. Hold the phone to it until it says done. Press tap on the badge and try again.")
-        XCTAssertEqual(CardView.problem("No card found. Hold the phone to the chip."),
-                       "No card found. Hold the phone to the chip.")
+    /// The tap window closed under the phone, or was never open: the Card screen says how to
+    /// open it, only for a badge that says it is closed, since the same button closes an open
+    /// window.
+    func testACardThatMovedAwayOrWasNotFoundSaysHowToOpenTheWindow() {
+        XCTAssertEqual(CardView.problem(PhoneError.Nfc(message: NfcTransport.movedAway)),
+                       "The card moved away. Hold the phone to it until it says done. If the badge says closed to taps, press its left button, then try again.")
+        XCTAssertEqual(CardView.problem(PhoneError.NoCard),
+                       "No card found. Hold the phone still to the badge. If the badge says closed to taps, press its left button, then try again.")
+        XCTAssertEqual(CardView.problem(PhoneError.Nfc(message: "The NFC reader is busy. Try again in a moment.")),
+                       "The NFC reader is busy. Try again in a moment.")
+    }
+
+    /// A card that no longer knows this phone: the Card screen points at Forget.
+    func testACardThatNoLongerKnowsThisPhoneSaysToForgetAndPairAgain() {
+        XCTAssertEqual(CardView.problem(PhoneError.NotPaired),
+                       "This card no longer knows this phone. Choose Forget this card, then pair again.")
     }
 
     func testTheWordsInThePocketRunLow() {
@@ -76,7 +86,7 @@ final class CardViewTests: XCTestCase {
     func testASecondBadgeSaysWhatToDo() {
         XCTAssertEqual(PairCardModel.note(after: "Forget this card first."),
                        "This phone is paired to another badge. In Settings, open Card and forget that card, then pair again. The badge you just tapped already took this phone's key, so unpair it there first.")
-        XCTAssertNil(PairCardModel.note(after: "No card found. Hold the phone to the chip."))
+        XCTAssertNil(PairCardModel.note(after: "No card found. Hold the phone still to the badge."))
         XCTAssertNil(PairCardModel.note(after: nil))
     }
 }

@@ -80,7 +80,7 @@ pub enum PhoneError {
     #[error("{message}")]
     Nfc { message: String },
     /// No card answered the tap in time, or the person cancelled it.
-    #[error("No card found. Hold the phone to the chip.")]
+    #[error("No card found. Hold the phone still to the badge.")]
     NoCard,
     /// The card would not open a session for the phone: its badge holds the chip.
     #[error("The card is busy with its badge. Try again in a moment.")]

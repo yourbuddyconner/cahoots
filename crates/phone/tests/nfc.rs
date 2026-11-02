@@ -275,7 +275,7 @@ fn no_tag_is_no_card() {
     let nfc = FakeNfc::default();
     let e = Tap::begin(&nfc, "Hold the phone to the card").err().unwrap();
     assert!(matches!(e, TapError::NoCard));
-    assert_eq!(PhoneError::from(e).to_string(), "No card found. Hold the phone to the chip.");
+    assert_eq!(PhoneError::from(e).to_string(), "No card found. Hold the phone still to the badge.");
 }
 
 #[test]

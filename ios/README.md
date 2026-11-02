@@ -161,8 +161,8 @@ keep a new circle before pairing.
 The badge rests on home: "badge" over the names of its circles, a status line, and "tap",
 "A+B menu" and "menu" along the bottom. The left button opens a tap window of two minutes: the
 status line says "open for a tap, 2 min", then "1 min", and the chip's power is cut until the
-window closes. Press the left button again to close it early, and the status line says "closed
-to taps". Opening the menu closes it too. Both buttons, or the right one, open the menu: the
+window closes. While the window is open the left button's label says "close". Press it again
+to close the window early, and the status line says "closed to taps". Opening the menu closes it too. Both buttons, or the right one, open the menu: the
 badge's circles by name, "new circle", "pair a phone", "phone" while a phone is paired, and
 "back". The side buttons move along it and both buttons choose. A note after an action goes
 home by itself after five seconds, or at any press.

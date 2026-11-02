@@ -95,7 +95,7 @@ func plain(_ error: Error) -> String {
          let PhoneError.Signer(m), let PhoneError.Channel(m), let PhoneError.Nfc(m):
         return m
     case PhoneError.NoCard:
-        return "No card found. Hold the phone to the chip."
+        return "No card found. Hold the phone still to the badge."
     case PhoneError.CardBusy:
         return "The card is busy with its badge. Try again in a moment."
     case PhoneError.NotPaired:

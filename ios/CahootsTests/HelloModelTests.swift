@@ -65,7 +65,7 @@ final class HelloModelTests: XCTestCase {
         fake.tapError = PhoneError.NoCard
         await model.tapCard()
         XCTAssertTrue(model.needsTap)
-        XCTAssertEqual(model.error, "No card found. Hold the phone to the chip.")
+        XCTAssertEqual(model.error, "No card found. Hold the phone still to the badge.")
         XCTAssertEqual(model.words?.number, 0)
         await model.tapCard()
         XCTAssertFalse(model.needsTap)

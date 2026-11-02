@@ -108,7 +108,7 @@ struct CardView: View {
         do {
             result = Self.result(try await app.tapCard())
         } catch {
-            self.error = Self.problem(plain(error))
+            self.error = Self.problem(error)
         }
     }
 
@@ -153,11 +153,27 @@ struct CardView: View {
         return "last tap: " + f.localizedString(for: when, relativeTo: now)
     }
 
-    /// A tap's problem as this screen says it. The chip goes quiet when the badge's tap window
-    /// closes in the middle of a tap, so that sentence says how to open it again.
-    static func problem(_ text: String) -> String {
-        text == NfcTransport.movedAway ? text + " Press tap on the badge and try again." : text
+    /// A tap's problem as this screen says it, with what to do next. A badge closed to taps
+    /// gives the phone no chip, or one that goes quiet in the middle of a tap, so those two
+    /// say how to open the window again. A card that no longer knows this phone points at
+    /// Forget.
+    static func problem(_ error: Error) -> String {
+        let text = plain(error)
+        switch error {
+        case PhoneError.NoCard:
+            return text + " " + closedHint
+        case let PhoneError.Nfc(m) where m == NfcTransport.movedAway:
+            return text + " " + closedHint
+        case PhoneError.NotPaired:
+            return text + " Choose Forget this card, then pair again."
+        default:
+            return text
+        }
     }
+
+    /// The badge's left button opens its window for a tap on its home page. While the window
+    /// is open the same button closes it, so the hint names the case it is for.
+    static let closedHint = "If the badge says closed to taps, press its left button, then try again."
 
     /// "1 bump", "2 bumps".
     private static func counted(_ n: UInt32, _ thing: String) -> String {
