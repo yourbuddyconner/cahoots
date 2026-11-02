@@ -76,15 +76,15 @@ struct CirclesView: View {
 /// No circles yet: what Cahoots is for, in three steps.
 private struct EmptyCircles: View {
     private let steps = [
-        ("Create a circle", "Say how many people are in the room with you."),
-        ("Meet and compare", "Exchange codes, then check that the same six words appear on every phone."),
-        ("Keep talking", "Wherever you go. Messages are encrypted on each phone."),
+        ("Create a circle", "Choose how many people will be in the circle, including you."),
+        ("Compare the words", "Exchange codes with everyone joining. Check that every phone and badge shows the same six words in order."),
+        ("Send messages", "Once everyone has kept the circle, you can send encrypted messages to each other."),
     ]
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xxl) {
-            ScreenHeader(title: "Meet in person. Stay in cahoots.",
-                         detail: "A private circle with the people beside you. No account, no phone number.",
+            ScreenHeader(title: "No circles yet",
+                         detail: "A circle is a group of people who meet in person. Create one together or join one they have started. You don’t need an account or a phone number.",
                          style: .title)
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(steps.enumerated()), id: \.offset) { i, step in
@@ -115,7 +115,7 @@ struct CircleRow: View {
         var s = AppModel.isCard(circle) ? "Card circle on \(badge ?? "your badge"). " : ""
         s += others.map { "With \($0)." } ?? "\(spelled(Int(circle.members))) people."
         if !AppModel.isCard(circle) { s += " You are seat \(circle.mySeat + 1)." }
-        if !circle.hasRoot && !AppModel.isCard(circle) { s += " Needs a new ceremony to chat." }
+        if !circle.hasRoot && !AppModel.isCard(circle) { s += " Create a new circle together to chat." }
         if circle.needsTap { s += " Tap the card." }
         return s
     }

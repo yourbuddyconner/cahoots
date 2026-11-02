@@ -64,7 +64,7 @@ struct CardView: View {
                 }
             }
         } message: {
-            Text("Its circles and their messages are deleted from this phone, and so is this phone’s key for the card. The badge keeps its phone slot until you unpair it there. To use the card again, pair it again.")
+            Text("This deletes the card’s circles, their messages and the card’s key from this phone. On the badge, open “phone” in the menu and unpair this phone before pairing again.")
         }
         .task { await app.refreshCard() }
     }
@@ -79,7 +79,7 @@ struct CardView: View {
                 }
                 ScreenHeader(title: name, detail: Self.lastTap(status.lastTap), style: .title)
             }
-            PaperSection(title: "What a tap would do") {
+            PaperSection(title: "What happens when you tap the card") {
                 ForEach(Array(Self.summary(status) { app.seatName(circle: $0, seat: $1) }.enumerated()), id: \.offset) { i, line in
                     if i > 0 { Hairline() }
                     Text(line)

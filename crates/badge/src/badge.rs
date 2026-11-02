@@ -2794,7 +2794,7 @@ impl<B: Board> Badge<B> {
                 Ok(Some(inbox)) => {
                     let Some(words) = self.pair_words(&inbox) else {
                         self.pair_close();
-                        return self.note(&["pairing failed, try again"], false);
+                        return self.note(&["could not pair. Try again"], false);
                     };
                     self.board.log(&format!(
                         "pairing: {} asks, words {}",
@@ -2821,7 +2821,7 @@ impl<B: Board> Badge<B> {
                 }
                 Err(_) => {
                     self.pair_close();
-                    self.note(&["pairing failed, try again"], false)
+                    self.note(&["could not pair. Try again"], false)
                 }
             },
         }
@@ -2852,11 +2852,11 @@ impl<B: Board> Badge<B> {
                     }
                     Err(BadgeError::ChipHeld) => self.note(&[RESTART], false),
                     Err(BadgeError::UnpairUnfinished) => self.note(
-                        &["finish the last unpair first, turn the badge off and on"],
+                        &["unpairing is unfinished. Turn the badge off and on"],
                         false,
                     ),
                     Err(BadgeError::NoAnswer) => self.note(&[NO_ANSWER], false),
-                    Err(_) => self.note(&["pairing failed, try again"], false),
+                    Err(_) => self.note(&["could not pair. Try again"], false),
                 }
             }
             Press::Left | Press::Right => {
@@ -2880,7 +2880,7 @@ impl<B: Board> Badge<B> {
                 ),
                 Err(BadgeError::NoAnswer) => self.note(&[NO_ANSWER], false),
                 Err(BadgeError::ChipHeld) => self.note(&[RESTART], false),
-                Err(_) => self.note(&["unpairing failed, try again"], false),
+                Err(_) => self.note(&["could not unpair. Try again"], false),
             },
             Press::Left | Press::Right => {
                 self.show_chooser(index);

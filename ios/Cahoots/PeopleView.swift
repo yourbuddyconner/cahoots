@@ -50,7 +50,7 @@ struct PeopleView: View {
                 VStack(alignment: .leading, spacing: Space.m) {
                     FaceRow(faces: members.compactMap { faces[$0.seat] }, size: 32)
                     ScreenHeader(title: app.circle(circle)?.name ?? "Your circle",
-                                 detail: "Each seat is a device in this circle. Open someone’s hello words to check them on a call.", style: .title)
+                                 detail: "Each seat is a device in this circle. On a call, open the other person’s words. Take turns saying your two words and checking the reply to know it is really them.", style: .title)
                 }
                 if !loaded && error == nil {
                     ProgressView("Loading people…").frame(maxWidth: .infinity)
@@ -98,7 +98,7 @@ struct PeopleView: View {
                                     Text(Self.about(member, card: card)).font(.subheadline).foregroundStyle(Color.muted)
                                 }
                             }
-                            Text("These are the protection levels each device reported when the circle was created. They have not been independently verified. Every member holds the circle’s secret.")
+                            Text("Each device reported how it protects its keys when the circle was created. Cahoots has not checked those claims. Every member has access to the circle’s secret.")
                                 .font(.footnote).foregroundStyle(Color.muted)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -356,7 +356,7 @@ struct HelloView: View {
                 HStack(spacing: Space.m) {
                     FaceView(pixels: face, size: 44, label: "\(who)'s face")
                     ScreenHeader(title: "Check with \(who)",
-                                 detail: "On their phone, ask them to open this circle, tap People, then choose your seat (seat \((app.circle(circle)?.mySeat ?? 0) + 1)).", style: .title2)
+                                 detail: "Ask them to open this circle on their phone, tap the chat title to open People, then choose your seat (seat \((app.circle(circle)?.mySeat ?? 0) + 1)).", style: .title2)
                 }
                 if let words = model.words {
                     VStack(alignment: .leading, spacing: Space.s) {
@@ -383,15 +383,15 @@ struct HelloView: View {
                     }
                     VStack(alignment: .leading, spacing: 0) {
                         Hairline()
-                        said("1", "You say aloud", words.mine, detail: "They should match the reply shown on the other person’s screen.")
+                        said("1", "You say aloud", words.mine, detail: "Say these two words. Ask them to check the reply on their screen.")
                         Hairline()
-                        said("2", "Listen for their reply", words.theirs, detail: "Ask them to read their own words. Check that you hear this pair, without telling them the answer.")
+                        said("2", "Listen for their reply", words.theirs, detail: "Ask them to say their two words. Check that you hear these words. Do not tell them what you expect to hear.")
                         Hairline()
                     }
-                    InstructionStep(number: 3, title: "Finished? Move on together",
-                                    detail: "If both pairs match, each of you taps Next hello to prepare fresh words for your next conversation. The other phone won’t advance automatically.")
+                    InstructionStep(number: 3, title: "When both pairs match",
+                                    detail: "After both pairs match, each of you taps Next hello to get the words for your next call. Tapping changes only your phone.")
                     DisclosureGroup("Numbers or words don’t match?") {
-                        Text("Check that you’re in the same circle and have opened each other’s seat. If hello numbers differ, only the person with the lower number taps Next hello until they match. If the words still differ, stop the check. A familiar voice alone is not enough.")
+                        Text("Check that you’re in the same circle and have opened each other’s seat. If the numbers differ, only the person with the lower number taps Next hello until they match. If the words still differ, stop. You have not confirmed who is on the call, even if the voice sounds familiar.")
                             .font(.subheadline).foregroundStyle(Color.muted)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.top, Space.s)
@@ -427,7 +427,7 @@ struct HelloView: View {
         .confirmationDialog("Move to the next hello?", isPresented: $confirmNext, titleVisibility: .visible) {
             Button("Move to next hello") { Task { await model.next() } }
         } message: {
-            Text("This changes only your phone. Ask \(who) to advance too, unless you’re catching up to their number. You can’t go back to earlier words.")
+            Text("This changes only your phone. Ask \(who) to tap Next hello too, unless you’re catching up to their number. You can’t go back to earlier words.")
         }
         .task {
             face = try? await core.run { [circle, seat] in $0.seatFace(circle: circle, seat: seat) }

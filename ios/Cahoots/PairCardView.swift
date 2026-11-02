@@ -159,19 +159,19 @@ struct PairCardView: View {
         switch model.step {
         case .name:
             Button { Task { await model.start() } } label: {
-                Working(busy: model.working, title: "Hold the phone to the card")
+                Working(busy: model.working, title: "Tap the card")
             }
             .buttonStyle(.filled)
             .disabled(model.working)
-            .accessibilityLabel("Hold the phone to the card")
+            .accessibilityLabel("Tap the card")
             .accessibilityIdentifier("pair-start")
         case .check:
             Button { Task { await model.finish() } } label: {
-                Working(busy: model.working, title: "Hold the phone again")
+                Working(busy: model.working, title: "Tap the card again")
             }
             .buttonStyle(.filled)
             .disabled(model.working)
-            .accessibilityLabel("Hold the phone again")
+            .accessibilityLabel("Tap the card again")
             .accessibilityIdentifier("pair-finish")
         case .done:
             Button("Done") { app.leave() }
@@ -188,7 +188,7 @@ private struct PairNameStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xl) {
             ScreenHeader(title: "Pair a card",
-                         detail: "This phone can read and post in this badge's circles until you unpair it on the badge.",
+                         detail: "Pairing adds this badge's circles to this phone so you can read and send messages. The badge shows the name you give this phone.",
                          style: .title)
             VStack(alignment: .leading, spacing: Space.s) {
                 Text("Name for this phone")
@@ -248,7 +248,7 @@ private struct PairDoneStep: View {
         VStack(alignment: .leading, spacing: Space.xl) {
             ScreenHeader(title: "Paired with \(badge)", style: .title)
             if circles.isEmpty {
-                StatusLine(text: "No circles came from this badge.")
+                StatusLine(text: "Paired. No circles were added to this phone.")
             } else {
                 CircleNames(title: "Circles on this phone", names: circles)
             }

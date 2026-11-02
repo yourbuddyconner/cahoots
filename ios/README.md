@@ -60,10 +60,11 @@ to `$CARGO_TARGET_DIR/ios` when the target directory is elsewhere.
   behind user presence, one per badge, so Face ID or the passcode releases it for each tap after
   pairing.
 
-In People, tap the pencil beside any seat to give it a name. Names are private to this phone,
-appear in chat and hello words, and are stored in the circle's protected `seat-names.json` file.
-An empty name restores the seat number. Deleting a circle also removes its names.
-The chat title and Conversation's People and names action both open the roster.
+In People, each seat shows the name and face its owner shared. A seat without a shared name
+has a pencil beside it: tap it to give that seat a name only this phone sees. These names
+appear in chat and hello words and are stored in the circle's protected `seat-names.json`
+file. An empty name restores the seat number. Deleting a circle also removes its names.
+The chat title and Conversation's People and names action both open People.
 
 For hello words, both people open each other's seat and compare the hello number before taking
 turns reading their own pair. Each person checks the reply against their expected pair without
@@ -89,7 +90,7 @@ screen shows the posts and a composer for those who may post, and reads the rela
 seconds while it is open. The owner's menu shares the link, retires it, starts new keys, and
 opens Members (revoke, which shows the new link) and Requests (allow or refuse, and a toggle to
 allow automatically what the policy permits, kept in UserDefaults). Every step is a `channel_*`
-call on `Phone`; the screens follow `web/app/channels.js` and use its words. `pollAll` reads
+call on `Phone`. The screens follow `web/app/channels.js` and use its words. `pollAll` reads
 every live channel after the circles, and channel unread counts add to the icon badge.
 
 ## Universal links
@@ -163,27 +164,28 @@ The badge rests on home: "badge" over the names of its circles, a status line, a
 "A+B menu" and "menu" along the bottom. The left button opens a tap window of two minutes: the
 status line says "open for a tap, 2 min", then "1 min", and the chip's power is cut until the
 window closes. While the window is open the left button's label says "close". Press it again
-to close the window early, and the status line says "closed to taps". Opening the menu closes it too. Both buttons, or the right one, open the menu: the
-badge's circles by name, "new circle", "pair a phone", "phone" while a phone is paired, and
-"back". The side buttons move along it and both buttons choose. A note after an action goes
-home by itself after five seconds, or at any press.
+to close the window early, and the status line says "closed to taps". Opening the menu closes
+it too. Both buttons, or the right one, open the menu: the badge's circles by name, "new
+circle", "pair a phone", "phone" while a phone is paired, and "back". The side buttons move
+along it and both buttons choose. A note after an action goes home by itself after five
+seconds, or at any press.
 
 1. On the badge, press both for the menu, move to "pair a phone" and press both. The page says
    "hold the phone to the chip, then press both". The chip's power is cut while it is open.
 2. In the app, open Settings and choose "Pair a card". Type a name for this phone and choose
-   "Hold the phone to the card". Face ID asks first, before the NFC sheet, because the phone
-   signs its request with its enclave key during the tap and the camera cannot see a face while
-   the phone lies on the badge. Then hold the phone to the badge's antenna. The app shows how
+   "Tap the card". Face ID asks first, before the NFC sheet, because the phone signs its
+   request with its enclave key during the tap and the camera cannot see a face while the
+   phone lies on the badge. Then hold the phone to the badge's antenna. The app shows how
    many circles the badge holds and six words, and says "Set the phone down. On the badge, press
    both to show its six words. Compare every word in order. If they all match, press both
    again, then hold the phone to the card." A badge with no name shows as "your badge".
 3. On the badge, press both. It shows "pair with" the phone's name and six words in two rows.
    Check they match the phone's, then press both again. The badge says "paired with" the name
    and "hold the phone again", then goes home with the tap window open for that tap.
-4. In the app, choose "Hold the phone again" and hold the phone to the antenna. This tap asks
+4. In the app, choose "Tap the card again" and hold the phone to the antenna. This tap asks
    nothing. It brings each of the badge's circles onto the phone with its chat key and the
-   next eight hello words with each other seat. The app shows "Paired with" the badge and the
-   circles it kept. Choose "Done". The badge took four presses of both buttons in all.
+   words for the next eight hello numbers with each other seat. The app shows "Paired with" the
+   badge and the circles it kept. Choose "Done". The badge took four presses of both buttons in all.
 5. On Circles, each of the badge's circles shows the badge's face and "Card circle on" the
    badge. Open one's chat. Post from the browser or another phone and read it here, and post
    back.
@@ -193,9 +195,10 @@ home by itself after five seconds, or at any press.
    for a tap", then choose "Tap the card" and hold the phone to the antenna. No page on the
    badge needs opening. Face ID asks before the NFC sheet, because the tap reads the card's key
    from the keychain. One tap fetches every key a chat waits for, passes on the bumps the badge
-   signed, and tops up the hello words. It also keeps any circle the badge kept since it
-   paired, with its chat key and hello words, and the result says "and kept 1 new circle". When
-   a chat's composer is replaced by "Tap the card", that button taps the same way.
+   signed, and tops up the words to eight hello numbers with each other seat. It also keeps
+   any circle the badge kept since it paired, with its chat key and hello words, and the result
+   says "and kept 1 new circle". When a chat's composer is replaced by "Tap the card", that
+   button taps the same way.
 7. In People, open a seat for hello words. They come from the phone with no tap, as in any
    other circle. When three or fewer are left with that seat, the page says "N hellos left from
    your card. Tap the card soon." When none are left, "Next hello" becomes "Tap the card", which
@@ -263,7 +266,7 @@ On 2026-10-30, Xcode 15.4, iOS 17.5, on a Mac with Apple silicon.
    circles' relay address still works, and runs `ChannelWalkUITests` on both simulators:
    `testOwner` starts a "Garden news" group chat from the circle, shares the link (read off the
    share screen and written to a file in OUT), posts, lets the reader in from Requests, reads the
-   reply and opens Members; `testReader` launches with `-cahoots-link` and the file's link, opens
+   reply and opens Members. `testReader` launches with `-cahoots-link` and the file's link, opens
    the channel from the join screen, reads the first post, asks to post as "Bea", waits for the
    grant, and posts. Each step is photographed into OUT.
 5. On 2026-10-31, a ceremony a phone hosts with a badge through the bridge:
@@ -335,6 +338,6 @@ A phone first paired with this board by tap on 2026-11-01.
 
 ## First-use guide
 
-The app shows a four-page guide on first use. It explains circles and seats, hello words, channel access, and local storage. Completing or skipping it records `cahoots.welcomeSeen` on that phone or browser. The guide can be reopened from **How Cahoots works** in iOS Settings or the browser home screen’s More options menu. Incoming routes are kept while it is shown.
+On first use, the iOS app shows four guide pages, then asks for your name on a fifth page. The guide explains circles and seats, hello words, channel access, and local storage. Completing or skipping it records `cahoots.welcomeSeen` on that phone. **How Cahoots works** in Settings reopens the four guide pages. The browser also has a guide, opened from the home screen’s More options menu. Incoming routes are kept while the iOS guide is shown.
 
 The iOS guide uses small decorative cahoot animations and respects Reduce Motion. Pages return to the top when advancing, including at larger text sizes. The full user guide is [Getting started with Cahoots](../docs/getting-started.md).

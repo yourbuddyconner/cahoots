@@ -141,7 +141,7 @@ final class ChatModel: ObservableObject {
             let waiting = (try? await core.run { [circle] in $0.chatResetWaiting(circle: circle) }) ?? false
             await load()
             return waiting
-                ? "Reset saved. It reaches the others when the relay answers."
+                ? "Reset saved on this phone. Cahoots will send it to the circle when the relay is available."
                 : "Keys were reset for everyone."
         } catch {
             status = plain(error)
@@ -352,8 +352,8 @@ private struct ChatEmpty: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.m) {
             if !faces.isEmpty { FaceRow(faces: faces, size: 32, limit: 8).padding(.bottom, Space.xs) }
-            Text("Start with a hello.").serifTitle(.title)
-            Text("Messages are encrypted on your phone before the relay delivers them. Only this circle can read them.")
+            Text("No messages yet").serifTitle(.title)
+            Text("Send a message to this circle. Messages are encrypted on your phone before they are sent. Only members of this circle can read them.")
                 .font(.body).foregroundStyle(Color.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -498,7 +498,7 @@ struct ConversationSettings: View {
                             .foregroundStyle(Color.muted)
                             .fixedSize(horizontal: false, vertical: true)
                         if let epoch {
-                            Text("Current keys: epoch \(epoch).")
+                            Text("Current keys: version \(epoch).")
                                 .font(.subheadline).foregroundStyle(Color.ink)
                         }
                     }
@@ -507,12 +507,12 @@ struct ConversationSettings: View {
                             .buttonStyle(TextButtonStyle(full: true))
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    PaperSection(footer: "Every member moves to new keys. A device that cannot reach its card reads nothing new until it taps.") {
+                    PaperSection(footer: "This changes the keys for everyone in the circle. Anyone using a card circle must tap the card before they can read or send new messages.") {
                         Button("Reset keys for everyone") { confirmReset = true }
                             .buttonStyle(TextButtonStyle(full: true))
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    PaperSection(footer: "Sender names help you follow a conversation. They do not independently verify who typed a message.") {
+                    PaperSection(footer: "The relay delivers this circle’s encrypted messages. Everyone in the circle must use the same relay address.") {
                         Button {
                             done("relay")
                         } label: {

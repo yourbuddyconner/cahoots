@@ -342,7 +342,7 @@ pub fn pair_prompt(name: &str, words: &[&str; 6]) -> Screen {
         }
         s.lines.push(three.join(" "));
     }
-    s.centered(&FONT_8X13, 148, "the phone shows these words");
+    s.centered(&FONT_8X13, 148, "check every word in order");
     s.footer(Some("no"), Some("A+B  pair"), Some("no"));
     s.done()
 }

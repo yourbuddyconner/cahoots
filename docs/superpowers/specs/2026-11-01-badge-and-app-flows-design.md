@@ -249,7 +249,8 @@ such a tap gets.
   Until V1 has its antenna switch in software, the gate is the chip's power: powered and deaf
   at rest, cut for the window. (Conner's calls: the owner's gate, and the firmware working
   around the bench rather than steps about a switch.)
-- Hello words are fetched eight at a time per seat and kept on the phone.
+- The words are fetched for eight hello numbers at a time with each other seat and kept on
+  the phone.
 - Placeholders for every circle slot's ids at first boot, with the slot count dropping to
   eight if sixteen cost more than a circle of memory.
 - No radio. USB stays the laptop's link.
@@ -259,13 +260,14 @@ such a tap gets.
 **As built, 2026-11-01.** Where the build differs from the calls above:
 
 - The gate is the chip's power. No board has an antenna switch in software yet, so the left
-  button on home, the pairing page and the note after a pairing cut the chip's power, and
-  every conversation of the badge's own gives it back. A badge that is off has no gate: the
-  phone's field starts the chip, as an iPhone did with the Pico off on 2026-10-31. Home's status line says "closed to
-  taps", "open for a tap, 2 min" or "open for a tap, 1 min". Home's title is "badge" over the
-  circles' names. The menu lists the circles first, then "new circle", "pair a phone",
-  "phone" while one is paired, and "back". A circle's page is a list of "words", "key as
-  code", "grants", "forget this circle" and "back".
+  button on home opens a window that cuts the chip's power. The pairing page and the note
+  after pairing cut it too. The badge powers the chip when it needs to use it. A badge that
+  is off has no gate: the phone's field starts the chip, as an iPhone did with the Pico off on
+  2026-10-31. Home's status line says "closed to taps", "open for a tap, 2 min" or "open for a
+  tap, 1 min". Home's title is "badge" over the circles' names. The menu lists the circles
+  first, then "new circle", "pair a phone", "phone" while one is paired, and "back". A
+  circle's page is a list of "words", "key as code", "grants", "forget this circle" and
+  "back".
 - Placeholders sit at the public id of every circle slot, and nowhere else. On the bench SE051
   a placeholder takes 160 bytes. Sixteen slots with all their ids, 144 objects, left room for
   two circles, and eight slots for three. With the public ids alone, the chip holds five
@@ -276,14 +278,18 @@ such a tap gets.
   boot puts a placeholder back.
 - A phone keeps one badge. A second badge's pairing is refused at its second tap with "Forget
   this card first."
-- The Card screen lists a seat's hello words as low at three or fewer, not fewer than three.
+- The Card screen lists a seat's words as low when three or fewer hello numbers remain.
+  A tap tops them up to eight with each other seat. It also keeps circles the badge kept
+  after pairing, with their chat keys and words.
 - A tap's report counts the bumps it passed on, not the bumps it posted: a bump the relay
   already held, or one dropped as stale, counts too. The app says "passed on".
 - A circle of three seats is 32 hello MACs at a tap, not 48: two other seats, eight numbers,
   and two speakers each. On the bench, through the laptop's wire, the second tap of a pairing
   kept three circles in 6.2 seconds: 83 commands, 32 of them hello MACs, 11 root MACs and 31
   reads. Over NFC a command took 37 to 55 ms, so a chip full of circles stays well under a
-  tap's 60 seconds, and no limit on the MACs of one tap is needed yet.
+  tap's 60 seconds by that estimate, and no limit on the MACs of one tap is needed yet.
+  The phone waits up to 30 seconds to find a card and up to five seconds for each answer.
+  The full Card screen tap has not yet been tried on a phone.
 - A seat whose hello object refuses the slot or is not there (`6985`, `6986` or `6A82` at the
   seat's first MAC in a tap) gets no words from the card, and the tap goes on. The phone marks
   the seat: its hello words say "This seat has no hello words from the card." and ask for no

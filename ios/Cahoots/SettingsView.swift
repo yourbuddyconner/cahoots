@@ -45,7 +45,7 @@ struct SettingsView: View {
                         .padding(.vertical, Space.m)
                 }
                 if !app.circles.isEmpty { circles }
-                PaperSection(title: "Bench", footer: "For trying a badge’s chip over NFC. It reads the chip’s version and random bytes and touches no key.") {
+                PaperSection(title: "Card check", footer: "Check whether this phone can reach the badge’s chip. This reads the chip’s version and some random bytes. It does not change any keys.") {
                     NavigationLink {
                         NfcDiagnosticsView()
                     } label: {
@@ -147,7 +147,7 @@ struct SettingsView: View {
             if !core.signer.usesEnclave {
                 StatusLine(text: "This simulator has no Secure Enclave. The key is in the keychain.")
             }
-            Text("Your circles and keys stay on this phone and are not included in backups. You can’t transfer them to a new phone. To use another phone, create a new circle together.")
+            Text("Your circles and keys are not included in backups and cannot be transferred to a new phone. For card circles, unpair this phone on the badge, then pair the new phone. For other circles, create a new circle together.")
                 .font(.footnote).foregroundStyle(Color.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -193,7 +193,7 @@ struct SettingsView: View {
         }
     }
 
-    private static let waiting = "Your name is saved on this phone and not shared yet."
+    private static let waiting = "Your name is saved on this phone. Tap Share again to share it with your circles."
     private static let notShared = "Saved on this phone, but not shared yet. Tap Share again and confirm with Face ID."
 
     private func saveName() async {
@@ -274,7 +274,7 @@ struct SettingsView: View {
             }
             StatusLine(text: relayNote, problem: false)
             StatusLine(text: relayError)
-            Text("The host chooses the relay used during setup and for the circle’s chat. This setting applies to new circles you create. To change an existing circle’s relay, open its conversation settings.")
+            Text("A relay delivers the circle’s encrypted messages. This address is used for new circles you create. To change it for an existing circle, open its chat, tap … at the top, then Relay address.")
                 .font(.footnote).foregroundStyle(Color.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
