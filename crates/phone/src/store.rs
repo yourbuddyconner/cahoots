@@ -116,6 +116,10 @@ pub struct PhoneRecord {
     /// request. `None` only in a record written before faces, and `Phone::open` fills it.
     #[n(5)]
     pub face_seed: Option<ByteVec>,
+    /// When the last tap on the card that went through ended, in seconds since the Unix
+    /// epoch. `None` before the first, and in a record written before taps were kept.
+    #[n(6)]
+    pub card_last_tap: Option<u64>,
 }
 
 impl PhoneRecord {

@@ -15,7 +15,7 @@ use cahoots_core::seat::SeatKey;
 use cahoots_phone::nfc::Nfc;
 use cahoots_phone::signer::SoftSigner;
 use cahoots_phone::store::CircleRecord;
-use cahoots_phone::{Http, Phone, PhoneError, Signer};
+use cahoots_phone::{Http, Phone, PhoneError, Signer, TapReport, WordsLeft};
 use cahoots_relay::{MemRelay, Relay};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -23,9 +23,23 @@ use tempfile::TempDir;
 
 const RELAY: &str = "https://relay.test";
 
-/// A reader whose card is whatever chip a test puts in it, or none.
+/// A reader whose card is whatever chip a test puts in it, or none, and how many commands
+/// reach it before it moves away (`None`: it stays).
 #[derive(Clone, Default)]
-struct FakeNfc(Arc<Mutex<Option<SoftChip>>>);
+struct FakeNfc(Arc<Mutex<Option<SoftChip>>>, Arc<Mutex<Option<usize>>>);
+
+impl FakeNfc {
+    /// The card moves away at the `n`th command from now, counting from 1: that command and
+    /// every one after it fail, until [`FakeNfc::keep_card`].
+    fn lose_card_at(&self, n: usize) {
+        *self.1.lock().unwrap() = Some(n - 1);
+    }
+
+    /// The card stays in the reader.
+    fn keep_card(&self) {
+        *self.1.lock().unwrap() = None;
+    }
+}
 
 impl Nfc for FakeNfc {
     fn begin(&self, _prompt: String) -> Result<(), PhoneError> {
@@ -35,6 +49,11 @@ impl Nfc for FakeNfc {
         }
     }
     fn transceive(&self, apdu: Vec<u8>) -> Result<Vec<u8>, PhoneError> {
+        match self.1.lock().unwrap().as_mut() {
+            Some(0) => return Err(PhoneError::Nfc { message: "The card moved away.".into() }),
+            Some(n) => *n -= 1,
+            None => {}
+        }
         let mut card = self.0.lock().unwrap();
         Ok(card.as_mut().ok_or(PhoneError::NoCard)?.apdu(&apdu))
     }
@@ -385,7 +404,7 @@ fn a_phone_pairs_chats_by_tap_follows_a_bump_and_forgets_the_card() {
     let e = d.phone.send_chat(id.clone(), "too soon".into()).err().unwrap();
     assert_eq!(e.to_string(), "Tap your card to catch up.");
     // Without the card nothing changes.
-    assert!(matches!(d.phone.tap_for_keys(id.clone()), Err(PhoneError::NoCard)));
+    assert!(matches!(d.phone.tap_card(), Err(PhoneError::NoCard)));
     assert!(d.phone.circles()[0].needs_tap);
     // Nor across a restart: the chat still waits for the key, and still says so.
     d.restart();
@@ -397,7 +416,8 @@ fn a_phone_pairs_chats_by_tap_follows_a_bump_and_forgets_the_card() {
     let held = CircleRecord::load(&dir).unwrap();
     assert!(held.card.as_ref().unwrap().generation_key.is_none());
 
-    tap(&mut b1, &d, |p| p.tap_for_keys(id.clone())).unwrap();
+    let report = tap(&mut b1, &d, |p| p.tap_card()).unwrap();
+    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 0 });
     assert!(!d.phone.circles()[0].needs_tap);
     let got = d.phone.poll(id.clone()).unwrap();
     assert_eq!(got.len(), 1);
@@ -408,15 +428,16 @@ fn a_phone_pairs_chats_by_tap_follows_a_bump_and_forgets_the_card() {
     assert!(history.contains(&"hello from the other card".to_string()));
     assert!(history.contains(&"caught up".to_string()));
 
-    // With nothing to fetch there is no tap: no card in the reader, and no error.
-    d.phone.tap_for_keys(id.clone()).unwrap();
+    // With nothing waiting a tap fetches nothing, and says so.
+    let report = tap(&mut b1, &d, |p| p.tap_card()).unwrap();
+    assert_eq!(report, TapReport { keys: 0, bumps: 0, words: 0 });
 
     // The badge unpairs the phone: the next tap says so, and the card circles can be forgotten.
     b1.unpair().unwrap();
     member.bump(&relay, [0x78; 32]);
     d.phone.poll(id.clone()).unwrap();
     assert!(d.phone.circles()[0].needs_tap);
-    let e = tap(&mut b1, &d, |p| p.tap_for_keys(id.clone())).err().unwrap();
+    let e = tap(&mut b1, &d, |p| p.tap_card()).err().unwrap();
     assert!(matches!(e, PhoneError::NotPaired));
     assert_eq!(e.to_string(), "This card no longer knows this phone.");
     d.phone.forget_card().unwrap();
@@ -467,8 +488,8 @@ fn a_pending_bump_in_the_public_object_is_forwarded_and_a_root_holder_moves() {
     assert_eq!(got.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["me too"]);
 }
 
-/// The words `speaker` says at hello `n` with the badge's seat `badge_seat`, worked out by the
-/// other card from its own hello object for that seat.
+/// The words `speaker` says at hello `n` between card `b2` and the seat `badge_seat`, worked out
+/// by `b2` from its own hello object for that seat.
 fn other_card_words(b2: &mut Badge<FakeBoard>, badge_seat: u8, speaker: u8, n: u32) -> String {
     let mut data = cahoots_core::pairwise::WORDS_DOMAIN.to_vec();
     data.push(speaker);
@@ -642,7 +663,7 @@ fn an_entry_in_a_generation_the_card_circle_dropped_is_passed_over() {
         member.bump(&relay, to);
         d.phone.poll(id.clone()).unwrap();
         assert!(d.phone.circles()[0].needs_tap);
-        tap(&mut b1, &d, |p| p.tap_for_keys(id.clone())).unwrap();
+        tap(&mut b1, &d, |p| p.tap_card()).unwrap();
         d.phone.poll(id.clone()).unwrap();
         assert!(!d.phone.circles()[0].needs_tap);
     }
@@ -690,4 +711,217 @@ fn a_relay_out_of_reach_at_the_second_tap_leaves_the_bumps_for_the_next_poll() {
     second.phone.send_chat(id.clone(), "after the outage".into()).unwrap();
     let seat = b1.circle().unwrap().seat;
     assert_eq!(member.read(&relay), vec![(seat, "after the outage".to_string())]);
+}
+
+/// The pocket on disk, as (other seat, number, mine, theirs), sorted.
+fn pocket_on_disk(dir: &std::path::Path) -> Vec<(u8, u32, Vec<u8>, Vec<u8>)> {
+    let record = CircleRecord::load(dir).unwrap();
+    let mut out: Vec<_> = record
+        .card
+        .as_ref()
+        .unwrap()
+        .hello_pocket
+        .iter()
+        .flatten()
+        .map(|p| (p.other, p.number, p.mine.to_vec(), p.theirs.to_vec()))
+        .collect();
+    out.sort();
+    out
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+}
+
+#[test]
+fn one_tap_fetches_the_waiting_key_posts_the_bumps_and_tops_up_the_pocket() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b1, b2) = kept_pair((true, false));
+    let mut member = Member::of(&b2);
+    let mut d = device(&relay);
+    let id = pair(&mut b1, &d).remove(0);
+    let mine = b1.circle().unwrap().seat;
+    let other = member.seat;
+
+    // Nothing waits after the pairing tap.
+    let s = d.phone.card_status().unwrap();
+    assert!(s.paired);
+    assert_eq!(s.badge, "your badge");
+    assert_eq!(s.circles, 1);
+    assert_eq!((s.keys_wanted, s.bumps_to_post), (0, 0));
+    assert!(s.words_low.is_empty(), "{:?}", s.words_low);
+    assert_eq!(s.last_tap, None);
+
+    // Five hellos with the other seat leave three in the pocket.
+    for _ in 0..5 {
+        d.phone.next_hello(id.clone(), other).unwrap();
+    }
+    assert_eq!(d.phone.hello_words(id.clone(), other).unwrap().card_left, Some(3));
+
+    // A root holder resets the chat: the card circle waits for the next generation's key.
+    member.bump(&relay, [0x77; 32]);
+    member.say(&relay, "after the reset");
+    d.phone.poll(id.clone()).unwrap();
+    assert!(d.phone.circles()[0].needs_tap);
+
+    // The status says what a tap would do.
+    let s = d.phone.card_status().unwrap();
+    assert!(s.paired);
+    assert_eq!(s.badge, "your badge");
+    assert_eq!(s.circles, 1);
+    assert_eq!(s.keys_wanted, 1);
+    assert_eq!(s.bumps_to_post, 0);
+    assert_eq!(s.words_low, vec![WordsLeft { circle: id.clone(), seat: other, left: 3 }]);
+    assert_eq!(s.last_tap, None);
+
+    // One tap: the key, and five more pairs, numbers 8 to 12.
+    let started = now_secs();
+    let report = tap(&mut b1, &d, |p| p.tap_card()).unwrap();
+    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 5 });
+    assert!(!d.phone.circles()[0].needs_tap);
+    let s = d.phone.card_status().unwrap();
+    assert_eq!(s.keys_wanted, 0);
+    assert!(s.words_low.is_empty(), "{:?}", s.words_low);
+    let last = s.last_tap.expect("a last tap");
+    assert!(last >= started && last <= now_secs(), "{last}");
+
+    // The pocket holds numbers 5 to 12, and the words are the badge's own for them.
+    let dir = d.path.join("circles").join(&id);
+    let numbers: Vec<u32> = pocket_on_disk(&dir).iter().map(|p| p.1).collect();
+    assert_eq!(numbers, (5..13).collect::<Vec<u32>>());
+    let h = d.phone.hello_words(id.clone(), other).unwrap();
+    assert_eq!((h.number, h.card_left), (5, Some(8)));
+    assert!(d.nfc.0.lock().unwrap().is_none());
+    for n in 6..13u32 {
+        let h = d.phone.next_hello(id.clone(), other).unwrap();
+        assert_eq!((h.number, h.card_left), (n, Some(13 - n)));
+        // The badge's hello object for the other seat, asked by the badge itself.
+        assert_eq!(h.mine, other_card_words(&mut b1, other, mine, n));
+        assert_eq!(h.theirs, other_card_words(&mut b1, other, other, n));
+    }
+
+    // The chat goes on in the new generation.
+    let got = d.phone.poll(id.clone()).unwrap();
+    assert_eq!(got.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["after the reset"]);
+    d.phone.send_chat(id.clone(), "caught up".into()).unwrap();
+    assert_eq!(member.read(&relay), vec![(mine, "caught up".to_string())]);
+
+    // The last tap is on disk.
+    d.restart();
+    assert_eq!(d.phone.card_status().unwrap().last_tap, Some(last));
+}
+
+#[test]
+fn a_tap_that_loses_the_card_keeps_nothing_half_done() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b1, b2) = kept_pair((true, false));
+    let mut member = Member::of(&b2);
+    let mut d = device(&relay);
+    let id = pair(&mut b1, &d).remove(0);
+    let other = member.seat;
+    let dir = d.path.join("circles").join(&id);
+    for _ in 0..5 {
+        d.phone.next_hello(id.clone(), other).unwrap();
+    }
+    member.bump(&relay, [0x77; 32]);
+    d.phone.poll(id.clone()).unwrap();
+    assert!(d.phone.circles()[0].needs_tap);
+
+    let pocket = pocket_on_disk(&dir);
+    let words = d.phone.hello_words(id.clone(), other).unwrap();
+    let status = d.phone.card_status().unwrap();
+    let kept_nothing = |d: &Device| {
+        assert!(d.phone.circles()[0].needs_tap);
+        assert_eq!(pocket_on_disk(&dir), pocket);
+        assert_eq!(d.phone.hello_words(id.clone(), other).unwrap(), words);
+        assert_eq!(d.phone.card_status().unwrap(), status);
+        let e = d.phone.send_chat(id.clone(), "too soon".into()).err().unwrap();
+        assert!(matches!(e, PhoneError::Chat { .. }), "{e:?}");
+    };
+
+    // The card moves away at the third command.
+    d.nfc.lose_card_at(3);
+    let e = tap(&mut b1, &d, |p| p.tap_card()).err().unwrap();
+    assert_eq!(e.to_string(), "The card moved away.");
+    kept_nothing(&d);
+
+    // And at every later command, up to the one that closes the session. Once, in the middle
+    // of the session, the app is closed and opened again.
+    let mut at = 4;
+    let report = loop {
+        d.nfc.lose_card_at(at);
+        match tap(&mut b1, &d, |p| p.tap_card()) {
+            Ok(r) => break r,
+            Err(e) => {
+                assert_eq!(e.to_string(), "The card moved away.", "at command {at}");
+                kept_nothing(&d);
+                if at == 15 {
+                    d.restart();
+                    kept_nothing(&d);
+                }
+            }
+        }
+        at += 1;
+        assert!(at < 100, "the tap never got through");
+    };
+    d.nfc.keep_card();
+    // The reads, the key, ten hello MACs and the close: the sweep went past the restart.
+    assert!(at > 15, "{at}");
+    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 5 });
+    assert!(!d.phone.circles()[0].needs_tap);
+    assert_eq!(d.phone.hello_words(id.clone(), other).unwrap().card_left, Some(8));
+}
+
+#[test]
+fn a_card_circle_from_before_the_pocket_fills_at_the_next_tap() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b1, b2) = kept_pair((true, false));
+    let other = b2.circle().unwrap().seat;
+    let mut d = device(&relay);
+    let id = pair(&mut b1, &d).remove(0);
+
+    // The record as a build from before the pocket wrote it.
+    let dir = d.path.join("circles").join(&id);
+    let mut record = CircleRecord::load(&dir).unwrap();
+    record.card.as_mut().unwrap().hello_pocket = None;
+    record.save(&dir).unwrap();
+    d.restart();
+    assert!(matches!(d.phone.hello_words(id.clone(), other), Err(PhoneError::NeedsTap)));
+    let s = d.phone.card_status().unwrap();
+    assert_eq!(s.keys_wanted, 0);
+    assert_eq!(s.words_low, vec![WordsLeft { circle: id.clone(), seat: other, left: 0 }]);
+
+    let report = tap(&mut b1, &d, |p| p.tap_card()).unwrap();
+    assert_eq!(report, TapReport { keys: 0, bumps: 0, words: 8 });
+    let h = d.phone.hello_words(id.clone(), other).unwrap();
+    assert_eq!((h.number, h.card_left), (0, Some(8)));
+    assert!(d.phone.card_status().unwrap().words_low.is_empty());
+    d.restart();
+    assert_eq!(d.phone.hello_words(id.clone(), other).unwrap(), h);
+}
+
+#[test]
+fn face_id_comes_before_the_reader_opens() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b1, b2) = kept_pair((true, false));
+    let mut member = Member::of(&b2);
+    let d = device(&relay);
+    let id = pair(&mut b1, &d).remove(0);
+    member.bump(&relay, [0x77; 32]);
+    d.phone.poll(id.clone()).unwrap();
+
+    // Face ID is refused. The card would move away at its first command, so a reader opened
+    // before the key was read would say that instead.
+    d.signer.set_locked(true);
+    d.nfc.lose_card_at(1);
+    let e = tap(&mut b1, &d, |p| p.tap_card()).err().unwrap();
+    assert!(matches!(e, PhoneError::Locked), "{e:?}");
+    assert!(d.phone.circles()[0].needs_tap);
+    assert_eq!(d.phone.card_status().unwrap().last_tap, None);
+
+    d.signer.set_locked(false);
+    d.nfc.keep_card();
+    let report = tap(&mut b1, &d, |p| p.tap_card()).unwrap();
+    assert_eq!(report, TapReport { keys: 1, bumps: 0, words: 0 });
+    assert!(!d.phone.circles()[0].needs_tap);
 }

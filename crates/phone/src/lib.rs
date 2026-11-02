@@ -246,7 +246,7 @@ pub struct CircleSummary {
     /// "seat" for a circle this phone holds a seat in, "card" for a circle of a badge this
     /// phone is paired to (a card circle).
     pub kind: String,
-    /// A card circle whose chat cannot go on until the card is tapped (`tap_for_keys`): say
+    /// A card circle whose chat cannot go on until the card is tapped (`tap_card`): say
     /// "Tap your card to catch up."
     pub needs_tap: bool,
 }
@@ -366,6 +366,48 @@ pub struct HelloWords {
     /// on, this one included: `next_hello` needs a tap once it is 1. `None` in a circle that
     /// works the words out itself.
     pub card_left: Option<u32>,
+}
+
+/// What one tap on the card did (`tap_card`).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct TapReport {
+    /// Chat keys fetched, for the circles that waited for one.
+    pub keys: u32,
+    /// Bumps the badge left for a device to post, sent to the relay.
+    pub bumps: u32,
+    /// Hello words added: one for each hello number with a seat.
+    pub words: u32,
+}
+
+/// The hello words a card circle has left with one seat.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct WordsLeft {
+    /// The circle id, 32 hex characters.
+    pub circle: String,
+    /// The other seat, from 0.
+    pub seat: u8,
+    /// How many hello numbers with that seat are left, the current one included.
+    pub left: u32,
+}
+
+/// What a tap on the card would do now (`card_status`). Nothing here taps or asks for Face ID.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CardStatus {
+    /// This phone keeps circles of a card. When false, offer "Pair a card".
+    pub paired: bool,
+    /// The card's name from the pairing, or "your badge" when it gave none.
+    pub badge: String,
+    /// The card circles on this phone.
+    pub circles: u32,
+    /// Card circles whose chat waits for a key, or that will need one for a bump to post.
+    pub keys_wanted: u32,
+    /// Bumps the badge left for a device to post that this phone has not sent yet.
+    pub bumps_to_post: u32,
+    /// Every seat with 3 or fewer hello numbers left.
+    pub words_low: Vec<WordsLeft>,
+    /// When the last tap that went through ended, in seconds since 1970. `None` before the
+    /// first.
+    pub last_tap: Option<u64>,
 }
 
 /// One seat of a circle, from its manifest and the seat's card.
@@ -678,6 +720,7 @@ impl Phone {
                     relay: None,
                     name: None,
                     face_seed: Some(random_seed().to_vec().into()),
+                    card_last_tap: None,
                 };
                 r.save(&dir)?;
                 r
