@@ -236,8 +236,10 @@ fn discarding_deletes_the_key_made_in_the_chip() {
         out.0 && out.1
     });
     assert!(circle_objects(&mut b1).is_empty());
-    // The slot's public id holds its placeholder again.
+    // The slot's public id holds its placeholder again, and the record says so.
     no_empty_public_id(&mut b1);
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.placeholders, Some(PLACEHOLDERS));
     assert!(b1
         .board()
         .chip_record_load()
@@ -265,6 +267,8 @@ fn forget_deletes_slot_objects() {
         vec![id(KeyKind::Grant, 255), KeyId::SLOT, KeyId::PAIRING, KeyId::INBOX, KeyId::OWNER]
     );
     no_empty_public_id(&mut b1);
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.placeholders, Some(PLACEHOLDERS));
     assert!(b1
         .board()
         .chip_record_load()
@@ -619,6 +623,8 @@ fn a_slot_holding_an_object_that_cannot_be_deleted_is_passed_over() {
     let c = chip(&mut b1);
     assert!(is_placeholder(c, id(KeyKind::Public, 0)));
     assert!(is_placeholder(c, id(KeyKind::Public, 1)));
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.placeholders, Some(PLACEHOLDERS));
 }
 
 #[test]
@@ -671,9 +677,13 @@ fn a_wipe_marks_the_slot_it_could_not_empty_as_stuck() {
     board.a_down = true;
     board.release_at_ms = board.elapsed_ms + 3000;
     b1.boot();
+    // The record vouches for no slot, the circle's included, and marks slot 0 stuck so the
+    // next boot tries it again.
     let r = b1.board().chip_record_load().unwrap().unwrap();
-    assert_eq!(r.slots.iter().map(|e| e.slot).collect::<Vec<_>>(), vec![0]);
+    assert!(r.slots.is_empty());
     assert!(r.is_stuck(0));
+    assert_eq!(r.placeholders, Some(PLACEHOLDERS));
+    no_empty_public_id(&mut b1);
 }
 
 #[test]
@@ -724,6 +734,8 @@ fn a_keep_takes_the_placeholder_at_its_public_id_and_leaves_the_rest() {
         assert_eq!(is_placeholder(c, at), at != public, "{at:?}");
     }
     assert_eq!(circle_objects(&mut b1).len(), KEPT_OBJECTS);
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.placeholders, Some(PLACEHOLDERS));
 }
 
 #[test]
@@ -764,4 +776,59 @@ fn a_chip_record_of_earlier_firmware_gets_its_placeholders_once() {
     b1.boot();
     assert_eq!(made(&mut b1).len(), 1);
     no_empty_public_id(&mut b1);
+}
+
+#[test]
+fn a_first_boot_with_no_room_for_placeholders_still_owns_the_chip() {
+    let mut c = SoftChip::with_seed([3; 32]);
+    // The owner object, the phone slot, the inbox, the issue counter and the pairing object are
+    // made. The first placeholder meets a full chip.
+    c.fail_next_create_with(0x6A84);
+    c.fail_create_after_for_test(5);
+    let record = cahoots_badge::chip::first_boot(&mut c, &TEST_OWNER_SECRET, [0; 16]).unwrap();
+    // Nothing was left at the public ids to adopt, so the record says the placeholders are the
+    // badge's: a later boot fills the empty ids when the chip has room.
+    assert_eq!(record.placeholders, Some(PLACEHOLDERS));
+    for id in [KeyId::OWNER, KeyId::SLOT, KeyId::INBOX, KeyId::PAIRING] {
+        assert!(c.exists(id).unwrap(), "{id:?}");
+    }
+    assert_eq!(empty_public_ids(&mut c).len(), CIRCLE_SLOTS as usize);
+}
+
+#[test]
+fn a_record_of_earlier_firmware_whose_fill_fails_keeps_saying_so() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    let c = chip(&mut b1);
+    for at in every_public_id() {
+        if is_placeholder(c, at) {
+            c.delete(at).unwrap();
+        }
+    }
+    let mut r = b1.board().chip_record_load().unwrap().unwrap();
+    r.placeholders = None;
+    b1.board().chip_record_store(&r).unwrap();
+    // The first placeholder fails for a reason that is not memory.
+    b1.board().chip.as_mut().unwrap().fail_next_create_for_test();
+    b1.boot();
+    assert!(b1.board().has_chip());
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.placeholders, None);
+    assert!(b1.board().log.iter().any(|l| l.starts_with("chip: placeholders not made")));
+    // The next boot clears and fills them, and says so in the record.
+    b1.boot();
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.placeholders, Some(PLACEHOLDERS));
+    no_empty_public_id(&mut b1);
+}
+
+#[test]
+fn a_first_boot_whose_placeholders_fail_otherwise_owns_the_chip_and_says_they_are_not_made() {
+    let mut c = SoftChip::with_seed([3; 32]);
+    // The first placeholder fails with 6A80, after the badge's own objects.
+    c.fail_create_after_for_test(5);
+    let record = cahoots_badge::chip::first_boot(&mut c, &TEST_OWNER_SECRET, [0; 16]).unwrap();
+    assert_eq!(record.placeholders, None);
+    for id in [KeyId::OWNER, KeyId::SLOT, KeyId::INBOX, KeyId::PAIRING] {
+        assert!(c.exists(id).unwrap(), "{id:?}");
+    }
 }

@@ -522,6 +522,46 @@ fn an_object_a_tap_planted_at_a_circle_slots_public_id_that_can_be_deleted_is_no
     assert_eq!(common::empty_public_ids(c), Vec::<KeyId>::new());
 }
 
+#[test]
+fn a_first_boot_with_no_room_for_placeholders_owns_the_chip_and_fills_them_when_it_can() {
+    let mut board = FakeBoard::new();
+    let mut c = SoftChip::with_seed([2; 32]);
+    // The first placeholder meets a full chip, after the badge's own objects.
+    c.fail_next_create_with(0x6A84);
+    c.fail_create_after_for_test(5);
+    board.chip = Some(c);
+    let mut b = Badge::new(board);
+    b.boot();
+    assert_eq!(refused(&mut b) + not_now(&mut b), 0);
+    assert!(b.board().has_chip());
+    let r = b.board().chip_record_load().unwrap().unwrap();
+    assert!(r.is_current());
+    assert_eq!(r.placeholders, Some(cahoots_badge::chip::PLACEHOLDERS));
+    // The same boot fills them, the chip having room again.
+    assert_eq!(common::empty_public_ids(b.board().owner_chip()), Vec::<KeyId>::new());
+    let log = b.board().log.join("\n");
+    assert!(log.contains("chip: 16 placeholders made at the circle slots' public ids"), "{log}");
+}
+
+#[test]
+fn a_first_boot_whose_placeholders_fail_is_owned_and_the_same_boot_clears_and_fills_them() {
+    let mut board = FakeBoard::new();
+    let mut c = SoftChip::with_seed([2; 32]);
+    // The first placeholder fails with 6A80, after the badge's own objects.
+    c.fail_create_after_for_test(5);
+    board.chip = Some(c);
+    let mut b = Badge::new(board);
+    b.boot();
+    assert_eq!(refused(&mut b) + not_now(&mut b), 0);
+    assert!(b.board().has_chip());
+    let r = b.board().chip_record_load().unwrap().unwrap();
+    assert!(r.is_current());
+    assert_eq!(r.placeholders, Some(cahoots_badge::chip::PLACEHOLDERS));
+    assert_eq!(common::empty_public_ids(b.board().owner_chip()), Vec::<KeyId>::new());
+    let log = b.board().log.join("\n");
+    assert!(log.contains("chip: 16 placeholders made at the circle slots' public ids"), "{log}");
+}
+
 /// A chip whose record is current, with the pairing object missing: the boot flags the record
 /// before it deletes anything. A power cut after the deletes, before the makes, then leaves
 /// every antenna id empty. A tap fills them all. The next boot sees the flag and makes them

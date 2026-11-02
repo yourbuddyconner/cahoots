@@ -244,6 +244,100 @@ fn a_tap_in_no_session_reads_which_circles_the_badge_holds_and_no_public_object(
     assert_eq!(tapped(&mut b1).circles, 0);
 }
 
+/// From a just-kept circle: home, the list, its actions, Left twice to "forget this circle",
+/// its page and its question, so one more Both forgets it.
+fn to_the_forget_question(b: &mut Badge<FakeBoard>) {
+    home_after_keep(b);
+    press(b, Press::Both);
+    press(b, Press::Both);
+    press(b, Press::Left);
+    press(b, Press::Left);
+    press(b, Press::Both);
+    assert!(b.board().shows("forget this circle"), "{:?}", b.board().last());
+    press(b, Press::Both);
+    assert!(b.board().shows("forget this circle?"), "{:?}", b.board().last());
+}
+
+/// Both on the forget question, with the power cut right after the chip deletes `id`.
+fn forget_cut_after(b: &mut Badge<FakeBoard>, id: KeyId) {
+    b.board().chip.as_mut().unwrap().cut_after_delete_for_test(id);
+    b.board().presses.push_back(Press::Both);
+    let cut = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| b.idle_step()));
+    assert!(cut.is_err(), "the power was cut");
+    b.board().power_cycle();
+}
+
+/// A forget stores the chip record first: it no longer vouches for the slot, and says the
+/// placeholders must be made again. Only then are the slot's objects deleted. Power cut after
+/// the first delete leaves nothing a phone reads, and the next boot deletes what the badge left
+/// and makes the slot's placeholder again.
+#[test]
+fn a_forget_cut_off_after_its_record_leaves_nothing_a_phone_reads() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    let other = other_seat(&b1);
+    to_the_forget_question(&mut b1);
+    forget_cut_after(&mut b1, KeyId::new(KeyKind::Seat, 0));
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert!(r.slots.is_empty());
+    assert_eq!(r.circle_mask(), 0);
+    assert_eq!(r.placeholders, None);
+    // The pairing object a phone reads names no circle, though the slot's other objects stay.
+    assert_eq!(tapped(&mut b1).circles, 0);
+    assert!(b1.board().owner_chip().exists(chip::public_id(0)).unwrap());
+    b1.boot();
+    assert!(b1.circles().is_empty());
+    let c = b1.board().owner_chip();
+    for kind in [KeyKind::Seat, KeyKind::Root, KeyKind::Epoch] {
+        assert!(!c.exists(KeyId::new(kind, 0)).unwrap(), "{kind:?}");
+    }
+    assert!(!c.exists(chip::hello_id(0, other)).unwrap());
+    assert!(common::is_placeholder(c, chip::public_id(0)));
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.placeholders, Some(chip::PLACEHOLDERS));
+}
+
+/// Power cut after a forget deleted the slot's public object, before the placeholder is back.
+/// A tap fills the empty id. The next boot deletes what the tap made and makes the placeholder
+/// again: it adopts nothing.
+#[test]
+fn a_forget_cut_off_before_its_placeholder_is_back_adopts_nothing_a_tap_put_there() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    to_the_forget_question(&mut b1);
+    forget_cut_after(&mut b1, chip::public_id(0));
+    assert_eq!(b1.board().chip_record_load().unwrap().unwrap().placeholders, None);
+    tap(&mut b1)
+        .write_binary(chip::public_id(0), b"planted", &ObjectPolicy::any_session())
+        .unwrap();
+    b1.boot();
+    let c = b1.board().owner_chip();
+    assert!(common::is_placeholder(c, chip::public_id(0)));
+    assert_eq!(common::empty_public_ids(c), Vec::<KeyId>::new());
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.placeholders, Some(chip::PLACEHOLDERS));
+}
+
+/// A forget that meets an object nobody may delete: the record no longer vouches for the slot
+/// and marks it stuck, the rest of the slot goes, and its public id holds a placeholder again.
+#[test]
+fn a_forget_that_cannot_empty_its_slot_marks_it_stuck_and_vouches_for_nothing() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    let stuck = ObjectPolicy { delete: Vec::new(), ..ObjectPolicy::any_session() };
+    // At the hello id of a seat a circle of two does not have.
+    tap(&mut b1).put_hmac_key(chip::hello_id(0, 5), &[3; 32], &stuck).unwrap();
+    to_the_forget_question(&mut b1);
+    press(&mut b1, Press::Both);
+    assert!(b1.circles().is_empty());
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert!(r.slots.is_empty());
+    assert!(r.is_stuck(0));
+    assert_eq!(r.placeholders, Some(chip::PLACEHOLDERS));
+    assert_eq!(tapped(&mut b1).circles, 0);
+    let c = b1.board().owner_chip();
+    assert!(!c.exists(KeyId::new(KeyKind::Seat, 0)).unwrap());
+    assert!(c.exists(chip::hello_id(0, 5)).unwrap());
+    assert!(common::is_placeholder(c, chip::public_id(0)));
+}
+
 #[test]
 fn keeping_a_circle_writes_hello_objects_and_a_public_object() {
     let (mut b1, mut b2) = kept_pair((true, true));

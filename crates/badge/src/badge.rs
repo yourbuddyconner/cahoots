@@ -1426,9 +1426,10 @@ impl<B: Board> Badge<B> {
     }
 
     /// Forget one circle and nothing else: its record first (inside [`Board::forget`]), then
-    /// its pad and ledger, then its chip objects and chip record entry. A record never stays
-    /// over a blank pad: a failure after the record is gone leaves only bytes in a free place,
-    /// or chip objects that a slot no circle names, which are not served.
+    /// its pad and ledger, then its chip record entry, then its chip objects. A record never
+    /// stays over a blank pad, and the chip record never vouches for an emptied slot: a
+    /// failure after the record is gone leaves only bytes in a free place, or chip objects in a
+    /// slot no circle names, which are not served and which the next boot deletes.
     fn forget_circle(&mut self, c: &Circle) -> Result<(), String> {
         let forgot = self
             .board
@@ -1449,39 +1450,46 @@ impl<B: Board> Badge<B> {
             return forgot.and(stored).and(Err(String::from("flash: record not erased")));
         }
         if let Some(slot) = c.chip_slot {
-            if let Some(chip) = self.board.chip_begin() {
-                let left = chip::delete_slot(chip, slot).map_err(|e| format!("chip: {e:?}"))?;
-                if !left.is_empty() {
-                    // The record keeps the slot, marked stuck, so it is never chosen again
-                    // and the next boot tries it again.
-                    self.log_left(&left);
-                    if let Ok(Some(mut record)) = self.board.chip_record_load() {
-                        record.set_stuck(slot, true);
-                        if self.board.chip_record_store(&record).is_err() {
-                            self.board.log("chip record: write failed");
-                        }
-                        self.fill_slots(&record, &[slot]);
-                    }
-                    self.sync_pairing();
-                    return Err(left_line(left.len()));
+            // The chip record first: it stops vouching for the slot and says the placeholders
+            // must be made again, and the pairing object stops naming the slot, before anything
+            // in it is deleted. A conversation cut off after that leaves nothing a phone reads,
+            // and the next boot deletes what is left and makes the placeholder again.
+            let mut record = match self.board.chip_record_load() {
+                Ok(Some(r)) if r.is_current() => r,
+                Ok(_) => return forgot.and(stored),
+                Err(_) => {
+                    self.board.log("chip record: unreadable, chip objects left as they are");
+                    return forgot.and(stored);
                 }
+            };
+            let vouched = record.entry(slot).is_some();
+            record.remove(slot);
+            let had = self
+                .placeholders_out(&mut record)
+                .map_err(|_| String::from("flash: chip record failed"))?;
+            if vouched {
+                self.sync_pairing();
             }
-            match self.board.chip_record_load() {
-                Ok(Some(mut record)) => {
-                    if record.entry(slot).is_some() {
-                        record.remove(slot);
-                        self.board
-                            .chip_record_store(&record)
-                            .map_err(|_| String::from("flash: chip record failed"))?;
-                        self.sync_pairing();
-                    }
-                    // The slot's public id holds a placeholder again.
-                    self.fill_slots(&record, &[slot]);
+            let Some(chip) = self.board.chip_begin() else {
+                return forgot.and(stored);
+            };
+            let left = match chip::delete_slot(chip, slot) {
+                Ok(left) => left,
+                Err(e) => {
+                    self.refill(&mut record, had, &[slot]);
+                    return Err(format!("chip: {e:?}"));
                 }
-                Ok(None) => {}
-                Err(_) => self
-                    .board
-                    .log("chip record: unreadable, left as it is"),
+            };
+            if !left.is_empty() {
+                // The slot is marked stuck: the next boot tries it again, and a new circle
+                // passes it over while the object stays.
+                self.log_left(&left);
+                record.set_stuck(slot, true);
+            }
+            // The slot's public id holds a placeholder again.
+            self.refill(&mut record, had, &[slot]);
+            if !left.is_empty() {
+                return Err(left_line(left.len()));
             }
         }
         forgot.and(stored)
@@ -1691,8 +1699,8 @@ impl<B: Board> Badge<B> {
             "upgrade: the chip has its owner, its phone slot, its inbox, its grant counter and its pairing object",
         );
         self.board.log(match record.placeholders {
-            Some(_) => "upgrade: a placeholder at every circle slot's public id",
-            None => "upgrade: not every circle slot's public id has a placeholder, the next boot tries again",
+            Some(_) => "upgrade: placeholders at the circle slots' public ids, as many as the chip had room for",
+            None => "upgrade: the placeholders were not all made, this boot makes them again",
         });
         if !gone.is_empty() || n > 0 || stored.is_some() {
             Owned::Upgraded
@@ -1738,6 +1746,9 @@ impl<B: Board> Badge<B> {
         for e in &mut record.slots {
             e.set_public_written(false);
         }
+        // Each public id is empty for a moment: the record says the placeholders must be made
+        // again, which this boot does next ([`Badge::place_placeholders`]).
+        record.placeholders = None;
         if self.board.chip_record_store(&record).is_err() {
             self.board.log("chip record: write failed");
             return;
@@ -1857,6 +1868,16 @@ impl<B: Board> Badge<B> {
                 stuck.push(slot);
             }
         }
+        // Emptying a slot empties its public id too: the record says first that the
+        // placeholders must be made again, which this boot does next
+        // ([`Badge::place_placeholders`]).
+        if !stuck.is_empty() && self.placeholders_out(&mut record).is_err() {
+            lines.push(String::from("chip record: write failed, stuck slots left as they are"));
+            stuck.clear();
+        }
+        let Some(chip) = self.board.chip_begin() else {
+            return;
+        };
         for slot in stuck {
             match chip::delete_slot(chip, slot) {
                 Ok(left) if left.is_empty() => {
@@ -1879,10 +1900,37 @@ impl<B: Board> Badge<B> {
         }
     }
 
-    /// The wipe at boot: every chip object and the chip record go with the circles. Returns
-    /// how many objects stayed; the record keeps the slots they are in, so those slots are
-    /// never chosen again.
+    /// The wipe at boot: every chip object and the chip record's slots go with the circles.
+    /// Returns how many objects stayed. The record marks the slots they are in stuck.
+    ///
+    /// The record goes first, as for one circle ([`Badge::forget_circle`]): it vouches for no
+    /// slot and says the placeholders must be made again before anything is deleted. A record
+    /// that cannot be written leaves the chip as it is.
     fn forget_chip(&mut self) -> usize {
+        let mut record = match self.board.chip_record_load() {
+            Ok(Some(r)) if r.is_current() => Some(r),
+            Ok(_) => None,
+            Err(_) => {
+                self.board.log("chip record: unreadable, left as it is");
+                None
+            }
+        };
+        let had = match record.as_mut() {
+            Some(r) => {
+                r.slots.clear();
+                match self.placeholders_out(r) {
+                    Ok(had) => had,
+                    Err(()) => {
+                        self.board.log("chip record: write failed, chip objects left as they are");
+                        return 0;
+                    }
+                }
+            }
+            None => None,
+        };
+        self.sync_pairing();
+        let all: Vec<u8> = (0..chip::CIRCLE_SLOTS).collect();
+        let mut after = record.unwrap_or_default();
         let Some(chip) = self.board.chip_begin() else {
             return 0;
         };
@@ -1890,28 +1938,18 @@ impl<B: Board> Badge<B> {
             Ok(left) => left,
             Err(e) => {
                 self.board.log(&format!("chip: wipe failed: {e:?}"));
+                self.refill(&mut after, had, &all);
                 return 0;
             }
         };
         self.log_left(&left);
-        let stayed: Vec<u8> = left.iter().filter_map(|(id, _)| id.circle_slot()).collect();
-        // The circles go; the badge's own objects, its nonce and its phone stay.
-        match self.board.chip_record_load() {
-            Ok(Some(mut record)) => {
-                record.slots.retain(|e| stayed.contains(&e.slot));
-                for slot in &stayed {
-                    record.set_stuck(*slot, true);
-                }
-                if self.board.chip_record_store(&record).is_err() {
-                    self.board.log("chip record: write failed");
-                }
-                // Every circle slot's public id holds a placeholder again.
-                let all: Vec<u8> = (0..chip::CIRCLE_SLOTS).collect();
-                self.fill_slots(&record, &all);
-            }
-            Ok(None) => {}
-            Err(_) => self.board.log("chip record: unreadable, left as it is"),
+        // A slot that kept an object is marked stuck: the next boot tries it again, and a new
+        // circle passes it over while the object stays.
+        for slot in left.iter().filter_map(|(id, _)| id.circle_slot()) {
+            after.set_stuck(slot, true);
         }
+        // Every circle slot's public id holds a placeholder again.
+        self.refill(&mut after, had, &all);
         left.len()
     }
 
@@ -1945,28 +1983,60 @@ impl<B: Board> Badge<B> {
             None => {}
             Some(_) if filled.out_of_memory() => self
                 .board
-                .log("chip: no room for more placeholders, and none for a tap's object either"),
+                .log("chip: no room for more placeholders, a later boot makes the rest"),
             Some(e) => self.board.log(&format!("chip: placeholders not made: {e:?}")),
         }
         filled
     }
 
+    /// Store `record` saying the placeholders must be made again ([`ChipRecord::placeholders`]
+    /// `None`), before a conversation empties a circle slot's public id. One cut off before the
+    /// placeholder is back leaves the next boot to delete whatever stands there then and make
+    /// it again ([`Badge::place_placeholders`]), as [`chip::REMAKE_GENERATION`] does for the
+    /// phone slot. Returns the value to put back once it is back ([`Badge::refill`]), or `Err`
+    /// when the record was not written, and then nothing may be emptied. A record of no current
+    /// generation is not stored.
+    fn placeholders_out(&mut self, record: &mut ChipRecord) -> Result<Option<u8>, ()> {
+        let had = record.placeholders.take();
+        if record.is_current() && self.board.chip_record_store(record).is_err() {
+            record.placeholders = had;
+            return Err(());
+        }
+        Ok(had)
+    }
+
+    /// The placeholders of the circle slots in `slots` made again ([`Badge::fill_slots`]),
+    /// then `record` stored with `had` ([`Badge::placeholders_out`]) put back, if the fill went
+    /// as far as the chip's memory allows.
+    fn refill(&mut self, record: &mut ChipRecord, had: Option<u8>, slots: &[u8]) {
+        let filled = self.fill_slots(record, slots);
+        if filled.error.is_none() || filled.out_of_memory() {
+            record.placeholders = had;
+        }
+        if record.is_current() && self.board.chip_record_store(record).is_err() {
+            self.board.log("chip record: write failed");
+        }
+    }
+
     /// At boot: a placeholder at every circle slot's public id that holds nothing
     /// ([`Badge::fill_slots`]), so a conversation cut off after it emptied one leaves it empty
-    /// only until then. A record of earlier firmware, which made none, says nothing of what
-    /// stands at those ids: in each slot neither the record nor a circle in `named` uses, it
-    /// is deleted first and never kept as the badge's, and the record then says
-    /// [`chip::PLACEHOLDERS`], so that is done once.
+    /// only until then. A record that does not say [`chip::PLACEHOLDERS`] says nothing of what
+    /// stands at those ids: that of earlier firmware, which made none, or one a conversation
+    /// cut off while a public id was empty ([`Badge::placeholders_out`]). Then whatever stands
+    /// at the public id of each slot whose object the record does not vouch for, and that no
+    /// circle in `named` holds, is deleted first and never kept as the badge's, and the record
+    /// says [`chip::PLACEHOLDERS`] again.
     fn place_placeholders(&mut self, named: &[u8]) {
         let Ok(mut record) = self.owned_record() else {
             return;
         };
         let all: Vec<u8> = (0..chip::CIRCLE_SLOTS).collect();
         if record.placeholders.is_none() {
+            let vouched = record.circle_mask();
             let free: Vec<u8> = all
                 .iter()
                 .copied()
-                .filter(|s| record.entry(*s).is_none() && !named.contains(s))
+                .filter(|s| vouched & 1 << s == 0 && !named.contains(s))
                 .collect();
             let Some(chip) = self.board.chip_begin() else {
                 return;
@@ -1995,28 +2065,44 @@ impl<B: Board> Badge<B> {
     /// once, so its public id is never left empty past this conversation. A slot a circle
     /// holds is never chosen.
     fn make_chip_seat(&mut self) -> Result<(u8, SeatPublic), String> {
-        let record = self.load_chip_record()?;
+        let mut record = self.load_chip_record()?;
         let kept = self.held_slots();
         let free: Vec<u8> = (0..chip::CIRCLE_SLOTS)
             .filter(|&s| record.entry(s).is_none() && !kept.contains(&s))
             .collect();
         // Anything left in a free slot is deleted first; a slot holding an object that cannot
-        // be deleted is passed over.
+        // be deleted is passed over. The record says first that the placeholders must be made
+        // again.
+        let had = self
+            .placeholders_out(&mut record)
+            .map_err(|_| String::from("flash: chip record failed"))?;
         let mut chosen = None;
         let mut emptied = Vec::new();
+        let mut failed = None;
         for s in free {
-            let chip = self.board.chip_begin().ok_or("chip: not found")?;
-            let left = chip::delete_slot(chip, s).map_err(|e| format!("chip: {e:?}"))?;
-            emptied.push(s);
-            if left.is_empty() {
-                chosen = Some(s);
+            let Some(chip) = self.board.chip_begin() else {
+                failed = Some(String::from("chip: not found"));
                 break;
+            };
+            emptied.push(s);
+            match chip::delete_slot(chip, s) {
+                Ok(left) if left.is_empty() => {
+                    chosen = Some(s);
+                    break;
+                }
+                Ok(left) => self.log_left(&left),
+                Err(e) => {
+                    failed = Some(format!("chip: {e:?}"));
+                    break;
+                }
             }
-            self.log_left(&left);
         }
         // Each slot tried lost its placeholder with the rest, and gets it again now, the chosen
         // one too: the keep deletes it just before it writes the circle's public object.
-        self.fill_slots(&record, &emptied);
+        self.refill(&mut record, had, &emptied);
+        if let Some(e) = failed {
+            return Err(e);
+        }
         let slot = chosen.ok_or("chip: every slot is in use")?;
         let chip = self.board.chip_begin().ok_or("chip: not found")?;
         let public = chip
@@ -2043,9 +2129,8 @@ impl<B: Board> Badge<B> {
     /// beside two older ones with larger public objects, and the seventh keep met `6A84`. That
     /// is about seven circles on an empty chip of that kind. The Pico has 16 places for
     /// circles, and the chip slots run to 16, but that does not mean 16 circles on this chip.
-    /// The placeholders at the free slots' public ids take about one circle's room: on the
-    /// bench (2026-11-01) the chip held five circles of three with them and refused a sixth
-    /// that would have fit without them.
+    /// With a placeholder of 160 bytes at each free slot's public id, the bench chip
+    /// (2026-11-01) held five circles of three seats and refused a sixth with 3232 bytes free.
     fn keep_in_chip(&mut self, slot: u8, result: &CeremonyResult, seat: u8) -> Result<(), String> {
         let root = result.root.as_ref().ok_or("ceremony: no circle root")?;
         let circle_id = result.circle_id;
@@ -2103,9 +2188,13 @@ impl<B: Board> Badge<B> {
         let object = object
             .fitted_for_new()
             .ok_or_else(|| String::from(TOO_BIG_FOR_CHIP))?;
+        // Whatever stands at the id, the badge's placeholder, is deleted and the circle's object
+        // made new. The record says first that the placeholders must be made again, and the
+        // record that learns the slot says what it said before.
+        let had = self
+            .placeholders_out(&mut record)
+            .map_err(|_| String::from("flash: chip record failed"))?;
         let chip = self.board.chip_begin().ok_or("chip: not found")?;
-        // Whatever stands at the id was made before the circle existed, so it is not the
-        // badge's: it is deleted, and the circle's object made new.
         chip::remake_public(chip, slot, &object).map_err(|e| match e {
             chip::PublicError::TooLarge => String::from(TOO_BIG_FOR_CHIP),
             chip::PublicError::Undeletable(e) => {
@@ -2129,6 +2218,7 @@ impl<B: Board> Badge<B> {
             chat_generation: None,
             public_written: Some(true),
         });
+        record.placeholders = had;
         self.board
             .chip_record_store(&record)
             .map_err(|_| String::from("flash: chip record failed"))?;
@@ -2161,11 +2251,27 @@ impl<B: Board> Badge<B> {
     }
 
     /// A pass that made a chip key ended without keeping it: delete the slot's objects and
-    /// any record entry for it.
+    /// any record entry for it. The record goes first, as for a forget
+    /// ([`Badge::forget_circle`]), and the slot's placeholder is made again. A record that
+    /// cannot be written leaves the slot as it is, for the next boot to delete.
     fn drop_chip_seat(&mut self) {
         let Some(slot) = self.chip_slot.take() else {
             return;
         };
+        let mut record = match self.board.chip_record_load() {
+            Ok(Some(r)) => r,
+            _ => ChipRecord::default(),
+        };
+        let vouched = record.entry(slot).is_some();
+        record.remove(slot);
+        let Ok(had) = self.placeholders_out(&mut record) else {
+            self.board
+                .log(&format!("chip record: write failed, slot {slot} left as it is"));
+            return;
+        };
+        if vouched {
+            self.sync_pairing();
+        }
         if let Some(chip) = self.board.chip_begin() {
             match chip::delete_slot(chip, slot) {
                 Ok(left) => self.log_left(&left),
@@ -2174,19 +2280,9 @@ impl<B: Board> Badge<B> {
                     .log(&format!("chip: slot {slot} not deleted: {e:?}")),
             }
         }
-        let mut after = ChipRecord::default();
-        if let Ok(Some(mut record)) = self.board.chip_record_load() {
-            if record.entry(slot).is_some() {
-                record.remove(slot);
-                if self.board.chip_record_store(&record).is_err() {
-                    self.board.log("chip record: write failed");
-                }
-            }
-            after = record;
-        }
         self.board.log(&format!("chip: slot {slot} deleted"));
         // The slot's public id holds a placeholder again.
-        self.fill_slots(&after, &[slot]);
+        self.refill(&mut record, had, &[slot]);
     }
 
     fn advance(&mut self, state: State<B::Link>) -> Result<(State<B::Link>, Step), String> {

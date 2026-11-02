@@ -36,19 +36,24 @@
 //! at the public id of every circle slot, and the badge keeps one at each public id no circle
 //! uses ([`fill_slots`]). A keep deletes it just before it writes the circle's public object
 //! there ([`remake_public`]), and a slot emptied by a forget or a discarded pass gets its
-//! placeholder again in the same conversation. A chip with no room for a placeholder has no
-//! room for a tap's object either.
+//! placeholder again in the same conversation. Before any of those empties a public id the
+//! record says the placeholders must be made again ([`ChipRecord::placeholders`] `None`), and
+//! after the placeholder is back it says what it said before. So a conversation cut off in
+//! between leaves the next boot to delete whatever stands at those ids by then and make the
+//! placeholders again: nothing a tap put there is kept. A public id the chip has no room for
+//! stays empty until a boot finds room, and what stands there by then is kept as it is,
+//! never read.
 //!
 //! The known limit: the hello ids, and the seat key, root and epoch ids, of a slot no circle
 //! uses stay empty, and a tap that makes an object nobody may delete at one of them still
-//! burns that slot. A placeholder takes 160 bytes of the chip's memory (bench, SE051 applet
-//! 7.2.0, 2026-11-01), and a circle of three about 3.1 KB. One at the public id and the eight
-//! hello ids of all sixteen slots, 144 of them, would take 23 KB, more than the bench chip has
-//! beside its circles: holding two circles, it made 91 and had no room for a third circle. At
-//! eight slots, 72 of them, it held three circles. At the public ids alone, sixteen of them,
-//! it held five and refused a sixth with 3.2 KB free. The eleven placeholders left then took
-//! 1.8 KB, and with that room a sixth would have fit. A kept circle's public object takes its
-//! slot's placeholder's place.
+//! burns that slot. What the bench chip's free memory count showed (SE051, applet 7.2.0,
+//! 2026-11-01): a placeholder took 160 bytes, and 50 deletes and makes of one left the count
+//! as it was. A circle of three seats took 2948 bytes beside the placeholder its public object
+//! replaced. Holding two such circles, with 14956 bytes free, the chip made 91 of the 138
+//! placeholders the public and hello ids of sixteen slots needed, then refused one for want of
+//! memory, and refused a third circle. With the public and hello ids of eight slots it held
+//! three circles. With the public ids alone it held five and refused a sixth with 3232 bytes
+//! free.
 
 use alloc::format;
 use alloc::string::String;
@@ -253,10 +258,12 @@ pub struct ChipRecord {
     /// ([`crate::Badge::boot`]).
     #[n(7)]
     pub public_policy: Option<u8>,
-    /// [`PLACEHOLDERS`] once the badge made its placeholders at the circle slots' public ids
-    /// ([`fill_slots`]), after it deleted whatever stood at them. `None` in a record of earlier
-    /// firmware, which made none: the next boot deletes what stands at the ids of the slots no
-    /// circle uses and makes them ([`crate::Badge::boot`]).
+    /// [`PLACEHOLDERS`] while nothing at a circle slot's public id that the record does not
+    /// vouch for is anyone's but the badge's: its placeholders ([`fill_slots`]), or nothing.
+    /// `None` in a record of earlier firmware, which made none, and from before a conversation
+    /// empties a public id until its placeholder is back. With `None` the next boot deletes
+    /// whatever stands at those ids, but where a circle is held, and makes the placeholders
+    /// ([`crate::Badge::boot`]).
     #[n(8)]
     pub placeholders: Option<u8>,
 }
@@ -711,8 +718,7 @@ impl Filled {
 /// circle slot in `slots` that holds nothing. A public object the record vouches for
 /// ([`ChipRecord::circle_mask`]) is the circle's, and its id is left: if the object is gone,
 /// the badge writes it again there. Nothing is deleted, so what stands at an id stays. Stops
-/// at the first error: a chip short of memory (`6A84`) for a placeholder has no room for a
-/// tap's object either.
+/// at the first error, `6A84` among them when the chip is short of memory.
 pub fn fill_slots(chip: &mut dyn ChipOps, record: &ChipRecord, slots: &[u8]) -> Filled {
     let mut filled = Filled::default();
     let present = match chip.ids() {

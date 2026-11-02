@@ -486,6 +486,7 @@ fn forget_one_keeps_the_other() {
     // The forgotten circle's slot holds its placeholder again.
     no_empty_public_id(&mut b);
     let record = b.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(record.placeholders, Some(cahoots_badge::chip::PLACEHOLDERS));
     assert_eq!(record.slots.len(), 1);
     assert_eq!((record.slots[0].slot, record.slots[0].circle_id), (1, kept.circle_id));
 
