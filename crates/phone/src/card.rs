@@ -27,6 +27,7 @@ use crate::{
     PHONE_KEY,
 };
 use cahoots_badge::public::PublicObject;
+use cahoots_chat::ChatSession;
 use cahoots_core::manifest::{Manifest, SealedManifest};
 use cahoots_core::seat::SeatPublic;
 use rand_core::{OsRng, RngCore};
@@ -51,7 +52,7 @@ fn as_u32(n: usize) -> u32 {
 }
 
 /// A generation's id and its key.
-type GenKey = ([u8; 32], Zeroizing<[u8; 32]>);
+type GenKey = chat::GenKey;
 
 /// The data whose HMAC under a circle's root is a chat generation's key:
 /// `"chat/gen" || circle_id || generation_id`.
@@ -429,6 +430,41 @@ impl Phone {
         }
     }
 
+    /// For a circle kept at this tap, whose chat starts in the first generation of the badge's
+    /// chain and reads the relay from its start: the keys of the generations the relay names
+    /// that the chain does not, fetched into `keys` beside the chain's own. The badge joins
+    /// its oldest bumps when it holds too many, so the relay can name a generation the chain
+    /// skips, and a reset by a member can follow another.
+    fn keys_beyond_the_chain(
+        &self,
+        k: &Kept,
+        slot: u8,
+        keys: &mut Vec<GenKey>,
+        s: &mut Session<'_, '_>,
+        default_relay: &str,
+    ) -> Result<(), TapError> {
+        let Some((start, start_key)) = keys.first().cloned() else {
+            return Ok(());
+        };
+        let cid = k.object.circle_id;
+        let mut probe =
+            ChatSession::from_generation(start, start_key, cid, k.manifest.params.n, k.seat);
+        let relay = match k.object.relay.as_str() {
+            "" => default_relay,
+            r => r,
+        };
+        let url = chat::messages_url_of(relay, &hex::encode(cid));
+        chat::keys_the_relay_needs(
+            &mut probe,
+            &k.manifest,
+            &url,
+            None,
+            keys,
+            self.http.as_ref(),
+            |g| s.hmac_root(slot, &generation_label(&cid, &g)),
+        )
+    }
+
     /// Keep one circle of the badge as a card circle, with the hello words the tap fetched,
     /// or bring a card circle already held up to the pairing, then read its relay, post the
     /// bumps it forwards, and publish the badge's card in its chat. `None` when the phone
@@ -628,6 +664,8 @@ impl Phone {
             (p.key.clone(), p.badge_name.clone())
         };
         let mine = self.my_public()?;
+        let held = store::circle_ids(&self.dir);
+        let default_relay = self.lock().relay.clone();
         let read = self.tap_slot(PROMPT, &key, |s| {
             let mut out = Vec::new();
             for (slot, o) in s.list_public()? {
@@ -648,6 +686,12 @@ impl Phone {
                         let f = fill(&pocket, &no_hello, slot, k.seat, n, &counters, s)?;
                         k.pocket = f.pocket;
                         k.no_hello = f.no_hello;
+                    }
+                    // A circle this phone does not hold yet reads the relay from the chain's
+                    // first generation: the keys its chat meets there that the chain does
+                    // not name come in this tap too.
+                    if !held.contains(&hex::encode(k.object.circle_id)) {
+                        self.keys_beyond_the_chain(k, slot, &mut keys, s, &default_relay)?;
                     }
                 }
                 out.push((slot, nonce, checked, keys));
@@ -721,6 +765,7 @@ impl Phone {
         // Face ID for the key comes before the reader's sheet.
         let key = self.slot_key(&label)?;
         let mine = self.my_public()?;
+        let default_relay = st.relay.clone();
         let circles = &st.circles;
         let (fetched, new) = self.tap_slot(PROMPT, &key, |s| {
             // Only the slots the pairing object names: the badge wrote it. The slot key opened
@@ -747,6 +792,25 @@ impl Phone {
                     let k = s.hmac_root(slot, &generation_label(&c.circle_id, &g))?;
                     keys.push((g, Zeroizing::new(k)));
                 }
+                // With those keys the chat reads on from where it stopped. What it meets
+                // there may name more generations, each behind the one before: their keys
+                // come in this same tap.
+                if !keys.is_empty() {
+                    if let (Ok((mut probe, after, url)), Some(manifest)) =
+                        (c.probe(), c.manifest())
+                    {
+                        let cid = c.circle_id;
+                        chat::keys_the_relay_needs(
+                            &mut probe,
+                            &manifest,
+                            &url,
+                            after,
+                            &mut keys,
+                            self.http.as_ref(),
+                            |g| s.hmac_root(slot, &generation_label(&cid, &g)),
+                        )?;
+                    }
+                }
                 out.push((id.clone(), keys, pocket_fill(c, s)?));
             }
             // A circle the badge kept since this phone paired: the badge vouches for it, and
@@ -768,6 +832,7 @@ impl Phone {
                     let mac = s.hmac_root(slot, &generation_label(&k.object.circle_id, g))?;
                     keys.push((*g, Zeroizing::new(mac)));
                 }
+                self.keys_beyond_the_chain(&k, slot, &mut keys, s, &default_relay)?;
                 let n = k.manifest.params.n;
                 let f = fill(&[], &[], slot, k.seat, n, &vec![0; usize::from(n)], s)?;
                 k.pocket = f.pocket;

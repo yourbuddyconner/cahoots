@@ -24,6 +24,8 @@ final class ChatModel: ObservableObject {
     @Published private(set) var needsTap = false
     /// A tap on the card is under way.
     @Published private(set) var tapping = false
+    /// What the last tap from this chat did, shown until the next message goes.
+    @Published private(set) var tapNote: String?
 
     init(core: Core, circle: String) {
         self.core = core
@@ -95,15 +97,26 @@ final class ChatModel: ObservableObject {
         guard !tapping else { return }
         tapping = true
         defer { tapping = false }
+        tapNote = nil
         do {
-            _ = try await app.tapCard()
+            let report = try await app.tapCard()
             status = nil
             await poll()
             await load()
+            await checkTap()
+            tapNote = Self.afterTap(report, waiting: needsTap)
         } catch {
             status = plain(error)
+            await checkTap()
         }
-        await checkTap()
+    }
+
+    /// The sentence after a tap from this chat: what the tap brought, and that messages can
+    /// go now. A chat that still waits, because the circle changed its keys again in the
+    /// meantime, asks for one more tap.
+    static func afterTap(_ report: TapReport, waiting: Bool) -> String {
+        if waiting { return "The circle changed its keys again. Tap the card once more." }
+        return CardView.result(report) + " You can send messages now."
     }
 
     func run() async {
@@ -127,6 +140,7 @@ final class ChatModel: ObservableObject {
             try await core.run { [circle] in try $0.sendChat(circle: circle, text: text) }
             draft = ""
             status = nil
+            tapNote = nil
         } catch {
             status = "Not sent: \(plain(error))"
         }
@@ -242,7 +256,11 @@ struct ChatView: View {
         .actionBar {
             if let notice { StatusLine(text: notice, problem: false) }
             StatusLine(text: model.status)
+            StatusLine(text: model.tapNote, problem: false)
             if model.needsTap {
+                Text("This circle changed its keys while the phone was away. Tap the card once to get them.")
+                    .font(.subheadline).foregroundStyle(Color.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Button { Task { await model.tapCard(app) } } label: {
                     Working(busy: model.tapping, title: "Tap the card")
                 }

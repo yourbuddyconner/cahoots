@@ -14,6 +14,7 @@ use crate::store::{
     self, CardsRecord, ChatRecord, CircleRecord, CursorRecord, MessageRecord, OutboxEntry,
     SettingsRecord,
 };
+use crate::nfc::TapError;
 use crate::{ChatMessage, Http, PhoneError};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -62,6 +63,18 @@ pub struct Circle {
 
 /// What a card circle says when it cannot go on without a tap.
 pub const NEEDS_TAP: &str = "Tap the card.";
+
+/// The most generation keys one tap fetches beyond those the chats asked for: how far a
+/// relay can lead a tap before the tap ends with what it has.
+pub(crate) const MAX_PROBED_KEYS: usize = 16;
+
+/// A generation's id and its key, as a tap fetches them.
+pub(crate) type GenKey = ([u8; 32], zeroize::Zeroizing<[u8; 32]>);
+
+/// The relay's address for circle `id_hex`'s messages.
+pub(crate) fn messages_url_of(relay: &str, id_hex: &str) -> String {
+    format!("{}/v1/circles/{}/messages", relay.trim_end_matches('/'), id_hex)
+}
 
 impl Circle {
     pub fn load(dir: &Path) -> Result<Circle, PhoneError> {
@@ -293,11 +306,26 @@ impl Circle {
     }
 
     fn messages_url(&self) -> String {
-        format!(
-            "{}/v1/circles/{}/messages",
-            self.settings.relay.trim_end_matches('/'),
-            self.id_hex
+        messages_url_of(&self.settings.relay, &self.id_hex)
+    }
+
+    /// A copy of this card circle's chat to read the relay ahead with, with its cursor and
+    /// its relay address. The copy holds what the chat holds and none of `ahead`.
+    pub(crate) fn probe(&self) -> Result<(ChatSession, Option<u64>, String), PhoneError> {
+        let probe = ChatSession::import_generation_state(
+            self.circle_id,
+            self.params.n,
+            self.record.seat,
+            &self.session.export_state(),
         )
+        .map_err(chat_err)?;
+        Ok((probe, self.cursor.after, self.messages_url()))
+    }
+
+    /// The circle's manifest, decoded from the record.
+    pub(crate) fn manifest(&self) -> Option<cahoots_core::manifest::Manifest> {
+        let sealed = cahoots_core::manifest::SealedManifest::decode(&self.record.manifest).ok()?;
+        cahoots_core::manifest::Manifest::decode(&sealed.body).ok()
     }
 
     /// Read the relay after the cursor to the end, decrypt, store, and return what others
@@ -725,6 +753,92 @@ pub(crate) fn random_id() -> Result<String, PhoneError> {
         message: format!("No randomness: {e}"),
     })?;
     Ok(hex::encode(b))
+}
+
+/// Read the relay from `after` to its end with `probe`, a copy of a card circle's chat, and
+/// fetch with `fetch` the key of every generation the chat would stop at on the way, adding
+/// each to `ahead`, which holds the keys the tap fetched already. A bump sealed in a
+/// generation the chat has just reached names the next one, so each key opens the way to
+/// the next, and one tap brings them all. The circle itself is not touched: the poll after
+/// the tap reads the same entries with these keys in hand. A relay out of reach, an entry
+/// that does not read, or [`MAX_PROBED_KEYS`] keys end the read where it is, and the keys
+/// fetched so far stay.
+pub(crate) fn keys_the_relay_needs(
+    probe: &mut ChatSession,
+    manifest: &cahoots_core::manifest::Manifest,
+    url: &str,
+    mut after: Option<u64>,
+    ahead: &mut Vec<GenKey>,
+    http: &dyn Http,
+    mut fetch: impl FnMut([u8; 32]) -> Result<[u8; 32], TapError>,
+) -> Result<(), TapError> {
+    let circle_id = manifest.circle_id;
+    let mut fetched = 0usize;
+    // The key of `id` into the probe, from `ahead` or from the card. `false` at the cap.
+    let mut install = |probe: &mut ChatSession,
+                       id: [u8; 32],
+                       ahead: &mut Vec<GenKey>,
+                       fetched: &mut usize|
+     -> Result<bool, TapError> {
+        if !ahead.iter().any(|(g, _)| *g == id) {
+            if *fetched >= MAX_PROBED_KEYS {
+                return Ok(false);
+            }
+            let k = fetch(id)?;
+            ahead.push((id, zeroize::Zeroizing::new(k)));
+            *fetched += 1;
+        }
+        let key = ahead
+            .iter()
+            .find(|(g, _)| *g == id)
+            .map(|(_, k)| k.clone())
+            .expect("the key was just added");
+        probe.install_generation(id, key);
+        Ok(true)
+    };
+    loop {
+        let mut u = format!("{url}?wait=0");
+        if let Some(a) = after {
+            u.push_str(&format!("&after={a}"));
+        }
+        let Ok(body) = http.get(u) else {
+            return Ok(());
+        };
+        let Ok(entries) = parse_entries(&body) else {
+            return Ok(());
+        };
+        let fresh: Vec<_> = entries
+            .into_iter()
+            .filter(|(seq, _)| after.is_none_or(|a| *seq > a))
+            .collect();
+        if fresh.is_empty() {
+            return Ok(());
+        }
+        for (seq, bytes) in fresh {
+            after = Some(seq);
+            let mut opened = probe.receive(&bytes);
+            if let Err(ChatError::NeedsGeneration(id)) = opened {
+                if !install(probe, id, ahead, &mut fetched)? {
+                    return Ok(());
+                }
+                opened = probe.receive(&bytes);
+            }
+            let Ok((h, pt)) = opened else {
+                continue;
+            };
+            if h.msg_type != MessageType::Bump {
+                continue;
+            }
+            let Ok((from, to, _)) = verify_bump(&pt, &circle_id, manifest) else {
+                continue;
+            };
+            if let Err(ChatError::NeedsGeneration(id)) = probe.apply_bump(from, to) {
+                if !install(probe, id, ahead, &mut fetched)? {
+                    return Ok(());
+                }
+            }
+        }
+    }
 }
 
 pub(crate) fn parse_entries(body: &[u8]) -> Result<Vec<(u64, Vec<u8>)>, PhoneError> {

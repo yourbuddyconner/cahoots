@@ -125,3 +125,15 @@ final class CardViewTests: XCTestCase {
         XCTAssertNil(PairCardModel.note(after: nil))
     }
 }
+
+/// The chat's line after a tap from its banner.
+@MainActor
+final class ChatTapNoteTests: XCTestCase {
+    func testAfterATapTheChatSaysWhatCameAndThatMessagesCanGo() {
+        let two = TapReport(keys: 2, bumps: 0, words: 0, kept: 0)
+        XCTAssertEqual(ChatModel.afterTap(two, waiting: false), "Fetched 2 keys. You can send messages now.")
+        let none = TapReport(keys: 0, bumps: 0, words: 0, kept: 0)
+        XCTAssertEqual(ChatModel.afterTap(none, waiting: false), "Nothing was waiting. You can send messages now.")
+        XCTAssertEqual(ChatModel.afterTap(two, waiting: true), "The circle changed its keys again. Tap the card once more.")
+    }
+}

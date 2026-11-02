@@ -195,7 +195,10 @@ seconds, or at any press.
    for a tap", then choose "Tap the card" and hold the phone to the antenna. No page on the
    badge needs opening. Face ID asks before the NFC sheet, because the tap reads the card's key
    from the keychain. One tap fetches every key a chat waits for, passes on the bumps the badge
-   signed, and tops up the words to eight hello numbers with each other seat. It also keeps
+   signed, and tops up the words to eight hello numbers with each other seat. With the keys it
+   fetched in hand, the tap also reads the relay for the chat, and fetches the key of every
+   further generation it meets there, so a chat that fell several resets behind needs one tap,
+   not one per reset. The chat says what the tap brought and that messages can go. It also keeps
    any circle the badge kept since it paired, with its chat key and hello words, and the result
    says "and kept 1 new circle". When a chat's composer is replaced by "Tap the card", that
    button taps the same way.

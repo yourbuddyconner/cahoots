@@ -290,6 +290,17 @@ such a tap gets.
   tap's 60 seconds by that estimate, and no limit on the MACs of one tap is needed yet.
   The phone waits up to 30 seconds to find a card and up to five seconds for each answer.
   The full Card screen tap has not yet been tried on a phone.
+- A tap reads the relay while the card is still there. The phone asks the card only for keys
+  it knows it needs, but a bump is sealed in the generation it moves from, so the relay can
+  name a generation only once the one before it opens: a chat two resets behind would have
+  needed two taps. The badge's own chain has the same gap, since the badge joins its two
+  oldest bumps when it holds more than four, and a phone pairing fresh then meets the
+  skipped generation on the relay. So, with the keys it fetched in hand, the tap reads the
+  relay on a copy of the chat and fetches every further key the relay names, up to sixteen,
+  in the same session. The chat itself is not touched until the tap has gone through. The
+  pairing's second tap does the same for each circle it keeps. On 2026-11-02 a phone pairing
+  with the bench badge after five bench unpairs hit this: the chat said "Tap the card" right
+  after pairing, and each tap moved it one generation.
 - A seat whose hello object refuses the slot or is not there (`6985`, `6986` or `6A82` at the
   seat's first MAC in a tap) gets no words from the card, and the tap goes on. The phone marks
   the seat: its hello words say "This seat has no hello words from the card." and ask for no

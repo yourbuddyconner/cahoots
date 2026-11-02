@@ -1388,3 +1388,74 @@ fn a_card_circle_removed_from_the_phone_comes_back_at_the_next_tap() {
     assert!(ids.contains(&first), "{ids:?}");
     assert_eq!(ids.len(), 2);
 }
+
+#[test]
+fn pairing_after_the_badge_joined_its_oldest_bumps_needs_no_tap() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b1, b2) = kept_pair((true, false));
+    let mut member = Member::of(&b2);
+    let mine = b1.circle().unwrap().seat;
+
+    // Five phones pair and are unpaired in turn. Each pairing posts the bumps the unpairs
+    // before it left, so the relay holds the whole chain, one bump per generation. At the
+    // fifth unpair the badge is over its cap of four and joins its two oldest bumps into one,
+    // which skips a generation the relay still names.
+    for _ in 0..5 {
+        let d = device(&relay);
+        pair(&mut b1, &d);
+        b1.unpair().unwrap();
+    }
+    let o = badge_chip::read_public(b1.board().owner_chip(), 0).unwrap().unwrap();
+    b1.board().chip.as_mut().unwrap().close_session().unwrap();
+    assert_eq!(o.pending_bumps.len(), 4);
+    member.say(&relay, "before the sixth phone");
+
+    // The sixth phone pairs. Its two taps bring every key its chat meets on the relay, the
+    // skipped generation's among them, so it waits for nothing.
+    let d = device(&relay);
+    let id = pair(&mut b1, &d).remove(0);
+    assert!(!d.phone.circles()[0].needs_tap, "the chat waits for a key right after pairing");
+    assert_eq!(d.phone.card_status().unwrap().keys_wanted, 0);
+
+    // It posted the last bump, and both chat in the badge's generation.
+    member.read(&relay);
+    assert_eq!(member.session.generation_id(), o.generation);
+    d.phone.send_chat(id.clone(), "paired once".into()).unwrap();
+    assert_eq!(member.read(&relay), vec![(mine, "paired once".to_string())]);
+    member.say(&relay, "welcome");
+    let got = d.phone.poll(id.clone()).unwrap();
+    assert_eq!(got.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["welcome"]);
+}
+
+#[test]
+fn one_tap_brings_every_key_a_chain_of_resets_needs() {
+    let relay = Arc::new(Mutex::new(MemRelay::default()));
+    let (mut b1, b2) = kept_pair((true, false));
+    let mut member = Member::of(&b2);
+    let d = device(&relay);
+    let id = pair(&mut b1, &d).remove(0);
+    let mine = b1.circle().unwrap().seat;
+
+    // Two resets by a root holder while the phone was away. The second is sealed in the
+    // generation the first moves to, so the phone learns of it only once it holds that key.
+    member.bump(&relay, [0x71; 32]);
+    member.bump(&relay, [0x72; 32]);
+    member.say(&relay, "after two resets");
+    d.phone.poll(id.clone()).unwrap();
+    assert!(d.phone.circles()[0].needs_tap);
+    assert_eq!(d.phone.card_status().unwrap().keys_wanted, 1);
+
+    // One tap brings both keys.
+    let report = tap(&mut b1, &d, |p| p.tap_card()).unwrap();
+    assert_eq!(report, TapReport { keys: 2, bumps: 0, words: 0, kept: 0 });
+    assert!(!d.phone.circles()[0].needs_tap);
+    assert_eq!(d.phone.card_status().unwrap().keys_wanted, 0);
+    // The second reset's line and the text behind it come with the next poll.
+    let got = d.phone.poll(id.clone()).unwrap();
+    assert_eq!(
+        got.iter().map(|m| (m.kind.as_str(), m.text.as_str())).collect::<Vec<_>>(),
+        [("bump", "Keys were reset by seat 2."), ("text", "after two resets")]
+    );
+    d.phone.send_chat(id.clone(), "caught up".into()).unwrap();
+    assert_eq!(member.read(&relay), vec![(mine, "caught up".to_string())]);
+}
