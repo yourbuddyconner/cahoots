@@ -183,7 +183,9 @@ pub enum Goal {
 /// Presses the badge's buttons from the laptop, for a firmware built with its `bench`
 /// feature. It reads the badge's own screen lines (`screen: ...` log frames) and answers
 /// each new one with at most one press, chosen for the goal. It never presses on a screen
-/// that discards or forgets a circle.
+/// that discards or forgets a circle. From home it opens the list with Both, never with Left,
+/// which opens or closes the window for a phone's tap. A note gets no press: it goes home by
+/// itself.
 ///
 /// Turned on by `CAHOOTS_BENCH=new-circle` or `CAHOOTS_BENCH=serve` in the environment;
 /// `CAHOOTS_BENCH_SEAT=<n>` names the seat the badge is expected to be given in the pile.
@@ -199,6 +201,9 @@ pub struct Bench {
     /// A press held until this moment: the badge discards a gesture on its first loop pass
     /// after a prompt is drawn, which is a few milliseconds after "drawn" reaches the laptop.
     due: Option<(std::time::Instant, u8)>,
+    /// The new circle's keep was answered: home, where the badge goes after its note, is
+    /// where this goal ends, and the list is not opened again.
+    kept: bool,
 }
 
 impl Bench {
@@ -211,7 +216,11 @@ impl Bench {
         let seat = std::env::var("CAHOOTS_BENCH_SEAT")
             .ok()
             .and_then(|s| s.parse().ok());
-        Some(Bench {
+        Some(Bench::new(goal, seat))
+    }
+
+    pub fn new(goal: Goal, seat: Option<u8>) -> Bench {
+        Bench {
             goal,
             seat,
             last: String::new(),
@@ -219,7 +228,8 @@ impl Bench {
             nudged: false,
             after_draw: None,
             due: None,
-        })
+            kept: false,
+        }
     }
 
     /// A held press whose time has come.
@@ -234,8 +244,9 @@ impl Bench {
     }
 
     /// A badge that was already sitting on a screen when the port opened logs nothing until
-    /// something changes, so after a moment with no screen line the driver turns one page
-    /// (Right: a page in a menu, back from the pile, never a consent) to see where it is.
+    /// something changes, so after a moment with no screen line the driver presses Right to
+    /// see where it is: the list from home, the next entry on a list, back from the pile or
+    /// a page, never a consent.
     fn nudge(&mut self) -> Option<u8> {
         if self.nudged || !self.last.is_empty() || self.opened.elapsed() < std::time::Duration::from_millis(1500) {
             return None;
@@ -250,6 +261,7 @@ impl Bench {
         // away one gesture (one seen while the prompt was being drawn), so the press waits
         // for the words line, which comes after that.
         if line.starts_with("words: ") {
+            self.kept = true;
             return Some(2);
         }
         if line == "drawn" {
@@ -286,9 +298,21 @@ impl Bench {
                 _ => None,
             };
         }
+        let home = title == "badge" && footer.contains("A+B  menu");
         if self.goal == Goal::Serve {
-            // Nothing to walk to: the badge answers from any page.
+            // Nothing to walk to: the badge answers on home and on a circle's pages. The list
+            // does not, so "back" there goes home.
+            if title == "circles" || title == "chip needs a restart" {
+                return Some(if fields.contains(&"> back") { 2 } else { 1 });
+            }
             return None;
+        }
+        if self.kept {
+            // The circle is kept: its note goes home by itself, and the goal ends there.
+            return None;
+        }
+        if home {
+            return Some(2);
         }
         if title == "circles" {
             // The list: `> name` marks the chosen entry.
@@ -614,5 +638,48 @@ pub fn tail_logs(path: &str, label: &str) -> io::Result<()> {
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
             Err(e) => return Err(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HOME: &str = "screen: badge | owner-bench3 | closed to taps | tap  A+B  menu  menu";
+    const LIST_AT_BACK: &str =
+        "screen: circles |   owner-bench3 |   new circle |   pair a phone | > back | prev  A+B  open  next";
+
+    #[test]
+    fn a_new_circle_goes_from_home_to_the_list_with_both() {
+        let mut b = Bench::new(Goal::NewCircle, None);
+        assert_eq!(b.react(HOME), Some(2));
+        let list = "screen: circles | > owner-bench3 |   new circle |   back | prev  A+B  open  next";
+        assert_eq!(b.react(list), Some(1));
+        let at_new = "screen: circles |   owner-bench3 | > new circle |   back | prev  A+B  open  next";
+        assert_eq!(b.react(at_new), Some(2));
+    }
+
+    #[test]
+    fn after_the_keep_the_saved_note_and_home_get_no_press() {
+        let mut b = Bench::new(Goal::NewCircle, None);
+        assert_eq!(b.react("words: a b c d e f"), Some(2));
+        assert_eq!(b.react("screen: saved pair-1712"), None);
+        assert_eq!(b.react(HOME), None);
+    }
+
+    #[test]
+    fn serving_stays_on_home_and_leaves_the_list_by_back() {
+        let mut b = Bench::new(Goal::Serve, None);
+        assert_eq!(b.react(HOME), None);
+        let list = "screen: circles | > owner-bench3 |   new circle |   back | prev  A+B  open  next";
+        assert_eq!(b.react(list), Some(1));
+        assert_eq!(b.react(LIST_AT_BACK), Some(2));
+    }
+
+    #[test]
+    fn a_note_gets_no_press() {
+        let mut b = Bench::new(Goal::NewCircle, None);
+        assert_eq!(b.react("screen: unpair the current phone first"), None);
+        assert_eq!(b.react("screen: phone unpaired | its taps end now"), None);
     }
 }

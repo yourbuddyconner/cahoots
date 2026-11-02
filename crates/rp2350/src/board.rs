@@ -507,6 +507,13 @@ impl PicoBoard {
             self.tap_end();
             self.bench_window = false;
             self.bench_raw = None;
+        } else if self.tap_open {
+            // The badge cut the chip's power for a phone's tap: the pairing page, the note
+            // after a pairing, or home's window. The laptop stands in for that phone, on the
+            // wire, which needs the power. The window ends, as a phone's tap ends it.
+            log!("bench: the laptop's tap stands in for a phone's, the chip gets its power back");
+            self.tap_end();
+            self.bench_raw = None;
         }
         if self.bench_raw.is_none() {
             let _ = self.chip_enable.set_high();

@@ -1,14 +1,19 @@
 #!/bin/sh
 # Pairing on the bench, hands off: flash a bench build of the Pico 2 firmware, keep a circle
-# with the laptop as the two cards under the badge, then pair the laptop to the badge as a
-# phone would. The laptop runs the phone's own chip client against the real chip through the
-# firmware's APDU pass-through, and presses the badge's buttons over USB (the firmware's
-# `bench` feature). Then it unpairs and checks that the old key no longer opens the chip.
+# with the laptop as the two cards under the badge, then pair the laptop to the badge as the
+# app pairs a phone. The laptop runs the phone crate's own pairing, with no network, against
+# the real chip through the firmware's APDU pass-through, and presses the badge's buttons over
+# USB (the firmware's `bench` feature): from home, Both opens the list, and a note is left to
+# go home by itself. The second tap is timed. Then the run unpairs and checks that the old key
+# no longer opens the chip.
+#
+# The badge takes one phone. A badge with a phone paired already answers "pair a phone" with
+# "unpair the current phone first", and the run stops there.
 #
 #   scripts/pair-bench.sh [--port /dev/cu.usbmodempico21] [--state /tmp/pbench] [--no-flash] [--forget | --keep]
 #
 # --forget, the default, forgets the circle the run kept, through the badge's own forget
-# page, once the run is done, so the bench chip's sixteen circle slots do not fill up.
+# page, once the run is done, so the bench chip does not fill up: it holds five circles.
 # --keep leaves it on the badge.
 #
 # Logs land in $STATE/pair.log. The run ends with "pair bench: ok".
@@ -136,24 +141,24 @@ grep -q "^slot $SLOT: refused in no session" "$STATE/public0.txt" || fail "the n
 chip refusals --circle "$SLOT" || fail "an unpaired tap was allowed something, see $LOG"
 
 say "opening pair a phone on the badge"
-chip goto --entry "pair a phone" || fail "could not open pair a phone"
+chip goto --entry "pair a phone" || fail "could not open pair a phone: $(tail -1 "$LOG")"
 chip pairing > "$STATE/pairing.txt" || fail "reading the pairing object"
 grep -q "^pairing: open" "$STATE/pairing.txt" || fail "the pairing object says no pairing is open"
 
-KEY=$(openssl rand -hex 16)
+# The first tap writes the inbox. Both reads it and shows the words. Only if they are the
+# laptop's, Both again, once the question is drawn, pairs. Any other words are answered no.
+# Then the second tap keeps every circle of the badge on the laptop's phone.
+say "pairing as the app does, the laptop as the phone"
+chip pair --name "bench laptop" --state "$STATE/phone" > "$STATE/pair.txt" \
+  || fail "the badge did not pair, see $LOG"
+WORDS=$(sed -n 's/^words: //p' "$STATE/pair.txt")
+PHONE=$(sed -n 's/^phone key: //p' "$STATE/pair.txt")
+KEY=$(sed -n 's/^slot key: //p' "$STATE/pair.txt")
 echo "$KEY" > "$STATE/slot.key"
-say "writing the inbox as the bench laptop"
-chip inbox --name "bench laptop" --key "$KEY" --state "$STATE" > "$STATE/inbox.txt" || fail "writing the inbox"
-WORDS=$(sed -n 's/^words: //p' "$STATE/inbox.txt")
-PHONE=$(sed -n 's/^phone key: //p' "$STATE/inbox.txt")
-say "the laptop shows: $WORDS"
-[ "$(echo "$WORDS" | wc -w | tr -d ' ')" = 6 ] || fail "the laptop shows $(echo "$WORDS" | wc -w | tr -d ' ') words, not six"
-
-# Both reads the inbox and shows the words. Only if they are the laptop's, Both again, once
-# the question is drawn, pairs; any other words are answered no.
-chip press both --until "pairing: " --expect "words $WORDS" --then "paired with" > "$STATE/ask.txt" \
-  || fail "the badge did not pair: $(cat "$STATE/ask.txt")"
-say "the badge showed the same words and paired"
+[ "$(echo "$WORDS" | wc -w | tr -d ' ')" = 6 ] || fail "the laptop showed $(echo "$WORDS" | wc -w | tr -d ' ') words, not six"
+[ -n "$KEY" ] || fail "the second tap kept no slot key"
+say "the laptop showed $WORDS, the badge showed the same words and paired"
+say "$(grep '^second tap: ' "$STATE/pair.txt")"
 
 chip open --key "$KEY" || fail "the slot did not open with the paired key"
 chip hmac --key "$KEY" --circle "$SLOT" --label "chat/gen" || fail "no HMAC with the root of slot $SLOT"

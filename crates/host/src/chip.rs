@@ -7,22 +7,25 @@
 //! cahoots-host chip pairing --serial <port>
 //! cahoots-host chip inbox --serial <port> --name <text> --key <hex> [--state <dir>]
 //! cahoots-host chip open --serial <port> --key <hex>
-//! cahoots-host chip hmac --serial <port> --key <hex> --circle <slot> --label <text>
+//! cahoots-host chip hmac --serial <port> --key <hex> --circle <slot> --label <text> [--hello <seat>]
 //! cahoots-host chip public --serial <port> [--key <hex>]
 //! cahoots-host chip refusals --serial <port> --circle <slot>
 //! cahoots-host chip raw --serial <port> --apdu <hex> [--apdu <hex>]...
 //! cahoots-host chip goto --serial <port> --entry <name>
 //! cahoots-host chip press --serial <port> (left|right|both) [--after <text>] [--until <text> [--expect <text>] [--then <text>]]
 //! cahoots-host chip forget --serial <port> --circle <name>
+//! cahoots-host chip pair --serial <port> --name <text> --state <dir>
 //! ```
 //!
 //! `--key` is the phone slot's 16-byte AES key, in hex. `inbox` signs with a software P-256 key
 //! kept in `--state` (`phone.key`, made on first use), the laptop's stand-in for the phone's
 //! enclave key. `refusals` tries, in no session, what an unpaired tap must not do, and says
-//! what the applet answered to each. `goto` presses through the badge's menu and list to an
-//! entry of the list ("pair a phone", "phone") and opens it; `press` waits for a log line
-//! holding `--after` if given, sends one press, and waits for a line holding `--until` (see
-//! [`press`] for `--expect` and `--then`); `forget` forgets a circle through the badge's pages.
+//! what the applet answered to each. `goto` presses from the badge's home through its list to
+//! an entry ("pair a phone", "phone") and opens it. `press` waits for a log line holding
+//! `--after` if given, sends one press, and waits for a line holding `--until` (see [`press`]
+//! for `--expect` and `--then`). `forget` forgets a circle through the badge's pages. `pair`
+//! runs the app's own pairing, the phone crate's `Phone` with no network, from the badge's
+//! pairing page: both taps, the presses between them, and the second tap timed (see [`pair`]).
 //!
 //! `public` reads the public objects of the circle slots the pairing object names: with
 //! `--key`, in the slot's session, as a paired phone reads them. Without it they are tried
@@ -46,9 +49,12 @@ use cahoots_badge::public::PublicObject;
 use cahoots_chip::{KeyId, KeyKind};
 use cahoots_core::seat::SeatKey;
 use cahoots_phone::nfc::{self, Nfc, Tap, TapError};
-use cahoots_phone::PhoneError;
+use cahoots_phone::signer::SoftSigner;
+use cahoots_phone::{Http, HttpHeader, HttpResponse, Phone, PhoneError, Signer};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// The NFC reader as the phone crate sees it, over the bench pass-through. A tap begins and
@@ -156,6 +162,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "pintest" => return pintest(port, 0x02),
         "starttime" => return pintest(port, 0x03),
         "forget" => return forget(port, req("--circle")?),
+        "pair" => return pair(port, req("--name")?, Path::new(req("--state")?)),
         "press" => {
             let code = match args.get(1).map(String::as_str) {
                 Some("left") => 0,
@@ -214,11 +221,19 @@ pub fn run(args: &[String]) -> Result<(), String> {
             let key = key16(req("--key")?)?;
             let slot: u8 = req("--circle")?.parse().map_err(|_| "--circle: a slot, 0 to 15")?;
             let label = req("--label")?;
+            let hello: Option<u8> = match get("--hello") {
+                Some(h) => Some(h.parse().map_err(|_| "--hello: a seat, 0 to 7")?),
+                None => None,
+            };
             let mut s = tap.open_slot(&key).map_err(tap_error)?;
             // A command with no data first: the MAC after it shows the applet counts it in
             // the encryption counter.
             s.version().map_err(tap_error)?;
-            let mac = s.hmac_root(slot, label.as_bytes()).map_err(tap_error)?;
+            let mac = match hello {
+                Some(other) => s.hmac_hello(slot, other, label.as_bytes()),
+                None => s.hmac_root(slot, label.as_bytes()),
+            }
+            .map_err(tap_error)?;
             s.close().map_err(tap_error)?;
             println!("hmac: {}", hex::encode(mac));
             Ok(())
@@ -342,6 +357,75 @@ fn fields(screen: &str) -> Vec<&str> {
 /// The footer of a list: the circles, or one circle's actions under its name.
 const LIST_FOOTER: &str = "prev  A+B  open  next";
 
+/// The title of home, the page the badge rests on.
+const HOME: &str = "badge";
+
+/// How long a walker waits on a screen it does not press on, or before it has seen any, until
+/// it presses Right to see where the badge is. Longer than a note stays: a note goes home by
+/// itself first.
+const NUDGE_AFTER: Duration = Duration::from_secs(6);
+
+/// What a walker does about one screen of the badge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Walk {
+    /// Press `0` Left, `1` Right or `2` Both.
+    Press(u8),
+    /// Press Both on the list entry the walker is going to.
+    Open,
+    /// Press nothing and wait for the next screen.
+    Wait,
+    /// The walker is where it was going.
+    There,
+    /// The entry was opened and the badge showed something else.
+    Refused,
+}
+
+/// Home: the badge's circles by name over the footer "tap  A+B  menu  menu".
+fn is_home(f: &[&str]) -> bool {
+    f.first() == Some(&HOME) && f.last().is_some_and(|x| x.contains("A+B  menu"))
+}
+
+/// The list of circles, under its usual title or the one it has while the chip is held.
+fn is_list(title: &str) -> bool {
+    title == "circles" || title == "chip needs a restart"
+}
+
+/// The list entry marked with `>`.
+fn chosen<'a>(f: &[&'a str]) -> Option<&'a str> {
+    f.iter().find_map(|x| x.strip_prefix("> "))
+}
+
+/// The press every walker makes on a screen that is not on its own way: Both past the
+/// self-test and from home to the list (never Left there, which opens or closes the window
+/// for a tap), Right along the list, "back" out of a circle's actions, and Left off any other
+/// page with a way back or a question. A note gets no press: it goes home by itself within
+/// five seconds. Neither does a page in the middle of something.
+fn walk_on(f: &[&str]) -> Walk {
+    let title = f.first().copied().unwrap_or("");
+    let footer = f.last().copied().unwrap_or("");
+    if title == "self-test" || footer == "A+B  continue" || is_home(f) {
+        Walk::Press(2)
+    } else if is_list(title) {
+        Walk::Press(1)
+    } else if footer == LIST_FOOTER {
+        Walk::Press(if f.contains(&"> back") { 2 } else { 1 })
+    } else if footer.contains("A+B") || matches!(footer.split("  ").next(), Some("back" | "no" | "refuse")) {
+        Walk::Press(0)
+    } else {
+        Walk::Wait
+    }
+}
+
+/// Press Right once a walker has waited [`NUDGE_AFTER`] on a screen it does not press on, or
+/// with no screen at all: a badge sitting on a page logs nothing until it changes. Right
+/// opens the list from home, moves along a list, and goes back from any other page.
+fn nudge(link: &mut SerialLink, waiting: &mut Option<Instant>) {
+    if waiting.is_some_and(|t| t.elapsed() > NUDGE_AFTER) {
+        *waiting = None;
+        link.send_press(1);
+    }
+}
+
 /// Ask the badge to raise the chip's pin and say nothing on the wire for `seconds`, so a
 /// phone's tap meets the chip powered. The badge's log prints meanwhile.
 fn window(port: &str, seconds: u64) -> Result<(), String> {
@@ -382,15 +466,14 @@ fn pintest(port: &str, request: u8) -> Result<(), String> {
     Ok(())
 }
 
-/// Press through the badge's menu and list to the list entry `entry`, open it, and return
+/// Press through the badge's home and list to the list entry `entry`, open it, and return
 /// once its page is on the screen.
 fn goto(port: &str, entry: &str) -> Result<(), String> {
     let mut link = SerialLink::open(port, "badge").map_err(|e| format!("{port}: {e}"))?;
     link.keep_logs();
     let deadline = Instant::now() + Duration::from_secs(90);
-    let started = Instant::now();
     let mut last = String::new();
-    let mut nudged = false;
+    let mut waiting = Some(Instant::now());
     let mut opened = false;
     while Instant::now() < deadline {
         link.pump();
@@ -400,58 +483,47 @@ fn goto(port: &str, entry: &str) -> Result<(), String> {
                 continue;
             }
             last = screen.to_string();
-            let f = fields(screen);
-            let title = f.first().copied().unwrap_or("");
-            let footer = f.last().copied().unwrap_or("");
-            if footer.contains("discard") || footer.contains("forget") {
-                // Never the screens that lose something: step back off them.
-                link.send_press(0);
-                continue;
-            }
-            let at_entry = match entry {
-                "pair a phone" => title == "pair a phone" && footer.contains("A+B  ready"),
-                "phone" => title == "phone" && footer.contains("A+B  unpair"),
-                _ => false,
-            };
-            if at_entry && opened {
-                println!("on the page: {screen}");
-                return Ok(());
-            }
-            if opened && title != "circles" {
-                return Err(format!("the badge did not open \"{entry}\": {screen}"));
-            }
-            if title == "self-test" || footer == "A+B  continue" {
-                link.send_press(2);
-                continue;
-            }
-            let code = if title == "circles" || title == "chip needs a restart" {
-                match f.iter().find_map(|x| x.strip_prefix("> ")) {
-                    Some(e) if e == entry => {
-                        opened = true;
-                        2
-                    }
-                    _ => 1,
+            waiting = None;
+            match goto_walk(entry, &fields(screen), opened) {
+                Walk::There => {
+                    println!("on the page: {screen}");
+                    return Ok(());
                 }
-            } else if footer == LIST_FOOTER {
-                // A circle's actions: "back" is the list.
-                if f.contains(&"> back") { 2 } else { 1 }
-            } else if footer.contains("A+B") {
-                // Some other page with a question or a way back: Left is back or no.
-                0
-            } else {
-                // A note: any press goes back to the list.
-                1
-            };
-            link.send_press(code);
+                Walk::Refused => return Err(format!("the badge did not open \"{entry}\": {screen}")),
+                Walk::Open => {
+                    opened = true;
+                    link.send_press(2);
+                }
+                Walk::Press(code) => link.send_press(code),
+                Walk::Wait => waiting = Some(Instant::now()),
+            }
         }
-        if !nudged && last.is_empty() && started.elapsed() > Duration::from_millis(1500) {
-            // A badge that was sitting on a screen logs nothing until it changes.
-            nudged = true;
-            link.send_press(1);
-        }
+        nudge(&mut link, &mut waiting);
         std::thread::sleep(Duration::from_millis(5));
     }
     Err(format!("did not reach \"{entry}\" in 90 seconds"))
+}
+
+/// What `goto` does on the screen `f`, on its way to the list entry `entry`, which it chose
+/// already when `opened`.
+fn goto_walk(entry: &str, f: &[&str], opened: bool) -> Walk {
+    let title = f.first().copied().unwrap_or("");
+    let footer = f.last().copied().unwrap_or("");
+    let there = match entry {
+        "pair a phone" => title == "pair a phone" && footer.contains("A+B  ready"),
+        "phone" => title == "phone" && footer.contains("A+B  unpair"),
+        _ => false,
+    };
+    if there && opened {
+        return Walk::There;
+    }
+    if is_list(title) {
+        return if chosen(f) == Some(entry) { Walk::Open } else { Walk::Press(1) };
+    }
+    if opened {
+        return Walk::Refused;
+    }
+    walk_on(f)
 }
 
 /// What `press` waits for. See [`press`].
@@ -462,17 +534,24 @@ struct Presses<'a> {
     then: Option<&'a str>,
 }
 
-/// Wait for `line` to arrive on `link`, `secs` at most, and return it.
-fn wait_line(link: &mut SerialLink, text: &str, secs: u64) -> Result<String, String> {
+/// Wait for a line holding `text` to arrive on `link`, `secs` at most, and return it. The lines
+/// read past it wait in `backlog` for the next call: the badge can send a prompt's line and
+/// its "drawn" in one read, since it sends its log only between draws.
+fn wait_line(link: &mut SerialLink, backlog: &mut VecDeque<String>, text: &str, secs: u64) -> Result<String, String> {
     let deadline = Instant::now() + Duration::from_secs(secs);
-    while Instant::now() < deadline {
-        link.pump();
-        if let Some(l) = link.take_logs().into_iter().find(|l| l.contains(text)) {
-            return Ok(l);
+    loop {
+        while let Some(l) = backlog.pop_front() {
+            if l.contains(text) {
+                return Ok(l);
+            }
         }
+        if Instant::now() >= deadline {
+            return Err(format!("the badge did not say \"{text}\" in {secs} seconds"));
+        }
+        link.pump();
+        backlog.extend(link.take_logs());
         std::thread::sleep(Duration::from_millis(5));
     }
-    Err(format!("the badge did not say \"{text}\" in {secs} seconds"))
 }
 
 /// Wait for a log line holding `after` (60 seconds) if given, send one press, then wait for a
@@ -483,12 +562,20 @@ fn wait_line(link: &mut SerialLink, text: &str, secs: u64) -> Result<String, Str
 /// missed between the two presses.
 fn press(port: &str, code: u8, p: Presses<'_>) -> Result<(), String> {
     let mut link = SerialLink::open(port, "badge").map_err(|e| format!("{port}: {e}"))?;
+    press_on(&mut link, code, p)
+}
+
+/// [`press`], on a link already open.
+fn press_on(link: &mut SerialLink, code: u8, p: Presses<'_>) -> Result<(), String> {
     link.keep_logs();
+    let mut backlog = VecDeque::new();
     if let Some(a) = p.after {
-        wait_line(&mut link, a, 60)?;
+        wait_line(link, &mut backlog, a, 60)?;
         // The badge throws away a gesture seen while its prompt is drawn.
         std::thread::sleep(Duration::from_millis(600));
     }
+    // What the badge said before the press does not answer it.
+    backlog.clear();
     link.send_press(code);
     let Some(u) = p.until else {
         let deadline = Instant::now() + Duration::from_secs(3);
@@ -499,21 +586,22 @@ fn press(port: &str, code: u8, p: Presses<'_>) -> Result<(), String> {
         }
         return Ok(());
     };
-    let line = wait_line(&mut link, u, 20)?;
+    let line = wait_line(link, &mut backlog, u, 20)?;
     println!("{line}");
     if let Some(e) = p.expect {
         if !line.contains(e) {
-            wait_line(&mut link, "drawn", 10)?;
+            wait_line(link, &mut backlog, "drawn", 10)?;
             std::thread::sleep(Duration::from_millis(600));
             link.send_press(0);
             return Err(format!("the badge said \"{line}\", not \"{e}\". Answered no"));
         }
     }
     if let Some(t) = p.then {
-        wait_line(&mut link, "drawn", 10)?;
+        wait_line(link, &mut backlog, "drawn", 10)?;
         std::thread::sleep(Duration::from_millis(600));
+        backlog.clear();
         link.send_press(code);
-        println!("{}", wait_line(&mut link, t, 20)?);
+        println!("{}", wait_line(link, &mut backlog, t, 20)?);
     }
     Ok(())
 }
@@ -525,9 +613,8 @@ fn forget(port: &str, name: &str) -> Result<(), String> {
     let mut link = SerialLink::open(port, "badge").map_err(|e| format!("{port}: {e}"))?;
     link.keep_logs();
     let deadline = Instant::now() + Duration::from_secs(120);
-    let started = Instant::now();
     let mut last = String::new();
-    let mut nudged = false;
+    let mut waiting = Some(Instant::now());
     let done = format!("forgotten: {name} ");
     while Instant::now() < deadline {
         link.pump();
@@ -541,38 +628,257 @@ fn forget(port: &str, name: &str) -> Result<(), String> {
                 continue;
             }
             last = screen.to_string();
-            let f = fields(screen);
-            let title = f.first().copied().unwrap_or("");
-            let footer = f.last().copied().unwrap_or("");
-            // A page one of the circle's actions opened has its header, "name  tier n".
-            let ours = title.strip_prefix(name).is_some_and(|rest| rest.starts_with("  "));
-            let code = if title == "self-test" || footer == "A+B  continue" {
-                2
-            } else if title == "circles" || title == "chip needs a restart" {
-                if f.iter().find_map(|x| x.strip_prefix("> ")) == Some(name) { 2 } else { 1 }
-            } else if footer == LIST_FOOTER && title == name {
-                // Its actions, under its name: open "forget this circle".
-                if f.contains(&"> forget this circle") { 2 } else { 1 }
-            } else if footer == LIST_FOOTER {
-                // Another circle's actions: "back" is the list.
-                if f.contains(&"> back") { 2 } else { 1 }
-            } else if ours && f.get(1) == Some(&"forget this circle") {
-                2
-            } else if title == "forget this circle?" {
-                if f.get(1) == Some(&name) { 2 } else { 0 }
-            } else if footer.contains("A+B") {
-                0
-            } else {
-                1
-            };
-            link.send_press(code);
+            waiting = None;
+            match forget_walk(name, &fields(screen)) {
+                Walk::Press(code) => link.send_press(code),
+                _ => waiting = Some(Instant::now()),
+            }
         }
-        if !nudged && last.is_empty() && started.elapsed() > Duration::from_millis(1500) {
-            nudged = true;
-            link.send_press(1);
-        }
+        nudge(&mut link, &mut waiting);
         std::thread::sleep(Duration::from_millis(5));
     }
     Err(format!("did not forget \"{name}\" in 120 seconds"))
 }
 
+/// What `forget` does on the screen `f`, on its way to forgetting the circle `name`.
+fn forget_walk(name: &str, f: &[&str]) -> Walk {
+    let title = f.first().copied().unwrap_or("");
+    let footer = f.last().copied().unwrap_or("");
+    // A page one of the circle's actions opened has its header, "name  tier n".
+    let ours = title.strip_prefix(name).is_some_and(|rest| rest.starts_with("  "));
+    if is_list(title) {
+        Walk::Press(if chosen(f) == Some(name) { 2 } else { 1 })
+    } else if footer == LIST_FOOTER && title == name {
+        // Its actions, under its name: open "forget this circle".
+        Walk::Press(if f.contains(&"> forget this circle") { 2 } else { 1 })
+    } else if ours && f.get(1) == Some(&"forget this circle") {
+        Walk::Press(2)
+    } else if title == "forget this circle?" {
+        Walk::Press(if f.get(1) == Some(&name) { 2 } else { 0 })
+    } else {
+        walk_on(f)
+    }
+}
+
+/// The laptop's stand-in for the phone's Secure Enclave and keychain, for [`pair`]: the phone
+/// crate's software signer, which also keeps a copy of the last secret put, the phone slot's
+/// key, for the bench's checks after the pairing.
+#[derive(Clone, Default)]
+struct BenchSigner {
+    soft: SoftSigner,
+    slot_key: Arc<Mutex<Option<Vec<u8>>>>,
+}
+
+impl Signer for BenchSigner {
+    fn make_key(&self, label: String) -> Result<Vec<u8>, PhoneError> {
+        self.soft.make_key(label)
+    }
+    fn sign(&self, label: String, message: Vec<u8>) -> Result<Vec<u8>, PhoneError> {
+        self.soft.sign(label, message)
+    }
+    fn batch_begin(&self) {
+        self.soft.batch_begin();
+    }
+    fn batch_end(&self) {
+        self.soft.batch_end();
+    }
+    fn put_secret(&self, label: String, secret: Vec<u8>) -> Result<(), PhoneError> {
+        if let Ok(mut k) = self.slot_key.lock() {
+            *k = Some(secret.clone());
+        }
+        self.soft.put_secret(label, secret)
+    }
+    fn get_secret(&self, label: String) -> Result<Option<Vec<u8>>, PhoneError> {
+        self.soft.get_secret(label)
+    }
+}
+
+/// No network for the bench's phone: the badge's other circles may be circles a person
+/// chats in, and the bench must not post their bumps or the badge's card to their relay.
+struct Offline;
+
+fn offline() -> PhoneError {
+    PhoneError::Network {
+        message: "the bench phone has no network".into(),
+    }
+}
+
+impl Http for Offline {
+    fn get(&self, _url: String) -> Result<Vec<u8>, PhoneError> {
+        Err(offline())
+    }
+    fn post(&self, _url: String, _body: Vec<u8>) -> Result<Vec<u8>, PhoneError> {
+        Err(offline())
+    }
+    fn request(
+        &self,
+        _method: String,
+        _url: String,
+        _headers: Vec<HttpHeader>,
+        _body: Option<Vec<u8>>,
+    ) -> Result<HttpResponse, PhoneError> {
+        Err(offline())
+    }
+}
+
+/// The bench pass-through as the phone's reader, shared with the presses between the two
+/// taps, counting the APDUs it carries.
+struct SharedNfc(Arc<SerialNfc>, Arc<AtomicU32>);
+
+impl Nfc for SharedNfc {
+    fn begin(&self, prompt: String) -> Result<(), PhoneError> {
+        self.0.begin(prompt)
+    }
+    fn transceive(&self, apdu: Vec<u8>) -> Result<Vec<u8>, PhoneError> {
+        self.1.fetch_add(1, Ordering::SeqCst);
+        self.0.transceive(apdu)
+    }
+    fn end(&self, message: String, failed: bool) -> Result<(), PhoneError> {
+        self.0.end(message, failed)
+    }
+}
+
+/// Pair the laptop with the badge as the app pairs a phone, with the phone crate's own
+/// `Phone`, kept in `dir` (made fresh) and given no network. The badge must be on its pairing
+/// page. `pair_card_start` is the first tap: it writes the inbox under `name` and shows the
+/// words. Both on the badge shows its words, and only if they are the laptop's, Both again
+/// pairs. `pair_card_finish` is the second tap: it keeps every circle of the badge as a card
+/// circle, with its chat key and the hello words ahead. It is timed. Prints the words, the
+/// phone's key, the second tap's time and the phone slot's key.
+fn pair(port: &str, name: &str, dir: &Path) -> Result<(), String> {
+    if dir.exists() {
+        std::fs::remove_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let reader = Arc::new(SerialNfc::open(port)?);
+    let apdus = Arc::new(AtomicU32::new(0));
+    let signer = BenchSigner::default();
+    let phone = Phone::open(
+        dir.to_string_lossy().into_owned(),
+        Box::new(signer.clone()),
+        Box::new(Offline),
+        Box::new(SharedNfc(reader.clone(), apdus.clone())),
+    )
+    .map_err(|e| e.to_string())?;
+    let preview = phone
+        .pair_card_start(name.into())
+        .map_err(|e| format!("the first tap: {e}"))?;
+    let public = signer
+        .soft
+        .public(cahoots_phone::PHONE_KEY)
+        .ok_or("the phone made no key of its own")?;
+    let words = preview.words.join(" ");
+    println!("phone key: {}", hex::encode(public));
+    println!("words: {words}");
+    {
+        let mut link = reader.link.lock().map_err(|_| "the reader's link is poisoned")?;
+        link.keep_logs();
+        link.take_logs();
+        let expect = format!("words {words}");
+        let p = Presses { after: None, until: Some("pairing: "), expect: Some(&expect), then: Some("paired with") };
+        press_on(&mut link, 2, p)?;
+    }
+    apdus.store(0, Ordering::SeqCst);
+    let started = Instant::now();
+    let kept = phone
+        .pair_card_finish()
+        .map_err(|e| format!("the second tap: {e}"))?;
+    let took = started.elapsed();
+    println!(
+        "second tap: {} circles kept, {} APDUs, {:.1} s",
+        kept.len(),
+        apdus.load(Ordering::SeqCst),
+        took.as_secs_f64()
+    );
+    let key = signer
+        .slot_key
+        .lock()
+        .ok()
+        .and_then(|k| k.clone())
+        .ok_or("the phone kept no slot key")?;
+    println!("slot key: {}", hex::encode(key));
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The walk for a `screen: ` line as the badge logs it.
+    fn goto_on(entry: &str, screen: &str, opened: bool) -> Walk {
+        goto_walk(entry, &fields(screen), opened)
+    }
+
+    fn forget_on(name: &str, screen: &str) -> Walk {
+        forget_walk(name, &fields(screen))
+    }
+
+    const HOME_SCREEN: &str = "badge | owner-bench3 | pair-1712 | closed to taps | tap  A+B  menu  menu";
+    const OPEN_HOME: &str = "badge | owner-bench3 | open for a tap, 2 min | tap  A+B  menu  menu";
+
+    #[test]
+    fn home_opens_the_list_with_both_never_left() {
+        for screen in [HOME_SCREEN, OPEN_HOME] {
+            assert_eq!(goto_on("pair a phone", screen, false), Walk::Press(2));
+            assert_eq!(forget_on("pair-1712", screen), Walk::Press(2));
+        }
+    }
+
+    #[test]
+    fn goto_moves_along_the_list_and_opens_its_entry() {
+        let on_circle = "circles | > owner-bench3 |   pair-1712 |   new circle |   pair a phone |   back | prev  A+B  open  next";
+        let on_pair = "circles |   owner-bench3 |   pair-1712 |   new circle | > pair a phone |   back | prev  A+B  open  next";
+        assert_eq!(goto_on("pair a phone", on_circle, false), Walk::Press(1));
+        assert_eq!(goto_on("pair a phone", on_pair, false), Walk::Open);
+        assert_eq!(goto_on("phone", on_pair, false), Walk::Press(1));
+    }
+
+    #[test]
+    fn goto_stops_on_the_page_it_opened_and_fails_on_anything_else() {
+        let pair = "pair a phone | hold the phone | to the chip | then press both | back  A+B  ready  back";
+        let phone = "phone | bench laptop | reads and posts in | this badge's circles | unpairing ends its taps | back  A+B  unpair  back";
+        assert_eq!(goto_on("pair a phone", pair, true), Walk::There);
+        assert_eq!(goto_on("phone", phone, true), Walk::There);
+        assert_eq!(goto_on("pair a phone", "unpair the current phone first", true), Walk::Refused);
+        // A pairing page the walker did not open is left, which closes the pairing.
+        assert_eq!(goto_on("pair a phone", pair, false), Walk::Press(0));
+    }
+
+    #[test]
+    fn a_note_gets_no_press_since_it_goes_home_by_itself() {
+        for note in ["phone unpaired | its taps end now", "saved pair-1712", "not paired", "circle forgotten"] {
+            assert_eq!(goto_on("phone", note, false), Walk::Wait, "{note}");
+            assert_eq!(forget_on("pair-1712", note), Walk::Wait, "{note}");
+        }
+    }
+
+    #[test]
+    fn a_circles_actions_and_pages_lead_back_to_the_list() {
+        let actions = "owner-bench3 | > hello words |   key as code |   grants |   forget this circle |   back | prev  A+B  open  next";
+        let at_back = "owner-bench3 |   hello words |   key as code |   grants |   forget this circle | > back | prev  A+B  open  next";
+        let words = "owner-bench3  tier 2 | hello words | a | b | c | d | e | f | back  back";
+        assert_eq!(goto_on("phone", actions, false), Walk::Press(1));
+        assert_eq!(goto_on("phone", at_back, false), Walk::Press(2));
+        assert_eq!(goto_on("phone", words, false), Walk::Press(0));
+        assert_eq!(forget_on("pair-1712", actions), Walk::Press(1));
+        assert_eq!(forget_on("pair-1712", at_back), Walk::Press(2));
+        assert_eq!(forget_on("pair-1712", words), Walk::Press(0));
+    }
+
+    #[test]
+    fn forget_opens_its_own_circle_and_answers_only_its_own_question() {
+        let list = "circles |   owner-bench3 | > pair-1712 |   new circle |   back | prev  A+B  open  next";
+        let actions = "pair-1712 |   hello words |   key as code |   grants | > forget this circle |   back | prev  A+B  open  next";
+        let page = "pair-1712  tier 2 | forget this circle | Both to forget this circle | the others stay | back  A+B  choose  back";
+        let ours = "forget this circle? | pair-1712 | its words, pad and keys | are erased for good | other circles stay | back  A+B  forget  back";
+        let other = "forget this circle? | owner-bench3 | its words, pad and keys | are erased for good | other circles stay | back  A+B  forget  back";
+        assert_eq!(forget_on("pair-1712", list), Walk::Press(2));
+        assert_eq!(forget_on("owner-bench4", list), Walk::Press(1));
+        assert_eq!(forget_on("pair-1712", actions), Walk::Press(2));
+        assert_eq!(forget_on("pair-1712", page), Walk::Press(2));
+        assert_eq!(forget_on("pair-1712", ours), Walk::Press(2));
+        assert_eq!(forget_on("pair-1712", other), Walk::Press(0));
+        // Another circle's forget page is left by Left, back to its actions.
+        let theirs = "owner-bench3  tier 2 | forget this circle | Both to forget this circle | the others stay | back  A+B  choose  back";
+        assert_eq!(forget_on("pair-1712", theirs), Walk::Press(0));
+    }
+}

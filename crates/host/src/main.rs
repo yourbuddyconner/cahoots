@@ -20,7 +20,7 @@
 //! cahoots-host grant (--serial <port> | --sim <socket>) --circle <name> --to <key hex> --purpose <name>... --budget N --until N [--depth N] [--v2] [--out <file>]
 //! cahoots-host grant request (--serial <port> | --sim <socket>) --circle <name> --agent <text> --author <text> [--location <repo>] --budget N (--until YYYY-MM-DD | --standing)
 //! cahoots-host grant list
-//! cahoots-host chip (pairing|inbox|open|hmac|public|refusals|goto|press) --serial <port> ...
+//! cahoots-host chip (pairing|inbox|open|hmac|public|refusals|raw|goto|press|forget|pair) --serial <port> ...
 //! cahoots-host grant show <file>
 //! cahoots-host grant forget <file>
 //! cahoots-host grant verify <file> --state <dir> --circle <name>
