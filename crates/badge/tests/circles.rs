@@ -835,6 +835,10 @@ fn a_policy_upgrade_cut_between_two_circles_leaves_no_object_of_the_first_policy
     let c = b.board().chip.as_mut().unwrap();
     c.no_session_for_test();
     assert!(c.read_binary(public_id(slots[1])).is_ok());
+    // The pairing object a phone reads names no slot while the objects are made again, so it
+    // names no emptied id.
+    let pairing = cahoots_badge::pairing::PairingObject::decode(&c.read_binary(KeyId::PAIRING).unwrap()).unwrap();
+    assert_eq!(pairing.circles, 0);
 
     b.board().power_cycle();
     b.board().presses.push_back(Press::Both);

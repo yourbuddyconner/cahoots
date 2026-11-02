@@ -669,15 +669,34 @@ impl<B: Board> Badge<B> {
                 }
             }
             // An object made new that failed may have left the id empty: it is not the
-            // badge's until written again.
+            // badge's until written again, and a placeholder stands there meanwhile, so no tap
+            // can fill it.
             Err(_) if !own => {
                 if let Some(e) = record.entry_mut(slot) {
                     e.set_public_written(false);
                 }
+                self.placeholder_if_empty(slot);
             }
             Err(_) => {}
         }
         r
+    }
+
+    /// A placeholder at circle slot `slot`'s public id, if nothing stands there.
+    fn placeholder_if_empty(&mut self, slot: u8) {
+        let Some(chip) = self.board.chip_begin() else {
+            return;
+        };
+        let id = chip::public_id(slot);
+        let made = match chip.exists(id) {
+            Ok(false) => chip::make_placeholder_at(chip, id),
+            Ok(true) => return,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = made {
+            self.board
+                .log(&format!("chip: slot {slot} public id left empty, no placeholder: {e:?}"));
+        }
     }
 
     /// The chip left the phone slot's id empty: keep the pin high until the badge is turned
@@ -769,9 +788,16 @@ impl<B: Board> Badge<B> {
     /// the circle slots the chip record vouches for ([`ChipRecord::circle_mask`]). After every
     /// change to which circles the chip holds, and when a pairing closes.
     fn sync_pairing(&mut self) {
+        self.pairing_synced();
+    }
+
+    /// [`Badge::sync_pairing`], and whether the pairing object names no more than the record
+    /// vouches for now: false when it could not be written. A badge with no current record has
+    /// none to write.
+    fn pairing_synced(&mut self) -> bool {
         let circles = match self.board.chip_record_load() {
             Ok(Some(r)) if r.is_current() => r.circle_mask(),
-            _ => return,
+            _ => return true,
         };
         let object = match &self.pairing {
             Some((nonce, key)) => pairing::PairingObject {
@@ -783,11 +809,13 @@ impl<B: Board> Badge<B> {
             None => pairing::PairingObject::closed(circles),
         };
         let Some(chip) = self.board.chip_begin() else {
-            return;
+            return false;
         };
         if let Err(e) = chip::write_pairing(chip, &object) {
             self.board.log(&format!("pairing: the pairing object was not written: {e:?}"));
+            return false;
         }
+        true
     }
 
     /// What a phone wrote in the inbox for the open pairing: `Ok(None)` while the inbox is
@@ -1467,8 +1495,13 @@ impl<B: Board> Badge<B> {
             let had = self
                 .placeholders_out(&mut record)
                 .map_err(|_| String::from("flash: chip record failed"))?;
-            if vouched {
-                self.sync_pairing();
+            // A pairing object that still names the slot stops the forget: nothing is deleted,
+            // and the next boot, with the placeholders to be made again, deletes the slot's
+            // objects and names it no more.
+            if vouched && !self.pairing_synced() {
+                return Err(String::from(
+                    "pairing object: write failed, the next boot deletes the circle's chip objects",
+                ));
             }
             let Some(chip) = self.board.chip_begin() else {
                 return forgot.and(stored);
@@ -1753,6 +1786,13 @@ impl<B: Board> Badge<B> {
             self.board.log("chip record: write failed");
             return;
         }
+        // The pairing object stops naming them before any is deleted, so a phone never reads an
+        // emptied id. The boot names them again once they are made.
+        if !self.pairing_synced() {
+            self.board
+                .log("chip: public objects not made again under the new policy, tried at the next boot");
+            return;
+        }
         // Every other slot of the record has no object the badge can read back: one a boot cut
         // off before it was made again may still be of the first policy. Each is made again
         // from its circle's record, with no grant, no phone and no pending bumps. A slot no
@@ -1915,6 +1955,10 @@ impl<B: Board> Badge<B> {
                 None
             }
         };
+        let slots: Vec<u8> = record
+            .as_ref()
+            .map(|r| r.slots.iter().map(|e| e.slot).collect())
+            .unwrap_or_default();
         let had = match record.as_mut() {
             Some(r) => {
                 r.slots.clear();
@@ -1922,13 +1966,18 @@ impl<B: Board> Badge<B> {
                     Ok(had) => had,
                     Err(()) => {
                         self.board.log("chip record: write failed, chip objects left as they are");
-                        return 0;
+                        return self.objects_in(&slots);
                     }
                 }
             }
             None => None,
         };
-        self.sync_pairing();
+        // A pairing object that still names a slot stops the wipe, as for one circle: the next
+        // boot deletes what the record no longer knows and makes the placeholders again.
+        if !self.pairing_synced() {
+            self.board.log("chip: chip objects left as they are, the next boot deletes them");
+            return self.objects_in(&slots);
+        }
         let all: Vec<u8> = (0..chip::CIRCLE_SLOTS).collect();
         let mut after = record.unwrap_or_default();
         let Some(chip) = self.board.chip_begin() else {
@@ -1939,7 +1988,7 @@ impl<B: Board> Badge<B> {
             Err(e) => {
                 self.board.log(&format!("chip: wipe failed: {e:?}"));
                 self.refill(&mut after, had, &all);
-                return 0;
+                return self.objects_in(&slots);
             }
         };
         self.log_left(&left);
@@ -1951,6 +2000,21 @@ impl<B: Board> Badge<B> {
         // Every circle slot's public id holds a placeholder again.
         self.refill(&mut after, had, &all);
         left.len()
+    }
+
+    /// How many objects stand in the circle slots `slots`: what a wipe that stopped before its
+    /// deletes leaves. One per slot, the seat key, when the chip cannot list them.
+    fn objects_in(&mut self, slots: &[u8]) -> usize {
+        let Some(chip) = self.board.chip_begin() else {
+            return slots.len();
+        };
+        match chip.ids() {
+            Ok(ids) => ids
+                .iter()
+                .filter(|id| id.circle_slot().is_some_and(|s| slots.contains(&s)))
+                .count(),
+            Err(_) => slots.len(),
+        }
     }
 
     /// Log each object a wipe could not delete.
@@ -2218,6 +2282,8 @@ impl<B: Board> Badge<B> {
             chat_generation: None,
             public_written: Some(true),
         });
+        // A slot a forget or a wipe left stuck, whose object went since, is the circle's now.
+        record.set_stuck(slot, false);
         record.placeholders = had;
         self.board
             .chip_record_store(&record)
@@ -2269,8 +2335,11 @@ impl<B: Board> Badge<B> {
                 .log(&format!("chip record: write failed, slot {slot} left as it is"));
             return;
         };
-        if vouched {
-            self.sync_pairing();
+        if vouched && !self.pairing_synced() {
+            self.board.log(&format!(
+                "chip: slot {slot} left as it is, the next boot deletes it"
+            ));
+            return;
         }
         if let Some(chip) = self.board.chip_begin() {
             match chip::delete_slot(chip, slot) {

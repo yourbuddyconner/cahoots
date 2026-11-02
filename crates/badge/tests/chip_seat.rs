@@ -832,3 +832,59 @@ fn a_first_boot_whose_placeholders_fail_otherwise_owns_the_chip_and_says_they_ar
         assert!(c.exists(id).unwrap(), "{id:?}");
     }
 }
+
+#[test]
+fn a_circle_kept_in_a_slot_marked_stuck_reaches_the_pairing_object() {
+    // A forget left slot 0 stuck with no entry, for an object that would not go then, and
+    // went later.
+    let (mut b1, mut b2) = pile_of_two((true, false));
+    let mut r = b1.board().chip_record_load().unwrap().unwrap();
+    r.set_stuck(0, true);
+    b1.board().chip_record_store(&r).unwrap();
+    drive(&mut b1, &mut b2, |b1, b2, _, _| has_seat(b1) && has_seat(b2));
+    b2.board().presses.push_back(Press::Both);
+    let mut at = (false, false);
+    drive(&mut b1, &mut b2, |_, _, s1, s2| {
+        at.0 |= *s1 == Step::Prompt;
+        at.1 |= *s2 == Step::Prompt;
+        at.0 && at.1
+    });
+    b1.board().presses.push_back(Press::Both);
+    b2.board().presses.push_back(Press::Both);
+    let mut kept = (false, false);
+    drive(&mut b1, &mut b2, |_, _, s1, s2| {
+        kept.0 |= *s1 == Step::Kept;
+        kept.1 |= *s2 == Step::Kept;
+        kept.0 && kept.1
+    });
+    assert_eq!(b1.circle().unwrap().chip_slot, Some(0));
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert!(!r.is_stuck(0));
+    assert_eq!(r.circle_mask(), 1);
+    // The pairing object a phone reads names the new circle's slot.
+    let c = b1.board().chip.as_mut().unwrap();
+    c.no_session_for_test();
+    let pairing = cahoots_badge::pairing::PairingObject::decode(&c.read_binary(KeyId::PAIRING).unwrap()).unwrap();
+    assert_eq!(pairing.circles, 1);
+}
+
+#[test]
+fn a_wipe_whose_chip_record_cannot_be_written_deletes_nothing_and_says_what_stayed() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    let board = b1.board();
+    board.a_down = true;
+    board.release_at_ms = board.elapsed_ms + 3000;
+    board.fail_chip_record_store = true;
+    b1.boot();
+    // The circle's five objects stay, and the record still vouches for them, as the pairing
+    // object does: nothing a phone reads is emptied.
+    assert_eq!(circle_objects(&mut b1).len(), KEPT_OBJECTS);
+    assert!(b1
+        .board()
+        .statuses()
+        .iter()
+        .any(|s| s == "circle forgotten\n5 chip objects could not be deleted\nrelease A"));
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert_eq!(r.circle_mask(), 1);
+    assert!(chip(&mut b1).exists(id(KeyKind::Public, 0)).unwrap());
+}

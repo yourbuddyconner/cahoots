@@ -189,6 +189,8 @@ pub struct FakeBoard {
     pub name: String,
     /// `forget` fails at the ledger erase, after the record and the pad are gone.
     pub fail_ledger_erase: bool,
+    /// With this set, storing the chip record fails and changes nothing.
+    pub fail_chip_record_store: bool,
     /// The gestures `press()` hands out, one per call, then `Press::None`.
     pub presses: VecDeque<Press>,
     pub a_down: bool,
@@ -342,6 +344,7 @@ impl FakeBoard {
             pending: None,
             name: "fakes".into(),
             fail_ledger_erase: false,
+            fail_chip_record_store: false,
             presses: VecDeque::new(),
             a_down: false,
             release_at_ms: 3000,
@@ -697,6 +700,9 @@ impl Board for FakeBoard {
         }
     }
     fn chip_record_store(&mut self, r: &ChipRecord) -> Result<(), BoardError> {
+        if self.fail_chip_record_store {
+            return Err(BoardError::Storage);
+        }
         self.chip_record = Some(r.to_stored());
         Ok(())
     }

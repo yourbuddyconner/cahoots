@@ -338,6 +338,48 @@ fn a_forget_that_cannot_empty_its_slot_marks_it_stuck_and_vouches_for_nothing() 
     assert!(common::is_placeholder(c, chip::public_id(0)));
 }
 
+/// A pairing makes the public object of a circle whose object the badge had not written new.
+/// When the write fails after the old one was deleted, the id holds a placeholder, not
+/// nothing a tap could fill.
+#[test]
+fn a_public_write_that_fails_at_pairing_leaves_a_placeholder_at_the_id() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    let mut r = b1.board().chip_record_load().unwrap().unwrap();
+    r.entry_mut(0).unwrap().set_public_written(false);
+    b1.board().chip_record_store(&r).unwrap();
+    b1.pair_open().unwrap();
+    phone_taps(&mut b1, "Conner's phone", [7; 16]);
+    let read = b1.pair_read_inbox().unwrap().unwrap();
+    b1.board().chip.as_mut().unwrap().fail_next_create_for_test();
+    assert!(b1.pair_accept(read).is_err());
+    let c = b1.board().owner_chip();
+    assert!(common::is_placeholder(c, chip::public_id(0)));
+    assert_eq!(common::empty_public_ids(c), Vec::<KeyId>::new());
+}
+
+/// A forget whose pairing object cannot be written deletes nothing: the next boot deletes the
+/// slot's objects and makes its placeholder again.
+#[test]
+fn a_forget_whose_pairing_object_is_not_written_deletes_nothing_until_the_next_boot() {
+    let (mut b1, _b2) = kept_pair((true, false));
+    to_the_forget_question(&mut b1);
+    // Gone, as a write that fails would leave it unwritten.
+    b1.board().owner_chip().delete(KeyId::PAIRING).unwrap();
+    press(&mut b1, Press::Both);
+    assert!(b1.circles().is_empty());
+    assert!(b1.board().log.iter().any(|l| l.starts_with("forget: pairing object: write failed")));
+    assert!(b1.board().owner_chip().exists(KeyId::new(KeyKind::Seat, 0)).unwrap());
+    let r = b1.board().chip_record_load().unwrap().unwrap();
+    assert!(r.slots.is_empty());
+    assert_eq!(r.placeholders, None);
+    b1.board().power_cycle();
+    b1.boot();
+    let c = b1.board().owner_chip();
+    assert!(!c.exists(KeyId::new(KeyKind::Seat, 0)).unwrap());
+    assert!(common::is_placeholder(c, chip::public_id(0)));
+    assert_eq!(tapped(&mut b1).circles, 0);
+}
+
 #[test]
 fn keeping_a_circle_writes_hello_objects_and_a_public_object() {
     let (mut b1, mut b2) = kept_pair((true, true));
