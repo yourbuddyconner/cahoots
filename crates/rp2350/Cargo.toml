@@ -11,6 +11,8 @@ publish = false
 # badge built with this answers consent prompts from a cable, which defeats the point of
 # the buttons, so the boot line says BENCH BUILD and release firmware never sets it.
 bench = ["cahoots-chip/bench"]
+# A pad-bridge finder for a hand-wired board: logs which GPIOs follow which, never runs the badge.
+pintest = []
 
 [dependencies]
 cahoots-core = { path = "../core", default-features = false }

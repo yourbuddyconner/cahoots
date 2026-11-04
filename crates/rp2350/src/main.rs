@@ -16,6 +16,8 @@ mod clock;
 mod display;
 mod entropy;
 mod store;
+#[cfg(feature = "pintest")]
+mod pintest;
 
 use alloc::format;
 use board::PicoBoard;
@@ -174,7 +176,18 @@ fn main() -> ! {
     );
     #[cfg(feature = "bench")]
     log!("BENCH BUILD: the laptop can press the buttons over USB; not for anyone's keys");
+    #[cfg(feature = "pintest")]
+    pintest::run(timer);
 
+    #[cfg(feature = "bench")]
+    {
+        log!("boot: usb and uarts up, pumping before the screen");
+        for _ in 0..30 {
+            link::usb_pump();
+            let mut d = timer;
+            d.delay_ms(100);
+        }
+    }
     // The e-paper on SPI0, V1's pins: CLK GP18, DIN GP19, CS GP17, DC GP16, RST GP20, BUSY GP21.
     let spi_pins: display::SpiPins = (pins.gpio19.reconfigure(), pins.gpio18.reconfigure());
     let spi = hal::spi::Spi::<_, _, _, 8>::new(pac.SPI0, spi_pins).init(
@@ -189,6 +202,8 @@ fn main() -> ! {
     let busy = pins.gpio21.into_pull_down_input();
     let screen = display::Epd::new(spi, cs, dc, rst, busy, timer).expect("e-paper");
     log!("e-paper up");
+    #[cfg(feature = "bench")]
+    for _ in 0..5 { link::usb_pump(); let mut d = timer; d.delay_ms(100); }
 
     // The buttons: A on GP14, B on GP15, each to ground, pulled up here.
     let _a = pins.gpio14.into_pull_up_input();
