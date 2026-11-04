@@ -1,6 +1,6 @@
 # Use Cahoots in your browser
 
-The [Cahoots app](https://cahoots.network/app/) works on phones and laptops. Your circles, keys, and message history stay in the browser you use. You don’t need an account.
+The [Cahoots app](https://cahoots.network/app/) works on phones and laptops. Your circles, keys, and message history stay in the browser you use. You don’t need an account. In Chrome or Edge on a desktop, a badge on a USB cable can join a circle the browser creates: see [create a circle](ceremony-guide.md#with-badges-in-a-pile).
 
 New to Cahoots? Start with [Getting started](getting-started.md). The app also shows a short guide on first use. You can reopen it from the home screen’s **More options** menu by selecting **How Cahoots works**.
 

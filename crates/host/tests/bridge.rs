@@ -8,7 +8,7 @@ use cahoots_core::frame;
 use cahoots_core::manifest::{Manifest, SealedManifest};
 use cahoots_core::params::CircleParams;
 use cahoots_hal::Link;
-use cahoots_host::bridge::{Bridge, BridgeError, BridgeStep};
+use cahoots_host::bridge::{new as new_bridge, Bridge, BridgeError, BridgeStep, Run as _};
 use cahoots_host::link::{Absent, SocketLink};
 use cahoots_host::pile::spawn_card;
 use cahoots_phone::signer::SoftSigner;
@@ -139,7 +139,7 @@ fn a_phone_hosts_two_cards_through_the_bridge_and_a_phone_joiner() {
         Some(12),
     );
 
-    let mut bridge = Bridge::new(Channel::from_offer(&code).unwrap(), 2).unwrap();
+    let mut bridge = new_bridge(Channel::from_offer(&code).unwrap(), 2).unwrap();
     let (codes_tx, codes_rx) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
     let bridge_thread = {
@@ -231,7 +231,7 @@ fn the_bridge_refuses_a_pile_that_does_not_match_the_offer() {
     let (_, text) = offer_text(4, 2, b"host");
     let offer = Channel::from_offer(&text).unwrap();
     assert!(matches!(
-        Bridge::new(offer, 3),
+        new_bridge(offer, 3),
         Err(BridgeError::Count { pile: 3, offer: 2 })
     ));
 }
@@ -239,7 +239,7 @@ fn the_bridge_refuses_a_pile_that_does_not_match_the_offer() {
 /// A bridge and the far end of its cable, with a card's first ring frame already read so
 /// the bridge reads the relay.
 fn started_bridge(text: &str) -> (Bridge, SocketLink, UnixStream) {
-    let bridge = Bridge::new(Channel::from_offer(text).unwrap(), 2).unwrap();
+    let bridge = new_bridge(Channel::from_offer(text).unwrap(), 2).unwrap();
     start(bridge)
 }
 
@@ -315,9 +315,9 @@ fn an_abort_from_the_pile_ends_the_run() {
 #[test]
 fn a_pile_with_too_few_cards_is_named_after_a_while() {
     let (_, text) = offer_text(4, 2, b"host");
-    let bridge = Bridge::new(Channel::from_offer(&text).unwrap(), 2)
+    let bridge = new_bridge(Channel::from_offer(&text).unwrap(), 2)
         .unwrap()
-        .with_pile_deadline(Duration::from_millis(300));
+        .with_pile_deadline_ms(300);
     // Only card 1 is there: seat 2's parameters never come down.
     let (mut bridge, mut link, _far) = start(bridge);
     let begun = Instant::now();
@@ -333,9 +333,9 @@ fn a_pile_with_too_few_cards_is_named_after_a_while() {
 #[test]
 fn a_whole_pile_is_not_named_too_small() {
     let (_, text) = offer_text(4, 2, b"host");
-    let bridge = Bridge::new(Channel::from_offer(&text).unwrap(), 2)
+    let bridge = new_bridge(Channel::from_offer(&text).unwrap(), 2)
         .unwrap()
-        .with_pile_deadline(Duration::from_millis(100));
+        .with_pile_deadline_ms(100);
     let (mut bridge, mut link, mut far) = start(bridge);
     from_pile(&mut far, 1, 2, &bridge.offer().params.encode());
     let until = Instant::now() + Duration::from_millis(400);
@@ -476,7 +476,7 @@ impl Relay for SlowRelay {
 #[test]
 fn a_slow_relay_never_stops_the_bridge_reading_the_cable() {
     let (_, text) = offer_text(4, 2, b"host");
-    let mut bridge = Bridge::new(Channel::from_offer(&text).unwrap(), 2).unwrap();
+    let mut bridge = new_bridge(Channel::from_offer(&text).unwrap(), 2).unwrap();
     let reads = Arc::new(Mutex::new(Vec::new()));
     let begun = Instant::now();
     let mut link = WatchedLink {
@@ -484,7 +484,7 @@ fn a_slow_relay_never_stops_the_bridge_reading_the_cable() {
         until: begun + Duration::from_millis(4500),
     };
     let r = bridge.run(&mut link, &mut SlowRelay, &mut SlowRelay, &mut |_, _| {}, &mut || {});
-    assert!(matches!(r, Err(BridgeError::Link)), "{r:?}");
+    assert!(matches!(r, Err(cahoots_host::bridge::RunError::Bridge(BridgeError::Link))), "{r:?}");
     let reads = reads.lock().unwrap();
     assert!(reads.len() > 10, "{} reads", reads.len());
     let gap = reads

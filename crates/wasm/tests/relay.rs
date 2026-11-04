@@ -50,11 +50,11 @@ fn tick_any(c: &mut WasmCeremony, relay: &mut MemRelay, id: &[u8; 16], cursor: &
 fn three_browsers_hold_a_ceremony_through_a_mem_relay() {
     let mut host = member(0, None);
     assert!(!host.through_relay());
-    let offer = host.offer(RELAY).unwrap();
+    let offer = host.offer(RELAY, 0).unwrap();
     assert!(offer.starts_with("cahoots:ceremony:v1:"), "{offer}");
     assert!(host.through_relay());
     // The offer is the same each time it is shown.
-    assert_eq!(host.offer("https://elsewhere.test").unwrap(), offer);
+    assert_eq!(host.offer("https://elsewhere.test", 0).unwrap(), offer);
     assert_eq!(host.relay().as_deref(), Some(RELAY));
     let params = offer_params(&offer).unwrap();
     assert_eq!(params, host.params_bytes());
@@ -126,7 +126,7 @@ fn three_browsers_hold_a_ceremony_through_a_mem_relay() {
 #[test]
 fn a_second_browser_on_a_taken_seat_is_told() {
     let mut host = member(0, None);
-    let offer = host.offer(RELAY).unwrap();
+    let offer = host.offer(RELAY, 0).unwrap();
     let mut a = member(1, Some(&offer));
     let mut b = member(1, Some(&offer));
     let id: [u8; 16] = hex::decode(host.channel_hex().unwrap()).unwrap().try_into().unwrap();
@@ -159,7 +159,7 @@ fn a_second_browser_on_a_taken_seat_is_told() {
 fn an_unscanned_commitment_does_not_reach_the_host() {
     // An intruder photographed the offer and takes seat 3 on the relay before the real person.
     let mut host = member(0, None);
-    let offer = host.offer(RELAY).unwrap();
+    let offer = host.offer(RELAY, 0).unwrap();
     let id: [u8; 16] = hex::decode(host.channel_hex().unwrap()).unwrap().try_into().unwrap();
     let mut intruder = WasmCeremony::from_offer(&offer, 2, &contribution(9), None, &[0x49; 32], &[0x69; 32], 0).unwrap();
     let mut ms = [host, member(1, Some(&offer)), member(2, Some(&offer))];
@@ -216,7 +216,7 @@ fn an_unscanned_commitment_does_not_reach_the_host() {
 fn a_seat_0_commitment_not_in_the_offer_is_not_fed() {
     use cahoots_core::channel::{Channel, Mailbox, Round};
     let mut host = member(0, None);
-    let offer = host.offer(RELAY).unwrap();
+    let offer = host.offer(RELAY, 0).unwrap();
     let id: [u8; 16] = hex::decode(host.channel_hex().unwrap()).unwrap().try_into().unwrap();
     // An intruder photographed the offer and posts a seat-0 commitment of its own before the
     // host's lands. It cannot use from_offer for seat 0, so it seals straight into the channel.

@@ -14,6 +14,7 @@
 
 extern crate alloc;
 
+pub mod bridge;
 pub mod frame;
 pub mod health;
 pub mod ledger;

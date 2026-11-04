@@ -6,7 +6,7 @@
 // UI rules: one job per screen. A top bar, one stage element, one primary action. Every screen says
 // what to do next in one line. Nothing the person needs is behind a scroll.
 import init, {
-  Ceremony, Circle, FountainEncoder, FountainDecoder, offer_params, offer_badges,
+  Ceremony, Circle, FountainEncoder, FountainDecoder, offer_params, offer_badges, WasmBridge,
   b64_encode, b64_decode, bucket_pad, bucket_unpad, chat_bucket_pad, chat_bucket_unpad, qr_svg, qr_decode_rgba, face_pixels,
 } from './pkg/cahoots_wasm.js';
 import { setupChannels, routeChannels, loadChannels } from './channels.js';
@@ -64,6 +64,61 @@ const CHAT_LABEL = 'End-to-end encrypted';
 const CHAT_CLAIM = 'Messages are encrypted before they leave your device. The relay delivers them without being able to read them. It can still see when messages are sent.';
 // The relay the app ships with. A circle can point at another one from the chat menu.
 const DEFAULT_RELAY = 'https://relay.cahoots.network';
+
+// A badge on a USB cable. Chrome and Edge on a desktop open the port themselves with Web Serial.
+// For a browser without it, a small helper on this machine can stand in: open the app with
+// `?cable=ws://127.0.0.1:8765` and the helper's socket carries the bytes to the port.
+const CABLE_EVERY_MS = 30; // between passes over the cable, as on the laptop
+const CABLE_BAUD = 115200;
+const cableSocketUrl = () => new URLSearchParams(location.search).get('cable');
+const cableAvailable = () => !!(cableSocketUrl() || navigator.serial);
+/** Open the cable: `onBytes` gets what the badge sends, `write` sends to it, `close` ends it. */
+async function openCable(onBytes, onClosed) {
+  const ws = cableSocketUrl();
+  if (ws) {
+    const sock = new WebSocket(ws);
+    sock.binaryType = 'arraybuffer';
+    await new Promise((ok, no) => { sock.onopen = ok; sock.onerror = () => no(new Error('cable-helper')); });
+    sock.onmessage = (ev) => onBytes(new Uint8Array(ev.data));
+    sock.onclose = () => onClosed();
+    return { write: async (bytes) => sock.send(bytes), close: () => sock.close() };
+  }
+  const port = await navigator.serial.requestPort();
+  await port.open({ baudRate: CABLE_BAUD });
+  const writer = port.writable.getWriter();
+  let open = true;
+  (async () => {
+    try {
+      while (open && port.readable) {
+        const reader = port.readable.getReader();
+        try {
+          for (;;) { const { value, done } = await reader.read(); if (done) break; if (value?.length) onBytes(value); }
+        } finally { reader.releaseLock(); }
+      }
+    } catch (e) { /* the port went away: closed below */ }
+    if (open) { open = false; onClosed(); }
+  })();
+  return {
+    write: async (bytes) => { await writer.write(bytes); },
+    close: async () => { open = false; try { writer.releaseLock(); await port.close(); } catch (e) { /* already gone */ } },
+  };
+}
+const CABLE_ERRORS = {
+  unplugged: 'The badge was unplugged. Plug it in and add it again.',
+  'cable-helper': 'The cable helper is not running on this machine.',
+};
+const cableFriendly = (e) => {
+  const s = String(e).replace(/^Error: /, '');
+  if (CABLE_ERRORS[s]) return CABLE_ERRORS[s];
+  let m = s.match(/^count:(\d+):(\d+)$/);
+  if (m) return `The pile has ${m[1]} badge${m[1] === '1' ? '' : 's'} but this circle was made for ${m[2]}. Start a new ceremony with the right number.`;
+  m = s.match(/^params:(\d+)$/);
+  if (m) return `The badge in seat ${Number(m[1]) + 1} proposed a different circle. Start a new ceremony.`;
+  m = s.match(/^aborted:(\d+):/);
+  if (m) return `The badge in seat ${Number(m[1]) + 1} stopped the ceremony.`;
+  if (/NotFoundError|No port selected/.test(s)) return '';
+  return friendly(s);
+};
 const POLL_WAIT_MS = 25000;
 const CEREMONY_POLL_MS = 2000; // a ceremony through the relay reads the relay every 2 seconds
 const LOST = 'Setup couldn’t be restored after Cahoots closed. Ask everyone to start a new ceremony and scan the new code.';
@@ -545,7 +600,7 @@ async function screenNetwork(id) {
 }
 
 function screenNew() {
-  const params = { n: 2, pad_len: 65536, name: '', agent_seat: false, via: 'relay' };
+  const params = { n: 2, pad_len: 65536, name: '', agent_seat: false, via: 'relay', badges: 0 };
   const VIA = { relay: 'Everyone scans your code, then you scan theirs. The relay handles the remaining steps over the internet.', codes: 'Everyone shows and scans codes. No network is needed.' };
   const viaHint = h('span', { class: 'hint' }, VIA.relay);
   const name = input({ type: 'text', placeholder: 'e.g. sf-meetup', maxlength: '64', autocomplete: 'off', autocapitalize: 'off', oninput: (e) => { params.name = e.target.value; } });
@@ -562,12 +617,15 @@ function screenNew() {
         h('div', { class: 'field' }, h('label', {}, 'How to connect'), seg([['relay', 'Through the relay'], ['codes', 'Codes only']], params.via, (v) => { params.via = v; viaHint.textContent = VIA[v]; }), viaHint),
         h('div', { class: 'field' }, h('label', {}, 'Secret size'), seg(SIZES.map(([v, l]) => [v, l]), params.pad_len, (v) => { params.pad_len = v; sizeHint.textContent = SIZES.find((s) => s[0] === v)[2]; }), sizeHint),
         h('details', { class: 'more' }, h('summary', {}, 'Advanced'),
+          field('Badges in the pile', stepper(0, 7, params.badges, (v) => { params.badges = v; }), 'Badges stacked on this computer, joined through the relay. They take the seats after yours, and a browser with Web Serial, or the laptop bridge, carries their part.'),
           h('label', { class: 'toggle' }, h('span', {}, h('b', {}, 'Invite a hosted software member'), h('br'), h('span', { class: 'muted' }, 'A program in a secure enclave gets a seat and a copy of the secret. Leave off for a people-only circle.')), h('input', { type: 'checkbox', onchange: (e) => { params.agent_seat = e.target.checked; } }))),
         err),
     ],
     actions: [btn('Continue', () => {
       const n = params.name.trim();
       if (!n) { err.textContent = 'Enter a name for your circle.'; name.focus(); return; }
+      if (params.badges >= params.n) { err.textContent = 'Count the badges among the people in the room, and leave a seat for yourself.'; return; }
+      if (params.badges && params.via !== 'relay') { err.textContent = 'Badges join through the relay. Choose Through the relay.'; return; }
       pendingOffer = null; pendingCommits = [];
       go(`#/ceremony/${paramsHash({ ...params, name: n })}/pick`);
     }, 'primary')],
@@ -671,7 +729,7 @@ function screenPick(params) {
         }
         const relay = params.via === 'relay';
         // The host opens the channel; its code is what everyone joining scans.
-        const offer = relay ? c.offer(DEFAULT_RELAY) : null;
+        const offer = relay ? c.offer(DEFAULT_RELAY, params.badges || 0) : null;
         pendingOffer = null;
         ceremony = { c, params, label: extra ? 'TRNG' : 'CSPRNG', mode: 'show', attests: [], revealShared: false, relay, offer, cursor: null, run: 0 };
         go(`#/ceremony/${paramsHash(params)}/run`);
@@ -849,7 +907,7 @@ function screenRelay(params) {
   const received = h('p', { class: 'ceremony-progress', role: 'status', 'aria-live': 'polite' });
   const step = h('p', { class: 'next' });
   const stop = () => { cer.run++; };
-  const leaveRelay = () => { if (confirm('Leave setup? This device’s progress will be discarded. This setup cannot be resumed. Ask everyone to start a new ceremony.')) { stop(); ceremony = null; go('#/'); } };
+  const leaveRelay = () => { if (confirm('Leave setup? This device’s progress will be discarded. This setup cannot be resumed. Ask everyone to start a new ceremony.')) { stop(); stopCable(); ceremony = null; go('#/'); } };
   const host = me === 0;
   // What decides the layout. A change in it draws the screen again.
   const shape = () => `${c.phase()}|${c.needs_continue()}|${!!c.join_code()}`;
@@ -865,6 +923,60 @@ function screenRelay(params) {
     btn('Paste a join code', () => { close(); pasteSheet('cahoots:joined:v1:…', takeJoin); })));
   // A joiner: a seat-1 setup on the relay that is not the host it scanned. It is never used.
   const warn = h('p', { class: 'status', role: 'alert' });
+  // A badge on a USB cable: this browser carries it into the ceremony, as the laptop's bridge
+  // would, and takes its join code as a scan.
+  const badges = host ? offer_badges(cer.offer) : 0;
+  const cableSt = h('p', { class: 'status', role: 'status' }, cer.cableText || '');
+  // The cable's loop outlives this render: it writes to whichever element the current one made.
+  cer.cableEl = cableSt;
+  const sayCable = (text) => { cer.cableText = text; if (cer.cableEl) cer.cableEl.textContent = text; };
+  const stopCable = async () => { const cb = cer.cable; if (!cb) return; cer.cable = null; clearInterval(cb.timer); await cb.link.close(); };
+  const addBadge = async () => {
+    if (cer.cable) return;
+    let bridge;
+    try { bridge = new WasmBridge(cer.offer, badges); } catch (e) { st.textContent = cableFriendly(e); return; }
+    let link;
+    try {
+      link = await openCable((bytes) => bridge.cable_in(bytes), () => { if (cer.cable) { bridge.unplug(); } });
+    } catch (e) { st.textContent = cableFriendly(e); return; }
+    const cb = { bridge, link, timer: 0, posting: false, seats: new Set() };
+    cer.cable = cb;
+    for (const w of cer.wires || []) bridge.deliver(w);
+    sayCable('Badge on USB. Waiting for it to press both buttons.');
+    const pass = async () => {
+      if (cer.cable !== cb) return;
+      let state;
+      try { state = bridge.step(); } catch (e) {
+        const text = cb.done && String(e) === 'unplugged' ? 'The badge is unplugged. It kept the circle.' : cableFriendly(e);
+        await stopCable();
+        sayCable(text);
+        if (live()) screenRelay(params);
+        return;
+      }
+      const out = bridge.cable_out();
+      if (out.length) { try { await link.write(out); } catch (e) { /* the read side reports the loss */ } }
+      for (const code of bridge.take_join_codes()) {
+        try { const seat = c.scan_join(code); cb.seats.add(seat); buzz(); st.textContent = ''; if (live()) refresh(); }
+        catch (e) { st.textContent = friendly(e); }
+      }
+      if (!cb.posting) {
+        const posts = bridge.take_posts();
+        if (posts.length) {
+          cb.posting = true;
+          try {
+            for (const w of posts) {
+              const res = await fetch(base(), { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: b64_decode(w) });
+              if (res.status !== 201) throw new Error(`relay ${res.status}`);
+            }
+          } catch (e) { st.textContent = 'Cannot reach the relay. Trying again.'; }
+          cb.posting = false;
+        }
+      }
+      if (state === 'done') { cb.done = true; sayCable('Every seat has signed. The badge keeps the circle. You can unplug it.'); }
+      else if (cb.seats.size) sayCable(`Badge in seat ${[...cb.seats].map((i) => i + 1).join(', ')}. Carrying its part.`);
+    };
+    cb.timer = setInterval(pass, CABLE_EVERY_MS);
+  };
   const refresh = () => {
     warn.textContent = !host && c.host_mismatch() ? 'Seat 1 on the relay is not the host whose code you scanned. Someone outside the room may have the code.' : '';
     const phase = c.phase();
@@ -883,12 +995,13 @@ function screenRelay(params) {
         ? (host ? 'Show this code to everyone joining. Then scan the code on each of their screens.' : (c.join_code() ? 'Show this to the host.' : 'Wait here while everyone joins.'))
         : phase === 'reveal' ? (c.join_code() ? 'Show this to the host.' : 'Exchanging secrets through the relay.') : 'Confirming who is in the circle.';
   };
-  const body = [h('div', { class: 'ceremony-members' }, chips, received), step, warn];
+  const body = [h('div', { class: 'ceremony-members' }, chips, received), step, warn, cableSt];
   const join = c.join_code();
   if (host && c.phase() === 'commit') body.push(h('div', { class: 'pair' }, h('div', { class: 'half' }, panelQr(cer.offer, params.name, 'join'))), scanned);
   if (join) body.push(h('div', { class: 'pair' }, h('div', { class: 'half' }, panelQr(join, `seat ${me + 1}`, 'for the host'))));
   body.push(st);
-  const actions = host && c.phase() === 'commit' ? [btn('Scan a joiner\'s code', scanSheet, 'primary')]
+  const actions = host && c.phase() === 'commit'
+    ? [btn('Scan a joiner\'s code', scanSheet, 'primary'), ...(badges > 0 && !cer.cable && cableAvailable() ? [btn('Add the badge on USB', addBadge)] : [])]
     : c.needs_continue() ? [btn('Continue', () => { c.proceed(); screenRelay(params); }, 'primary')] : [];
   screen({
     title: c.needs_continue() ? 'Everyone is scanned' : host && c.phase() === 'commit' ? 'Show this code to everyone joining' : join ? 'Show this to the host' : 'Through the relay', sub: `${params.name} · you are seat ${me + 1}`,
@@ -922,7 +1035,11 @@ function screenRelay(params) {
         if (!fresh.length) break;
         for (const e of fresh) {
           cer.cursor = e.seq;
-          try { if (c.inbound(b64_decode(e.message))) buzz(); } catch (err) { st.textContent = friendly(err); }
+          const wire = b64_decode(e.message);
+          try { if (c.inbound(wire)) buzz(); } catch (err) { st.textContent = friendly(err); }
+          // Every entry is kept for a badge added later: its bridge must see the whole channel.
+          (cer.wires ||= []).push(wire);
+          if (cer.cable) cer.cable.bridge.deliver(wire);
         }
       }
       await post();

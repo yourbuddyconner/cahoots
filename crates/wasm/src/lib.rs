@@ -19,6 +19,8 @@ use cahoots_core::reveal::PUBLIC_KEY_LEN;
 use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
 use rand_core::{OsRng, RngCore};
 use wasm_bindgen::prelude::*;
+
+pub mod bridge;
 use zeroize::Zeroizing;
 
 pub mod channel;
@@ -314,7 +316,9 @@ impl WasmCeremony {
     /// The code to show everyone joining through the relay. The first call opens the channel
     /// on `relay`, the host's relay address: from then on the ceremony is held through the
     /// relay, and everyone joining uses that relay. Later calls show the same code.
-    pub fn offer(&mut self, relay: &str) -> Result<String, String> {
+    /// `badges` is how many cards sit in a pile under a laptop or a browser: they take seats
+    /// 2 up, and their part is carried in by a bridge.
+    pub fn offer(&mut self, relay: &str, badges: u8) -> Result<String, String> {
         if let Some(o) = &self.offer {
             return Ok(o.clone());
         }
@@ -325,7 +329,7 @@ impl WasmCeremony {
         let host = commitment_hash(&self.commitment());
         let channel = Channel::new(&mut OsRng);
         let text = channel
-            .offer(self.inner.params(), relay, &host, 0)
+            .offer(self.inner.params(), relay, &host, badges)
             .map_err(|_| "relay-too-long".to_string())?;
         self.mailbox = Some(Mailbox::for_host(channel));
         self.gate = Some(Gate::new());

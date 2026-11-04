@@ -151,7 +151,7 @@ fn connect_ring(listen: &str, next: &str) -> std::io::Result<(SocketLink, Socket
 
 /// `cahoots-host bridge`: carry a pile on a serial port into a phone's ceremony.
 fn run_bridge(args: &Args) -> Result<(), String> {
-    use cahoots_host::bridge::Bridge;
+    use cahoots_host::bridge::Run as _;
     let text = match (args.get("--offer-image"), args.get("--offer"), args.get("--offer-file")) {
         (Some(path), None, None) => {
             cahoots_host::offer_image::read_offer_image(std::path::Path::new(path))?
@@ -180,7 +180,7 @@ fn run_bridge(args: &Args) -> Result<(), String> {
     };
     let mut poster = cahoots_relay::HttpRelay::new(&offer.relay);
     let mut poller = cahoots_relay::HttpRelay::new(&offer.relay);
-    let mut bridge = Bridge::new(offer, badges).map_err(|e| e.to_string())?;
+    let mut bridge = cahoots_host::bridge::new(offer, badges).map_err(|e| e.to_string())?;
     let mut link: Box<dyn cahoots_hal::Link> = match (args.get("--serial"), args.get("--sim")) {
         (Some(port), None) => Box::new(
             cahoots_host::link::SerialLink::open(port, "pile").map_err(|e| format!("{port}: {e}"))?,

@@ -22,7 +22,20 @@ With **Through the relay**, steps 2 to 4 below happen on their own. The host's s
 
 ## With badges in a pile
 
-Badges can join a ceremony that a phone hosts through the relay. A laptop carries their part between the pile and the relay. The laptop holds no seat and never sees the secret.
+Badges can join a ceremony that a phone or a browser hosts through the relay. Something at the bottom of the pile carries their part between the pile and the relay: the host's own browser, over a USB cable, or a laptop running the bridge. Neither holds a seat or sees the secret.
+
+**From the browser, over USB.** This needs Chrome or Edge on a desktop, which can open a serial port from a page.
+
+1. In the browser, create the circle **Through the relay**. Count the badges in **People in the room**, and under **Advanced** set **Badges in the pile** to the number of badges. A circle with badges keeps a **Small** secret.
+2. Stack the badges on the desk, with the bottom badge on a USB cable to the computer. On each badge, open the menu and choose "new circle". It says it is looking for the pile.
+3. On the host's screen, select **Add the badge on USB** and pick the badge's port when the browser asks. The badge's seat fills in by itself, as if its code had been scanned. The screen says which seat the badge took.
+4. Phones that join scan the host's code and show their own, as usual. When the host's screen says "Everyone is scanned", select **Continue**.
+
+The badges show the six words with everyone else. When the host's screen says every seat has signed, the badges keep the circle on both buttons, and the cable can come out.
+
+A browser without a serial port can still use a small helper on the same computer: run `python3 scripts/cable-helper.py <port>` and open the app with `?cable=ws://127.0.0.1:8765` in its address. The helper needs the `websockets` package.
+
+**From a laptop, with the bridge.** For a phone as the host, or a browser that cannot open the port.
 
 1. On the host's phone, create the circle **Through the relay**. Count the badges in **People in the room**, and set **Cards in the pile** to the number of badges. A circle with badges keeps a **Small** secret.
 2. Stack the badges on the laptop, with the bottom badge on USB.
