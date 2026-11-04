@@ -184,6 +184,28 @@ pub fn chooser(names: &[String], chosen: usize) -> Screen {
 /// A list under another title: "chip needs a restart" while the badge holds its chip until it
 /// is turned off and on, or a circle's name over its actions. A title too wide is cut.
 pub fn chooser_titled(title: &str, names: &[String], chosen: usize) -> Screen {
+    chooser_body(title, names, chosen, None)
+}
+
+/// The badge's menu: the circles it holds, a rule, then what the badge can do. `circles` is
+/// how many entries at the top are circles; the rule sits under the last of them.
+pub fn menu(title: &str, names: &[String], chosen: usize, circles: usize) -> Screen {
+    chooser_body(title, names, chosen, Some(circles))
+}
+
+/// "unpair {name}?" over what unpairing does: Both unpairs, either button alone keeps it.
+pub fn unpair_ask(name: &str) -> Screen {
+    let mut s = Draw::new();
+    s.title("unpair?");
+    s.centered(&FONT_9X18_BOLD, 46, &fit("", &phone_name(name), "", cols(&FONT_9X18_BOLD)));
+    s.centered(&FONT_8X13, 80, "its taps end now");
+    s.centered(&FONT_8X13, 96, "a new tap can pair it");
+    s.centered(&FONT_8X13, 112, "again later");
+    s.footer(Some("no"), Some("A+B  unpair"), Some("no"));
+    s.done()
+}
+
+fn chooser_body(title: &str, names: &[String], chosen: usize, split: Option<usize>) -> Screen {
     let mut s = Draw::new();
     s.title(&fit("", title, "", cols(&FONT_9X18_BOLD)));
     let n = names.len();
@@ -197,7 +219,18 @@ pub fn chooser_titled(title: &str, names: &[String], chosen: usize) -> Screen {
     }
     let w = cols(&FONT_8X13) - 2;
     for (row, i) in (first..n.min(first + CHOOSER_ROWS)).enumerate() {
-        let y = 46 + 16 * row as i32;
+        let mut y = 46 + 16 * row as i32;
+        // The rule between the circles and the actions, with the actions set a little lower.
+        if let Some(c) = split {
+            if i >= c && c >= first {
+                y += 6;
+                if i == c {
+                    let _ = Line::new(Point::new(8, y - 5), Point::new(W - 9, y - 5))
+                        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+                        .draw(&mut Canvas(&mut s.frame));
+                }
+            }
+        }
         let mark = if i == chosen { "> " } else { "  " };
         let text = fit(mark, &names[i], "", w);
         let font = if i == chosen { &FONT_7X13_BOLD } else { &FONT_8X13 };
@@ -631,6 +664,15 @@ fn fit(prefix: &str, value: &str, suffix: &str, cols: usize) -> String {
 /// One or a few lines of text, for errors and short notes. `lines` keeps the caller's lines;
 /// a line too wide for the screen wraps in the frame.
 pub fn status(lines: &[&str]) -> Screen {
+    status_body(lines, None)
+}
+
+/// A status that waits: the lines, and a footer naming what Both does to leave.
+pub fn status_hold(lines: &[&str], both: &str) -> Screen {
+    status_body(lines, Some(both))
+}
+
+fn status_body(lines: &[&str], both: Option<&str>) -> Screen {
     let mut s = Draw::new();
     let rows: usize = lines.iter().map(|l| wrap(l, cols(&FONT_10X20)).len()).sum();
     let font = if rows * 22 <= 190 {
@@ -647,6 +689,9 @@ pub fn status(lines: &[&str]) -> Screen {
         y += pitch;
     }
     s.lines = lines.iter().map(|l| String::from(*l)).collect();
+    if let Some(b) = both {
+        s.footer(None, Some(b), None);
+    }
     s.done()
 }
 

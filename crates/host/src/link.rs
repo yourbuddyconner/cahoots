@@ -302,7 +302,7 @@ impl Bench {
         if self.goal == Goal::Serve {
             // Nothing to walk to: the badge answers on home and on a circle's pages. The list
             // does not, so "back" there goes home.
-            if title == "circles" || title == "chip needs a restart" {
+            if title == "menu" || title == "circles" || title == "chip needs a restart" {
                 return Some(if fields.contains(&"> back") { 2 } else { 1 });
             }
             return None;
@@ -314,7 +314,7 @@ impl Bench {
         if home {
             return Some(2);
         }
-        if title == "circles" {
+        if title == "menu" || title == "circles" {
             // The list: `> name` marks the chosen entry.
             let chosen = fields.iter().find(|f| f.starts_with("> ")).map(|f| &f[2..]);
             return match chosen {

@@ -342,7 +342,7 @@ fn two_stored() -> FakeBoard {
 fn to_the_list(b: &mut Badge<FakeBoard>) {
     assert!(b.board().shows("closed to taps"), "{:?}", b.board().last());
     press(b, Press::Both);
-    assert!(b.board().shows("circles"), "{:?}", b.board().last());
+    assert!(b.board().shows("menu"), "{:?}", b.board().last());
 }
 
 #[test]
@@ -355,7 +355,7 @@ fn chooser_navigation() {
     to_the_list(&mut b);
     assert_eq!(
         b.board().last(),
-        ["circles", "> fakes", "  other", "  new circle", "  back", "prev  A+B  open  next"]
+        ["menu", "> fakes", "  other", "  new circle", "  back", "prev  A+B  open  next"]
     );
     press(&mut b, Press::Right);
     assert!(b.board().shows("> other"));
@@ -380,7 +380,7 @@ fn chooser_navigation() {
     press(&mut b, Press::Left);
     assert!(b.board().shows("> back"));
     press(&mut b, Press::Both);
-    assert!(b.board().shows("circles"));
+    assert!(b.board().shows("menu"));
     assert!(b.board().shows("> other"));
     press(&mut b, Press::Left);
     press(&mut b, Press::Both);
@@ -398,7 +398,7 @@ fn one_circle_rests_on_home_without_the_list() {
     b.idle_step();
     assert!(b.board().shows("closed to taps"), "{:?}", b.board().last());
     assert!(b.board().shows("fakes"));
-    assert!(!b.board().screens.iter().any(|l| l.iter().any(|x| x == "circles")));
+    assert!(!b.board().screens.iter().any(|l| l.iter().any(|x| x == "menu")));
 }
 
 #[test]
@@ -411,7 +411,7 @@ fn a_full_board_offers_no_new_circle() {
     to_the_list(&mut b);
     assert_eq!(
         b.board().last(),
-        ["circles", "> fakes", "  other", "  back", "prev  A+B  open  next"]
+        ["menu", "> fakes", "  other", "  back", "prev  A+B  open  next"]
     );
 }
 
@@ -684,7 +684,7 @@ fn a_board_with_one_record_holds_one_circle() {
     // Home, then the list: the one circle, no "new circle", and "back".
     b.board().0.presses.push_back(Press::Both);
     b.idle_step();
-    assert_eq!(b.board().0.last(), ["circles", "> fakes", "  back", "prev  A+B  open  next"]);
+    assert_eq!(b.board().0.last(), ["menu", "> fakes", "  back", "prev  A+B  open  next"]);
     // Forget it from its actions, "forget this circle" two to the left: the record goes
     // through the adapter.
     for p in [Press::Both, Press::Left, Press::Left, Press::Both, Press::Both, Press::Both] {

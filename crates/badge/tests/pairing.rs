@@ -1085,7 +1085,7 @@ fn home_after_keep(b: &mut Badge<FakeBoard>) {
 fn to_the_list_at(b: &mut Badge<FakeBoard>, index: usize) {
     home_after_keep(b);
     press(b, Press::Both);
-    assert!(b.board().last().iter().any(|l| l == "circles"), "{:?}", b.board().last());
+    assert!(b.board().last().iter().any(|l| l == "menu"), "{:?}", b.board().last());
     for _ in 0..index {
         press(b, Press::Right);
     }
@@ -1167,30 +1167,27 @@ fn pairing_from_the_list_shows_the_name_and_the_six_words() {
     assert!(!b1.board().pin_high());
     // "hold the phone again": the chip's power is cut for that second tap.
     assert!(b1.board().tap_open);
-    // Five seconds later the note goes home by itself, with the window for that tap open.
+    // The note waits for Both, however long that takes, with the window for that tap open.
+    // A single button does not leave it.
     b1.board().uptime += 5;
     b1.idle_step();
+    assert!(b1.board().shows("hold the phone again"), "{:?}", b1.board().last());
+    press(&mut b1, Press::Right);
+    assert!(b1.board().shows("hold the phone again"), "{:?}", b1.board().last());
+    assert!(b1.board().tap_open);
+    press(&mut b1, Press::Both);
     assert!(b1.board().shows("open for a tap, 2 min"), "{:?}", b1.board().last());
     assert!(b1.board().tap_open);
 
-    // The list gives the chip its power back. "pair a phone" says to unpair first, and
-    // "phone" is there.
+    // The list gives the chip its power back. While a phone is paired, "pair a phone" is
+    // not offered: its place holds the phone's entry, with the phone's name.
     press(&mut b1, Press::Both);
     assert!(!b1.board().tap_open);
+    assert!(!b1.board().shows("pair a phone"), "{:?}", b1.board().last());
     press(&mut b1, Press::Right);
     press(&mut b1, Press::Right);
-    assert!(b1.board().shows("> pair a phone"));
-    press(&mut b1, Press::Both);
-    assert!(b1.board().shows("unpair the current phone first"));
-    // A note goes home by itself five seconds later, with no press.
-    b1.board().uptime += 5;
-    b1.idle_step();
-    assert!(b1.board().shows("closed to taps"), "{:?}", b1.board().last());
-    press(&mut b1, Press::Both);
-    for _ in 0..3 {
-        press(&mut b1, Press::Right);
-    }
-    assert!(b1.board().shows("> phone"), "{:?}", b1.board().last());
+    // The entry cuts the name to what fits beside "phone: ".
+    assert!(b1.board().shows("> phone: Conner's p..."), "{:?}", b1.board().last());
     press(&mut b1, Press::Both);
     assert!(b1.board().shows("Conner's phone"), "{:?}", b1.board().last());
     // The phone's page says what the phone does. Its taps happen at home, so the chip keeps
@@ -1200,6 +1197,13 @@ fn pairing_from_the_list_shows_the_name_and_the_six_words() {
     assert!(!b1.board().tap_open);
     // Left goes back without unpairing.
     press(&mut b1, Press::Left);
+    assert_eq!(b1.paired_phone().as_deref(), Some("Conner's phone"));
+    // Both on the page asks first; a single button there keeps the phone.
+    press(&mut b1, Press::Both);
+    press(&mut b1, Press::Both);
+    assert!(b1.board().shows("unpair?"), "{:?}", b1.board().last());
+    press(&mut b1, Press::Right);
+    assert!(b1.board().shows("reads and posts in"), "{:?}", b1.board().last());
     assert_eq!(b1.paired_phone().as_deref(), Some("Conner's phone"));
     press(&mut b1, Press::Both);
     press(&mut b1, Press::Both);
@@ -1389,9 +1393,12 @@ fn an_unpair_that_meets_an_undeletable_public_object_marks_it_stuck_and_finishes
     let (mut b1, _b2) = kept_pair((true, true));
     pair(&mut b1, "phone", PHONE_KEY);
     plant_public(&mut b1, &ObjectPolicy::owner_object());
-    // The list: the circle, "new circle", "pair a phone", "phone".
-    to_the_list_at(&mut b1, 3);
+    // The list: the circle, "new circle", "phone: ...". Open the phone's page, ask to
+    // unpair, and confirm.
+    to_the_list_at(&mut b1, 2);
     press(&mut b1, Press::Both);
+    press(&mut b1, Press::Both);
+    assert!(b1.board().shows("unpair?"), "{:?}", b1.board().last());
     press(&mut b1, Press::Both);
     assert!(
         b1.board().shows("a circle could not be updated. Forget it to clear this."),

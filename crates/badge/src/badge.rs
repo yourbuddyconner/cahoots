@@ -383,14 +383,19 @@ enum Idle<B: Board> {
     /// A note, until any gesture or the uptime `until`, then home. `open_tap`: the chip's
     /// power was cut for a phone's tap, and home opens with the window running.
     Note { until: u64, open_tap: bool },
+    /// A note that waits for Both, with no time limit: the chip's power stays cut for the
+    /// phone's tap the whole time, and home opens with the window running.
+    Hold,
     /// A pairing is open, waiting for the phone's tap: Both reads the inbox, Left or Right
     /// closes the pairing and goes home.
     PairWait,
     /// "pair with {name}?" and the six words, with no time limit: Both pairs the phone that
     /// wrote the inbox, Left or Right declines and empties the inbox.
     PairAsk { inbox: Inbox },
-    /// The paired phone's page: Both unpairs it, Left or Right goes back to the list.
+    /// The paired phone's page: Both asks to unpair it, Left or Right goes back to the list.
     Phone { index: usize },
+    /// "unpair {name}?": Both unpairs, Left or Right goes back to the phone's page.
+    UnpairAsk { index: usize },
 }
 
 /// The chooser's entry that starts a pass for one more circle.
@@ -410,8 +415,19 @@ fn keep_error(what: &str, e: ChipError) -> String {
         e => format!("chip: {what}: {e:?}"),
     }
 }
-/// The chooser's entry for the paired phone, while one is paired.
+/// The start of the chooser's entry for the paired phone, while one is paired: "phone: "
+/// and its name.
 const PHONE: &str = "phone";
+
+/// A phone's name as the menu entry shows it: cut to what fits after "phone: ".
+fn phone_entry_name(name: &str) -> String {
+    const ROOM: usize = 14;
+    let mut out: String = name.chars().take(ROOM).collect();
+    if name.chars().count() > ROOM {
+        out.push_str("...");
+    }
+    out
+}
 /// The chooser's last entry, which goes home.
 const BACK: &str = "back";
 /// How long the window for a phone's tap stays open, in seconds.
@@ -2695,9 +2711,17 @@ impl<B: Board> Badge<B> {
                     self.enter_menu(Page::Home, open_tap)
                 }
             }
+            Idle::Hold => {
+                if self.board.press() == Press::Both {
+                    self.enter_menu(Page::Home, true)
+                } else {
+                    Idle::Hold
+                }
+            }
             Idle::PairWait => self.pair_wait_step(),
             Idle::PairAsk { inbox } => self.pair_ask_step(inbox),
             Idle::Phone { index } => self.phone_step(index),
+            Idle::UnpairAsk { index } => self.unpair_ask_step(index),
             Idle::On(mut menu) => {
                 match Self::menu_step(
                     &mut self.board,
@@ -2750,9 +2774,9 @@ impl<B: Board> Badge<B> {
         }
         let (can_pair, phone) = self.phone_state();
         if can_pair {
-            names.push(String::from(PAIR_PHONE));
-            if phone.is_some() {
-                names.push(String::from(PHONE));
+            match phone {
+                Some(name) => names.push(format!("{PHONE}: {}", phone_entry_name(&name))),
+                None => names.push(String::from(PAIR_PHONE)),
             }
         }
         names.push(String::from(BACK));
@@ -2765,6 +2789,13 @@ impl<B: Board> Badge<B> {
         show(&mut self.board, screens::status(lines));
         let until = self.board.uptime_secs() + NOTE_SECS;
         Idle::Note { until, open_tap }
+    }
+
+    /// A note that stays until Both, with the chip's power cut for a phone's tap meanwhile.
+    fn hold(&mut self, lines: &[&str]) -> Idle<B> {
+        self.board.tap_begin();
+        show(&mut self.board, screens::status_hold(lines, "A+B  done"));
+        Idle::Hold
     }
 
     /// "pair a phone" was chosen: open a pairing and wait for the phone's tap.
@@ -2835,21 +2866,12 @@ impl<B: Board> Badge<B> {
             Press::Both => {
                 let name = screens::phone_name(&inbox.name);
                 match self.pair_accept(inbox) {
-                    Ok(()) => {
-                        self.board.tap_begin();
-                        self.note(&[&format!("paired with {name}"), "hold the phone again"], true)
-                    }
-                    Err(BadgeError::NotAllUpdated) => {
-                        self.board.tap_begin();
-                        self.note(
-                            &[
-                                &format!("paired with {name}"),
-                                "some circles not updated",
-                                "hold the phone again",
-                            ],
-                            true,
-                        )
-                    }
+                    Ok(()) => self.hold(&[&format!("paired with {name}"), "hold the phone again"]),
+                    Err(BadgeError::NotAllUpdated) => self.hold(&[
+                        &format!("paired with {name}"),
+                        "some circles not updated",
+                        "hold the phone again",
+                    ]),
                     Err(BadgeError::ChipHeld) => self.note(&[RESTART], false),
                     Err(BadgeError::UnpairUnfinished) => self.note(
                         &["unpairing is unfinished. Turn the badge off and on"],
@@ -2869,6 +2891,26 @@ impl<B: Board> Badge<B> {
     fn phone_step(&mut self, index: usize) -> Idle<B> {
         match self.board.press() {
             Press::None => Idle::Phone { index },
+            Press::Both => match self.paired_phone() {
+                Some(name) => {
+                    show(&mut self.board, screens::unpair_ask(&name));
+                    Idle::UnpairAsk { index }
+                }
+                None => {
+                    self.show_chooser(index);
+                    Idle::Choose { index }
+                }
+            },
+            Press::Left | Press::Right => {
+                self.show_chooser(index);
+                Idle::Choose { index }
+            }
+        }
+    }
+
+    fn unpair_ask_step(&mut self, index: usize) -> Idle<B> {
+        match self.board.press() {
+            Press::None => Idle::UnpairAsk { index },
             Press::Both => match self.unpair() {
                 Ok(()) => self.note(&["phone unpaired", "its taps end now"], false),
                 Err(BadgeError::NotAllUpdated) => {
@@ -2882,10 +2924,16 @@ impl<B: Board> Badge<B> {
                 Err(BadgeError::ChipHeld) => self.note(&[RESTART], false),
                 Err(_) => self.note(&["could not unpair. Try again"], false),
             },
-            Press::Left | Press::Right => {
-                self.show_chooser(index);
-                Idle::Choose { index }
-            }
+            Press::Left | Press::Right => match self.paired_phone() {
+                Some(name) => {
+                    show(&mut self.board, screens::phone_page(&name));
+                    Idle::Phone { index }
+                }
+                None => {
+                    self.show_chooser(index);
+                    Idle::Choose { index }
+                }
+            },
         }
     }
 
@@ -2893,8 +2941,9 @@ impl<B: Board> Badge<B> {
         // The list closes home's window for a tap: the chip gets its power back here.
         self.board.tap_end();
         let names = self.chooser_names();
-        let title = if self.chip_held { "chip needs a restart" } else { "circles" };
-        show(&mut self.board, screens::chooser_titled(title, &names, index));
+        let title = if self.chip_held { "chip needs a restart" } else { "menu" };
+        let circles = self.circles.len();
+        show(&mut self.board, screens::menu(title, &names, index, circles));
     }
 
     fn choose_step(&mut self, index: usize) -> Idle<B> {
@@ -2918,7 +2967,7 @@ impl<B: Board> Badge<B> {
             }
             Press::Both if self.chooser_names()[index] == BACK => self.enter_menu(Page::Home, false),
             Press::Both if self.chooser_names()[index] == PAIR_PHONE => self.pair_start(),
-            Press::Both if self.chooser_names()[index] == PHONE => match self.paired_phone() {
+            Press::Both if self.chooser_names()[index].starts_with(PHONE) => match self.paired_phone() {
                 Some(name) => {
                     show(&mut self.board, screens::phone_page(&name));
                     Idle::Phone { index }

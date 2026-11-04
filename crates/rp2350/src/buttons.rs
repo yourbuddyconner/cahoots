@@ -81,6 +81,8 @@ pub struct Buttons {
     pending: Option<(Press, Instant)>,
     /// Gestures decided but not yet returned.
     ready: VecDeque<Press>,
+    /// Nothing counts until both switches have read open: set when a page is drawn.
+    released: bool,
 }
 
 impl Buttons {
@@ -90,7 +92,13 @@ impl Buttons {
             b,
             pending: None,
             ready: VecDeque::new(),
+            released: true,
         }
+    }
+
+    /// Take no gesture until both buttons have been up at once.
+    pub fn wait_release(&mut self) {
+        self.released = false;
     }
 
     /// Drop every gesture decided or held back so far.
@@ -105,6 +113,14 @@ impl Buttons {
     pub fn press(&mut self) -> Press {
         let mut a = self.a.pressed();
         let mut b = self.b.pressed();
+        if !self.released {
+            if self.a.is_down() || self.b.is_down() {
+                self.pending = None;
+                self.ready.clear();
+                return Press::None;
+            }
+            self.released = true;
+        }
         if let Some((side, start)) = self.pending {
             let left = side == Press::Left;
             let (mine, other) = if left {

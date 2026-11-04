@@ -132,8 +132,13 @@ impl Board for PicoBoard {
         self.buttons.a.is_down()
     }
 
-    #[cfg(feature = "bench")]
     fn screen_drawn(&mut self) {
+        // A press made while this page was drawing was made against the page before it, and
+        // the gesture that opened this page must not act on it too: drop what is queued and
+        // take nothing until both buttons have been up.
+        self.buttons.clear();
+        self.buttons.wait_release();
+        #[cfg(feature = "bench")]
         log!("drawn");
     }
 

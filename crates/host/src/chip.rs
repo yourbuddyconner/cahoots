@@ -388,7 +388,7 @@ fn is_home(f: &[&str]) -> bool {
 
 /// The list of circles, under its usual title or the one it has while the chip is held.
 fn is_list(title: &str) -> bool {
-    title == "circles" || title == "chip needs a restart"
+    title == "menu" || title == "circles" || title == "chip needs a restart"
 }
 
 /// The list entry marked with `>`.
@@ -519,7 +519,9 @@ fn goto_walk(entry: &str, f: &[&str], opened: bool) -> Walk {
         return Walk::There;
     }
     if is_list(title) {
-        return if chosen(f) == Some(entry) { Walk::Open } else { Walk::Press(1) };
+        // The paired phone's entry carries the phone's name: "phone: <name>".
+        let on_it = chosen(f).is_some_and(|c| c == entry || (entry == "phone" && c.starts_with("phone: ")));
+        return if on_it { Walk::Open } else { Walk::Press(1) };
     }
     if opened {
         return Walk::Refused;
