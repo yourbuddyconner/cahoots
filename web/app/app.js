@@ -617,7 +617,7 @@ function screenNew() {
         h('div', { class: 'field' }, h('label', {}, 'How to connect'), seg([['relay', 'Through the relay'], ['codes', 'Codes only']], params.via, (v) => { params.via = v; viaHint.textContent = VIA[v]; }), viaHint),
         h('div', { class: 'field' }, h('label', {}, 'Secret size'), seg(SIZES.map(([v, l]) => [v, l]), params.pad_len, (v) => { params.pad_len = v; sizeHint.textContent = SIZES.find((s) => s[0] === v)[2]; }), sizeHint),
         h('details', { class: 'more' }, h('summary', {}, 'Advanced'),
-          field('Badges in the pile', stepper(0, 7, params.badges, (v) => { params.badges = v; }), 'Badges stacked on this computer, joined through the relay. They take the seats after yours, and a browser with Web Serial, or the laptop bridge, carries their part.'),
+          field('Badges in the pile', stepper(0, 7, params.badges, (v) => { params.badges = v; }), 'Badges stacked on this computer, joined through the relay. They take the seats after yours, and a browser with Web Serial, or the laptop bridge, carries their part. A circle with badges keeps a Small secret.'),
           h('label', { class: 'toggle' }, h('span', {}, h('b', {}, 'Invite a hosted software member'), h('br'), h('span', { class: 'muted' }, 'A program in a secure enclave gets a seat and a copy of the secret. Leave off for a people-only circle.')), h('input', { type: 'checkbox', onchange: (e) => { params.agent_seat = e.target.checked; } }))),
         err),
     ],
@@ -626,6 +626,7 @@ function screenNew() {
       if (!n) { err.textContent = 'Enter a name for your circle.'; name.focus(); return; }
       if (params.badges >= params.n) { err.textContent = 'Count the badges among the people in the room, and leave a seat for yourself.'; return; }
       if (params.badges && params.via !== 'relay') { err.textContent = 'Badges join through the relay. Choose Through the relay.'; return; }
+      if (params.badges && params.pad_len !== SIZES[0][0]) { err.textContent = 'A circle with badges keeps a Small secret. A badge has no room for more.'; return; }
       pendingOffer = null; pendingCommits = [];
       go(`#/ceremony/${paramsHash({ ...params, name: n })}/pick`);
     }, 'primary')],

@@ -400,6 +400,8 @@ enum Idle<B: Board> {
 
 /// The chooser's entry that starts a pass for one more circle.
 const NEW_CIRCLE: &str = "new circle";
+/// The start of the pass's refusal of a circle whose secret is bigger than the board keeps.
+const SECRET_TOO_BIG: &str = "secret too big for this badge:";
 /// The chooser's entry that pairs a phone, on a badge whose chip it owns.
 const PAIR_PHONE: &str = "pair a phone";
 /// Why a circle was not kept: even its least public object is larger than the chip takes.
@@ -2399,6 +2401,16 @@ impl<B: Board> Badge<B> {
                 if let Some(ready) = pile.poll().map_err(|e| format!("pile: {e:?}"))? {
                     let params = ready.params.clone();
                     let seat = ready.seat;
+                    // A secret bigger than the board proposes does not fit its memory through
+                    // a ceremony: refuse it here rather than run out of heap mid-reveal.
+                    let (_, max_pad) = self.board.proposal();
+                    if params.pad_len > max_pad {
+                        return Err(format!(
+                            "{SECRET_TOO_BIG} {} KiB at most, this circle has {} KiB",
+                            max_pad / 1024,
+                            params.pad_len / 1024
+                        ));
+                    }
                     self.board.log(&format!(
                         "pile counted: seat {seat} of {}, circle {}",
                         params.n, params.name
@@ -3000,9 +3012,9 @@ impl<B: Board> Badge<B> {
             }
             // A full chip says so until the next gesture or for five seconds: a circle must be
             // forgotten first.
-            Step::Failed(e) if e == CHIP_FULL => {
+            Step::Failed(e) if e == CHIP_FULL || e.starts_with(SECRET_TOO_BIG) => {
                 self.board.log(&format!("new circle: {e}"));
-                self.note(&[CHIP_FULL], false)
+                self.note(&[&e], false)
             }
             Step::Failed(e) => {
                 self.board.log(&format!("new circle: {e}"));
